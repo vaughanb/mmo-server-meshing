@@ -1,0 +1,54 @@
+{
+  "LoginAddress": "127.0.0.1",
+  "LoginPort": 7500,
+  "loginMaxConnections": 4,
+  "MaxConcurrentRequest": 150,
+  "centralAddress": "127.0.0.1",
+  "centralPort": 6010,
+  "centralMaxConnections": null,
+  "mapSpawnMillisecondsTimeout": 0,
+  "defaultChannelMaxConnections": 500,
+  "channels": [
+    {
+      "id": "1",
+      "title": "Channel 1",
+      "maxConnections": 200
+    },
+    {
+      "id": "2",
+      "title": "Channel 2",
+      "maxConnections": 0
+    }
+  ],
+  "useWebSocket": false,
+  "webSocketSecure": false,
+  "webSocketCertPath": "",
+  "webSocketCertPassword": "",
+  "clusterPort": 6010,
+  "machineAddress": null,
+  "publicAddress": "127.0.0.1",
+  "mapSpawnPort": 6001,
+  "spawnExePath": "./kit-ce-project.exe",
+  "notSpawnInBatchMode": false,
+  "spawnStartPort": 8000,
+  "spawnMaps": [
+    "BaseMap-CE"
+  ],
+  "spawnChannels": [
+    "1"
+  ],
+  "spawnAllocateMaps": [
+    {
+      "mapName": "BaseMap-CE",
+      "allocateAmount": 0
+    }
+  ],
+  "mapPort": 8000,
+  "mapMaxConnections": 1100,
+  "useCustomDatabaseClient": false,
+  "databaseOptionIndex": 0,
+  "databaseDisableCacheReading": null,
+  "disableDatabaseCaching": false,
+  "databaseManagerAddress": "127.0.0.1",
+  "databaseManagerPort": 6100
+}

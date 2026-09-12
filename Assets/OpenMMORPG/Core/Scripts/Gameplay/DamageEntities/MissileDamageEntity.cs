@@ -1,0 +1,441 @@
+﻿using Insthync.ManagedUpdating;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.Events;
+
+namespace MultiplayerARPG
+{
+    public partial class MissileDamageEntity : BaseDamageEntity, IManagedUpdate
+    {
+        public enum HitDetectionMode
+        {
+            Raycast,
+            SphereCast,
+            BoxCast,
+        }
+        public HitDetectionMode hitDetectionMode = HitDetectionMode.Raycast;
+        /// <summary>
+        /// If it is nothing, it will use values from `GameInstance.Singleton.GetDamageEntityHitLayerMask()`
+        /// </summary>
+        public LayerMask hitLayers = 0;
+        public float sphereCastRadius = 1f;
+        public float insideColliderOverlappingRadius = 0.05f;
+        public float minDistanceForRaycasting = 0.25f;
+        public Vector3 boxCastSize = Vector3.one;
+        public float destroyDelay;
+        public UnityEvent onExploded = new UnityEvent();
+        public UnityEvent onDestroy = new UnityEvent();
+        [Tooltip("If this value more than 0, when it hit anything or it is out of life, it will explode and apply damage to characters in this distance")]
+        public float explodeDistance;
+
+        protected float _missileDistance;
+        protected float _missileSpeed;
+        protected IDamageableEntity _lockingTarget;
+        protected float _launchTime;
+        protected float _missileDuration;
+
+        protected Vector3? _previousPosition;
+        protected RaycastHit2D[] _hits2D = new RaycastHit2D[8];
+        protected RaycastHit[] _hits3D = new RaycastHit[8];
+        protected Collider2D[] _overlaps2D = new Collider2D[128];
+        protected Collider[] _overlaps3D = new Collider[128];
+        protected readonly HashSet<uint> _alreadyHitObjects = new HashSet<uint>();
+        protected bool _overlappedInsideColliderOnce = false;
+
+        protected bool _isExploded;
+        protected bool IsExploded
+        {
+            get
+            {
+                return _isExploded;
+            }
+            set
+            {
+                _isExploded = value;
+            }
+        }
+
+        protected bool _destroying;
+        protected bool Destroying
+        {
+            get
+            {
+                return _destroying;
+            }
+            set
+            {
+                _destroying = value;
+            }
+        }
+
+        protected override void OnDestroy()
+        {
+            base.OnDestroy();
+            onExploded?.RemoveAllListeners();
+            onExploded = null;
+            onDestroy?.RemoveAllListeners();
+            onDestroy = null;
+            _lockingTarget = null;
+            _previousPosition = null;
+            _alreadyHitObjects?.Clear();
+        }
+
+        /// <summary>
+        /// Setup this component data
+        /// </summary>
+        /// <param name="instigator">Weapon's or skill's instigator who to spawn this to attack enemy</param>
+        /// <param name="weapon">Weapon which was used to attack enemy</param>
+        /// <param name="simulateSeed">Launch random seed</param>
+        /// <param name="triggerIndex"></param>
+        /// <param name="spreadIndex"></param>
+        /// <param name="damageAmounts">Calculated damage amounts</param>
+        /// <param name="skill">Skill which was used to attack enemy</param>
+        /// <param name="skillLevel">Level of the skill</param>
+        /// <param name="hitRegisterData"></param>
+        /// <param name="missileDistance">Calculated missile distance</param>
+        /// <param name="missileSpeed">Calculated missile speed</param>
+        /// <param name="lockingTarget">Locking target, if this is empty it can hit any entities</param>
+        public virtual void Setup(
+            EntityInfo instigator,
+            CharacterItem weapon,
+            int simulateSeed,
+            byte triggerIndex,
+            byte spreadIndex,
+            Dictionary<DamageElement, MinMaxFloat> damageAmounts,
+            BaseSkill skill,
+            int skillLevel,
+            HitRegisterData hitRegisterData,
+            float missileDistance,
+            float missileSpeed,
+            IDamageableEntity lockingTarget)
+        {
+            Setup(instigator, weapon, simulateSeed, triggerIndex, spreadIndex, damageAmounts, skill, skillLevel, hitRegisterData);
+            _missileDistance = missileDistance;
+            _missileSpeed = missileSpeed;
+
+            if (missileDistance <= 0 && missileSpeed <= 0)
+            {
+                // Explode immediately when distance and speed is 0
+                Explode();
+                PushBack(destroyDelay);
+                Destroying = true;
+                return;
+            }
+            _lockingTarget = lockingTarget;
+            IsExploded = false;
+            Destroying = false;
+            _launchTime = Time.unscaledTime;
+            _missileDuration = (missileDistance / missileSpeed) + 0.1f;
+            _alreadyHitObjects.Clear();
+        }
+
+        protected override void OnEnable()
+        {
+            base.OnEnable();
+            _previousPosition = CacheTransform.position;
+            _overlappedInsideColliderOnce = false;
+            UpdateManager.Register(this);
+        }
+
+        protected virtual void OnDisable()
+        {
+            UpdateManager.Unregister(this);
+        }
+
+#if UNITY_EDITOR
+        protected virtual void OnDrawGizmos()
+        {
+            Color defaultColor = Gizmos.color;
+            Gizmos.color = Color.green;
+            switch (hitDetectionMode)
+            {
+                case HitDetectionMode.SphereCast:
+                    Gizmos.DrawWireSphere(transform.position, sphereCastRadius);
+                    break;
+                case HitDetectionMode.BoxCast:
+                    Gizmos.DrawWireCube(transform.position, boxCastSize);
+                    break;
+            }
+            Gizmos.color = defaultColor;
+        }
+#endif
+
+        /// <summary>
+        /// RayCast/SphereCast/BoxCast from current position back to previous frame position to detect hit target
+        /// </summary>
+        public virtual void HitDetect()
+        {
+            if (Destroying)
+                return;
+
+            if (!_previousPosition.HasValue)
+                return;
+
+            Vector3 currentPosition = CacheTransform.position;
+            int layerMask = hitLayers == 0 ? GameInstance.Singleton.GetDamageEntityHitLayerMask() : hitLayers;
+            Vector3 offsetVector = currentPosition - _previousPosition.Value;
+            float dist = offsetVector.magnitude;
+            if (CurrentGameInstance.DimensionType != DimensionType.Dimension2D &&
+                OverlappedInsideCollider(currentPosition, layerMask))
+            {
+                // Overlapped inside collider, so it is hit already, don't continues and raycast
+                _previousPosition = currentPosition;
+                return;
+            }
+
+            if (dist < minDistanceForRaycasting)
+            {
+                // Not far enough for raycasting yet
+                return;
+            }
+
+            int hitCount = 0;
+            Vector3 dir = offsetVector.normalized;
+            // Raycast to previous position to check is it hitting something or not
+            // If hit, explode
+            bool queriesHitBackfaces = Physics.queriesHitBackfaces;
+            Physics.queriesHitBackfaces = true;
+            switch (hitDetectionMode)
+            {
+                case HitDetectionMode.Raycast:
+                    if (CurrentGameInstance.DimensionType == DimensionType.Dimension2D)
+                    {
+                        ContactFilter2D contactFilter2D = new ContactFilter2D()
+                        {
+                            useLayerMask = true,
+                            layerMask = layerMask,
+                            useTriggers = true,
+                        };
+                        hitCount = Physics2D.Raycast(_previousPosition.Value, dir, contactFilter2D, _hits2D, dist);
+                    }
+                    else
+                    {
+                        hitCount = Physics.RaycastNonAlloc(_previousPosition.Value, dir, _hits3D, dist, layerMask, QueryTriggerInteraction.Collide);
+                    }
+                    break;
+                case HitDetectionMode.SphereCast:
+                    if (CurrentGameInstance.DimensionType == DimensionType.Dimension2D)
+                        hitCount = Physics2D.CircleCast(_previousPosition.Value, sphereCastRadius, dir, PhysicUtils.CreateContactFilter2D(layerMask), _hits2D, dist);
+                    else
+                    {
+                        hitCount = Physics.SphereCastNonAlloc(_previousPosition.Value, sphereCastRadius, dir, _hits3D, dist, layerMask, QueryTriggerInteraction.Collide);
+                    }
+                    break;
+                case HitDetectionMode.BoxCast:
+                    if (CurrentGameInstance.DimensionType == DimensionType.Dimension2D)
+                        hitCount = Physics2D.BoxCast(_previousPosition.Value, new Vector2(boxCastSize.x, boxCastSize.y), Vector2.SignedAngle(Vector2.zero, dir), dir, PhysicUtils.CreateContactFilter2D(layerMask), _hits2D, dist);
+                    else
+                    {
+                        hitCount = Physics.BoxCastNonAlloc(_previousPosition.Value, boxCastSize * 0.5f, dir, _hits3D, CacheTransform.rotation, dist, layerMask, QueryTriggerInteraction.Collide);
+                    }
+                    break;
+            }
+            Physics.queriesHitBackfaces = queriesHitBackfaces;
+            for (int i = 0; i < hitCount; ++i)
+            {
+                if (CurrentGameInstance.DimensionType == DimensionType.Dimension2D && _hits2D[i].transform != null)
+                    TriggerEnter(_hits2D[i].transform.gameObject);
+                if (CurrentGameInstance.DimensionType == DimensionType.Dimension3D && _hits3D[i].transform != null)
+                    TriggerEnter(_hits3D[i].transform.gameObject);
+                if (Destroying)
+                    break;
+            }
+            _previousPosition = currentPosition;
+        }
+
+        public bool OverlappedInsideCollider(Vector3 currentPosition, int layerMask)
+        {
+            if (_overlappedInsideColliderOnce)
+                return false;
+            _overlappedInsideColliderOnce = true;
+            int count = Physics.OverlapSphereNonAlloc(currentPosition, insideColliderOverlappingRadius, _overlaps3D, layerMask, QueryTriggerInteraction.Collide);
+            for (int i = 0; i < count; ++i)
+            {
+                Collider overlapped = _overlaps3D[i];
+                GameObject other = overlapped.gameObject;
+                if (!other.GetComponent<IUnHittable>().IsNull())
+                    continue;
+                if (FindTargetHitBox(other, true, out DamageableHitBox target) && TriggerEnter(other, target))
+                    return true;
+            }
+            return false;
+        }
+
+        public virtual void ManagedUpdate()
+        {
+            if (Destroying)
+                return;
+
+            if (Time.unscaledTime - _launchTime >= _missileDuration)
+            {
+                Explode();
+                PushBack(destroyDelay);
+                Destroying = true;
+            }
+
+            HitDetect();
+
+            if (Destroying)
+                return;
+
+            if (CurrentGameInstance.DimensionType == DimensionType.Dimension2D)
+                CacheTransform.position += -CacheTransform.up * _missileSpeed * Time.deltaTime;
+            else
+                CacheTransform.position += CacheTransform.forward * _missileSpeed * Time.deltaTime;
+        }
+
+        public override void OnPushBack()
+        {
+            _previousPosition = null;
+            if (onDestroy != null)
+                onDestroy.Invoke();
+            base.OnPushBack();
+        }
+
+        protected virtual void TriggerEnter(GameObject other)
+        {
+            if (Destroying)
+                return;
+
+            if (!other.GetComponent<IUnHittable>().IsNull())
+                return;
+
+            if (!FindTargetHitBox(other, true, out DamageableHitBox target))
+                target = null;
+
+            TriggerEnter(other, target);
+        }
+
+        protected virtual bool TriggerEnter(GameObject other, DamageableHitBox hitBox)
+        {
+            if (hitBox != null)
+            {
+                // Hit a locking target
+                if (explodeDistance <= 0f)
+                {
+                    if (!_alreadyHitObjects.Contains(hitBox.GetObjectId()))
+                    {
+                        // If this is not going to explode, just apply damage to target
+                        _alreadyHitObjects.Add(hitBox.GetObjectId());
+                        ApplyDamageTo(hitBox);
+                    }
+                }
+                else
+                {
+                    // Explode immediately when hit something
+                    Explode();
+                }
+                PushBack(destroyDelay);
+                Destroying = true;
+                return true;
+            }
+
+            // Must hit walls or grounds to explode
+            // So if it hit item drop, character, building, harvestable and other ignore raycasting objects, it won't explode
+            if (!CurrentGameInstance.IsDamageableLayer(other.layer) &&
+                !CurrentGameInstance.IgnoreRaycastLayersValues.Contains(other.layer))
+            {
+                if (explodeDistance > 0f)
+                {
+                    // Explode immediately when hit something
+                    Explode();
+                }
+                PushBack(destroyDelay);
+                Destroying = true;
+                return true;
+            }
+
+            return false;
+        }
+
+        protected virtual bool FindTargetHitBox(GameObject other, bool checkLockingTarget, out DamageableHitBox target)
+        {
+            target = null;
+
+            if (!other.GetComponent<IUnHittable>().IsNull())
+            {
+                return false;
+            }
+
+            if (!other.TryGetComponent(out target))
+            {
+                return false;
+            }
+
+            if (target.IsDead())
+            {
+                target = null;
+                return false;
+            }
+
+            if (target.GetObjectId() == _instigator.ObjectId)
+            {
+                target = null;
+                return false;
+            }
+
+            if (!target.CanReceiveDamageFrom(_instigator))
+            {
+                target = null;
+                return false;
+            }
+
+            if (checkLockingTarget && _lockingTarget != null && _lockingTarget.GetObjectId() != target.GetObjectId())
+            {
+                target = null;
+                return false;
+            }
+
+            return true;
+        }
+
+        protected virtual bool FindAndApplyDamage(GameObject other, bool checkLockingTarget, HashSet<uint> alreadyHitObjects)
+        {
+            if (FindTargetHitBox(other, checkLockingTarget, out DamageableHitBox target) && !_alreadyHitObjects.Contains(target.GetObjectId()))
+            {
+                _alreadyHitObjects.Add(target.GetObjectId());
+                ApplyDamageTo(target);
+                return true;
+            }
+            return false;
+        }
+
+        protected virtual void Explode()
+        {
+            if (IsExploded)
+                return;
+
+            IsExploded = true;
+
+            // Explode when distance > 0
+            if (explodeDistance <= 0f)
+                return;
+
+            if (onExploded != null)
+                onExploded.Invoke();
+
+            ExplodeApplyDamage();
+        }
+
+        protected virtual void ExplodeApplyDamage()
+        {
+            if (CurrentGameInstance.DimensionType == DimensionType.Dimension2D)
+            {
+                ContactFilter2D contactFilter2D = new ContactFilter2D();
+                int hitCount = Physics2D.OverlapCircle(CacheTransform.position, explodeDistance, contactFilter2D, _overlaps2D);
+                for (int i = 0; i < hitCount; ++i)
+                {
+                    FindAndApplyDamage(_overlaps2D[i].gameObject, false, _alreadyHitObjects);
+                }
+            }
+            else
+            {
+                int hitCount = Physics.OverlapSphereNonAlloc(CacheTransform.position, explodeDistance, _overlaps3D);
+                for (int i = 0; i < hitCount; ++i)
+                {
+                    FindAndApplyDamage(_overlaps3D[i].gameObject, false, _alreadyHitObjects);
+                }
+            }
+        }
+    }
+}
