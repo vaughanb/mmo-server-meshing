@@ -13,6 +13,8 @@
 //   pace  — walk to -meshWalkX, then pace between there and +8 m forever (a moving bot for ghost tests).
 //   observe — walk to -meshWalkX, then watch for OTHER player entities (ghosts streamed from the
 //             neighbour zone) for observeSeconds and report whether one was seen moving.
+//   fight — walk to (-meshWalkX, -meshWalkZ), attack the nearest monster beyond x=100 (a ghost owned by the
+//           neighbour zone) and report whether its hp dropped (cross-border hit) and whether we got hit back.
 //
 // Enable with command-line `-meshAutoClient` (build) or the "Server Meshing/Auto Client" menu (editor).
 // Optional: -meshAutoMode walk|self|none  -meshChannel C  -meshUser name  -meshWalkX 130
@@ -35,6 +37,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public const string ARG_CHANNEL = "-meshChannel";
         public const string ARG_USER = "-meshUser";
         public const string ARG_WALK_X = "-meshWalkX";
+        public const string ARG_WALK_Z = "-meshWalkZ";
 
 #if UNITY_EDITOR
         public const string PREF_ENABLE = "ServerMesh.AutoClient.Enabled";
@@ -42,9 +45,10 @@ namespace MultiplayerARPG.MMO.Mesh
         public const string PREF_CHANNEL = "ServerMesh.AutoClient.Channel";
         public const string PREF_USER = "ServerMesh.AutoClient.User";
         public const string PREF_WALK_X = "ServerMesh.AutoClient.WalkX";
+        public const string PREF_WALK_Z = "ServerMesh.AutoClient.WalkZ";
 #endif
 
-        public enum Mode { none, walk, self, stand, pace, observe }
+        public enum Mode { none, walk, self, stand, pace, observe, fight }
 
         [Header("Session")]
         public string username = "meshtest";
@@ -59,6 +63,8 @@ namespace MultiplayerARPG.MMO.Mesh
         public Mode mode = Mode.walk;
         [Tooltip("World X to walk to (zone E starts at x=100 with the default 3x3 grid).")]
         public float walkTargetX = 130f;
+        [Tooltip("World Z to walk at (fight mode walks to (walkTargetX, walkTargetZ)).")]
+        public float walkTargetZ = 0f;
         [Tooltip("World X to walk back to after reaching walkTargetX (zone C).")]
         public float walkReturnX = 0f;
         [Tooltip("Seconds to wait after entering the map before starting the test.")]
@@ -87,6 +93,7 @@ namespace MultiplayerARPG.MMO.Mesh
             string channel = ReadArg(args, ARG_CHANNEL, null);
             string user = ReadArg(args, ARG_USER, null);
             string walkX = ReadArg(args, ARG_WALK_X, null);
+            string walkZ = ReadArg(args, ARG_WALK_Z, null);
 #if UNITY_EDITOR
             if (!enabled && EditorPrefs.GetBool(PREF_ENABLE, false))
             {
@@ -95,6 +102,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 channel = channel ?? EditorPrefs.GetString(PREF_CHANNEL, "C");
                 user = user ?? EditorPrefs.GetString(PREF_USER, "meshtest");
                 walkX = walkX ?? EditorPrefs.GetString(PREF_WALK_X, "130");
+                walkZ = walkZ ?? EditorPrefs.GetString(PREF_WALK_Z, "0");
             }
 #endif
             if (!enabled)
@@ -107,6 +115,7 @@ namespace MultiplayerARPG.MMO.Mesh
             if (!string.IsNullOrEmpty(channel)) c.channelId = channel;
             if (!string.IsNullOrEmpty(user)) { c.username = user; c.characterName = user + "Char"; } // names are global: derive from the user
             if (!string.IsNullOrEmpty(walkX) && float.TryParse(walkX, out float wx)) c.walkTargetX = wx;
+            if (!string.IsNullOrEmpty(walkZ) && float.TryParse(walkZ, out float wz)) c.walkTargetZ = wz;
         }
 
         private static string ReadArg(string[] args, string key, string fallback)
@@ -265,8 +274,17 @@ namespace MultiplayerARPG.MMO.Mesh
                 done = false;
                 GameInstance.ClientCharacterHandlers.RequestRespawn(new RequestRespawnMessage() { option = 0 }, (h, c, r) => { code = c; done = true; });
                 while (!done && Time.realtimeSinceStartup < deadline) yield return null;
-                float aliveDeadline = Time.realtimeSinceStartup + 10f;
-                while ((GameInstance.PlayingCharacterEntity == null || GameInstance.PlayingCharacterEntity.IsDead()) && Time.realtimeSinceStartup < aliveDeadline) yield return null;
+                float aliveDeadline = Time.realtimeSinceStartup + 20f;
+                float aliveSince = -1f;
+                while (Time.realtimeSinceStartup < aliveDeadline)
+                {
+                    BasePlayerCharacterEntity pe = GameInstance.PlayingCharacterEntity;
+                    bool alive = pe != null && !pe.IsDead() && pe.MaxHp > 0;
+                    if (!alive) aliveSince = -1f;
+                    else if (aliveSince < 0f) aliveSince = Time.realtimeSinceStartup;
+                    else if (Time.realtimeSinceStartup - aliveSince > 1f) break; // stable for a second (a respawn may hand us off first)
+                    yield return null;
+                }
                 if (GameInstance.PlayingCharacterEntity == null || GameInstance.PlayingCharacterEntity.IsDead()) { Fail($"Respawn failed ({code})"); yield break; }
                 Log($"Respawned at {GameInstance.PlayingCharacterEntity.EntityTransform.position}");
                 yield return new WaitForSecondsRealtime(1f);
@@ -289,6 +307,9 @@ namespace MultiplayerARPG.MMO.Mesh
                     break;
                 case Mode.observe:
                     yield return RunObserve(deadline);
+                    break;
+                case Mode.fight:
+                    yield return RunFight(deadline);
                     break;
                 default:
                     Finished = true; Passed = true;
@@ -419,15 +440,92 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private float _deadSince = -1f;
         private int _respawnsUsed;
+        private IEnumerator RunFight(float deadline)
+        {
+            Phase = "fight";
+            _walkZOverride = walkTargetZ;
+            bool reached = false;
+            yield return WalkTo(walkTargetX, deadline, ClientMigrationController.CompletedCount, r => reached = r);
+            _walkZOverride = null;
+            if (!reached) { Fail("never reached the fight position"); yield break; }
+            BasePlayerCharacterEntity self = GameInstance.PlayingCharacterEntity;
+            int selfHpStart = self.CurrentHp;
+
+            // Pick the nearest monster on OUR side of the edge: our zone runs no spawn areas here, so every monster we
+            // can see is a ghost owned by the neighbour, and staying on our side keeps us from being handed off.
+            BaseMonsterCharacterEntity target = null; float best = float.MaxValue;
+            float searchEnd = Time.realtimeSinceStartup + 10f;
+            while (target == null && Time.realtimeSinceStartup < searchEnd)
+            {
+                foreach (BaseMonsterCharacterEntity m in FindObjectsByType<BaseMonsterCharacterEntity>(FindObjectsSortMode.None))
+                {
+                    if (m == null || m.IsDead() || m.EntityTransform.position.x > observeGhostBeyondX - 2f) continue;
+                    float d = Vector3.Distance(m.EntityTransform.position, self.EntityTransform.position);
+                    if (d < best) { best = d; target = m; }
+                }
+                if (target == null) yield return new WaitForSecondsRealtime(0.5f);
+            }
+            if (target == null) { Fail("no monster beyond the edge to attack"); yield break; }
+            Log($"Fighting '{target.name}' hp={target.CurrentHp}/{target.MaxHp} at {target.EntityTransform.position} (dist {best:0.#}m)");
+            int targetHpStart = target.CurrentHp;
+            int minTargetHp = targetHpStart, minSelfHp = selfHpStart;
+            float attackRange = Mathf.Max(1f, self.GetAttackDistance(false) - 0.3f);
+            float end = Time.realtimeSinceStartup + 40f;
+            float nextAttack = 0f, nextLog = 0f;
+            while (Time.realtimeSinceStartup < end)
+            {
+                self = GameInstance.PlayingCharacterEntity;
+                if (self == null || target == null) break;
+                Vector3 toTarget = target.EntityTransform.position - self.EntityTransform.position; toTarget.y = 0f;
+                if (toTarget.magnitude > attackRange)
+                {
+                    self.PointClickMovement(target.EntityTransform.position - toTarget.normalized * (attackRange * 0.7f));
+                }
+                else if (Time.realtimeSinceStartup >= nextAttack)
+                {
+                    nextAttack = Time.realtimeSinceStartup + 0.6f;
+                    self.StopMove();
+                    self.SetLookRotation(Quaternion.LookRotation(toTarget.normalized), true);
+                    self.SetTargetEntity(target);
+                    bool isLeftHand = false;
+                    self.AimPosition = self.GetAttackAimPosition(ref isLeftHand, target.EntityTransform.position);
+                    WeaponHandlingState whs = WeaponHandlingState.None;
+                    self.Attack(ref whs);
+                }
+                minTargetHp = Mathf.Min(minTargetHp, target.CurrentHp);
+                minSelfHp = Mathf.Min(minSelfHp, self.CurrentHp);
+                if (Time.realtimeSinceStartup >= nextLog)
+                {
+                    nextLog = Time.realtimeSinceStartup + 3f;
+                    Log($"target hp={target.CurrentHp} self hp={self.CurrentHp} dist={toTarget.magnitude:0.#}");
+                }
+                if (target.IsDead()) { Log("target died"); break; }
+                yield return null;
+            }
+            bool targetHurt = minTargetHp < targetHpStart;
+            bool selfHurt = minSelfHp < selfHpStart;
+            Finished = true; Passed = targetHurt;
+            Log($"RESULT fight: targetHp {targetHpStart}->{minTargetHp} (hurt={targetHurt}) selfHp {selfHpStart}->{minSelfHp} (hitBack={selfHurt}) -> {(Passed ? "PASS" : "FAIL")}");
+            // Retreat to the zone start so the next run does not begin next to the neighbour's monsters.
+            _walkZOverride = 0f;
+            bool back = false;
+            yield return WalkTo(walkReturnX, Time.realtimeSinceStartup + 90f, ClientMigrationController.CompletedCount, r => back = r);
+            _walkZOverride = null;
+            Log($"Retreated to start: {back}");
+        }
+
         private bool _allMigrationsReady = true;
         private long _maxGapMs;
         private float _maxJump;
+
+        private float? _walkZOverride;
 
         private IEnumerator WalkTo(float targetX, float deadline, int migrationsBefore, System.Action<bool> onDone)
         {
             BasePlayerCharacterEntity p0 = GameInstance.PlayingCharacterEntity;
             if (p0 == null) { onDone(false); yield break; }
             Vector3 start = p0.EntityTransform.position;
+            if (_walkZOverride.HasValue) start.z = _walkZOverride.Value;
             Log($"Walking from {start} to x={targetX}");
             float nextOrder = 0f;
             float lastLogT = 0f;
@@ -469,7 +567,7 @@ namespace MultiplayerARPG.MMO.Mesh
                         lastLogT = Time.realtimeSinceStartup;
                         Log($"pos={pos} migrations={ClientMigrationController.CompletedCount - migrationsBefore}");
                     }
-                    if (Mathf.Abs(pos.x - targetX) < 1.5f)
+                    if (Mathf.Abs(pos.x - targetX) < 1.5f && (!_walkZOverride.HasValue || Mathf.Abs(pos.z - start.z) < 1.5f))
                     {
                         p.StopMove();
                         onDone(true);

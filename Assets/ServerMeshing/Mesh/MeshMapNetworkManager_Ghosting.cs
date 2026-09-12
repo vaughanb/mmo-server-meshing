@@ -202,13 +202,19 @@ namespace MultiplayerARPG.MMO.Mesh
         }
 
         /// <summary>Owned = registered players + server-owned monsters that are not ghosts. Monsters are rescanned once a second.</summary>
+        private readonly Dictionary<string, BaseCharacterEntity> _ownedByMeshId = new Dictionary<string, BaseCharacterEntity>();
+
         private void RescanOwnedCandidates()
         {
             _ownedCandidates.Clear();
+            _ownedByMeshId.Clear();
             foreach (IPlayerCharacterData data in ServerUserHandlers.GetPlayerCharacters())
             {
                 if (data is BasePlayerCharacterEntity entity && !entity.IsWarping)
+                {
                     _ownedCandidates.Add(entity);
+                    _ownedByMeshId[entity.Id] = entity;
+                }
             }
             if (!ghostMonsters)
                 return;
@@ -223,6 +229,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     id.OwnerZoneId = OwnZoneId;
                 }
                 _ownedCandidates.Add(monster);
+                _ownedByMeshId[id.MeshEntityId] = monster;
             }
         }
 
@@ -363,7 +370,10 @@ namespace MultiplayerARPG.MMO.Mesh
                 id.IsGhost = true;
                 id.OwnerZoneId = _neighbourZoneByConnection.TryGetValue(connectionId, out string z) ? z : "?";
                 int silenced = GhostSuppression.Ghostify(entity, this, null, false, false, disableMovement: false);
-                entity.IsInvincible = true; // never damaged by the local simulation (P3 routes hits to the owner)
+                entity.IsInvincible = true; // never damaged by the local simulation: hits are forwarded to the owner (P3)
+                string capturedMeshId = msg.characterId;
+                entity.onReceiveDamage += (target, position, fromPosition, instigator, damageAmounts, weapon, skill, skillLevel) =>
+                    ForwardGhostHit(capturedMeshId, position, fromPosition, instigator, damageAmounts, weapon, skill, skillLevel);
                 ghost = new MeshGhost { entity = entity, kind = msg.kind, lastTarget = msg.position };
                 _ghosts[msg.characterId] = ghost;
                 Logging.Log("Mesh", $"Ghost spawned {msg.kind} {msg.characterName} ({msg.characterId}) from zone {id.OwnerZoneId} at {msg.position} (silenced {silenced})");
@@ -439,6 +449,113 @@ namespace MultiplayerARPG.MMO.Mesh
             DestroyGhost(meshId, "neighbour removed");
         }
 
+        // ---- P3: cross-border hits (DESIGN §12) ----
+        // A hit on a ghost is forwarded (raw attacker damage) to the ghost's owner, which resolves it against the
+        // real entity with the kit's own DamageableEntity.ApplyDamage (internal, reachable from Assembly-CSharp)
+        // and reports the outcome back so the ghost's cell can show real combat text and hp.
+
+        [Tooltip("Forward hits landing on ghosts to the owning cell and apply them to the real entity there.")]
+        public bool forwardGhostHits = true;
+
+        private void ForwardGhostHit(string targetMeshId, HitBoxPosition position, Vector3 fromPosition, EntityInfo instigator, Dictionary<DamageElement, MinMaxFloat> damageAmounts, CharacterItem weapon, BaseSkill skill, int skillLevel)
+        {
+            if (!forwardGhostHits || !_ghosts.TryGetValue(targetMeshId, out MeshGhost ghost) || ghost.entity == null)
+                return;
+            MeshIdentity id = MeshIdentity.Get(ghost.entity);
+            if (id == null || string.IsNullOrEmpty(id.OwnerZoneId) || !_linkClients.TryGetValue(id.OwnerZoneId, out MeshLinkClient link))
+                return;
+            string instigatorMeshId = string.Empty;
+            if (instigator != null)
+            {
+                Component instigatorComponent = instigator.Entity as Component;
+                MeshIdentity instigatorId = instigatorComponent != null ? MeshIdentity.Get(instigatorComponent) : null;
+                instigatorMeshId = instigatorId != null && !string.IsNullOrEmpty(instigatorId.MeshEntityId) ? instigatorId.MeshEntityId : (instigator.Id ?? string.Empty);
+            }
+            int n = damageAmounts != null ? damageAmounts.Count : 0;
+            GhostHitMessage msg = new GhostHitMessage
+            {
+                targetMeshId = targetMeshId,
+                instigatorMeshId = instigatorMeshId,
+                hitBoxPosition = (byte)position,
+                fromPosition = fromPosition,
+                elementDataIds = new int[n], mins = new float[n], maxs = new float[n],
+                hasWeapon = weapon.dataId != 0,
+                weapon = weapon,
+                skillDataId = skill != null ? skill.DataId : 0,
+                skillLevel = skillLevel,
+                randomSeed = Random.Range(int.MinValue, int.MaxValue),
+            };
+            int i = 0;
+            if (damageAmounts != null)
+            {
+                foreach (KeyValuePair<DamageElement, MinMaxFloat> kv in damageAmounts)
+                {
+                    msg.elementDataIds[i] = kv.Key != null ? kv.Key.DataId : 0;
+                    msg.mins[i] = kv.Value.min;
+                    msg.maxs[i] = kv.Value.max;
+                    i++;
+                }
+            }
+            link.SendGhostHit(msg);
+            if (traceHandoffTiming)
+                Logging.Log("Mesh", $"Hit on ghost {ghost.entity.CharacterName} ({targetMeshId}) forwarded to zone {id.OwnerZoneId}");
+        }
+
+        internal void OnGhostHit(long connectionId, GhostHitMessage msg)
+        {
+            if (!IsServer)
+                return;
+            BaseCharacterEntity target = null;
+            if (_ownedByMeshId.TryGetValue(msg.targetMeshId, out BaseCharacterEntity owned) && owned != null)
+                target = owned;
+            else if (ServerUserHandlers.TryGetPlayerCharacterById(msg.targetMeshId, out IPlayerCharacterData data) && data is BaseCharacterEntity ce)
+                target = ce;
+            if (target == null || target.IsDead())
+                return;
+
+            Dictionary<DamageElement, MinMaxFloat> damageAmounts = new Dictionary<DamageElement, MinMaxFloat>();
+            for (int i = 0; i < msg.elementDataIds.Length; ++i)
+            {
+                DamageElement element = null;
+                if (msg.elementDataIds[i] == 0 || !GameInstance.DamageElements.TryGetValue(msg.elementDataIds[i], out element) || element == null)
+                    element = GameInstance.Singleton.DefaultDamageElement;
+                if (element == null) continue;
+                damageAmounts[element] = new MinMaxFloat { min = msg.mins[i], max = msg.maxs[i] };
+            }
+            BaseSkill skill = null;
+            if (msg.skillDataId != 0)
+                GameInstance.Skills.TryGetValue(msg.skillDataId, out skill);
+            // The attacker is (usually) a ghost here: use it as the instigator so hit rules see a real entity.
+            EntityInfo instigator = EntityInfo.Empty;
+            if (!string.IsNullOrEmpty(msg.instigatorMeshId) && _ghosts.TryGetValue(msg.instigatorMeshId, out MeshGhost attackerGhost) && attackerGhost.entity != null)
+                instigator = attackerGhost.entity.GetInfo();
+
+            int hpBefore = target.CurrentHp;
+            target.ApplyDamage((HitBoxPosition)msg.hitBoxPosition, msg.fromPosition, instigator, damageAmounts, msg.hasWeapon ? msg.weapon : CharacterItem.Empty, skill, msg.skillLevel, msg.randomSeed);
+            int dealt = Mathf.Max(0, hpBefore - target.CurrentHp);
+            if (traceHandoffTiming)
+                Logging.Log("Mesh", $"Forwarded hit applied to {target.CharacterName} ({msg.targetMeshId}): {hpBefore} -> {target.CurrentHp}");
+
+            if (_neighbourZoneByConnection.TryGetValue(connectionId, out string fromZone) && _linkClients.TryGetValue(fromZone, out MeshLinkClient back))
+            {
+                back.SendGhostHitResult(new GhostHitResultMessage
+                {
+                    targetMeshId = msg.targetMeshId,
+                    combatAmountType = (byte)(dealt > 0 ? CombatAmountType.NormalDamage : CombatAmountType.Miss),
+                    totalDamage = dealt,
+                    currentHp = target.CurrentHp,
+                });
+            }
+        }
+
+        internal void OnGhostHitResult(GhostHitResultMessage msg)
+        {
+            if (!IsServer || !_ghosts.TryGetValue(msg.targetMeshId, out MeshGhost ghost) || ghost.entity == null)
+                return;
+            ghost.entity.CurrentHp = msg.currentHp;
+            ghost.entity.CallRpcAppendCombatText((CombatAmountType)msg.combatAmountType, HitEffectsSourceType.None, 0, msg.totalDamage);
+        }
+
         // ---- Incoming handoffs: the neighbour tells us a character is about to reconnect here ----
 
         [Tooltip("For a character arriving by mesh handoff, do not block its spawn on re-loading relates data (gold, cash, user level, party, guild, storage) from the DB; load them in the background instead. Cuts ~150-300 ms off the swap.")]
@@ -489,6 +606,8 @@ namespace MultiplayerARPG.MMO.Mesh
         internal void OnGhostSnapshot(long connectionId, GhostSnapshotMessage msg) { }
         internal void OnGhostRemove(string characterId) { }
         internal void OnHandoffNotice(HandoffNoticeMessage msg) { }
+        internal void OnGhostHit(long connectionId, GhostHitMessage msg) { }
+        internal void OnGhostHitResult(GhostHitResultMessage msg) { }
         internal void SendHandoffNotice(string zoneId, string characterId, string userId) { }
 #endif
     }

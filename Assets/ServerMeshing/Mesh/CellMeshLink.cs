@@ -22,6 +22,71 @@ namespace MultiplayerARPG.MMO.Mesh
         public const ushort GhostSnapshot = 101;
         public const ushort GhostRemove = 102;
         public const ushort HandoffNotice = 103;
+        public const ushort GhostHit = 104;
+        public const ushort GhostHitResult = 105;
+    }
+
+    /// <summary>
+    /// A hit that landed on a GHOST in the sender's cell (P3, DESIGN §12): the raw attacker damage is forwarded to
+    /// the target's owner, which resolves it authoritatively against the real entity.
+    /// </summary>
+    public struct GhostHitMessage : INetSerializable
+    {
+        public string targetMeshId;
+        public string instigatorMeshId;   // MeshEntityId of the attacker (may be unknown to the receiver)
+        public byte hitBoxPosition;
+        public Vector3 fromPosition;
+        public int[] elementDataIds;      // damageAmounts keys (0 = default element)
+        public float[] mins;
+        public float[] maxs;
+        public bool hasWeapon;
+        public CharacterItem weapon;
+        public int skillDataId;
+        public int skillLevel;
+        public int randomSeed;
+
+        public void Serialize(NetDataWriter writer)
+        {
+            writer.Put(targetMeshId);
+            writer.Put(instigatorMeshId);
+            writer.Put(hitBoxPosition);
+            writer.Put(fromPosition.x); writer.Put(fromPosition.y); writer.Put(fromPosition.z);
+            int n = elementDataIds != null ? elementDataIds.Length : 0;
+            writer.Put(n);
+            for (int i = 0; i < n; ++i) { writer.Put(elementDataIds[i]); writer.Put(mins[i]); writer.Put(maxs[i]); }
+            writer.Put(hasWeapon);
+            if (hasWeapon) weapon.Serialize(writer);
+            writer.Put(skillDataId);
+            writer.Put(skillLevel);
+            writer.Put(randomSeed);
+        }
+
+        public void Deserialize(NetDataReader reader)
+        {
+            targetMeshId = reader.GetString();
+            instigatorMeshId = reader.GetString();
+            hitBoxPosition = reader.GetByte();
+            fromPosition = new Vector3(reader.GetFloat(), reader.GetFloat(), reader.GetFloat());
+            int n = reader.GetInt();
+            elementDataIds = new int[n]; mins = new float[n]; maxs = new float[n];
+            for (int i = 0; i < n; ++i) { elementDataIds[i] = reader.GetInt(); mins[i] = reader.GetFloat(); maxs[i] = reader.GetFloat(); }
+            hasWeapon = reader.GetBool();
+            if (hasWeapon) { weapon = new CharacterItem(); weapon.Deserialize(reader); }
+            skillDataId = reader.GetInt();
+            skillLevel = reader.GetInt();
+            randomSeed = reader.GetInt();
+        }
+    }
+
+    /// <summary>The owner's authoritative outcome of a forwarded hit, so the ghost's cell can show real combat text.</summary>
+    public struct GhostHitResultMessage : INetSerializable
+    {
+        public string targetMeshId;
+        public byte combatAmountType;
+        public int totalDamage;
+        public int currentHp;
+        public void Serialize(NetDataWriter writer) { writer.Put(targetMeshId); writer.Put(combatAmountType); writer.Put(totalDamage); writer.Put(currentHp); }
+        public void Deserialize(NetDataReader reader) { targetMeshId = reader.GetString(); combatAmountType = reader.GetByte(); totalDamage = reader.GetInt(); currentHp = reader.GetInt(); }
     }
 
     /// <summary>Sent by the owning cell right before it tells the client to reconnect: "this character is coming to you".</summary>
@@ -113,6 +178,8 @@ namespace MultiplayerARPG.MMO.Mesh
             RegisterMessageHandler(MeshLinkMessageTypes.GhostSnapshot, HandleGhostSnapshot);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostRemove, HandleGhostRemove);
             RegisterMessageHandler(MeshLinkMessageTypes.HandoffNotice, HandleHandoffNotice);
+            RegisterMessageHandler(MeshLinkMessageTypes.GhostHit, HandleGhostHit);
+            RegisterMessageHandler(MeshLinkMessageTypes.GhostHitResult, HandleGhostHitResult);
         }
 
         public override void OnServerReceive(TransportEventData eventData)
@@ -159,6 +226,18 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             HandoffNoticeMessage msg = messageHandler.ReadMessage<HandoffNoticeMessage>();
             _manager.OnHandoffNotice(msg);
+        }
+
+        private void HandleGhostHit(MessageHandlerData messageHandler)
+        {
+            GhostHitMessage msg = messageHandler.ReadMessage<GhostHitMessage>();
+            _manager.OnGhostHit(messageHandler.ConnectionId, msg);
+        }
+
+        private void HandleGhostHitResult(MessageHandlerData messageHandler)
+        {
+            GhostHitResultMessage msg = messageHandler.ReadMessage<GhostHitResultMessage>();
+            _manager.OnGhostHitResult(msg);
         }
     }
 
@@ -221,6 +300,18 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (!IsConnected) return;
             SendPacket(0, DeliveryMethod.ReliableOrdered, MeshLinkMessageTypes.HandoffNotice, writer => new HandoffNoticeMessage { characterId = characterId, userId = userId }.Serialize(writer));
+        }
+
+        public void SendGhostHit(GhostHitMessage msg)
+        {
+            if (!IsConnected) return;
+            SendPacket(0, DeliveryMethod.ReliableOrdered, MeshLinkMessageTypes.GhostHit, writer => msg.Serialize(writer));
+        }
+
+        public void SendGhostHitResult(GhostHitResultMessage msg)
+        {
+            if (!IsConnected) return;
+            SendPacket(0, DeliveryMethod.ReliableOrdered, MeshLinkMessageTypes.GhostHitResult, writer => msg.Serialize(writer));
         }
 
         public void SendGhostRemove(string characterId)
