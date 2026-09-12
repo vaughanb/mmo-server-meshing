@@ -6,9 +6,9 @@
 
 | | |
 |---|---|
-| **Status** | Draft / planning — **identity, coordinates & routing now explicit (v0.5); not yet build-ready until Spikes 0–2 pass** |
-| **Doc version** | 0.10 |
-| **Last updated** | 2026-06-12 |
+| **Status** | **Working on the 2-zone rig (2026-09-12):** P0 spikes pass; P1 seamless handoff done (~250 ms, no visible break); P2 players + monsters ghost across the edge (shared world frame); P3 hits on ghosts resolved by the owner. Open: per-cell coordinate frames (only needed beyond ±960 m), kill credit, projectiles, dynamic cells |
+| **Doc version** | 0.15 |
+| **Last updated** | 2026-09-12 |
 | **Owner** | brenden.vaughan@gmail.com |
 | **Scope target** | Fully seamless (Phases 1–3) on a **uniform grid of equal cells** |
 | **Build constraint** | **Add-on only — extend/inherit, do not edit core.** See [§2](#2-engineering-principles--core-edit-policy) |
