@@ -342,6 +342,10 @@ logical map**. Plan:
 - **Resolution rule:** the **acting** entity's owner resolves the action and sends an authoritative
   result to the **target's** owner over CellMeshLink, which applies it. Ghosts are never trusted for
   hit detection.
+  *Implemented 2026-09-12 with one refinement:* the acting cell does the **hit detection** (against the
+  ghost's colliders) and forwards the **raw attacker damage** (the kit computes defence/crit/miss at the
+  target); the **target's owner** resolves it with the kit's `ApplyDamage` and reports the outcome back.
+  Ghosts are invincible locally, so nothing is applied twice and no loot/exp is duplicated.
 - **Projectiles/skills** crossing the seam are handed off like players, or resolved by their owner
   against translated ghost positions.
 - **Lag comp across cells** needs neighbor history → ship recent transform history with ghost
