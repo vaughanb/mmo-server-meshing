@@ -21,6 +21,16 @@ namespace MultiplayerARPG.MMO.Mesh
         public const ushort Hello = 100;
         public const ushort GhostSnapshot = 101;
         public const ushort GhostRemove = 102;
+        public const ushort HandoffNotice = 103;
+    }
+
+    /// <summary>Sent by the owning cell right before it tells the client to reconnect: "this character is coming to you".</summary>
+    public struct HandoffNoticeMessage : INetSerializable
+    {
+        public string characterId;
+        public string userId;
+        public void Serialize(NetDataWriter writer) { writer.Put(characterId); writer.Put(userId); }
+        public void Deserialize(NetDataReader reader) { characterId = reader.GetString(); userId = reader.GetString(); }
     }
 
     /// <summary>Sent by a MeshLinkClient right after connecting so the server knows which zone is talking.</summary>
@@ -102,6 +112,7 @@ namespace MultiplayerARPG.MMO.Mesh
             RegisterMessageHandler(MeshLinkMessageTypes.Hello, HandleHello);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostSnapshot, HandleGhostSnapshot);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostRemove, HandleGhostRemove);
+            RegisterMessageHandler(MeshLinkMessageTypes.HandoffNotice, HandleHandoffNotice);
         }
 
         public override void OnServerReceive(TransportEventData eventData)
@@ -142,6 +153,12 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             GhostRemoveMessage msg = messageHandler.ReadMessage<GhostRemoveMessage>();
             _manager.OnGhostRemove(msg.characterId);
+        }
+
+        private void HandleHandoffNotice(MessageHandlerData messageHandler)
+        {
+            HandoffNoticeMessage msg = messageHandler.ReadMessage<HandoffNoticeMessage>();
+            _manager.OnHandoffNotice(msg);
         }
     }
 
@@ -198,6 +215,12 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (!IsConnected) return;
             SendPacket(0, DeliveryMethod.ReliableOrdered, MeshLinkMessageTypes.GhostSnapshot, writer => msg.Serialize(writer));
+        }
+
+        public void SendHandoffNotice(string characterId, string userId)
+        {
+            if (!IsConnected) return;
+            SendPacket(0, DeliveryMethod.ReliableOrdered, MeshLinkMessageTypes.HandoffNotice, writer => new HandoffNoticeMessage { characterId = characterId, userId = userId }.Serialize(writer));
         }
 
         public void SendGhostRemove(string characterId)

@@ -18,6 +18,7 @@
 // Ghosts are never registered as player characters, so the boundary tick and streaming ignore them.
 
 using System.Collections.Generic;
+using Cysharp.Threading.Tasks;
 using LiteNetLibManager;
 using UnityEngine;
 
@@ -437,6 +438,46 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             DestroyGhost(meshId, "neighbour removed");
         }
+
+        // ---- Incoming handoffs: the neighbour tells us a character is about to reconnect here ----
+
+        [Tooltip("For a character arriving by mesh handoff, do not block its spawn on re-loading relates data (gold, cash, user level, party, guild, storage) from the DB; load them in the background instead. Cuts ~150-300 ms off the swap.")]
+        public bool fastSpawnOnHandoff = true;
+
+        private readonly Dictionary<string, float> _incomingHandoffs = new Dictionary<string, float>(); // characterId -> notice time
+
+        internal void OnHandoffNotice(HandoffNoticeMessage msg)
+        {
+            _incomingHandoffs[msg.characterId] = Time.unscaledTime;
+        }
+
+        internal void SendHandoffNotice(string zoneId, string characterId, string userId)
+        {
+            if (_linkClients.TryGetValue(zoneId, out MeshLinkClient client))
+                client.SendHandoffNotice(characterId, userId);
+        }
+
+        private bool IsIncomingHandoff(string characterId)
+        {
+            return _incomingHandoffs.TryGetValue(characterId, out float t) && Time.unscaledTime - t < 15f;
+        }
+
+        /// <summary>
+        /// The kit awaits ~5 sequential DB round trips here before it spawns the player. A character that was
+        /// handed off a moment ago was fully loaded on the neighbour and saved by it, so for those we let the
+        /// spawn proceed and fill the relates data in the background (extension seam: protected virtual).
+        /// </summary>
+        protected override UniTask LoadPlayerCharacterEntityRelatesData(long connectionId, BasePlayerCharacterEntity playerCharacterEntity, string userId, string accessToken)
+        {
+            if (fastSpawnOnHandoff && playerCharacterEntity != null && IsIncomingHandoff(playerCharacterEntity.Id))
+            {
+                _incomingHandoffs.Remove(playerCharacterEntity.Id);
+                Stamp($"handoff arrival {playerCharacterEntity.CharacterName}: relates data loading in background");
+                base.LoadPlayerCharacterEntityRelatesData(connectionId, playerCharacterEntity, userId, accessToken).Forget();
+                return UniTask.CompletedTask;
+            }
+            return base.LoadPlayerCharacterEntityRelatesData(connectionId, playerCharacterEntity, userId, accessToken);
+        }
 #else
         private void GhostingOnStartServer() { }
         private void GhostingOnStopServer() { }
@@ -447,6 +488,8 @@ namespace MultiplayerARPG.MMO.Mesh
         internal void OnMeshNeighbourDisconnected(long connectionId) { }
         internal void OnGhostSnapshot(long connectionId, GhostSnapshotMessage msg) { }
         internal void OnGhostRemove(string characterId) { }
+        internal void OnHandoffNotice(HandoffNoticeMessage msg) { }
+        internal void SendHandoffNotice(string zoneId, string characterId, string userId) { }
 #endif
     }
 }

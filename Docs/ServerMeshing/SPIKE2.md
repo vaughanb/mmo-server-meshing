@@ -103,9 +103,20 @@ Run 12 (C→E): stand-ins 9 ms · connected 30 ms · new entity 564 ms · settle
 server-side continuity 0.92 m, stand-in vs spawn 0.76 m (absorbed by the blend); 5 stand-ins; 0 frames without a
 camera; no errors. Cost: the player has no input for ~0.55 s and the stand-in dead-reckons over it.
 
+**Pass 4 — shrink the no-input window (same day).**
+
+| Change | Effect |
+|---|---|
+| **Handoff notice** over the CellMeshLink: the sending cell tells the neighbour "character X (user U) is coming" right after the save | the receiver knows an arrival is a handoff, not a fresh login |
+| `LoadPlayerCharacterEntityRelatesData` is **protected virtual** in the core, so `MeshMapNetworkManager` overrides it: for a noticed arrival the relates data (gold, cash, user level, party, guild, storage) load in the **background** instead of blocking the spawn (`fastSpawnOnHandoff`) | server "client ready → player registered" **160–290 ms → 40–60 ms** |
+| **Input prediction on the stand-in**: during the gap the local stand-in follows the movement keys (camera-relative, at the character's move speed), so the player never loses control; with no input it dead-reckons | the ~0.25 s server round trip is no longer felt |
+
+Run 15 (round trip): `playerReady` **271 ms (C→E) / 238 ms (E→C)**, settled 572 / 539 ms, stand-in vs spawn
+0.04 / 0.19 m, 0 frames without a camera, no errors. CE-5 is **not needed**: the seam existed.
+
 Verdict for Q5: **seamless is achievable extension-only** (no screenshot, no loading UI, no camera gap, no
-HUD flash). CE-1 stays *not needed*. What remains is latency polish (S2S relates-data → CE-5) and, for
-interactive play, local prediction of the other players' stand-ins.
+HUD flash, input never lost). CE-1 stays *not needed*. Remaining polish: `handoffLeadSeconds` (0.4 s) is now
+longer than the gap and could drop to ~0.25 s; other players' stand-ins are dead-reckoned only.
 
 **Conclusions.**
 1. The make-or-break question is answered **yes**: a connected client can be moved A→B with the kit's own

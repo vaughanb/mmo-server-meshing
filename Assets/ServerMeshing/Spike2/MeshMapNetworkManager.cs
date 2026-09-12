@@ -65,7 +65,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public float handoffHysteresis = 1f;
 
         [Tooltip("Seconds of the player's current velocity to add to the saved position, so the neighbour spawns it where the client's dead-reckoned stand-in will be by then (~the measured gap).")]
-        public float handoffLeadSeconds = 0.4f;
+        public float handoffLeadSeconds = 0.3f;
 
         public bool IsMigrating { get; private set; }
 
@@ -447,6 +447,12 @@ namespace MultiplayerARPG.MMO.Mesh
                 DataUpdater.PlayerCharacterDataSaved(characterId);
                 bool saved = await WaitAndSaveCharacter(TransactionUpdateCharacterState.All, entity.CloneTo(new PlayerCharacterData()), true, mapName, savePosition, true, rotation);
                 entity.NetworkDestroy();
+
+                // Tell the neighbour who is coming so it can spawn without re-awaiting relates data.
+                if (ServerUserHandlers.TryGetUserId(connectionId, out string userId))
+                    SendHandoffNotice(zone.zoneId, characterId, userId);
+                else
+                    SendHandoffNotice(zone.zoneId, characterId, entity.UserId);
 
                 MMOWarpMessage message = new MMOWarpMessage
                 {

@@ -151,6 +151,7 @@ namespace MultiplayerARPG.MMO.Mesh
         private IEnumerator MigrateSeamlessRoutine(string address, int port)
         {
             _running = true;
+            _inputUsedDuringGap = false;
             System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
             BasePlayerCharacterEntity prevEntity = GameInstance.PlayingCharacterEntity;
             Vector3 posBefore = prevEntity != null ? prevEntity.EntityTransform.position : Vector3.zero;
@@ -160,6 +161,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 StartCoroutine(CaptureFramesRoutine(3.0f));
 
             // 1) Stand-ins for everything visible, made while the entities still exist.
+            float localMoveSpeed = prevEntity != null ? prevEntity.GetMoveSpeed() : 0f;
             List<StandIn> standIns = CreateStandIns(prevEntity);
             StandIn localStandIn = standIns.Find(s => s.isLocalPlayer);
             long tCapture = sw.ElapsedMilliseconds;
@@ -229,6 +231,27 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (Camera.main == null)
                     framesWithoutCamera++;
                 float dt = Time.unscaledDeltaTime;
+                // Client-side prediction for the local stand-in: the player's movement keys keep working during the
+                // gap (camera-relative, at the character's move speed). Without any input it dead-reckons instead.
+                if (localStandIn != null && localStandIn.go != null && localMoveSpeed > 0f)
+                {
+                    float h = InputManager.GetAxis("Horizontal", false);
+                    float v = InputManager.GetAxis("Vertical", false);
+                    if (Mathf.Abs(h) + Mathf.Abs(v) > 0.1f)
+                    {
+                        Transform camT = Camera.main != null ? Camera.main.transform : null;
+                        Vector3 fwd = camT != null ? camT.forward : Vector3.forward;
+                        Vector3 right = camT != null ? camT.right : Vector3.right;
+                        fwd.y = 0f; right.y = 0f; fwd.Normalize(); right.Normalize();
+                        Vector3 dir = Vector3.ClampMagnitude(fwd * v + right * h, 1f);
+                        localStandIn.velocity = dir * localMoveSpeed;
+                        if (dir.sqrMagnitude > 0.001f)
+                            localStandIn.go.transform.rotation = Quaternion.RotateTowards(localStandIn.go.transform.rotation, Quaternion.LookRotation(dir), 720f * dt);
+                        _inputUsedDuringGap = true;
+                    }
+                    else if (_inputUsedDuringGap)
+                        localStandIn.velocity = Vector3.zero; // keys released: stop, as the real character would
+                }
                 for (int i = 0; i < standIns.Count; ++i)
                 {
                     StandIn s = standIns[i];
@@ -348,6 +371,8 @@ namespace MultiplayerARPG.MMO.Mesh
                     m.Invoke(mb, new object[] { 0 });
             }
         }
+
+        private bool _inputUsedDuringGap;
 
         private static int s_captureSeq;
 
