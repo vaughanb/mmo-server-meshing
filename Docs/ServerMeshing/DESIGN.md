@@ -17,6 +17,7 @@
 
 | Version | Date | Change |
 |---|---|---|
+| 0.12 | 2026-09-12 | **Spike 1b PASS / first P2 slice** ([SPIKE1.md §0b](SPIKE1.md#0b-results-1b-2026-09-12)): `CellMeshLink` (per-cell `LiteNetLibServer` + per-neighbour clients, built like the cluster link, addresses from the cluster broadcast) and border ghosting in `MeshMapNetworkManager_Ghosting.cs` — owned players within B = 60 m of a shared edge are streamed at 10 Hz with full-precision position + movement state; the neighbour spawns a "puppet" ghost (normal entity, server drivers silenced, movement kept and steered with the kit's own API). A client in zone C saw a bot owned by zone E moving as a ghost (100 distinct positions) without migrating; dedup on handoff-in works. Git repository initialised. |
 | 0.11 | 2026-09-12 | **Spike 2 RUN — real A→B zone hop works end-to-end, extension-only** ([SPIKE2.md §0](SPIKE2.md#0-results-2026-09-12)). Implemented the **P1 server-side boundary tick + handoff** in `MeshMapNetworkManager` by replaying the kit's save-and-warp toward the neighbour zone's map server (zone = channel, resolved via the cluster peer broadcast). Automated rig (`ServerMeshAutoClient`, MapSpawn-launched zone servers). Masked gap 2.2 s → **450–650 ms** after (a) skipping the client's 1 s settle + forced GC during a hop (extension) and (b) removing the kit's 100 ms request-poll floor (**CE-6**, 2 lines, upstreamable). Position continuity 0.3 m, no scene reload, round trip C→E→C passes. **Q5 resolved (masking sufficient, CE-1 not needed)**, Q11 resolved for the rig. Core rename noted: `MovementDisablers` → `MovementDisableState` (OpenMMORPG). |
 | 0.1 | 2026-06-12 | Initial design |
 | 0.2 | 2026-06-12 | No-core-edit constraint, engineering principles, verified seams, core-edit registry; MeshCoordinator → standalone role |
@@ -388,7 +389,7 @@ logical map**. Plan:
 |---|---|---|
 | **P0 Foundations** | Coordinate model (Spike 0) + cell grid; `MeshIdentity`/`MeshEntityId`; routing; 2-cell harness; MeshCoordinator role | Scaffolding |
 | **P1 Fast handoff** | Boundary tick + in-memory transfer + masked client migration | **No loading screen / stall** |
-| **P2 Border ghosting** | CellMeshLink + GhostEntity (suppressed) + MeshInterestManager + coord translation | Players **see** across |
+| **P2 Border ghosting** | CellMeshLink + GhostEntity (suppressed) + MeshInterestManager + coord translation. *2026-09-12: CellMeshLink + player "puppet" ghosts working on the rig (shared frame, no translation yet, no MeshInterestManager — plain AOI suffices at B = 60 m); monsters/NPCs and per-cell frames still open* | Players **see** across |
 | **P3 Cross-border interaction** | Authority arbitration, ghost colliders, cross-cell lag comp, mob/projectile handoff | **See and fight** across |
 | **P4 Dynamic load** *(optional)* | Split/merge cells | Elastic scale |
 

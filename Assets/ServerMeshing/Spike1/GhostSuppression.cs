@@ -45,13 +45,17 @@ namespace MultiplayerARPG.MMO.Mesh
         /// useful for the spike's discovery; may also silence benign things like footstep sounds).
         /// </param>
         public static int Ghostify(BaseGameEntity entity, object disablerKey,
-            IEnumerable<string> extraTypeNames = null, bool stripAllManagedUpdates = false, bool logDetails = true)
+            IEnumerable<string> extraTypeNames = null, bool stripAllManagedUpdates = false, bool logDetails = true,
+            bool disableMovement = true)
         {
             if (entity == null)
                 return 0;
 
             // 1) Stop self-movement via the built-in seam (takes effect next EntityUpdate).
-            entity.MovementDisableState.Add(disablerKey);
+            //    A "puppet" ghost (P2) keeps its movement component and is steered toward snapshots
+            //    with the kit's own movement API instead, so its model animates and syncs normally.
+            if (disableMovement)
+                entity.MovementDisableState.Add(disablerKey);
 
             // 2) Silence server-driver managed-update components.
             HashSet<string> deny = new HashSet<string>(DefaultSuppressTypeNames);

@@ -6,10 +6,56 @@
 
 | | |
 |---|---|
-| **Status** | 1a scaffolded — needs in-editor run (host). 1b deferred (needs two-server rig) |
-| **Code** | `Assets/ServerMeshing/Spike1/` |
+| **Status** | **1a PASS (2026-06-13). 1b PASS (2026-09-12)** — S2S ghost over a real CellMeshLink, seen by a client on the other cell |
+| **Code** | `Assets/ServerMeshing/Spike1/` (suppression), `Assets/ServerMeshing/Mesh/` (CellMeshLink + ghosting) |
 | **Resolves** | [Q9](DESIGN.md#18-open-questions); de-risks P2/P3 |
-| **Result** | **1a suppression PASS (2026-06-13)** — see [Results](#0-results-2026-06-13) |
+| **Result** | 1a see [Results](#0-results-2026-06-13); 1b see [Results 1b](#0b-results-1b-2026-09-12) |
+
+---
+
+## 0b. Results 1b (2026-09-12) — PASS
+
+**Rig:** the Spike 2 rig (zones C and E as two map servers of the same logical map, see
+[SPIKE2.md §0](SPIKE2.md#0-results-2026-09-12)) plus:
+
+- `CellMeshLink` (`Assets/ServerMeshing/Mesh/CellMeshLink.cs`): one `MeshLinkServer` per cell on
+  `mapPort + 10000`, one `MeshLinkClient` per 4-neighbour, built exactly like the kit's
+  `ClusterClient`/`ClusterServer` (`LiteNetLibServer/Client` over `LiteNetLibTransport`). Neighbour
+  addresses come from the cluster's map-server broadcast; links came up within 2 s of both cells
+  registering (`Neighbour zone E linked`).
+- `MeshMapNetworkManager_Ghosting.cs`: every 100 ms each owned player within **B = 60 m** of a shared
+  edge is streamed as a `GhostSnapshotMessage` (character id = `MeshEntityId`, entity/data ids, name,
+  level, **full-precision position**, yaw, movement state, hp). The receiver spawns a normal player
+  entity via `Assets.NetworkSpawn`, silences its server drivers with `GhostSuppression` (3 components
+  on the demo character) **but keeps its movement component**, and steers it to each snapshot with
+  the kit's own `PointClickMovement` (teleport if > 4 m) — a "puppet" ghost that animates and syncs to
+  clients through the untouched AOI path. Snapshot for a character this cell owns for real → ignored;
+  real character registering (handoff-in) → ghost destroyed; no snapshot for 2 s or an explicit remove
+  → ghost destroyed.
+
+**Test (automated):** a bot client from the build (`-meshAutoClient -meshAutoMode pace -meshWalkX 106`)
+logs in, is handed to zone E and paces x = 106 ↔ 114 (6–14 m inside E). The editor client walks to
+x = 88 in zone C and watches for other player entities beyond x = 100 for 60 s.
+
+| Observation | Result |
+|---|---|
+| Ghost of the bot seen on the C client | yes, first at (101.41, −0.19, 0) |
+| Distinct ghost positions beyond the edge | **100** (101.4 → 108.2), i.e. it moves |
+| Observer migrated during the window | no |
+| Ghost lifecycle on the servers | `Ghost spawned … from zone C/E`, `Ghost destroyed … reason=neighbour removed` on hand-off, then the real character registered (dedup) |
+| Symmetric | yes: E held a ghost of the observer (x = 86.5, inside E's band) at the same time |
+
+**Refinements surfaced**
+
+- The player-entity ghost carries `hp`/`maxHp`; a fresh entity reports `hp = 0` until sync fields
+  arrive (the auto-client's death check needed a 3 s debounce for the same reason).
+- Steering with `PointClickMovement` uses the ghost's own move speed; at snapshot cadence 10 Hz the
+  ghost trails by roughly one snapshot. `KeyMovement` with the real movement state, or feeding the
+  snapshot straight into the movement component's server state, would remove the trailing.
+- Coordinate translation was identity here (both cells share one world frame in the rig); the
+  per-cell-local frame from DESIGN §6 is not exercised yet.
+- Spawn areas' monsters are the next ghost class (Spike 1a's recipe applies; they are server-owned
+  so `MeshEntityId` must be the birth-provenance id from DESIGN §8).
 
 ---
 

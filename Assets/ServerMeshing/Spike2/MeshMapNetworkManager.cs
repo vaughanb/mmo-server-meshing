@@ -24,7 +24,7 @@ using UnityEngine;
 
 namespace MultiplayerARPG.MMO.Mesh
 {
-    public class MeshMapNetworkManager : MapNetworkManager
+    public partial class MeshMapNetworkManager : MapNetworkManager
     {
         [Header("Spike 2 — Client Migration")]
         [Tooltip("When true, client warps are routed through the masked migration controller instead of the raw StopClient/StartClient.")]
@@ -227,6 +227,10 @@ namespace MultiplayerARPG.MMO.Mesh
         public override void RegisterPlayerCharacter(long connectionId, BasePlayerCharacterEntity playerCharacter)
         {
             Stamp($"player registered {playerCharacter.CharacterName} conn={connectionId}");
+#if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
+            if (IsServer)
+                GhostingOnRealPlayerRegistered(playerCharacter);
+#endif
             base.RegisterPlayerCharacter(connectionId, playerCharacter);
         }
 
@@ -258,6 +262,20 @@ namespace MultiplayerARPG.MMO.Mesh
             OwnZoneCoord = new Vector2Int(-1, -1);
             OwnZoneId = string.Empty;
             TryResolveOwnZone();
+            GhostingOnStartServer();
+        }
+
+        public override void OnStopServer()
+        {
+            GhostingOnStopServer();
+            base.OnStopServer();
+        }
+
+        public override void UnregisterPlayerCharacter(long connectionId)
+        {
+            if (IsServer)
+                GhostingOnRealPlayerUnregistered(connectionId);
+            base.UnregisterPlayerCharacter(connectionId);
         }
 
         private void OnMeshAppServerAddress(AckResponseCode responseCode, CentralServerPeerInfo peerInfo)
@@ -310,7 +328,10 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             base.Update();
             if (IsServer)
+            {
                 MeshBoundaryTick();
+                GhostingUpdate();
+            }
         }
 
         /// <summary>DESIGN.md §11 trigger #1 — walked crossings are just movement, so we poll.</summary>

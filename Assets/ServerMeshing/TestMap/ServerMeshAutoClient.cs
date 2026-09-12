@@ -9,6 +9,10 @@
 //           the client's masked migration is measured (Spike 2 Option B, real A→B hop).
 //   self  — after entering, migrate back to the SAME map server (Spike 2 Option 0, connection swap only).
 //   none  — just log in and enter the map.
+//   stand — walk to -meshWalkX and hold there (a "bot" standing in a neighbour zone's border band).
+//   pace  — walk to -meshWalkX, then pace between there and +8 m forever (a moving bot for ghost tests).
+//   observe — walk to -meshWalkX, then watch for OTHER player entities (ghosts streamed from the
+//             neighbour zone) for observeSeconds and report whether one was seen moving.
 //
 // Enable with command-line `-meshAutoClient` (build) or the "Server Meshing/Auto Client" menu (editor).
 // Optional: -meshAutoMode walk|self|none  -meshChannel C  -meshUser name  -meshWalkX 130
@@ -40,7 +44,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public const string PREF_WALK_X = "ServerMesh.AutoClient.WalkX";
 #endif
 
-        public enum Mode { none, walk, self }
+        public enum Mode { none, walk, self, stand, pace, observe }
 
         [Header("Session")]
         public string username = "meshtest";
@@ -59,6 +63,10 @@ namespace MultiplayerARPG.MMO.Mesh
         public float walkReturnX = 0f;
         [Tooltip("Seconds to wait after entering the map before starting the test.")]
         public float settleSeconds = 3f;
+        [Tooltip("observe mode: seconds to watch for other player entities after arriving.")]
+        public float observeSeconds = 60f;
+        [Tooltip("observe mode: only positions beyond this world X count as ghost sightings (the neighbour zone starts at x=100).")]
+        public float observeGhostBeyondX = 100f;
         [Tooltip("Overall timeout for the whole run.")]
         public float timeoutSeconds = 240f;
 
@@ -97,7 +105,7 @@ namespace MultiplayerARPG.MMO.Mesh
             ServerMeshAutoClient c = go.AddComponent<ServerMeshAutoClient>();
             if (!string.IsNullOrEmpty(modeStr) && System.Enum.TryParse(modeStr, true, out Mode m)) c.mode = m;
             if (!string.IsNullOrEmpty(channel)) c.channelId = channel;
-            if (!string.IsNullOrEmpty(user)) c.username = user;
+            if (!string.IsNullOrEmpty(user)) { c.username = user; c.characterName = user + "Char"; } // names are global: derive from the user
             if (!string.IsNullOrEmpty(walkX) && float.TryParse(walkX, out float wx)) c.walkTargetX = wx;
         }
 
@@ -273,6 +281,15 @@ namespace MultiplayerARPG.MMO.Mesh
                 case Mode.walk:
                     yield return RunWalk(deadline);
                     break;
+                case Mode.stand:
+                    yield return RunStand(deadline);
+                    break;
+                case Mode.pace:
+                    yield return RunPace(deadline);
+                    break;
+                case Mode.observe:
+                    yield return RunObserve(deadline);
+                    break;
                 default:
                     Finished = true; Passed = true;
                     Log("Mode none: done");
@@ -320,6 +337,85 @@ namespace MultiplayerARPG.MMO.Mesh
             Log($"RESULT walk: migrations={migrations} allReady={_allMigrationsReady} maxGap={_maxGapMs}ms maxJump={_maxJump:0.##}m finalPos={finalPos} -> {(Passed ? "PASS" : "FAIL")}");
         }
 
+        private IEnumerator RunStand(float deadline)
+        {
+            Phase = "stand";
+            bool reached = false;
+            yield return WalkTo(walkTargetX, deadline, ClientMigrationController.CompletedCount, r => reached = r);
+            Finished = true; Passed = reached;
+            Log($"RESULT stand: reached={reached} pos={(GameInstance.PlayingCharacterEntity != null ? GameInstance.PlayingCharacterEntity.EntityTransform.position : Vector3.zero)} -> {(Passed ? "PASS" : "FAIL")} (holding position)");
+        }
+
+        private IEnumerator RunPace(float deadline)
+        {
+            Phase = "pace";
+            bool reached = false;
+            yield return WalkTo(walkTargetX, deadline, ClientMigrationController.CompletedCount, r => reached = r);
+            if (!reached) { Fail("never reached the pacing start"); yield break; }
+            Log($"Pacing between x={walkTargetX} and x={walkTargetX + 8f}");
+            float far = walkTargetX + 8f;
+            float target = far;
+            float pacingDeadline = Time.realtimeSinceStartup + 600f;
+            while (Time.realtimeSinceStartup < pacingDeadline)
+            {
+                BasePlayerCharacterEntity p = GameInstance.PlayingCharacterEntity;
+                if (p != null)
+                {
+                    Vector3 pos = p.EntityTransform.position;
+                    if (Mathf.Abs(pos.x - target) < 1f)
+                        target = Mathf.Approximately(target, far) ? walkTargetX : far;
+                    p.PointClickMovement(new Vector3(target, pos.y, pos.z));
+                }
+                yield return new WaitForSecondsRealtime(0.5f);
+            }
+            Finished = true; Passed = true;
+        }
+
+        private IEnumerator RunObserve(float deadline)
+        {
+            Phase = "observe";
+            int before = ClientMigrationController.CompletedCount;
+            bool reached = false;
+            yield return WalkTo(walkTargetX, deadline, before, r => reached = r);
+            if (!reached) { Fail("never reached the observation point"); yield break; }
+            BasePlayerCharacterEntity self = GameInstance.PlayingCharacterEntity;
+            Log($"Observing from {self.EntityTransform.position} for {observeSeconds}s");
+            Dictionary<string, List<Vector3>> seen = new Dictionary<string, List<Vector3>>();
+            float end = Time.realtimeSinceStartup + observeSeconds;
+            float nextSample = 0f;
+            while (Time.realtimeSinceStartup < end)
+            {
+                if (Time.realtimeSinceStartup >= nextSample)
+                {
+                    nextSample = Time.realtimeSinceStartup + 0.5f;
+                    foreach (BasePlayerCharacterEntity e in FindObjectsByType<BasePlayerCharacterEntity>(FindObjectsSortMode.None))
+                    {
+                        if (e == GameInstance.PlayingCharacterEntity) continue;
+                        string key = $"{e.CharacterName}|{e.Id}";
+                        if (!seen.TryGetValue(key, out List<Vector3> list)) { list = new List<Vector3>(); seen[key] = list; Log($"Saw other player '{e.CharacterName}' at {e.EntityTransform.position}"); }
+                        Vector3 pos = e.EntityTransform.position;
+                        if (pos.x < observeGhostBeyondX) continue; // still on our own server; not a ghost
+                        if (list.Count == 0 || Vector3.Distance(list[list.Count - 1], pos) > 0.5f) list.Add(pos);
+                    }
+                }
+                yield return null;
+            }
+            bool movedGhost = false;
+            int ghostsSeen = 0;
+            foreach (KeyValuePair<string, List<Vector3>> kv in seen)
+            {
+                if (kv.Value.Count == 0) { Log($"Other player {kv.Key}: seen only on our side of the edge (not a ghost)"); continue; }
+                ghostsSeen++;
+                Log($"Ghost {kv.Key}: {kv.Value.Count} distinct positions beyond x={observeGhostBeyondX}, first={kv.Value[0]} last={kv.Value[kv.Value.Count - 1]}");
+                if (kv.Value.Count >= 2) movedGhost = true;
+            }
+            int migrations = ClientMigrationController.CompletedCount - before;
+            Finished = true;
+            Passed = ghostsSeen > 0 && movedGhost && migrations == 0;
+            Log($"RESULT observe: ghostsSeen={ghostsSeen} moved={movedGhost} migrationsDuringObserve={migrations} -> {(Passed ? "PASS" : "FAIL")}");
+        }
+
+        private float _deadSince = -1f;
         private bool _allMigrationsReady = true;
         private long _maxGapMs;
         private float _maxJump;
@@ -339,12 +435,18 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (p != null)
                 {
                     Vector3 pos = p.EntityTransform.position;
+                    // A freshly spawned entity reports hp=0 until its sync fields arrive; only a sustained death counts.
                     if (p.IsDead())
                     {
-                        Fail($"Character died at {pos} (hp={p.CurrentHp}); disable monsters on the test map");
-                        onDone(false);
-                        yield break;
+                        if (_deadSince < 0f) _deadSince = Time.realtimeSinceStartup;
+                        if (Time.realtimeSinceStartup - _deadSince > 3f)
+                        {
+                            Fail($"Character died at {pos} (hp={p.CurrentHp}); disable monsters on the test map");
+                            onDone(false);
+                            yield break;
+                        }
                     }
+                    else _deadSince = -1f;
                     if (Time.realtimeSinceStartup - lastLogT > 2f)
                     {
                         lastLogT = Time.realtimeSinceStartup;
