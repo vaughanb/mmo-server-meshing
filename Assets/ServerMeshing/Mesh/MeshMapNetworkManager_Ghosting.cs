@@ -1,15 +1,20 @@
 // Server Meshing add-on — border ghosting (Spike 1b / P2).
-// See Docs/ServerMeshing/DESIGN.md §5, §7, §8, §10 and SPIKE1.md §5.
+// See Docs/ServerMeshing/DESIGN.md §5, §7, §8, §10 and SPIKE1.md §0b.
 //
 // EXTENSION-ONLY (partial of the MapNetworkManager subclass). Server side only:
-//  * every `ghostSnapshotInterval` each owned player inside the border band B of a shared edge is
-//    streamed (full-precision position + movement state) to that neighbour over the CellMeshLink;
-//  * a received snapshot spawns/steers a GHOST: a normal player entity spawned server-side, with its
+//  * every `ghostSnapshotInterval` each owned entity (registered player, or server-owned monster)
+//    inside the border band B of a shared edge is streamed (full-precision position + movement state)
+//    to that neighbour over the CellMeshLink;
+//  * a received snapshot spawns/steers a GHOST: a normal entity spawned server-side, with its
 //    server-driver components silenced (GhostSuppression) but its movement component kept, so it is
 //    steered toward the snapshot with the kit's own movement API ("puppet"), animates, and reaches
-//    this cell's clients through the ordinary AOI/sync path;
+//    this cell's clients through the ordinary AOI/sync path. Ghosts are invincible so the local
+//    simulation cannot damage them (cross-border hits are resolved by the owner — P3);
 //  * dedup/promotion (DESIGN §8): a snapshot for a character this cell owns for real is ignored, and
-//    when the real character registers here (handoff-in) any ghost with the same id is destroyed.
+//    when the real character registers here (handoff-in) any ghost with the same id is destroyed;
+//  * monster ownership: each cell only runs the spawn areas that sit inside its own zone, so every
+//    server-spawned entity has exactly one owner; its MeshEntityId is the birth-provenance id
+//    "{zone}:{incarnation}:{objectId}" (DESIGN §8).
 // Ghosts are never registered as player characters, so the boundary tick and streaming ignore them.
 
 using System.Collections.Generic;
@@ -21,10 +26,16 @@ namespace MultiplayerARPG.MMO.Mesh
     public partial class MeshMapNetworkManager
     {
         [Header("Server Meshing — border ghosting (server side)")]
-        [Tooltip("Stream owned players near a shared zone edge to the neighbour cell, and spawn ghosts for what the neighbour streams to us.")]
+        [Tooltip("Stream owned entities near a shared zone edge to the neighbour cell, and spawn ghosts for what the neighbour streams to us.")]
         public bool enableBorderGhosting = true;
 
-        [Tooltip("Border band B (metres from the shared edge) inside which players are ghosted into the neighbour.")]
+        [Tooltip("Also ghost server-owned monsters (not only players).")]
+        public bool ghostMonsters = true;
+
+        [Tooltip("Only run spawn areas whose position lies inside this cell's zone (one owner per server-spawned entity).")]
+        public bool ownSpawnAreasByZone = true;
+
+        [Tooltip("Border band B (metres from the shared edge) inside which entities are ghosted into the neighbour.")]
         public float ghostBandWidth = 60f;
 
         [Tooltip("Seconds between ghost snapshots.")]
@@ -44,7 +55,8 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private sealed class MeshGhost
         {
-            public BasePlayerCharacterEntity entity;
+            public BaseCharacterEntity entity;
+            public GhostKind kind;
             public float lastSeen;
             public Vector3 lastTarget;
         }
@@ -52,15 +64,19 @@ namespace MultiplayerARPG.MMO.Mesh
         private MeshLinkServer _linkServer;
         private readonly Dictionary<string, MeshLinkClient> _linkClients = new Dictionary<string, MeshLinkClient>();   // zoneId -> link
         private readonly Dictionary<long, string> _neighbourZoneByConnection = new Dictionary<long, string>();
-        private readonly Dictionary<string, MeshGhost> _ghosts = new Dictionary<string, MeshGhost>();                  // characterId -> ghost
-        private readonly Dictionary<string, HashSet<string>> _streamedToZone = new Dictionary<string, HashSet<string>>(); // zoneId -> character ids streamed last tick
+        private readonly Dictionary<string, MeshGhost> _ghosts = new Dictionary<string, MeshGhost>();                  // meshEntityId -> ghost
+        private readonly Dictionary<string, HashSet<string>> _streamedToZone = new Dictionary<string, HashSet<string>>(); // zoneId -> ids streamed last tick
         private readonly List<string> _tmpIds = new List<string>();
+        private readonly List<BaseCharacterEntity> _ownedCandidates = new List<BaseCharacterEntity>();
         private float _nextSnapshotTime;
         private float _nextLinkCheck;
+        private float _nextMonsterScan;
+        private string _cellIncarnation;
 
 #if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
         private void GhostingOnStartServer()
         {
+            _cellIncarnation = System.DateTime.UtcNow.Ticks.ToString("x");
             if (!enableBorderGhosting)
                 return;
             _linkServer = new MeshLinkServer(this);
@@ -86,6 +102,37 @@ namespace MultiplayerARPG.MMO.Mesh
             _ghosts.Clear();
             _streamedToZone.Clear();
             _neighbourZoneByConnection.Clear();
+            _ownedCandidates.Clear();
+        }
+
+        /// <summary>
+        /// DESIGN §12 / risk #6: a map scene is shared by every cell of the logical map, so without this each
+        /// cell would spawn every spawn area's monsters (double spawn). Deactivate areas outside our zone
+        /// before the base class discovers them.
+        /// </summary>
+        public override void OnServerOnlineSceneLoaded()
+        {
+            if (ownSpawnAreasByZone && meshConfig != null && TryResolveOwnZone())
+            {
+                int kept = 0, disabled = 0;
+                foreach (MonsterSpawnArea area in FindObjectsByType<MonsterSpawnArea>(FindObjectsSortMode.None))
+                {
+                    if (meshConfig.WorldToZoneCoord(area.transform.position) == OwnZoneCoord) { kept++; continue; }
+                    area.gameObject.SetActive(false); disabled++;
+                }
+                foreach (HarvestableSpawnArea area in FindObjectsByType<HarvestableSpawnArea>(FindObjectsSortMode.None))
+                {
+                    if (meshConfig.WorldToZoneCoord(area.transform.position) == OwnZoneCoord) { kept++; continue; }
+                    area.gameObject.SetActive(false); disabled++;
+                }
+                foreach (ItemDropSpawnArea area in FindObjectsByType<ItemDropSpawnArea>(FindObjectsSortMode.None))
+                {
+                    if (meshConfig.WorldToZoneCoord(area.transform.position) == OwnZoneCoord) { kept++; continue; }
+                    area.gameObject.SetActive(false); disabled++;
+                }
+                Logging.Log("Mesh", $"Spawn areas owned by zone {OwnZoneId}: {kept} kept, {disabled} disabled (outside zone)");
+            }
+            base.OnServerOnlineSceneLoaded();
         }
 
         private void GhostingUpdate()
@@ -101,6 +148,11 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 _nextLinkCheck = Time.unscaledTime + 1f;
                 EnsureNeighbourLinks();
+            }
+            if (Time.unscaledTime >= _nextMonsterScan)
+            {
+                _nextMonsterScan = Time.unscaledTime + 1f;
+                RescanOwnedCandidates();
             }
             if (Time.unscaledTime >= _nextSnapshotTime)
             {
@@ -135,7 +187,7 @@ namespace MultiplayerARPG.MMO.Mesh
         private static readonly Vector2Int[] s_neighbourOffsets = { Vector2Int.right, Vector2Int.left, Vector2Int.up, Vector2Int.down };
         private Vector2Int NeighbourCoord(int i) => OwnZoneCoord + s_neighbourOffsets[i];
 
-        /// <summary>Distance from a world position to the edge shared with the neighbour at offset index i (∞ if not adjacent along that axis).</summary>
+        /// <summary>Distance from a world position to the edge shared with the neighbour at offset index i.</summary>
         private float DistanceToSharedEdge(Vector3 pos, int i)
         {
             Vector2Int off = s_neighbourOffsets[i];
@@ -146,6 +198,39 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             float lineZ = meshConfig.gridOrigin.z + Mathf.Max(OwnZoneCoord.y, OwnZoneCoord.y + off.y) * meshConfig.zoneSize;
             return Mathf.Abs(pos.z - lineZ);
+        }
+
+        /// <summary>Owned = registered players + server-owned monsters that are not ghosts. Monsters are rescanned once a second.</summary>
+        private void RescanOwnedCandidates()
+        {
+            _ownedCandidates.Clear();
+            foreach (IPlayerCharacterData data in ServerUserHandlers.GetPlayerCharacters())
+            {
+                if (data is BasePlayerCharacterEntity entity && !entity.IsWarping)
+                    _ownedCandidates.Add(entity);
+            }
+            if (!ghostMonsters)
+                return;
+            foreach (BaseMonsterCharacterEntity monster in FindObjectsByType<BaseMonsterCharacterEntity>(FindObjectsSortMode.None))
+            {
+                if (monster == null || !monster.IsServer || !monster.IsOwnedByServer || monster.IsDead() || MeshIdentity.IsGhostEntity(monster))
+                    continue;
+                MeshIdentity id = MeshIdentity.GetOrAdd(monster);
+                if (string.IsNullOrEmpty(id.MeshEntityId))
+                {
+                    id.MeshEntityId = $"{OwnZoneId}:{_cellIncarnation}:{monster.ObjectId}"; // birth provenance, never the current owner
+                    id.OwnerZoneId = OwnZoneId;
+                }
+                _ownedCandidates.Add(monster);
+            }
+        }
+
+        private string MeshEntityIdOf(BaseCharacterEntity entity)
+        {
+            if (entity is BasePlayerCharacterEntity)
+                return entity.Id;
+            MeshIdentity id = MeshIdentity.Get(entity);
+            return id != null ? id.MeshEntityId : entity.Id;
         }
 
         private void SendBandSnapshots()
@@ -164,17 +249,21 @@ namespace MultiplayerARPG.MMO.Mesh
                 _tmpIds.AddRange(streamed);
                 streamed.Clear();
 
-                foreach (IPlayerCharacterData data in ServerUserHandlers.GetPlayerCharacters())
+                for (int c = 0; c < _ownedCandidates.Count; ++c)
                 {
-                    BasePlayerCharacterEntity entity = data as BasePlayerCharacterEntity;
-                    if (entity == null || entity.IsWarping)
+                    BaseCharacterEntity entity = _ownedCandidates[c];
+                    if (entity == null || entity.IsDead())
+                        continue;
+                    if (entity is BasePlayerCharacterEntity player && player.IsWarping)
                         continue;
                     Vector3 pos = entity.EntityTransform.position;
                     if (DistanceToSharedEdge(pos, i) > ghostBandWidth)
                         continue;
+                    string meshId = MeshEntityIdOf(entity);
                     client.SendGhostSnapshot(new GhostSnapshotMessage
                     {
-                        characterId = entity.Id,
+                        kind = entity is BasePlayerCharacterEntity ? GhostKind.Player : GhostKind.Monster,
+                        characterId = meshId,
                         entityId = entity.EntityId,
                         dataId = entity.DataId,
                         characterName = entity.CharacterName,
@@ -186,10 +275,10 @@ namespace MultiplayerARPG.MMO.Mesh
                         currentHp = entity.CurrentHp,
                         maxHp = entity.MaxHp,
                     });
-                    streamed.Add(entity.Id);
+                    streamed.Add(meshId);
                 }
 
-                // Anything streamed last tick but not now has left the band (or this cell): tell the neighbour.
+                // Anything streamed last tick but not now has left the band (or this cell, or died): tell the neighbour.
                 for (int k = 0; k < _tmpIds.Count; ++k)
                 {
                     if (!streamed.Contains(_tmpIds[k]))
@@ -198,12 +287,12 @@ namespace MultiplayerARPG.MMO.Mesh
             }
         }
 
-        private void SendGhostRemoveToAll(string characterId)
+        private void SendGhostRemoveToAll(string meshId)
         {
             foreach (KeyValuePair<string, MeshLinkClient> kv in _linkClients)
             {
-                if (_streamedToZone.TryGetValue(kv.Key, out HashSet<string> streamed) && streamed.Remove(characterId))
-                    kv.Value.SendGhostRemove(characterId);
+                if (_streamedToZone.TryGetValue(kv.Key, out HashSet<string> streamed) && streamed.Remove(meshId))
+                    kv.Value.SendGhostRemove(meshId);
             }
         }
 
@@ -219,14 +308,14 @@ namespace MultiplayerARPG.MMO.Mesh
                 DestroyGhost(_tmpIds[i], "stale");
         }
 
-        private void DestroyGhost(string characterId, string reason)
+        private void DestroyGhost(string meshId, string reason)
         {
-            if (!_ghosts.TryGetValue(characterId, out MeshGhost ghost))
+            if (!_ghosts.TryGetValue(meshId, out MeshGhost ghost))
                 return;
-            _ghosts.Remove(characterId);
+            _ghosts.Remove(meshId);
             if (ghost.entity != null)
             {
-                Logging.Log("Mesh", $"Ghost destroyed {ghost.entity.CharacterName} ({characterId}) reason={reason}");
+                Logging.Log("Mesh", $"Ghost destroyed {ghost.kind} {ghost.entity.CharacterName} ({meshId}) reason={reason}");
                 ghost.entity.NetworkDestroy();
             }
         }
@@ -260,43 +349,70 @@ namespace MultiplayerARPG.MMO.Mesh
             if (!IsServer || !enableBorderGhosting)
                 return;
             // Dedup: this cell owns the real thing → the neighbour's copy is stale; ignore.
-            if (ServerUserHandlers.TryGetPlayerCharacterById(msg.characterId, out _))
+            if (msg.kind == GhostKind.Player && ServerUserHandlers.TryGetPlayerCharacterById(msg.characterId, out _))
                 return;
 
             if (!_ghosts.TryGetValue(msg.characterId, out MeshGhost ghost) || ghost.entity == null)
             {
-                int hashAssetId = GameInstance.GetPlayerCharacterEntityHashAssetId(msg.entityId, out int metaDataId);
-                LiteNetLibIdentity identity = Assets.NetworkSpawn(hashAssetId, msg.position, Quaternion.Euler(0f, msg.yaw, 0f));
-                if (identity == null)
-                {
-                    WarnThrottled($"Cannot spawn ghost for entity id {msg.entityId}");
-                    return;
-                }
-                BasePlayerCharacterEntity entity = identity.GetComponent<BasePlayerCharacterEntity>();
+                BaseCharacterEntity entity = SpawnGhostEntity(msg);
                 if (entity == null)
-                {
-                    identity.NetworkDestroy();
                     return;
-                }
-                GameInstance.SetupByMetaData(entity, metaDataId);
-                entity.Id = msg.characterId;
-                entity.DataId = msg.dataId;
-                entity.CharacterName = msg.characterName;
-                entity.Level = msg.level;
+                MeshIdentity id = MeshIdentity.GetOrAdd(entity);
+                id.MeshEntityId = msg.characterId;
+                id.IsGhost = true;
+                id.OwnerZoneId = _neighbourZoneByConnection.TryGetValue(connectionId, out string z) ? z : "?";
                 int silenced = GhostSuppression.Ghostify(entity, this, null, false, false, disableMovement: false);
-                ghost = new MeshGhost { entity = entity, lastTarget = msg.position };
+                entity.IsInvincible = true; // never damaged by the local simulation (P3 routes hits to the owner)
+                ghost = new MeshGhost { entity = entity, kind = msg.kind, lastTarget = msg.position };
                 _ghosts[msg.characterId] = ghost;
-                string fromZone = _neighbourZoneByConnection.TryGetValue(connectionId, out string z) ? z : "?";
-                Logging.Log("Mesh", $"Ghost spawned {msg.characterName} ({msg.characterId}) from zone {fromZone} at {msg.position} (silenced {silenced})");
+                Logging.Log("Mesh", $"Ghost spawned {msg.kind} {msg.characterName} ({msg.characterId}) from zone {id.OwnerZoneId} at {msg.position} (silenced {silenced})");
             }
 
             ghost.lastSeen = Time.unscaledTime;
             SteerGhost(ghost, msg);
         }
 
+        private BaseCharacterEntity SpawnGhostEntity(GhostSnapshotMessage msg)
+        {
+            Quaternion rot = Quaternion.Euler(0f, msg.yaw, 0f);
+            if (msg.kind == GhostKind.Player)
+            {
+                int hashAssetId = GameInstance.GetPlayerCharacterEntityHashAssetId(msg.entityId, out int metaDataId);
+                LiteNetLibIdentity identity = Assets.NetworkSpawn(hashAssetId, msg.position, rot);
+                BasePlayerCharacterEntity player = identity != null ? identity.GetComponent<BasePlayerCharacterEntity>() : null;
+                if (player == null)
+                {
+                    WarnThrottled($"Cannot spawn player ghost for entity id {msg.entityId}");
+                    if (identity != null) identity.NetworkDestroy();
+                    return null;
+                }
+                GameInstance.SetupByMetaData(player, metaDataId);
+                player.Id = msg.characterId;
+                player.DataId = msg.dataId;
+                player.CharacterName = msg.characterName;
+                player.Level = msg.level;
+                return player;
+            }
+            if (!GameInstance.MonsterCharacterEntities.TryGetValue(msg.entityId, out BaseMonsterCharacterEntity prefab) || prefab == null)
+            {
+                WarnThrottled($"Cannot spawn monster ghost: unknown monster entity id {msg.entityId}");
+                return null;
+            }
+            LiteNetLibIdentity monsterIdentity = Assets.NetworkSpawn(prefab.Identity.HashAssetId, msg.position, rot);
+            BaseMonsterCharacterEntity monster = monsterIdentity != null ? monsterIdentity.GetComponent<BaseMonsterCharacterEntity>() : null;
+            if (monster == null)
+            {
+                WarnThrottled($"Cannot spawn monster ghost for entity id {msg.entityId}");
+                if (monsterIdentity != null) monsterIdentity.NetworkDestroy();
+                return null;
+            }
+            monster.Level = msg.level;
+            return monster;
+        }
+
         private void SteerGhost(MeshGhost ghost, GhostSnapshotMessage msg)
         {
-            BasePlayerCharacterEntity entity = ghost.entity;
+            BaseCharacterEntity entity = ghost.entity;
             Vector3 current = entity.EntityTransform.position;
             float dist = Vector3.Distance(current, msg.position);
             if (dist > ghostTeleportDistance)
@@ -317,9 +433,9 @@ namespace MultiplayerARPG.MMO.Mesh
                 entity.CurrentHp = msg.currentHp;
         }
 
-        internal void OnGhostRemove(string characterId)
+        internal void OnGhostRemove(string meshId)
         {
-            DestroyGhost(characterId, "neighbour removed");
+            DestroyGhost(meshId, "neighbour removed");
         }
 #else
         private void GhostingOnStartServer() { }

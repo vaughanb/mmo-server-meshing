@@ -195,6 +195,7 @@ MonoBehaviour:
   enableServerBoundaryHandoff: 1
   boundaryCheckInterval: 0.1
   handoffHysteresis: 1
+  debugCaptureMigrationFrames: 0
 --- !u!114 &5788993006180215721
 MonoBehaviour:
   m_ObjectHideFlags: 0

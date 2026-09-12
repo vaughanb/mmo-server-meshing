@@ -8675,12 +8675,12 @@ GameObject:
   - component: {fileID: 1855060787}
   - component: {fileID: 1855060788}
   m_Layer: 0
-  m_Name: Spawn_Boundary_X100_Z0
+  m_Name: Spawn_Boundary_X100_Z60
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!4 &1855060787
 Transform:
   m_ObjectHideFlags: 0
@@ -8690,7 +8690,7 @@ Transform:
   m_GameObject: {fileID: 1855060786}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 100, y: 0, z: 0}
+  m_LocalPosition: {x: 100, y: 0, z: 60}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -8716,7 +8716,7 @@ MonoBehaviour:
     serializedVersion: 2
     m_Bits: 4294967295
   type: 0
-  randomRadius: 40
+  randomRadius: 20
   squareSizeX: 10
   squareSizeZ: 10
   enableRotation: 1
@@ -8737,8 +8737,8 @@ MonoBehaviour:
   btnTestSpawn: 0
   minLevel: 1
   maxLevel: 1
-  minAmount: 15
-  maxAmount: 15
+  minAmount: 4
+  maxAmount: 4
   destroyRespawnDelay: 0
   respawnPendingEntitiesDelay: 5
   subChannelId: 

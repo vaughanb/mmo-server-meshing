@@ -54,8 +54,14 @@ x = 88 in zone C and watches for other player entities beyond x = 100 for 60 s.
   snapshot straight into the movement component's server state, would remove the trailing.
 - Coordinate translation was identity here (both cells share one world frame in the rig); the
   per-cell-local frame from DESIGN §6 is not exercised yet.
-- Spawn areas' monsters are the next ghost class (Spike 1a's recipe applies; they are server-owned
-  so `MeshEntityId` must be the birth-provenance id from DESIGN §8).
+- ~~Spawn areas' monsters are the next ghost class~~ **Done (same day):** each cell only runs the spawn
+  areas whose position lies in its zone (`ownSpawnAreasByZone`, deactivated before the kit discovers
+  them → one owner per server-spawned entity, DESIGN risk #6); server-owned monsters are streamed with a
+  birth-provenance `MeshEntityId` `"{zone}:{incarnation}:{objectId}"` carried on a runtime `MeshIdentity`
+  tag; monster ghosts are spawned from `GameInstance.MonsterCharacterEntities[entityId]`, silenced (4
+  components on the demo enemy), kept steerable and made **invincible**. With the edge spawn area
+  (`Spawn_Boundary_X100_Z60`, owned by E) the C client saw all 4 of E's monsters as ghosts — two of them
+  standing on C's side of the line. Demo monsters idle unless aggroed, so movement was not exercised.
 
 ---
 

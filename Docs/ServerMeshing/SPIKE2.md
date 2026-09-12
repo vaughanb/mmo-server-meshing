@@ -83,8 +83,29 @@ From 2228 ms to 450–650 ms with two changes: skip the client's post-scene-load
 (extension-only), and remove the 100 ms request-poll floor (CE-6). Remaining cost is real DB work plus RTTs; the
 in-memory S2S state transfer (DESIGN §11 step 2) would remove most of the ~160–290 ms relates-data reload, but
 the kit's pending-spawn dictionary (`_pendingSpawnPlayerCharactersByUserId`) is private, so that needs either
-reflection or a small documented core seam (candidate **CE-5**). Verdict for Q5: **masking is sufficient**
-(≈0.5 s frozen input, no visual break); CE-1 stays *not needed*.
+reflection or a small documented core seam (candidate **CE-5**).
+
+**Pass 3 — "completely seamless" (same day).** A held screenshot plus the kit's warping indicator still read as a
+blip. Replaced the mask with a **seamless strategy** (`useVisualStandIns`, default on) that never stops rendering
+the live scene:
+
+| Mechanism | How (extension-only) |
+|---|---|
+| World keeps rendering | The scene is never unloaded; before `StopClient()` every spawned entity's model is cloned into a script-free **stand-in** (Animator kept, kit scripts and colliders stripped) and dead-reckoned with the velocity the controller tracked every frame |
+| Camera never disappears | The kit's controller (+ gameplay camera + HUD) is instantiated by the player entity and destroyed with it; we remove it from the dying entity's `InstantiatedObjects`, disable its scripts for the gap, and point the follow camera at the local stand-in. `framesWithoutCamera = 0` on every run |
+| No warping UI | The mesh handoff no longer raises `IsWarping` (the entity is unregistered and destroyed within ms anyway) |
+| Input resumes early | As soon as B's owned entity exists, `GameInstance.PlayingCharacter` is set and the controller scripts re-enabled — the new entity is already walking when the models swap |
+| No pop | B saves `pos + velocity × handoffLeadSeconds` (0.4 s) so it spawns the character roughly where the stand-in will be; then the hidden real model is revealed only after a 0.3 s **blend** that glides the stand-in (position + model orientation) onto it |
+| HUD never shows 0/0 | The old HUD's kit scripts are frozen during the gap (keeps last values); the re-bind that re-creates the HUD waits until the new entity's stats have arrived (`MaxHp > 0`, ~250 ms after spawn); notification badges are reset so the prefab's "99+" placeholder never flashes |
+| Verified by eye | `debugCaptureMigrationFrames` dumps a frame every ~17 ms across the swap to `Logs/MigrationFrames`; inspected sequences show the same scene, character, camera and HUD values across the whole swap |
+
+Run 12 (C→E): stand-ins 9 ms · connected 30 ms · new entity 564 ms · settled 878 ms · retired 1065 ms;
+server-side continuity 0.92 m, stand-in vs spawn 0.76 m (absorbed by the blend); 5 stand-ins; 0 frames without a
+camera; no errors. Cost: the player has no input for ~0.55 s and the stand-in dead-reckons over it.
+
+Verdict for Q5: **seamless is achievable extension-only** (no screenshot, no loading UI, no camera gap, no
+HUD flash). CE-1 stays *not needed*. What remains is latency polish (S2S relates-data → CE-5) and, for
+interactive play, local prediction of the other players' stand-ins.
 
 **Conclusions.**
 1. The make-or-break question is answered **yes**: a connected client can be moved A→B with the kit's own

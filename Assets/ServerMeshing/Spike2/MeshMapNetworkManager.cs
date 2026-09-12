@@ -33,8 +33,23 @@ namespace MultiplayerARPG.MMO.Mesh
         [Tooltip("Max seconds to wait for the client to reconnect + the local player to re-spawn before giving up the mask.")]
         public float migrationReadyTimeoutSeconds = 10f;
 
-        [Tooltip("Seconds to fade the screenshot mask out once the player is back.")]
+        [Tooltip("Seconds to fade the screenshot mask out once the player is back (mask strategy only).")]
         public float migrationMaskFadeSeconds = 0.25f;
+
+        [Tooltip("SEAMLESS: keep the world rendering through the swap with dead-reckoned visual stand-ins and a preserved controller/camera/HUD, instead of holding a screenshot.")]
+        public bool useVisualStandIns = true;
+
+        [Tooltip("SEAMLESS: a stand-in is retired when a real entity with the same model is within this distance.")]
+        public float standInMatchDistance = 2.5f;
+
+        [Tooltip("SEAMLESS: stand-ins that never get matched are removed after this long.")]
+        public float standInMaxLifetimeSeconds = 1.5f;
+
+        [Tooltip("SEAMLESS: seconds to glide the local stand-in onto the re-spawned entity before swapping (hides any dead-reckoning error).")]
+        public float standInBlendSeconds = 0.3f;
+
+        [Tooltip("SEAMLESS: after the blend, wait up to this long for the new entity's stats (MaxHp > 0) before re-binding the HUD, so it never shows 0/0.")]
+        public float entityDataWaitSeconds = 1f;
 
         [Header("Server Meshing — zone handoff (server side)")]
         [Tooltip("Zone grid definition. Each zone is served by a map server whose channelId == zoneId.")]
@@ -48,6 +63,9 @@ namespace MultiplayerARPG.MMO.Mesh
 
         [Tooltip("Metres a player must be past the zone edge before ownership flips (anti-thrash).")]
         public float handoffHysteresis = 1f;
+
+        [Tooltip("Seconds of the player's current velocity to add to the saved position, so the neighbour spawns it where the client's dead-reckoned stand-in will be by then (~the measured gap).")]
+        public float handoffLeadSeconds = 0.4f;
 
         public bool IsMigrating { get; private set; }
 
@@ -132,9 +150,14 @@ namespace MultiplayerARPG.MMO.Mesh
                 Logging.Log("MeshTrace", $"{System.DateTime.Now:HH:mm:ss.fff} {(IsServer ? "S" : "C")} {what}");
         }
 
+        [Tooltip("DEBUG (editor): save a screenshot every few frames during a seamless swap to <project>/Logs/MigrationFrames for visual inspection.")]
+        public bool debugCaptureMigrationFrames = false;
+
         public override void OnClientConnected()
         {
             Stamp("client connected");
+            if (!IsServer)
+                _ = Migration; // create early so the velocity tracker has history before the first hop
             if (!_assetEventsHooked && Assets != null)
             {
                 _assetEventsHooked = true;
@@ -348,12 +371,14 @@ namespace MultiplayerARPG.MMO.Mesh
 
             // Collect first: the handoff unregisters the character, which would mutate the collection.
             _handoffCandidates.Clear();
+            float now = Time.unscaledTime;
             foreach (IPlayerCharacterData data in ServerUserHandlers.GetPlayerCharacters())
             {
                 BasePlayerCharacterEntity entity = data as BasePlayerCharacterEntity;
                 if (entity == null || entity.IsWarping || _handoffsInProgress.Contains(entity.Id))
                     continue;
                 Vector3 pos = entity.EntityTransform.position;
+                TrackVelocity(entity.Id, pos, now);
                 Vector2Int coord = meshConfig.WorldToZoneCoord(pos);
                 if (coord == OwnZoneCoord)
                     continue;
@@ -403,18 +428,24 @@ namespace MultiplayerARPG.MMO.Mesh
             System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
             Vector3 position = entity.EntityTransform.position;
             Vector3 rotation = entity.CurrentRotation;
-            Logging.Log("Mesh", $"Handoff START {entity.CharacterName} ({characterId}) zone {OwnZoneId}->{zone.zoneId} pos={position} -> {peer.networkAddress}:{peer.networkPort}");
+            // Lead the saved position by the expected gap so the neighbour spawns the character where the
+            // client's dead-reckoned stand-in will be, instead of ~gap*speed behind it.
+            Vector3 velocity = _velocities.TryGetValue(characterId, out VelocitySample vs) ? vs.vel : Vector3.zero;
+            velocity.y = 0f;
+            Vector3 savePosition = position + velocity * Mathf.Max(0f, handoffLeadSeconds);
+            _velocities.Remove(characterId);
+            Logging.Log("Mesh", $"Handoff START {entity.CharacterName} ({characterId}) zone {OwnZoneId}->{zone.zoneId} pos={position} vel={velocity} save={savePosition} -> {peer.networkAddress}:{peer.networkPort}");
 
             try
             {
-                // Mirrors MapNetworkManager.SaveAndWarpCharacterByPeerInfo (changeMap=true keeps the logical map name).
-                entity.IsWarping = true;
+                // Mirrors MapNetworkManager.SaveAndWarpCharacterByPeerInfo (changeMap=true keeps the logical map name),
+                // except IsWarping is NOT raised: it would show the kit's "warping" UI on the client, and the entity
+                // is unregistered and destroyed within milliseconds anyway.
                 UnregisterPlayerCharacter(connectionId);
                 if (entity.TryGetComponent(out PlayerCharacterDataUpdater updater))
                     Destroy(updater);
                 DataUpdater.PlayerCharacterDataSaved(characterId);
-                bool saved = await WaitAndSaveCharacter(TransactionUpdateCharacterState.All, entity.CloneTo(new PlayerCharacterData()), true, mapName, position, true, rotation);
-                entity.IsWarping = false;
+                bool saved = await WaitAndSaveCharacter(TransactionUpdateCharacterState.All, entity.CloneTo(new PlayerCharacterData()), true, mapName, savePosition, true, rotation);
                 entity.NetworkDestroy();
 
                 MMOWarpMessage message = new MMOWarpMessage
@@ -433,6 +464,25 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 _handoffsInProgress.Remove(characterId);
             }
+        }
+
+        private struct VelocitySample { public Vector3 pos; public Vector3 vel; public float t; }
+        private readonly Dictionary<string, VelocitySample> _velocities = new Dictionary<string, VelocitySample>();
+
+        [Tooltip("Velocity samples above this (m/s) are treated as teleports/respawns and ignored for lead prediction.")]
+        public float handoffMaxLeadSpeed = 15f;
+
+        private void TrackVelocity(string characterId, Vector3 pos, float now)
+        {
+            if (_velocities.TryGetValue(characterId, out VelocitySample s) && now - s.t > 0.0001f)
+            {
+                Vector3 v = (pos - s.pos) / (now - s.t);
+                if (v.magnitude > handoffMaxLeadSpeed)
+                    v = Vector3.zero; // teleport / respawn / spawn: not a walking velocity
+                _velocities[characterId] = new VelocitySample { pos = pos, vel = Vector3.Lerp(s.vel, v, 0.5f), t = now };
+            }
+            else
+                _velocities[characterId] = new VelocitySample { pos = pos, vel = Vector3.zero, t = now };
         }
 
         private void WarnThrottled(string message)

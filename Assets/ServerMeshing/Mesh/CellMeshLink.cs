@@ -32,10 +32,13 @@ namespace MultiplayerARPG.MMO.Mesh
     }
 
     /// <summary>One authoritative snapshot of an entity that lives in the sender's border band.</summary>
+    public enum GhostKind : byte { Player = 0, Monster = 1 }
+
     public struct GhostSnapshotMessage : INetSerializable
     {
-        public string characterId;   // MeshEntityId for players = persistent character id (DESIGN §8)
-        public int entityId;         // player character entity prefab id
+        public GhostKind kind;
+        public string characterId;   // MeshEntityId: character id for players, birth-provenance id for monsters (DESIGN §8)
+        public int entityId;         // entity prefab id (player or monster)
         public int dataId;           // character class data id
         public string characterName;
         public int level;
@@ -48,6 +51,7 @@ namespace MultiplayerARPG.MMO.Mesh
 
         public void Serialize(NetDataWriter writer)
         {
+            writer.Put((byte)kind);
             writer.Put(characterId);
             writer.Put(entityId);
             writer.Put(dataId);
@@ -63,6 +67,7 @@ namespace MultiplayerARPG.MMO.Mesh
 
         public void Deserialize(NetDataReader reader)
         {
+            kind = (GhostKind)reader.GetByte();
             characterId = reader.GetString();
             entityId = reader.GetInt();
             dataId = reader.GetInt();
