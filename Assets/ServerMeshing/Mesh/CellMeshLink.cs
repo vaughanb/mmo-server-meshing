@@ -25,6 +25,49 @@ namespace MultiplayerARPG.MMO.Mesh
         public const ushort GhostHit = 104;
         public const ushort GhostHitResult = 105;
         public const ushort GhostReward = 106;
+        public const ushort MonsterHandoff = 107;
+        public const ushort MonsterGone = 108;
+    }
+
+    /// <summary>
+    /// Monster handoff (P3/P4): a server-owned monster walked clearly into the neighbour's cell (a chase across the
+    /// edge). The owner demotes its copy to a ghost in place and the neighbour promotes its puppet to the real
+    /// monster, so neither cell's clients see a despawn/spawn.
+    /// </summary>
+    public struct MonsterHandoffMessage : INetSerializable
+    {
+        public string meshId;
+        public int entityId;
+        public int dataId;
+        public int level;
+        public int currentHp;
+        public Vector3 position;
+        public float yaw;
+        public Vector3 spawnPosition;
+        public string homeZoneId;
+        public string targetMeshId;
+        public void Serialize(NetDataWriter writer)
+        {
+            writer.Put(meshId); writer.Put(entityId); writer.Put(dataId); writer.Put(level); writer.Put(currentHp);
+            writer.Put(position.x); writer.Put(position.y); writer.Put(position.z); writer.Put(yaw);
+            writer.Put(spawnPosition.x); writer.Put(spawnPosition.y); writer.Put(spawnPosition.z);
+            writer.Put(homeZoneId); writer.Put(targetMeshId);
+        }
+        public void Deserialize(NetDataReader reader)
+        {
+            meshId = reader.GetString(); entityId = reader.GetInt(); dataId = reader.GetInt(); level = reader.GetInt(); currentHp = reader.GetInt();
+            position = new Vector3(reader.GetFloat(), reader.GetFloat(), reader.GetFloat()); yaw = reader.GetFloat();
+            spawnPosition = new Vector3(reader.GetFloat(), reader.GetFloat(), reader.GetFloat());
+            homeZoneId = reader.GetString(); targetMeshId = reader.GetString();
+        }
+    }
+
+    /// <summary>A borrowed monster died (or was destroyed) on the borrowing cell: its home spawn area may respawn it.</summary>
+    public struct MonsterGoneMessage : INetSerializable
+    {
+        public string meshId;
+        public void Serialize(NetDataWriter writer) { writer.Put(meshId); }
+        public void Deserialize(NetDataReader reader) { meshId = reader.GetString(); }
     }
 
     /// <summary>
@@ -210,6 +253,8 @@ namespace MultiplayerARPG.MMO.Mesh
             RegisterMessageHandler(MeshLinkMessageTypes.GhostHit, HandleGhostHit);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostHitResult, HandleGhostHitResult);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostReward, HandleGhostReward);
+            RegisterMessageHandler(MeshLinkMessageTypes.MonsterHandoff, HandleMonsterHandoff);
+            RegisterMessageHandler(MeshLinkMessageTypes.MonsterGone, HandleMonsterGone);
         }
 
         public override void OnServerReceive(TransportEventData eventData)
@@ -274,6 +319,18 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             GhostRewardMessage msg = messageHandler.ReadMessage<GhostRewardMessage>();
             _manager.OnGhostReward(msg);
+        }
+
+        private void HandleMonsterHandoff(MessageHandlerData messageHandler)
+        {
+            MonsterHandoffMessage msg = messageHandler.ReadMessage<MonsterHandoffMessage>();
+            _manager.OnMonsterHandoff(messageHandler.ConnectionId, msg);
+        }
+
+        private void HandleMonsterGone(MessageHandlerData messageHandler)
+        {
+            MonsterGoneMessage msg = messageHandler.ReadMessage<MonsterGoneMessage>();
+            _manager.OnMonsterGone(msg.meshId);
         }
     }
 
@@ -354,6 +411,18 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (!IsConnected) return;
             SendPacket(0, DeliveryMethod.ReliableOrdered, MeshLinkMessageTypes.GhostReward, writer => msg.Serialize(writer));
+        }
+
+        public void SendMonsterHandoff(MonsterHandoffMessage msg)
+        {
+            if (!IsConnected) return;
+            SendPacket(0, DeliveryMethod.ReliableOrdered, MeshLinkMessageTypes.MonsterHandoff, writer => msg.Serialize(writer));
+        }
+
+        public void SendMonsterGone(string meshId)
+        {
+            if (!IsConnected) return;
+            SendPacket(0, DeliveryMethod.ReliableOrdered, MeshLinkMessageTypes.MonsterGone, writer => new MonsterGoneMessage { meshId = meshId }.Serialize(writer));
         }
 
         public void SendGhostRemove(string characterId)

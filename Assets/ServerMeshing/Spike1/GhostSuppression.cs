@@ -87,6 +87,36 @@ namespace MultiplayerARPG.MMO.Mesh
         }
 
         /// <summary>
+        /// Reverse of Ghostify for a puppet that is being promoted to the real thing (monster handoff): re-enable
+        /// movement and re-register the managed updates Ghostify silenced (the deny list only, matching Ghostify).
+        /// </summary>
+        public static int Unghostify(BaseGameEntity entity, object disablerKey, IEnumerable<string> extraTypeNames = null)
+        {
+            if (entity == null)
+                return 0;
+            entity.MovementDisableState.Remove(disablerKey);
+            HashSet<string> deny = new HashSet<string>(DefaultSuppressTypeNames);
+            if (extraTypeNames != null)
+            {
+                foreach (string n in extraTypeNames)
+                    deny.Add(n);
+            }
+            int restored = 0;
+            IManagedUpdate[] managed = entity.GetComponentsInChildren<IManagedUpdate>(true);
+            foreach (IManagedUpdate mu in managed)
+            {
+                if (mu is BaseGameEntity)
+                    continue;
+                if (deny.Contains(mu.GetType().Name))
+                {
+                    UpdateManager.Register(mu);
+                    restored++;
+                }
+            }
+            return restored;
+        }
+
+        /// <summary>
         /// Drive a ghost's transform from an external snapshot. SPIKE-level: sets the transform directly.
         /// Production ghosts feed the movement-sync path so neighbours/clients see it via normal AOI.
         /// </summary>

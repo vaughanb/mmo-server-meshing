@@ -60,6 +60,7 @@ namespace MultiplayerARPG.MMO.Mesh
             public GhostKind kind;
             public float lastSeen;
             public Vector3 lastTarget;
+            public ReceiveDamageDelegate hitHook; // so a promoted puppet can drop its hit forwarding
         }
 
         private MeshLinkServer _linkServer;
@@ -158,6 +159,7 @@ namespace MultiplayerARPG.MMO.Mesh
             if (Time.unscaledTime >= _nextSnapshotTime)
             {
                 _nextSnapshotTime = Time.unscaledTime + Mathf.Max(0.02f, ghostSnapshotInterval);
+                MonsterHandoffTick();
                 SendBandSnapshots();
                 ExpireGhosts();
             }
@@ -372,16 +374,23 @@ namespace MultiplayerARPG.MMO.Mesh
                 int silenced = GhostSuppression.Ghostify(entity, this, null, false, false, disableMovement: false);
                 entity.IsInvincible = true; // never damaged by the local simulation: hits are forwarded to the owner (P3)
                 string capturedMeshId = msg.characterId;
-                entity.onReceiveDamage += (target, position, fromPosition, instigator, damageAmounts, weapon, skill, skillLevel) =>
+                ReceiveDamageDelegate hitHook = (target, position, fromPosition, instigator, damageAmounts, weapon, skill, skillLevel) =>
                     ForwardGhostHit(capturedMeshId, position, fromPosition, instigator, damageAmounts, weapon, skill, skillLevel);
+                entity.onReceiveDamage += hitHook;
                 // Kill credit: rewards the kit gives this ghost (it was in a monster's damage records here) are intercepted
                 // by MeshGameplayRule and forwarded to the owner — see ForwardGhostReward.
-                ghost = new MeshGhost { entity = entity, kind = msg.kind, lastTarget = msg.position };
+                ghost = new MeshGhost { entity = entity, kind = msg.kind, lastTarget = msg.position, hitHook = hitHook };
                 _ghosts[msg.characterId] = ghost;
                 Logging.Log("Mesh", $"Ghost spawned {msg.kind} {msg.characterName} ({msg.characterId}) from zone {id.OwnerZoneId} at {msg.position} (silenced {silenced})");
             }
 
             ghost.lastSeen = Time.unscaledTime;
+            if (_neighbourZoneByConnection.TryGetValue(connectionId, out string ownerZone))
+            {
+                MeshIdentity gid = MeshIdentity.Get(ghost.entity);
+                if (gid != null && gid.OwnerZoneId != ownerZone)
+                    gid.OwnerZoneId = ownerZone; // ownership moved (monster handoff between neighbours)
+            }
             SteerGhost(ghost, msg);
         }
 
@@ -449,6 +458,238 @@ namespace MultiplayerARPG.MMO.Mesh
         internal void OnGhostRemove(string meshId)
         {
             DestroyGhost(meshId, "neighbour removed");
+        }
+
+        // ---- P3/P4: monster handoff (DESIGN §12) ----
+        // A server-owned monster that walks clearly into the neighbour's cell (chasing a player's ghost across the
+        // edge) is handed over: this cell demotes it to a ghost IN PLACE and the neighbour promotes its puppet to the
+        // real monster, so neither cell's clients see a despawn/spawn. Respawn accounting stays with the home cell's
+        // spawn area: when the borrowed monster dies elsewhere, the borrower tells the home cell (MonsterGone).
+
+        [Tooltip("Hand a server-owned monster to the neighbour cell once it walks clearly into that cell.")]
+        public bool handoffMonsters = true;
+        [Tooltip("Minimum seconds between two handoffs of the same monster (a chase back and forth across the line would otherwise ping-pong every tick).")]
+        public float monsterHandoffCooldown = 2f;
+
+        private sealed class LentMonster
+        {
+            public GameSpawnArea<BaseMonsterCharacterEntity> area;
+            public BaseMonsterCharacterEntity prefab;
+            public int level;
+            public float respawnDelay;
+            public Vector3 spawnPosition;
+        }
+
+        private readonly Dictionary<string, LentMonster> _lentMonsters = new Dictionary<string, LentMonster>();                 // meshId -> home spawn info (this cell is home)
+        private readonly Dictionary<string, CharacterEntityKilledDelegate> _borrowedKillHooks = new Dictionary<string, CharacterEntityKilledDelegate>();
+        private readonly List<BaseMonsterCharacterEntity> _monsterHandoffCandidates = new List<BaseMonsterCharacterEntity>();
+
+        private void MonsterHandoffTick()
+        {
+            if (!handoffMonsters || !enableServerBoundaryHandoff || !ghostMonsters)
+                return;
+            _monsterHandoffCandidates.Clear();
+            for (int i = 0; i < _ownedCandidates.Count; ++i)
+            {
+                BaseMonsterCharacterEntity monster = _ownedCandidates[i] as BaseMonsterCharacterEntity;
+                if (monster == null || monster.IsDead() || monster.IsSummoned)
+                    continue;
+                Vector3 pos = monster.EntityTransform.position;
+                if (meshConfig.WorldToZoneCoord(pos) == OwnZoneCoord)
+                    continue;
+                if (meshConfig.IsNearBoundary(pos, handoffHysteresis))
+                    continue; // same hysteresis as players: only once clearly past the line
+                _monsterHandoffCandidates.Add(monster);
+            }
+            for (int i = 0; i < _monsterHandoffCandidates.Count; ++i)
+                HandoffMonster(_monsterHandoffCandidates[i]);
+            _monsterHandoffCandidates.Clear();
+        }
+
+        private void HandoffMonster(BaseMonsterCharacterEntity monster)
+        {
+            Vector3 pos = monster.EntityTransform.position;
+            ServerMeshTestConfig.ZoneDefinition zone = meshConfig.GetZoneAt(pos);
+            if (zone == null || string.Equals(zone.zoneId, OwnZoneId))
+                return;
+            if (!_linkClients.TryGetValue(zone.zoneId, out MeshLinkClient link) || !link.IsConnected)
+                return; // stays ours until the link is up
+            MeshIdentity id = MeshIdentity.GetOrAdd(monster);
+            if (string.IsNullOrEmpty(id.MeshEntityId))
+                return;
+            if (Time.unscaledTime - id.LastHandoffTime < monsterHandoffCooldown)
+                return;
+            string meshId = id.MeshEntityId;
+            string homeZone = string.IsNullOrEmpty(id.HomeZoneId) ? OwnZoneId : id.HomeZoneId;
+            if (string.Equals(homeZone, OwnZoneId) && monster.SpawnArea != null && !_lentMonsters.ContainsKey(meshId))
+            {
+                _lentMonsters[meshId] = new LentMonster
+                {
+                    area = monster.SpawnArea, prefab = monster.SpawnPrefab, level = monster.SpawnLevel,
+                    respawnDelay = monster.DestroyRespawnDelay, spawnPosition = monster.SpawnPosition,
+                };
+            }
+            string targetMeshId = string.Empty;
+            if (monster.TryGetTargetEntity(out BaseCharacterEntity target) && target != null)
+                targetMeshId = MeshEntityIdOf(target);
+            link.SendMonsterHandoff(new MonsterHandoffMessage
+            {
+                meshId = meshId, entityId = monster.EntityId, dataId = monster.DataId, level = monster.Level, currentHp = monster.CurrentHp,
+                position = pos, yaw = monster.EntityTransform.eulerAngles.y, spawnPosition = monster.SpawnPosition,
+                homeZoneId = homeZone, targetMeshId = targetMeshId,
+            });
+            Logging.Log("Mesh", $"Monster handoff {meshId} {OwnZoneId}->{zone.zoneId} at {pos} hp={monster.CurrentHp}/{monster.MaxHp} home={homeZone} target={targetMeshId}");
+            DemoteToGhost(monster, id, zone.zoneId);
+        }
+
+        /// <summary>The neighbour owns it now: keep the entity (no pop for our clients) but run it as a puppet.</summary>
+        private void DemoteToGhost(BaseMonsterCharacterEntity monster, MeshIdentity id, string newOwnerZone)
+        {
+            string meshId = id.MeshEntityId;
+            monster.SetTargetEntity(null);
+            monster.StopMove();
+            id.IsGhost = true;
+            id.OwnerZoneId = newOwnerZone;
+            id.LastHandoffTime = Time.unscaledTime;
+            if (_borrowedKillHooks.TryGetValue(meshId, out CharacterEntityKilledDelegate killHook))
+            {
+                monster.onKilled -= killHook;
+                _borrowedKillHooks.Remove(meshId);
+            }
+            GhostSuppression.Ghostify(monster, this, null, false, false, disableMovement: false);
+            monster.IsInvincible = true;
+            ReceiveDamageDelegate hitHook = (target, position, fromPosition, instigator, damageAmounts, weapon, skill, skillLevel) =>
+                ForwardGhostHit(meshId, position, fromPosition, instigator, damageAmounts, weapon, skill, skillLevel);
+            monster.onReceiveDamage += hitHook;
+            _ghosts[meshId] = new MeshGhost { entity = monster, kind = GhostKind.Monster, lastSeen = Time.unscaledTime, lastTarget = monster.EntityTransform.position, hitHook = hitHook };
+            _ownedByMeshId.Remove(meshId);
+            _ownedCandidates.Remove(monster);
+            // We just handed it over: do not follow up with a GhostRemove for something we no longer stream.
+            foreach (HashSet<string> streamed in _streamedToZone.Values)
+                streamed.Remove(meshId);
+        }
+
+        internal void OnMonsterHandoff(long connectionId, MonsterHandoffMessage msg)
+        {
+            if (!IsServer)
+                return;
+            string fromZone = _neighbourZoneByConnection.TryGetValue(connectionId, out string z) ? z : "?";
+            Quaternion rot = Quaternion.Euler(0f, msg.yaw, 0f);
+            BaseMonsterCharacterEntity monster = null;
+            bool promoted = false;
+            if (_ghosts.TryGetValue(msg.meshId, out MeshGhost ghost) && ghost.entity != null && !ghost.entity.IsDead())
+            {
+                monster = ghost.entity as BaseMonsterCharacterEntity;
+                if (monster != null)
+                {
+                    // Promote the puppet in place: our clients already see this entity.
+                    _ghosts.Remove(msg.meshId);
+                    if (ghost.hitHook != null)
+                        monster.onReceiveDamage -= ghost.hitHook;
+                    GhostSuppression.Unghostify(monster, this);
+                    monster.IsInvincible = false;
+                    if (Vector3.Distance(monster.EntityTransform.position, msg.position) > ghostTeleportDistance)
+                        monster.Teleport(msg.position, rot, false);
+                    promoted = true;
+                }
+                else
+                {
+                    DestroyGhost(msg.meshId, "replaced by handoff");
+                }
+            }
+            GameInstance.MonsterCharacterEntities.TryGetValue(msg.entityId, out BaseMonsterCharacterEntity prefab);
+            if (monster == null)
+            {
+                if (prefab == null)
+                {
+                    WarnThrottled($"Monster handoff {msg.meshId} from {fromZone}: unknown monster entity id {msg.entityId}; dropped");
+                    return;
+                }
+                LiteNetLibIdentity identity = Assets.NetworkSpawn(prefab.Identity.HashAssetId, msg.position, rot);
+                monster = identity != null ? identity.GetComponent<BaseMonsterCharacterEntity>() : null;
+                if (monster == null)
+                {
+                    WarnThrottled($"Monster handoff {msg.meshId} from {fromZone}: cannot spawn entity id {msg.entityId}; dropped");
+                    if (identity != null) identity.NetworkDestroy();
+                    return;
+                }
+            }
+            MeshIdentity id = MeshIdentity.GetOrAdd(monster);
+            id.MeshEntityId = msg.meshId;
+            id.IsGhost = false;
+            id.OwnerZoneId = OwnZoneId;
+            id.HomeZoneId = msg.homeZoneId;
+            id.LastHandoffTime = Time.unscaledTime;
+            monster.Level = msg.level;
+            if (msg.currentHp > 0)
+                monster.CurrentHp = msg.currentHp;
+            if (_borrowedKillHooks.TryGetValue(msg.meshId, out CharacterEntityKilledDelegate oldHook))
+            {
+                monster.onKilled -= oldHook;
+                _borrowedKillHooks.Remove(msg.meshId);
+            }
+            if (string.Equals(msg.homeZoneId, OwnZoneId) && _lentMonsters.TryGetValue(msg.meshId, out LentMonster lent))
+            {
+                // Home again: the spawn area's respawn accounting comes back with it.
+                _lentMonsters.Remove(msg.meshId);
+                monster.SetSpawnArea(lent.area, lent.prefab, lent.level, lent.spawnPosition);
+                monster.DestroyRespawnDelay = lent.respawnDelay;
+            }
+            else
+            {
+                // Borrowed: no local respawn; when it dies here the home cell is told so its spawn area respawns it.
+                monster.SetSpawnArea(null, prefab, msg.level, msg.spawnPosition);
+                string capturedMeshId = msg.meshId, home = msg.homeZoneId;
+                CharacterEntityKilledDelegate killHook = (target, instigator) => OnBorrowedMonsterKilled(capturedMeshId, home);
+                monster.onKilled += killHook;
+                _borrowedKillHooks[msg.meshId] = killHook;
+            }
+            _ownedByMeshId[msg.meshId] = monster;
+            if (!_ownedCandidates.Contains(monster))
+                _ownedCandidates.Add(monster);
+            // Keep the chase going: the target is either the real player here or its ghost.
+            string targetDesc = "none";
+            if (!string.IsNullOrEmpty(msg.targetMeshId))
+            {
+                BaseCharacterEntity target = null;
+                if (ServerUserHandlers.TryGetPlayerCharacterById(msg.targetMeshId, out IPlayerCharacterData data) && data is BasePlayerCharacterEntity real)
+                    target = real;
+                else if (_ghosts.TryGetValue(msg.targetMeshId, out MeshGhost tg) && tg.entity != null)
+                    target = tg.entity;
+                if (target != null)
+                {
+                    monster.SetAttackTarget(target);
+                    targetDesc = target.CharacterName;
+                }
+            }
+            Logging.Log("Mesh", $"Monster {(promoted ? "promoted" : "spawned")} by handoff {msg.meshId} {fromZone}->{OwnZoneId} at {monster.EntityTransform.position} hp={monster.CurrentHp}/{monster.MaxHp} home={msg.homeZoneId} target={targetDesc}");
+        }
+
+        private void OnBorrowedMonsterKilled(string meshId, string homeZone)
+        {
+            _borrowedKillHooks.Remove(meshId);
+            _ownedByMeshId.Remove(meshId);
+            if (!_linkClients.TryGetValue(homeZone, out MeshLinkClient link) || !link.IsConnected)
+            {
+                Logging.LogWarning("Mesh", $"Borrowed monster {meshId} died but home zone {homeZone} is not linked: its respawn is lost");
+                return;
+            }
+            link.SendMonsterGone(meshId);
+            Logging.Log("Mesh", $"Borrowed monster {meshId} died here; told home zone {homeZone}");
+        }
+
+        internal void OnMonsterGone(string meshId)
+        {
+            if (!IsServer)
+                return;
+            DestroyGhost(meshId, "died on borrower");
+            if (!_lentMonsters.TryGetValue(meshId, out LentMonster lent))
+                return;
+            _lentMonsters.Remove(meshId);
+            if (lent.area == null || lent.prefab == null)
+                return;
+            lent.area.Spawn(lent.prefab, lent.level, lent.respawnDelay, lent.respawnDelay);
+            Logging.Log("Mesh", $"Lent monster {meshId} died on the borrower; home spawn area respawns it in {lent.respawnDelay:0.#}s");
         }
 
         // ---- P3: cross-border hits (DESIGN §12) ----
@@ -692,6 +933,8 @@ namespace MultiplayerARPG.MMO.Mesh
         internal void OnGhostHit(long connectionId, GhostHitMessage msg) { }
         internal void OnGhostHitResult(GhostHitResultMessage msg) { }
         internal void OnGhostReward(GhostRewardMessage msg) { }
+        internal void OnMonsterHandoff(long connectionId, MonsterHandoffMessage msg) { }
+        internal void OnMonsterGone(string meshId) { }
         internal bool IsPlayerGhostNear(Vector3 position, float range) { return false; }
         internal void ForwardGhostReward(BasePlayerCharacterEntity ghost, int exp, int gold, IEnumerable<CurrencyAmount> currencies, float multiplier, RewardGivenType givenType, int giverLevel, int sourceLevel) { }
         internal void SendHandoffNotice(string zoneId, string characterId, string userId) { }

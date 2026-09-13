@@ -525,7 +525,7 @@ namespace MultiplayerARPG.MMO.Mesh
                         ? $"target hp={target.CurrentHp} self hp={self.CurrentHp} pos={self.EntityTransform.position}"
                         : $"waiting for a monster within reach; self hp={self.CurrentHp} pos={self.EntityTransform.position}");
                 }
-                if (kills > 0 && self.Exp != expStart) break; // kill credit arrived; enough
+                if (kills >= 3) break;
                 yield return null;
             }
             // Give a pending kill credit a moment to travel owner -> our cell.

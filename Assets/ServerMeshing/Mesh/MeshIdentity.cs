@@ -17,6 +17,10 @@ namespace MultiplayerARPG.MMO.Mesh
         public string MeshEntityId;
         public bool IsGhost;
         public string OwnerZoneId;
+        /// <summary>For monsters: the zone whose spawn area respawns it (set when it is handed to another cell).</summary>
+        public string HomeZoneId;
+        /// <summary>Unscaled time of the last ownership change (monster handoff), for the ping-pong cooldown.</summary>
+        public float LastHandoffTime = -999f;
 
         public static MeshIdentity Get(Component entity)
         {
