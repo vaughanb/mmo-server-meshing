@@ -162,6 +162,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 MonsterHandoffTick();
                 SendBandSnapshots();
                 ExpireGhosts();
+                ExpireReservedArrivals();
             }
         }
 
@@ -331,10 +332,83 @@ namespace MultiplayerARPG.MMO.Mesh
         }
 
         /// <summary>Called when the real character registers on this cell (handoff-in): the ghost must go.</summary>
-        private void GhostingOnRealPlayerRegistered(BasePlayerCharacterEntity playerCharacter)
+        private void GhostingOnRealPlayerRegistered(BasePlayerCharacterEntity playerCharacter, long connectionId)
         {
-            if (playerCharacter != null)
-                DestroyGhost(playerCharacter.Id, "promoted to real");
+            if (playerCharacter == null)
+                return;
+            if (_reservedArrivals.Remove(playerCharacter.Id) && playerCharacter.Identity != null)
+            {
+                // A fresh spawn is pushed to its owner at once. A re-owned entity would wait for the AOI's next pass
+                // (1 s): the kit's SetOwnerClient is deferred by the AOI (manuallyApplyOwnerChanges) and the owner's
+                // subscription only comes with that pass. Apply the owner now and subscribe the owner now.
+                Assets.SetObjectOwnerImmediately(playerCharacter.ObjectId, connectionId);
+                if (InterestManager != null)
+                    InterestManager.NotifyNewObject(playerCharacter.Identity);
+            }
+            DestroyGhost(playerCharacter.Id, "promoted to real");
+        }
+
+        // ---- Arrival by handoff: promote the ghost in place (DESIGN §7) ----
+        // The kit's SetPlayerReadyRoutine has an "already spawned entity" branch (relates data, SetOwnerClient,
+        // Register, respawn RPC). Handing it the ghost entity means the arriving character IS the entity observers
+        // here were already looking at: no swap, no pop.
+
+        private sealed class ReservedArrival { public BasePlayerCharacterEntity entity; public float time; }
+        private readonly Dictionary<string, ReservedArrival> _reservedArrivals = new Dictionary<string, ReservedArrival>();
+        [Tooltip("If an arriving client never becomes ready, its promoted ghost is destroyed after this many seconds.")]
+        public float reservedArrivalTimeout = 15f;
+
+        private bool TryPromoteGhostForArrival(long connectionId, PlayerCharacterData data, out BasePlayerCharacterEntity entity)
+        {
+            entity = null;
+            if (data == null || !_ghosts.TryGetValue(data.Id, out MeshGhost ghost) || ghost.entity == null)
+                return false;
+            BasePlayerCharacterEntity player = ghost.entity as BasePlayerCharacterEntity;
+            if (player == null || player.Identity == null || player.Identity.IsDestroyed || player.EntityId != data.EntityId)
+                return false;
+            _ghosts.Remove(data.Id);
+            if (ghost.hitHook != null)
+                player.onReceiveDamage -= ghost.hitHook;
+            GhostSuppression.Unghostify(player, this);
+            player.IsInvincible = false;
+            MeshIdentity id = MeshIdentity.GetOrAdd(player);
+            id.IsGhost = false;
+            id.OwnerZoneId = OwnZoneId;
+            id.LastHandoffTime = Time.unscaledTime;
+            // Same setup the kit does for a fresh spawn, on the existing object.
+            GameInstance.GetPlayerCharacterEntityHashAssetId(data.EntityId, out int metaDataId);
+            GameInstance.SetupByMetaData(player, metaDataId);
+            data.CloneTo(player);
+            player.Teleport(data.CurrentPosition, Quaternion.Euler(data.CurrentRotation), false);
+            player.ForceMakeCaches();
+            player.FillEmptySlots();
+            player.Identity.DoNotDestroyWhenDisconnect = true;
+            _reservedArrivals[data.Id] = new ReservedArrival { entity = player, time = Time.unscaledTime };
+            Logging.Log("Mesh", $"Arrival {data.CharacterName} ({data.Id}) conn={connectionId}: ghost promoted in place at {player.EntityTransform.position}");
+            entity = player;
+            return true;
+        }
+
+        private void ExpireReservedArrivals()
+        {
+            if (_reservedArrivals.Count == 0)
+                return;
+            _tmpIds.Clear();
+            foreach (KeyValuePair<string, ReservedArrival> kv in _reservedArrivals)
+            {
+                if (kv.Value.entity == null || Time.unscaledTime - kv.Value.time > reservedArrivalTimeout)
+                    _tmpIds.Add(kv.Key);
+            }
+            for (int i = 0; i < _tmpIds.Count; ++i)
+            {
+                ReservedArrival r = _reservedArrivals[_tmpIds[i]];
+                _reservedArrivals.Remove(_tmpIds[i]);
+                if (r.entity != null && !ServerUserHandlers.TryGetPlayerCharacterById(_tmpIds[i], out _))
+                {
+                    Logging.LogWarning("Mesh", $"Promoted ghost {_tmpIds[i]} was never claimed by its client; destroying it");
+                    r.entity.NetworkDestroy();
+                }
+            }
         }
 
         private void GhostingOnRealPlayerUnregistered(long connectionId)
@@ -400,6 +474,9 @@ namespace MultiplayerARPG.MMO.Mesh
                 return;
             // Dedup: this cell owns the real thing → the neighbour's copy is stale; ignore.
             if (msg.kind == GhostKind.Player && ServerUserHandlers.TryGetPlayerCharacterById(msg.characterId, out _))
+                return;
+            // A ghost already promoted for an arriving client: the departing cell's last snapshots are in flight; ignore.
+            if (_reservedArrivals.ContainsKey(msg.characterId))
                 return;
 
             if (!_ghosts.TryGetValue(msg.characterId, out MeshGhost ghost) || ghost.entity == null)
@@ -963,9 +1040,10 @@ namespace MultiplayerARPG.MMO.Mesh
         private void GhostingOnStartServer() { }
         private void GhostingOnStopServer() { }
         private void GhostingUpdate() { }
-        private void GhostingOnRealPlayerRegistered(BasePlayerCharacterEntity playerCharacter) { }
+        private void GhostingOnRealPlayerRegistered(BasePlayerCharacterEntity playerCharacter, long connectionId) { }
         private void GhostingOnRealPlayerUnregistered(long connectionId) { }
         private void GhostingOnPlayerHandoffStart(string characterId, string toZone) { }
+        private bool TryPromoteGhostForArrival(long connectionId, PlayerCharacterData data, out BasePlayerCharacterEntity entity) { entity = null; return false; }
         private void DemotePlayerToGhost(BasePlayerCharacterEntity entity, string newOwnerZone) { }
         internal void OnMeshNeighbourHello(long connectionId, string zoneId) { }
         internal void OnMeshNeighbourDisconnected(long connectionId) { }

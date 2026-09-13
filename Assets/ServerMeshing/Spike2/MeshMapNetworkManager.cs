@@ -238,6 +238,19 @@ namespace MultiplayerARPG.MMO.Mesh
             Stamp($"enter-game request from {connectionId}");
             bool ok = await base.DeserializeEnterGameData(requestId, connectionId, request, reader);
             Stamp($"enter-game validated+loaded ok={ok} in {sw.ElapsedMilliseconds}ms");
+#if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
+            // Arrival by handoff with a ghost already standing here: hand the kit the ghost as the "already spawned"
+            // entity (CE-8 makes the pending map reachable), so its ready path re-owns and registers it in place.
+            if (ok && IsServer && promoteGhostOnArrival
+                && ServerUserHandlers.TryGetUserId(connectionId, out string userId)
+                && _pendingSpawnPlayerCharactersByUserId.TryGetValue(userId, out IPlayerCharacterData pending)
+                && pending is PlayerCharacterData pendingData
+                && TryPromoteGhostForArrival(connectionId, pendingData, out BasePlayerCharacterEntity promoted))
+            {
+                _pendingSpawnPlayerCharactersByUserId[userId] = promoted;
+                Stamp($"arrival {pendingData.CharacterName}: ghost promoted in place, pending spawn replaced");
+            }
+#endif
             return ok;
         }
 
@@ -252,7 +265,7 @@ namespace MultiplayerARPG.MMO.Mesh
             Stamp($"player registered {playerCharacter.CharacterName} conn={connectionId}");
 #if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
             if (IsServer)
-                GhostingOnRealPlayerRegistered(playerCharacter);
+                GhostingOnRealPlayerRegistered(playerCharacter, connectionId);
 #endif
             base.RegisterPlayerCharacter(connectionId, playerCharacter);
         }
@@ -488,6 +501,9 @@ namespace MultiplayerARPG.MMO.Mesh
 
         [Tooltip("On handoff, keep the departing player's entity as a ghost puppet (steered by the new owner) instead of destroying it, so other players on this cell see no blink. The destination cell likewise keeps its ghost until the real character registers.")]
         public bool demotePlayerOnHandoff = true;
+
+        [Tooltip("On arrival by handoff, reuse this cell's ghost of the character as its real entity (the kit's own 'already spawned entity' ready path) instead of spawning a new one: observers here see no entity swap at all.")]
+        public bool promoteGhostOnArrival = true;
 
         private void TrackVelocity(string characterId, Vector3 pos, float now)
         {

@@ -234,6 +234,11 @@ namespace MultiplayerARPG
         {
             NavPaths = null;
             _simulatingKeyMovement = false;
+            // MESH-EDIT: CE-9 — a re-owned entity must not keep applying the PREVIOUS owner's last accepted position
+            // (it snapped a promoted character back to where its old client left it, and rejected the new client's
+            // first syncs as "invalid timestamp"). See Docs/ServerMeshing/DESIGN.md §17
+            _acceptedPositionTimestamp = 0;
+            _isServerWaitingTeleportConfirm = false;
         }
 
         public bool CanSimulateMovement()

@@ -98,7 +98,9 @@ namespace MultiplayerARPG.MMO
         private readonly ConcurrentDictionary<string, CentralServerPeerInfo> _mapServerConnectionIdsBySceneName = new ConcurrentDictionary<string, CentralServerPeerInfo>();
         private readonly ConcurrentDictionary<string, CentralServerPeerInfo> _instanceMapServerConnectionIdsByInstanceId = new ConcurrentDictionary<string, CentralServerPeerInfo>();
         private readonly ConcurrentDictionary<string, SocialCharacterData> _socialCharactersByUserId = new ConcurrentDictionary<string, SocialCharacterData>();
-        private readonly ConcurrentDictionary<string, IPlayerCharacterData> _pendingSpawnPlayerCharactersByUserId = new ConcurrentDictionary<string, IPlayerCharacterData>();
+        // MESH-EDIT: CE-8 — was private; a meshed cell swaps the pending spawn data for an already-standing ghost entity
+        // so the kit's own "already spawned entity" ready path promotes it in place. See Docs/ServerMeshing/DESIGN.md §17
+        protected readonly ConcurrentDictionary<string, IPlayerCharacterData> _pendingSpawnPlayerCharactersByUserId = new ConcurrentDictionary<string, IPlayerCharacterData>();
         // Database operations
         private readonly ConcurrentHashSet<StorageId> _loadingStorageIds = new ConcurrentHashSet<StorageId>();
         private readonly ConcurrentHashSet<int> _loadingPartyIds = new ConcurrentHashSet<int>();
