@@ -70,7 +70,7 @@ namespace MultiplayerARPG.MMO.Mesh
         [Tooltip("Seconds to wait after entering the map before starting the test.")]
         public float settleSeconds = 3f;
         [Tooltip("observe mode: seconds to watch for other player entities after arriving.")]
-        public float observeSeconds = 60f;
+        public float observeSeconds = 100f;
         [Tooltip("observe mode: only positions beyond this world X count as ghost sightings (the neighbour zone starts at x=100).")]
         public float observeGhostBeyondX = 100f;
         [Tooltip("Overall timeout for the whole run.")]
@@ -402,10 +402,43 @@ namespace MultiplayerARPG.MMO.Mesh
             BasePlayerCharacterEntity self = GameInstance.PlayingCharacterEntity;
             Log($"Observing from {self.EntityTransform.position} for {observeSeconds}s");
             Dictionary<string, List<Vector3>> seen = new Dictionary<string, List<Vector3>>();
+            // Continuity of OTHER players as seen from here: an entity instance change is a "swap" (ghost <-> real),
+            // frames with no entity for a name we have seen are an "absence" (what an observer perceives as a blink).
+            Dictionary<string, int> lastInstance = new Dictionary<string, int>();
+            Dictionary<string, float> absentSince = new Dictionary<string, float>();
+            HashSet<string> presentNow = new HashSet<string>();
+            int swaps = 0, absences = 0; float maxAbsenceMs = 0f;
             float end = Time.realtimeSinceStartup + observeSeconds;
             float nextSample = 0f;
             while (Time.realtimeSinceStartup < end)
             {
+                presentNow.Clear();
+                float now = Time.realtimeSinceStartup;
+                foreach (BasePlayerCharacterEntity pe in FindObjectsByType<BasePlayerCharacterEntity>(FindObjectsSortMode.None))
+                {
+                    if (pe == GameInstance.PlayingCharacterEntity || string.IsNullOrEmpty(pe.CharacterName)) continue;
+                    string name = pe.CharacterName;
+                    presentNow.Add(name);
+                    int inst = pe.GetInstanceID();
+                    if (absentSince.TryGetValue(name, out float since))
+                    {
+                        float gapMs = (now - since) * 1000f;
+                        absences++; maxAbsenceMs = Mathf.Max(maxAbsenceMs, gapMs);
+                        absentSince.Remove(name);
+                        Log($"'{name}' absent for {gapMs:0} ms at {pe.EntityTransform.position}");
+                    }
+                    if (lastInstance.TryGetValue(name, out int prev) && prev != inst)
+                    {
+                        swaps++;
+                        Log($"'{name}' entity swapped (instance {prev} -> {inst}) at {pe.EntityTransform.position}");
+                    }
+                    lastInstance[name] = inst;
+                }
+                foreach (string name in lastInstance.Keys)
+                {
+                    if (!presentNow.Contains(name) && !absentSince.ContainsKey(name))
+                        absentSince[name] = now;
+                }
                 if (Time.realtimeSinceStartup >= nextSample)
                 {
                     nextSample = Time.realtimeSinceStartup + 0.5f;
@@ -435,7 +468,7 @@ namespace MultiplayerARPG.MMO.Mesh
             Finished = true;
             // Monsters in the demo idle unless aggroed, so movement is only required of player ghosts.
             Passed = ghostsSeen > 0 && (playerGhosts == 0 || movedGhost) && migrations == 0;
-            Log($"RESULT observe: ghostsSeen={ghostsSeen} (players={playerGhosts} monsters={monsterGhosts}) moved={movedGhost} migrationsDuringObserve={migrations} -> {(Passed ? "PASS" : "FAIL")}");
+            Log($"RESULT observe: ghostsSeen={ghostsSeen} (players={playerGhosts} monsters={monsterGhosts}) moved={movedGhost} migrationsDuringObserve={migrations} playerSwaps={swaps} absences={absences} maxAbsenceMs={maxAbsenceMs:0} -> {(Passed ? "PASS" : "FAIL")}");
         }
 
         private float _deadSince = -1f;

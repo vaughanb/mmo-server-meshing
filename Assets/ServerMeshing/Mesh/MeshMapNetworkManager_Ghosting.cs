@@ -343,6 +343,46 @@ namespace MultiplayerARPG.MMO.Mesh
                 SendGhostRemoveToAll(data.Id);
         }
 
+        /// <summary>
+        /// Player handoff to <paramref name="toZone"/> is starting: forget that we streamed this character there so no
+        /// GhostRemove follows (the destination promotes/replaces its ghost when the real character registers).
+        /// </summary>
+        private void GhostingOnPlayerHandoffStart(string characterId, string toZone)
+        {
+            if (_streamedToZone.TryGetValue(toZone, out HashSet<string> streamed))
+                streamed.Remove(characterId);
+        }
+
+        /// <summary>
+        /// The departing player's entity stays as a ghost puppet: server-owned (so the client's disconnect does not
+        /// destroy it), silenced, invincible, steered by the new owner's snapshots and removed when they stop.
+        /// </summary>
+        private void DemotePlayerToGhost(BasePlayerCharacterEntity entity, string newOwnerZone)
+        {
+            if (entity == null || entity.Identity == null || entity.Identity.IsDestroyed)
+                return;
+            string meshId = entity.Id;
+            entity.SetTargetEntity(null);
+            entity.StopMove();
+            Assets.SetObjectOwnerImmediately(entity.ObjectId, -1);
+            MeshIdentity id = MeshIdentity.GetOrAdd(entity);
+            id.MeshEntityId = meshId;
+            id.IsGhost = true;
+            id.OwnerZoneId = newOwnerZone;
+            id.LastHandoffTime = Time.unscaledTime;
+            int silenced = GhostSuppression.Ghostify(entity, this, null, false, false, disableMovement: false);
+            entity.IsInvincible = true;
+            ReceiveDamageDelegate hitHook = (target, position, fromPosition, instigator, damageAmounts, weapon, skill, skillLevel) =>
+                ForwardGhostHit(meshId, position, fromPosition, instigator, damageAmounts, weapon, skill, skillLevel);
+            entity.onReceiveDamage += hitHook;
+            if (_ghosts.TryGetValue(meshId, out MeshGhost stale) && stale.entity != null && stale.entity != entity)
+                stale.entity.NetworkDestroy(); // should not happen (a ghost and the real one on the same cell), be safe
+            _ghosts[meshId] = new MeshGhost { entity = entity, kind = GhostKind.Player, lastSeen = Time.unscaledTime, lastTarget = entity.EntityTransform.position, hitHook = hitHook };
+            foreach (HashSet<string> streamed in _streamedToZone.Values)
+                streamed.Remove(meshId);
+            Logging.Log("Mesh", $"Player {entity.CharacterName} demoted to ghost (owner {newOwnerZone}, silenced {silenced})");
+        }
+
         internal void OnMeshNeighbourHello(long connectionId, string zoneId)
         {
             _neighbourZoneByConnection[connectionId] = zoneId;
@@ -925,6 +965,8 @@ namespace MultiplayerARPG.MMO.Mesh
         private void GhostingUpdate() { }
         private void GhostingOnRealPlayerRegistered(BasePlayerCharacterEntity playerCharacter) { }
         private void GhostingOnRealPlayerUnregistered(long connectionId) { }
+        private void GhostingOnPlayerHandoffStart(string characterId, string toZone) { }
+        private void DemotePlayerToGhost(BasePlayerCharacterEntity entity, string newOwnerZone) { }
         internal void OnMeshNeighbourHello(long connectionId, string zoneId) { }
         internal void OnMeshNeighbourDisconnected(long connectionId) { }
         internal void OnGhostSnapshot(long connectionId, GhostSnapshotMessage msg) { }

@@ -441,12 +441,16 @@ namespace MultiplayerARPG.MMO.Mesh
                 // Mirrors MapNetworkManager.SaveAndWarpCharacterByPeerInfo (changeMap=true keeps the logical map name),
                 // except IsWarping is NOT raised: it would show the kit's "warping" UI on the client, and the entity
                 // is unregistered and destroyed within milliseconds anyway.
+                // The destination keeps its ghost of this character until the real one registers there (no blink for
+                // its observers): make sure neither the unregister nor the next snapshot tick sends it a GhostRemove.
+                GhostingOnPlayerHandoffStart(characterId, zone.zoneId);
                 UnregisterPlayerCharacter(connectionId);
                 if (entity.TryGetComponent(out PlayerCharacterDataUpdater updater))
                     Destroy(updater);
                 DataUpdater.PlayerCharacterDataSaved(characterId);
                 bool saved = await WaitAndSaveCharacter(TransactionUpdateCharacterState.All, entity.CloneTo(new PlayerCharacterData()), true, mapName, savePosition, true, rotation);
-                entity.NetworkDestroy();
+                if (!demotePlayerOnHandoff)
+                    entity.NetworkDestroy();
 
                 // Tell the neighbour who is coming so it can spawn without re-awaiting relates data.
                 if (ServerUserHandlers.TryGetUserId(connectionId, out string userId))
@@ -460,7 +464,11 @@ namespace MultiplayerARPG.MMO.Mesh
                     networkPort = peer.networkPort,
                 };
                 ServerSendPacket(connectionId, 0, DeliveryMethod.ReliableOrdered, GameNetworkingConsts.Warp, message);
-                Logging.Log("Mesh", $"Handoff SENT {entity.CharacterName} -> zone {zone.zoneId} saved={saved} serverSide={sw.ElapsedMilliseconds}ms");
+                // After the warp packet (ordered): the entity becomes a server-owned puppet that survives the client's
+                // disconnect; observers on this cell keep seeing it, now steered by the neighbour's snapshots.
+                if (demotePlayerOnHandoff && entity != null)
+                    DemotePlayerToGhost(entity, zone.zoneId);
+                Logging.Log("Mesh", $"Handoff SENT {entity.CharacterName} -> zone {zone.zoneId} saved={saved} serverSide={sw.ElapsedMilliseconds}ms demoted={demotePlayerOnHandoff}");
             }
             catch (System.Exception ex)
             {
@@ -477,6 +485,9 @@ namespace MultiplayerARPG.MMO.Mesh
 
         [Tooltip("Velocity samples above this (m/s) are treated as teleports/respawns and ignored for lead prediction.")]
         public float handoffMaxLeadSpeed = 15f;
+
+        [Tooltip("On handoff, keep the departing player's entity as a ghost puppet (steered by the new owner) instead of destroying it, so other players on this cell see no blink. The destination cell likewise keeps its ghost until the real character registers.")]
+        public bool demotePlayerOnHandoff = true;
 
         private void TrackVelocity(string characterId, Vector3 pos, float now)
         {
