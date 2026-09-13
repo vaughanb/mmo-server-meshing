@@ -24,6 +24,35 @@ namespace MultiplayerARPG.MMO.Mesh
         public const ushort HandoffNotice = 103;
         public const ushort GhostHit = 104;
         public const ushort GhostHitResult = 105;
+        public const ushort GhostReward = 106;
+    }
+
+    /// <summary>
+    /// Kill credit (P3): a monster killed on this cell rewarded the attacker's GHOST here. MeshGameplayRule intercepts
+    /// that and sends the RAW reward (before rates/bonuses) to the attacker's owner cell, which applies it to the real
+    /// character through the same gameplay rule.
+    /// </summary>
+    public struct GhostRewardMessage : INetSerializable
+    {
+        public string attackerMeshId;
+        public int exp;
+        public int gold;
+        public float multiplier;
+        public byte givenType;
+        public int giverLevel;
+        public int sourceLevel;
+        public int[] currencyDataIds;
+        public int[] currencyAmounts;
+        public void Serialize(NetDataWriter writer)
+        {
+            writer.Put(attackerMeshId); writer.Put(exp); writer.Put(gold); writer.Put(multiplier); writer.Put(givenType); writer.Put(giverLevel); writer.Put(sourceLevel);
+            writer.PutArray(currencyDataIds ?? System.Array.Empty<int>()); writer.PutArray(currencyAmounts ?? System.Array.Empty<int>());
+        }
+        public void Deserialize(NetDataReader reader)
+        {
+            attackerMeshId = reader.GetString(); exp = reader.GetInt(); gold = reader.GetInt(); multiplier = reader.GetFloat(); givenType = reader.GetByte(); giverLevel = reader.GetInt(); sourceLevel = reader.GetInt();
+            currencyDataIds = reader.GetIntArray(); currencyAmounts = reader.GetIntArray();
+        }
     }
 
     /// <summary>
@@ -180,6 +209,7 @@ namespace MultiplayerARPG.MMO.Mesh
             RegisterMessageHandler(MeshLinkMessageTypes.HandoffNotice, HandleHandoffNotice);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostHit, HandleGhostHit);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostHitResult, HandleGhostHitResult);
+            RegisterMessageHandler(MeshLinkMessageTypes.GhostReward, HandleGhostReward);
         }
 
         public override void OnServerReceive(TransportEventData eventData)
@@ -238,6 +268,12 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             GhostHitResultMessage msg = messageHandler.ReadMessage<GhostHitResultMessage>();
             _manager.OnGhostHitResult(msg);
+        }
+
+        private void HandleGhostReward(MessageHandlerData messageHandler)
+        {
+            GhostRewardMessage msg = messageHandler.ReadMessage<GhostRewardMessage>();
+            _manager.OnGhostReward(msg);
         }
     }
 
@@ -312,6 +348,12 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (!IsConnected) return;
             SendPacket(0, DeliveryMethod.ReliableOrdered, MeshLinkMessageTypes.GhostHitResult, writer => msg.Serialize(writer));
+        }
+
+        public void SendGhostReward(GhostRewardMessage msg)
+        {
+            if (!IsConnected) return;
+            SendPacket(0, DeliveryMethod.ReliableOrdered, MeshLinkMessageTypes.GhostReward, writer => msg.Serialize(writer));
         }
 
         public void SendGhostRemove(string characterId)

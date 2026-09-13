@@ -374,6 +374,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 string capturedMeshId = msg.characterId;
                 entity.onReceiveDamage += (target, position, fromPosition, instigator, damageAmounts, weapon, skill, skillLevel) =>
                     ForwardGhostHit(capturedMeshId, position, fromPosition, instigator, damageAmounts, weapon, skill, skillLevel);
+                // Kill credit: rewards the kit gives this ghost (it was in a monster's damage records here) are intercepted
+                // by MeshGameplayRule and forwarded to the owner — see ForwardGhostReward.
                 ghost = new MeshGhost { entity = entity, kind = msg.kind, lastTarget = msg.position };
                 _ghosts[msg.characterId] = ghost;
                 Logging.Log("Mesh", $"Ghost spawned {msg.kind} {msg.characterName} ({msg.characterId}) from zone {id.OwnerZoneId} at {msg.position} (silenced {silenced})");
@@ -548,6 +550,87 @@ namespace MultiplayerARPG.MMO.Mesh
             }
         }
 
+        /// <summary>
+        /// Called by MeshGameplayRule on the cell where a monster died: the attacker's ghost was about to be rewarded.
+        /// Sends the raw reward to the ghost's owner cell.
+        /// </summary>
+        internal void ForwardGhostReward(BasePlayerCharacterEntity ghost, int exp, int gold, IEnumerable<CurrencyAmount> currencies, float multiplier, RewardGivenType givenType, int giverLevel, int sourceLevel)
+        {
+            if (!IsServer || ghost == null)
+                return;
+            MeshIdentity id = MeshIdentity.Get(ghost);
+            if (id == null || !id.IsGhost || string.IsNullOrEmpty(id.OwnerZoneId))
+                return;
+            if (!_linkClients.TryGetValue(id.OwnerZoneId, out MeshLinkClient link) || !link.IsConnected)
+            {
+                Logging.LogWarning("Mesh", $"Reward for ghost {ghost.CharacterName} dropped: no link to owner zone {id.OwnerZoneId}");
+                return;
+            }
+            List<int> ids = new List<int>(), amounts = new List<int>();
+            if (currencies != null)
+            {
+                foreach (CurrencyAmount c in currencies)
+                {
+                    if (c.currency == null || c.amount <= 0) continue;
+                    ids.Add(c.currency.DataId); amounts.Add(c.amount);
+                }
+            }
+            if (exp <= 0 && gold <= 0 && ids.Count == 0)
+                return;
+            link.SendGhostReward(new GhostRewardMessage
+            {
+                attackerMeshId = id.MeshEntityId, exp = exp, gold = gold, multiplier = multiplier, givenType = (byte)givenType,
+                giverLevel = giverLevel, sourceLevel = sourceLevel, currencyDataIds = ids.ToArray(), currencyAmounts = amounts.ToArray(),
+            });
+            if (traceHandoffTiming)
+                Logging.Log("Mesh", $"Reward on ghost {ghost.CharacterName} forwarded to zone {id.OwnerZoneId}: exp {exp} gold {gold} currencies {ids.Count} x{multiplier} ({givenType})");
+        }
+
+        /// <summary>
+        /// True when a player ghost (a real player standing on a neighbouring cell) is within range of a position.
+        /// Used by MeshMonsterActivityComponent to keep edge monsters awake for players watching from next door.
+        /// </summary>
+        internal bool IsPlayerGhostNear(Vector3 position, float range)
+        {
+            float sqr = range * range;
+            foreach (MeshGhost g in _ghosts.Values)
+            {
+                if (g.kind != GhostKind.Player || g.entity == null || g.entity.IsDead())
+                    continue;
+                if ((g.entity.EntityTransform.position - position).sqrMagnitude <= sqr)
+                    return true;
+            }
+            return false;
+        }
+
+        internal void OnGhostReward(GhostRewardMessage msg)
+        {
+            if (!IsServer)
+                return;
+            if (!ServerUserHandlers.TryGetPlayerCharacterById(msg.attackerMeshId, out IPlayerCharacterData data) || !(data is BasePlayerCharacterEntity player))
+            {
+                Logging.LogWarning("Mesh", $"Forwarded reward for {msg.attackerMeshId} dropped: character not on this cell");
+                return;
+            }
+            RewardGivenType givenType = (RewardGivenType)msg.givenType;
+            if (msg.exp > 0)
+                player.RewardExp(msg.exp, msg.multiplier, givenType, msg.giverLevel, msg.sourceLevel);
+            if (msg.gold > 0)
+                player.RewardGold(msg.gold, msg.multiplier, givenType, msg.giverLevel, msg.sourceLevel);
+            if (msg.currencyDataIds != null && msg.currencyDataIds.Length > 0)
+            {
+                List<CurrencyAmount> currencies = new List<CurrencyAmount>();
+                for (int i = 0; i < msg.currencyDataIds.Length; ++i)
+                {
+                    if (GameInstance.Currencies.TryGetValue(msg.currencyDataIds[i], out Currency currency))
+                        currencies.Add(new CurrencyAmount { currency = currency, amount = msg.currencyAmounts[i] });
+                }
+                player.RewardCurrencies(currencies, msg.multiplier, givenType, msg.giverLevel, msg.sourceLevel);
+            }
+            if (traceHandoffTiming)
+                Logging.Log("Mesh", $"Forwarded reward applied to {player.CharacterName}: exp {msg.exp} gold {msg.gold} x{msg.multiplier} -> level={player.Level} exp={player.Exp} gold={player.Gold}");
+        }
+
         internal void OnGhostHitResult(GhostHitResultMessage msg)
         {
             if (!IsServer || !_ghosts.TryGetValue(msg.targetMeshId, out MeshGhost ghost) || ghost.entity == null)
@@ -608,6 +691,9 @@ namespace MultiplayerARPG.MMO.Mesh
         internal void OnHandoffNotice(HandoffNoticeMessage msg) { }
         internal void OnGhostHit(long connectionId, GhostHitMessage msg) { }
         internal void OnGhostHitResult(GhostHitResultMessage msg) { }
+        internal void OnGhostReward(GhostRewardMessage msg) { }
+        internal bool IsPlayerGhostNear(Vector3 position, float range) { return false; }
+        internal void ForwardGhostReward(BasePlayerCharacterEntity ghost, int exp, int gold, IEnumerable<CurrencyAmount> currencies, float multiplier, RewardGivenType givenType, int giverLevel, int sourceLevel) { }
         internal void SendHandoffNotice(string zoneId, string characterId, string userId) { }
 #endif
     }

@@ -449,69 +449,102 @@ namespace MultiplayerARPG.MMO.Mesh
             _walkZOverride = null;
             if (!reached) { Fail("never reached the fight position"); yield break; }
             BasePlayerCharacterEntity self = GameInstance.PlayingCharacterEntity;
-            int selfHpStart = self.CurrentHp;
+            int selfHpStart = self.CurrentHp, selfMaxHp = self.MaxHp;
+            int expStart = self.Exp, goldStart = self.Gold, levelStart = self.Level;
 
-            // Pick the nearest monster on OUR side of the edge: our zone runs no spawn areas here, so every monster we
-            // can see is a ghost owned by the neighbour, and staying on our side keeps us from being handed off.
-            BaseMonsterCharacterEntity target = null; float best = float.MaxValue;
-            float searchEnd = Time.realtimeSinceStartup + 10f;
-            while (target == null && Time.realtimeSinceStartup < searchEnd)
-            {
-                foreach (BaseMonsterCharacterEntity m in FindObjectsByType<BaseMonsterCharacterEntity>(FindObjectsSortMode.None))
-                {
-                    if (m == null || m.IsDead() || m.EntityTransform.position.x > observeGhostBeyondX - 2f) continue;
-                    float d = Vector3.Distance(m.EntityTransform.position, self.EntityTransform.position);
-                    if (d < best) { best = d; target = m; }
-                }
-                if (target == null) yield return new WaitForSecondsRealtime(0.5f);
-            }
-            if (target == null) { Fail("no monster beyond the edge to attack"); yield break; }
-            Log($"Fighting '{target.name}' hp={target.CurrentHp}/{target.MaxHp} at {target.EntityTransform.position} (dist {best:0.#}m)");
-            int targetHpStart = target.CurrentHp;
-            int minTargetHp = targetHpStart, minSelfHp = selfHpStart;
+            // Hold the line: stay on OUR side of the edge (x <= holdX) and fight whatever monster wanders within reach.
+            // Our zone runs no spawn areas here, so every monster we see is a ghost owned by the neighbour; hits we land
+            // are forwarded to the owner, hits the owner's real monster lands on our ghost come back the same way.
+            float holdX = observeGhostBeyondX - 0.5f;
             float attackRange = Mathf.Max(1f, self.GetAttackDistance(false) - 0.3f);
-            float end = Time.realtimeSinceStartup + 40f;
+            float end = Time.realtimeSinceStartup + 150f;
             float nextAttack = 0f, nextLog = 0f;
+            BaseMonsterCharacterEntity target = null;
+            int targetHpStart = 0, minTargetHp = int.MaxValue, minSelfHp = selfHpStart, kills = 0;
+            bool anyHurt = false;
             while (Time.realtimeSinceStartup < end)
             {
                 self = GameInstance.PlayingCharacterEntity;
-                if (self == null || target == null) break;
-                Vector3 toTarget = target.EntityTransform.position - self.EntityTransform.position; toTarget.y = 0f;
-                if (toTarget.magnitude > attackRange)
+                if (self == null) break;
+                if (self.IsDead()) { Log("we died"); minSelfHp = 0; break; }
+                if (target != null && target.IsDead())
                 {
-                    self.PointClickMovement(target.EntityTransform.position - toTarget.normalized * (attackRange * 0.7f));
+                    ++kills;
+                    Log($"target died (kill #{kills}); exp={self.Exp} gold={self.Gold} level={self.Level}");
+                    target = null;
                 }
-                else if (Time.realtimeSinceStartup >= nextAttack)
+                if (target == null || target.EntityTransform.position.x > holdX + attackRange + 0.5f)
                 {
-                    nextAttack = Time.realtimeSinceStartup + 0.6f;
-                    self.StopMove();
-                    self.SetLookRotation(Quaternion.LookRotation(toTarget.normalized), true);
-                    self.SetTargetEntity(target);
-                    bool isLeftHand = false;
-                    self.AimPosition = self.GetAttackAimPosition(ref isLeftHand, target.EntityTransform.position);
-                    WeaponHandlingState whs = WeaponHandlingState.None;
-                    self.Attack(ref whs);
+                    // Nearest alive monster we can reach without leaving our side.
+                    target = null; float best = float.MaxValue;
+                    foreach (BaseMonsterCharacterEntity m in FindObjectsByType<BaseMonsterCharacterEntity>(FindObjectsSortMode.None))
+                    {
+                        if (m == null || m.IsDead() || m.EntityTransform.position.x > holdX + attackRange + 0.5f) continue;
+                        float d = Vector3.Distance(m.EntityTransform.position, self.EntityTransform.position);
+                        if (d < best) { best = d; target = m; }
+                    }
+                    if (target != null)
+                    {
+                        targetHpStart = target.CurrentHp; minTargetHp = targetHpStart;
+                        Log($"Engaging '{target.name}' hp={target.CurrentHp}/{target.MaxHp} at {target.EntityTransform.position} (dist {best:0.#}m)");
+                    }
                 }
-                minTargetHp = Mathf.Min(minTargetHp, target.CurrentHp);
+                if (target != null)
+                {
+                    Vector3 toTarget = target.EntityTransform.position - self.EntityTransform.position; toTarget.y = 0f;
+                    if (toTarget.magnitude > attackRange)
+                    {
+                        Vector3 dest = target.EntityTransform.position - toTarget.normalized * (attackRange * 0.7f);
+                        dest.x = Mathf.Min(dest.x, holdX);
+                        self.PointClickMovement(dest);
+                    }
+                    else if (Time.realtimeSinceStartup >= nextAttack)
+                    {
+                        nextAttack = Time.realtimeSinceStartup + 0.6f;
+                        self.StopMove();
+                        self.SetLookRotation(Quaternion.LookRotation(toTarget.normalized), true);
+                        self.SetTargetEntity(target);
+                        bool isLeftHand = false;
+                        self.AimPosition = self.GetAttackAimPosition(ref isLeftHand, target.EntityTransform.position);
+                        WeaponHandlingState whs = WeaponHandlingState.None;
+                        self.Attack(ref whs);
+                    }
+                    if (target.CurrentHp < targetHpStart) anyHurt = true;
+                    minTargetHp = Mathf.Min(minTargetHp, target.CurrentHp);
+                }
+                else if (self.EntityTransform.position.x > holdX)
+                {
+                    Vector3 back = self.EntityTransform.position; back.x = holdX - 1f;
+                    self.PointClickMovement(back);
+                }
                 minSelfHp = Mathf.Min(minSelfHp, self.CurrentHp);
                 if (Time.realtimeSinceStartup >= nextLog)
                 {
                     nextLog = Time.realtimeSinceStartup + 3f;
-                    Log($"target hp={target.CurrentHp} self hp={self.CurrentHp} dist={toTarget.magnitude:0.#}");
+                    Log(target != null
+                        ? $"target hp={target.CurrentHp} self hp={self.CurrentHp} pos={self.EntityTransform.position}"
+                        : $"waiting for a monster within reach; self hp={self.CurrentHp} pos={self.EntityTransform.position}");
                 }
-                if (target.IsDead()) { Log("target died"); break; }
+                if (kills > 0 && self.Exp != expStart) break; // kill credit arrived; enough
                 yield return null;
             }
-            bool targetHurt = minTargetHp < targetHpStart;
+            // Give a pending kill credit a moment to travel owner -> our cell.
+            yield return new WaitForSecondsRealtime(1.5f);
+            self = GameInstance.PlayingCharacterEntity;
+            int expGained = self != null ? self.Exp - expStart : 0, goldGained = self != null ? self.Gold - goldStart : 0;
+            int levelGained = self != null ? self.Level - levelStart : 0;
             bool selfHurt = minSelfHp < selfHpStart;
-            Finished = true; Passed = targetHurt;
-            Log($"RESULT fight: targetHp {targetHpStart}->{minTargetHp} (hurt={targetHurt}) selfHp {selfHpStart}->{minSelfHp} (hitBack={selfHurt}) -> {(Passed ? "PASS" : "FAIL")}");
-            // Retreat to the zone start so the next run does not begin next to the neighbour's monsters.
-            _walkZOverride = 0f;
-            bool back = false;
-            yield return WalkTo(walkReturnX, Time.realtimeSinceStartup + 90f, ClientMigrationController.CompletedCount, r => back = r);
-            _walkZOverride = null;
-            Log($"Retreated to start: {back}");
+            Finished = true; Passed = anyHurt;
+            Log($"RESULT fight: hurtTarget={anyHurt} kills={kills} selfHp {selfHpStart}/{selfMaxHp}->{minSelfHp} (hitBack={selfHurt}) exp+{expGained} gold+{goldGained} level+{levelGained} -> {(Passed ? "PASS" : "FAIL")}");
+            if (self != null && !self.IsDead())
+            {
+                // Retreat to the zone start so the next run does not begin next to the neighbour's monsters.
+                _walkZOverride = 0f;
+                bool back = false;
+                yield return WalkTo(walkReturnX, Time.realtimeSinceStartup + 90f, ClientMigrationController.CompletedCount, r => back = r);
+                _walkZOverride = null;
+                Log($"Retreated to start: {back}");
+            }
         }
 
         private bool _allMigrationsReady = true;

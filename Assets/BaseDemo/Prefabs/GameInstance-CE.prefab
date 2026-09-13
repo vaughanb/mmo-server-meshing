@@ -52,7 +52,7 @@ MonoBehaviour:
   dimensionType: 0
   messageManager: {fileID: 0}
   saveSystem: {fileID: 0}
-  gameplayRule: {fileID: 11400000, guid: 4a11ea2d6af9db447ade2e03ef05c853, type: 2}
+  gameplayRule: {fileID: 11400000, guid: 7e4a2b3c1d5f4e6a9b8c7d6e5f4a3b21, type: 2}
   inventoryManager: {fileID: 0}
   dayNightTimeUpdater: {fileID: 0}
   gmCommands: {fileID: 0}

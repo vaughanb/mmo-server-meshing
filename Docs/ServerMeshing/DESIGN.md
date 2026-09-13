@@ -6,8 +6,8 @@
 
 | | |
 |---|---|
-| **Status** | **Working on the 2-zone rig (2026-09-12):** P0 spikes pass; P1 seamless handoff done (~250 ms, no visible break); P2 players + monsters ghost across the edge (shared world frame); P3 hits on ghosts resolved by the owner. Open: per-cell coordinate frames (only needed beyond ±960 m), kill credit, projectiles, dynamic cells |
-| **Doc version** | 0.15 |
+| **Status** | **Working on the 2-zone rig (2026-09-12):** P0 spikes pass; P1 seamless handoff done (~250 ms, no visible break); P2 players + monsters ghost across the edge (shared world frame); P3 hits on ghosts resolved by the owner, kill credit forwarded to the real character, edge monsters aggro on ghosts. Open: per-cell coordinate frames (only needed beyond ±960 m), monster handoff when a chase crosses deep into the neighbour, projectiles, dynamic cells |
+| **Doc version** | 0.16 |
 | **Last updated** | 2026-09-12 |
 | **Owner** | brenden.vaughan@gmail.com |
 | **Scope target** | Fully seamless (Phases 1–3) on a **uniform grid of equal cells** |
@@ -17,6 +17,7 @@
 
 | Version | Date | Change |
 |---|---|---|
+| 0.16 | 2026-09-12 | **P3 second slice — kill credit + aggro across the edge** (§12): (a) `MeshGameplayRule` (a `SimpleGameplayRule` subclass wired into the demo `GameInstance`) intercepts exp/gold/currency rewards the kit hands to a **ghost** on the killing cell and forwards the **raw** amounts (`GhostReward`: exp, gold, currencies, multiplier, given type, giver/source level) to the ghost's owner, which applies them through the same rule to the real character — so rates, guild bonuses and pk reductions use the real character's state and nothing is scaled twice; the ghost never keeps a reward. (b) Aggro: the kit sleeps a monster AI while it has **no network subscribers**, and ghosts never subscribe, so edge monsters froze exactly when a neighbour-cell player looked at them — **CE-7** (one `protected virtual bool IsWatched()` in `MonsterActivityComponent`) + add-on `MeshMonsterActivityComponent` (counts a player ghost within visual range + margin) fix it. Automated fight test (hold the line at x=99, zone C): zone-E monsters chased the player's ghost, 21 retaliation hits E→C landed on the real character (100→0 in the first run, 500→442 in the last); two kills on E → `Reward on ghost … forwarded` ×2 → `Forwarded reward applied … level=2 exp=20 gold=100` on C; the client saw exp+20 gold+100 level+1. Rig tuning: demo monster hp 1→6, player hp 10→500. Observed and left open: an E-owned monster chasing the ghost walked 20 m into C and stayed E-owned (its puppet on C followed fine) — monster handoff by position is a P4 item. |
 | 0.15 | 2026-09-12 | **P3 first slice — cross-border hits** (§12): a hit landing on a ghost is forwarded over the CellMeshLink (raw attacker damage amounts, weapon, skill, hit box, seed, attacker's `MeshEntityId`) to the ghost's owner, which resolves it against the real entity with the kit's own `DamageableEntity.ApplyDamage` (internal, reachable) and reports the outcome back so the ghost's cell shows real combat text and hp. Automated: the zone-C client attacked a zone-E-owned monster ghost standing on C's side; E applied 1 → 0, the monster died, the ghost was removed on C. Ghosts stay invincible locally (no double damage, no duplicate loot). Not yet: kill credit/exp to the attacker's real character (the owner sees the attacker's ghost as instigator), projectiles, the local "Immune" combat text on the ghost's cell, and monster aggro against ghosts (demo monsters are passive and die in one hit). |
 | 0.14 | 2026-09-12 | **Swap gap 440 → ~250 ms, input never lost** ([SPIKE2.md §0 pass 4](SPIKE2.md#0-results-2026-09-12)): handoff notice over the CellMeshLink + background relates-data loading for noticed arrivals (the core's `LoadPlayerCharacterEntityRelatesData` is `protected virtual`, so CE-5 is **not needed**); movement keys drive the local stand-in during the gap. |
 | 0.13 | 2026-09-12 | **Seamless swap (P1 done)** ([SPIKE2.md §0 pass 3](SPIKE2.md#0-results-2026-09-12)): the screenshot mask is replaced by dead-reckoned visual stand-ins, a controller/camera/HUD that survives the entity swap, early input resume, a lead-predicted spawn and a 0.3 s blend; the mesh handoff no longer raises `IsWarping`. Frame captures show no visible break. **Monster ghosting**: spawn areas are owned by the zone they sit in; server-owned monsters are ghosted with birth-provenance ids; ghosts are invincible. Observer saw E's monsters (4) as ghosts from C, two of them physically on C's side of the line. |
@@ -355,6 +356,21 @@ logical map**. Plan:
   to whether P3 is possible.
 - **Monsters/NPCs** near a border are owned by one cell, ghosted to the other; aggro must treat
   ghosted players as targets, routing threat across the link.
+  *Implemented 2026-09-12:* the kit's own aggro works against a player ghost unchanged (a ghost is a normal
+  player entity with colliders on the player layer, `IsEnemy` holds), once the monster is **awake**: the kit
+  skips a monster's AI update while it has zero network subscribers, so [CE-7](#17-core-edit-registry)
+  makes that check a virtual and `MeshMonsterActivityComponent` also counts a nearby player ghost as a
+  watcher. The monster's hits land on the ghost, are forwarded to the owner and applied to the real player
+  (the same GhostHit path as player→ghost hits, in the other direction).
+- **Kill credit:** the kit rewards whoever is in the monster's damage records — on the killing cell that
+  is the attacker's **ghost**. `MeshGameplayRule` (add-on subclass of the demo rule, swapped in on the
+  `GameInstance`) intercepts `RewardExp/RewardGold/RewardCurrencies` for ghosts and forwards the **raw**
+  amounts plus multiplier/given-type/levels to the ghost's owner over CellMeshLink; the owner applies them
+  through the same rule to the real character (real caches, guild, pk state; nothing scaled twice). If the
+  owner link is down the reward is dropped, matching what the kit does for a player who logged out mid-kill.
+  Not covered yet: party/guild share (the ghost carries no party/guild id, so the killing cell shares
+  nothing — the real character's party on its own cell would need the notice), quest kill counters and
+  item drops for the ghost (drops spawn on the killing cell, where the real player can walk to them).
 
 ---
 
@@ -397,7 +413,7 @@ logical map**. Plan:
 | **P0 Foundations** | Coordinate model (Spike 0) + cell grid; `MeshIdentity`/`MeshEntityId`; routing; 2-cell harness; MeshCoordinator role | Scaffolding |
 | **P1 Fast handoff** | Boundary tick + in-memory transfer + masked client migration. *2026-09-12: ✅ boundary tick, save-and-warp replay, seamless client swap (stand-ins, kept controller/camera/HUD, blend) — no loading screen, no stall, no visible break; in-memory S2S transfer still pending (CE-5)* | **No loading screen / stall** |
 | **P2 Border ghosting** | CellMeshLink + GhostEntity (suppressed) + MeshInterestManager + coord translation. *2026-09-12: CellMeshLink + player "puppet" ghosts working on the rig (shared frame, no translation yet, no MeshInterestManager — plain AOI suffices at B = 60 m); monsters/NPCs and per-cell frames still open* | Players **see** across |
-| **P3 Cross-border interaction** | Authority arbitration, ghost colliders, cross-cell lag comp, mob/projectile handoff. *2026-09-12: hits on ghosts are forwarded to and resolved by the owner (melee, verified); kill credit, projectiles, aggro-on-ghost and lag comp still open* | **See and fight** across |
+| **P3 Cross-border interaction** | Authority arbitration, ghost colliders, cross-cell lag comp, mob/projectile handoff. *2026-09-12: hits on ghosts are forwarded to and resolved by the owner (melee, both directions, verified); kill credit forwarded to the real character (verified); edge monsters aggro on ghosts (CE-7, verified). Open: party/guild share and quest counters for cross-edge kills, projectiles, lag comp, monster handoff when a chase crosses the edge* | **See and fight** across |
 | **P4 Dynamic load** *(optional)* | Split/merge cells | Elastic scale |
 
 ---
@@ -438,6 +454,7 @@ Marked in-code `// MESH-EDIT: CE-<n> — <reason>. See Docs/ServerMeshing/DESIGN
 | CE-3 | **Investigating** | `MMOServerInstance` / `ProcessArguments` launch | Register + launch the MeshCoordinator role | "Launch like Login/MapSpawn" goes through the kit launcher | Run as an **independent process** (zero-edit) if feasible; else a small documented launcher edit |
 | CE-4 | **Investigating** | Login / enter-game routing | Resolve `(worldMap, position) → cell server` | Existing path routes by `currentMapName` only | Prefer a handler/`ManagerComponent` seam; core edit only if none reaches the routing decision. *Observed 2026-09-12:* a character saved inside zone E but logging into channel C is handed off to E by C's boundary tick right after spawn — a working (if roundabout) fallback |
 | CE-6 | **Applied 2026-09-12 (2 lines, upstreamable)** | `ThirdParty/LiteNetLibManager/Scripts/LiteNetLibClient.cs` + `LiteNetLibServer.cs`, `SendRequestAsync` | `do { await UniTask.Delay(100); } while (!done);` → `await UniTask.WaitUntil(() => done);` | The 100 ms poll put a hard floor under **every** request/response in the kit (all DB calls, cluster calls); the receiving cell issues ~7 sequential DB requests per hop, so the floor alone was ≈0.7 s of the measured gap. No extension seam reaches the wait loop (would need a custom `IDatabaseClient` wrapping ~100 methods) | Marked `MESH-EDIT: CE-6`; a one-line PR to OpenMMORPG/LiteNetLibManager ("scalability") retires it |
+| CE-7 | **Applied 2026-09-12 (1 virtual + 1 call site, upstreamable)** | `Core/Scripts/Gameplay/CharacterSystems/MonsterCharacterSystems/MonsterActivityComponent.cs`, `ManagedUpdate` | Inline `Entity.Identity.CountSubscribers() == 0` gate → `protected virtual bool IsWatched()` (same default) | The kit puts a monster AI to sleep while it has no network subscribers. On a meshed cell the player standing just across the edge is a ghost here, not a subscriber, so edge monsters froze exactly when a neighbour-cell player looked at or hit them (fight test: 12 forwarded hits, no retaliation). The check is the first line of a public virtual with no seam around it | Marked `MESH-EDIT: CE-7`; add-on `MeshMonsterActivityComponent` overrides `IsWatched()` to also count a player ghost within visual range + margin; a one-line PR ("make the watcher check virtual") retires it |
 | CE-5 | **Not needed (2026-09-12)** | `MapNetworkManager._pendingSpawnPlayerCharactersByUserId` (private) | (would have been) a seam to inject transferred spawn data | The expensive part was the awaited relates-data reload, and `LoadPlayerCharacterEntityRelatesData` is already `protected virtual` — the add-on overrides it to load in the background for noticed handoff arrivals | The remaining `GetCharacter` DB read on enter-game (~40 ms) is the only thing a true S2S data transfer would still save |
 
 *(An entry here is a cost, not a milestone.)*

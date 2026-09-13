@@ -23,7 +23,7 @@ MonoBehaviour:
   expTable: {fileID: 0}
   stats:
     baseStats:
-      hp: 10
+      hp: 500
       hpRecovery: 0
       hpLeechRate: 0
       mp: 0
