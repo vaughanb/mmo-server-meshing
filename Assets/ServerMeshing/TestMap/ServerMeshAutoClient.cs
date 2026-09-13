@@ -376,7 +376,11 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 Phase = $"walk-leg{leg + 1}";
                 bool reached = false;
+                // With a Z target the out leg goes to (walkTargetX, walkTargetZ) — e.g. across a corner — and the return
+                // leg comes back to (walkReturnX, 0).
+                _walkZOverride = walkTargetZ != 0f ? (leg == 0 ? walkTargetZ : 0f) : (float?)null;
                 yield return WalkTo(legs[leg], deadline, before, r => reached = r);
+                _walkZOverride = null;
                 allLegsReached &= reached;
                 if (!reached) break;
                 yield return new WaitForSecondsRealtime(1f);
@@ -429,7 +433,9 @@ namespace MultiplayerARPG.MMO.Mesh
             Phase = "observe";
             int before = ClientMigrationController.CompletedCount;
             bool reached = false;
+            _walkZOverride = walkTargetZ != 0f ? walkTargetZ : (float?)null;
             yield return WalkTo(walkTargetX, deadline, before, r => reached = r);
+            _walkZOverride = null;
             if (!reached) { Fail("never reached the observation point"); yield break; }
             BasePlayerCharacterEntity self = GameInstance.PlayingCharacterEntity;
             Log($"Observing from {self.EntityTransform.position} for {observeSeconds}s");

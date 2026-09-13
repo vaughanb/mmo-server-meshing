@@ -172,7 +172,7 @@ namespace MultiplayerARPG.MMO.Mesh
         private void EnsureNeighbourLinks()
         {
             string mapName = CurrentMapInfo != null ? CurrentMapInfo.Id : string.Empty;
-            for (int i = 0; i < 4; ++i)
+            for (int i = 0; i < s_neighbourOffsets.Length; ++i)
             {
                 Vector2Int coord = NeighbourCoord(i);
                 ServerMeshTestConfig.ZoneDefinition zone = meshConfig.GetZone(coord);
@@ -190,20 +190,35 @@ namespace MultiplayerARPG.MMO.Mesh
             }
         }
 
-        private static readonly Vector2Int[] s_neighbourOffsets = { Vector2Int.right, Vector2Int.left, Vector2Int.up, Vector2Int.down };
+        // 8-neighbourhood: the four edge neighbours plus the diagonals. Near a corner an entity is within the band of a
+        // diagonal cell too (whose players can be a few metres away across the corner), so it is streamed there as well.
+        private static readonly Vector2Int[] s_neighbourOffsets =
+        {
+            Vector2Int.right, Vector2Int.left, Vector2Int.up, Vector2Int.down,
+            new Vector2Int(1, 1), new Vector2Int(-1, 1), new Vector2Int(1, -1), new Vector2Int(-1, -1),
+        };
         private Vector2Int NeighbourCoord(int i) => OwnZoneCoord + s_neighbourOffsets[i];
 
         /// <summary>Distance from a world position to the edge shared with the neighbour at offset index i.</summary>
+        /// <summary>
+        /// Distance from a position to the boundary shared with neighbour i: the edge line for an edge neighbour, and
+        /// for a diagonal neighbour the Chebyshev distance to the shared corner (within the band of both edges).
+        /// </summary>
         private float DistanceToSharedEdge(Vector3 pos, int i)
         {
             Vector2Int off = s_neighbourOffsets[i];
+            float dx = 0f, dz = 0f;
             if (off.x != 0)
             {
                 float lineX = meshConfig.gridOrigin.x + Mathf.Max(OwnZoneCoord.x, OwnZoneCoord.x + off.x) * meshConfig.zoneSize;
-                return Mathf.Abs(pos.x - lineX);
+                dx = Mathf.Abs(pos.x - lineX);
             }
-            float lineZ = meshConfig.gridOrigin.z + Mathf.Max(OwnZoneCoord.y, OwnZoneCoord.y + off.y) * meshConfig.zoneSize;
-            return Mathf.Abs(pos.z - lineZ);
+            if (off.y != 0)
+            {
+                float lineZ = meshConfig.gridOrigin.z + Mathf.Max(OwnZoneCoord.y, OwnZoneCoord.y + off.y) * meshConfig.zoneSize;
+                dz = Mathf.Abs(pos.z - lineZ);
+            }
+            return Mathf.Max(dx, dz);
         }
 
         /// <summary>Owned = registered players + server-owned monsters that are not ghosts. Monsters are rescanned once a second.</summary>
@@ -248,7 +263,7 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private void SendBandSnapshots()
         {
-            for (int i = 0; i < 4; ++i)
+            for (int i = 0; i < s_neighbourOffsets.Length; ++i)
             {
                 ServerMeshTestConfig.ZoneDefinition zone = meshConfig.GetZone(NeighbourCoord(i));
                 if (zone == null || !_linkClients.TryGetValue(zone.zoneId, out MeshLinkClient client) || !client.IsConnected)
@@ -265,8 +280,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 for (int c = 0; c < _ownedCandidates.Count; ++c)
                 {
                     BaseCharacterEntity entity = _ownedCandidates[c];
-                    if (entity == null || entity.IsDead())
-                        continue;
+                    if (entity == null || entity.IsDead() || MeshIdentity.IsGhostEntity(entity))
+                        continue; // a demoted entity is someone else's now
                     if (entity is BasePlayerCharacterEntity player && player.IsWarping)
                         continue;
                     Vector3 pos = entity.EntityTransform.position;
@@ -467,12 +482,14 @@ namespace MultiplayerARPG.MMO.Mesh
         }
 
         /// <summary>
-        /// Player handoff to <paramref name="toZone"/> is starting: forget that we streamed this character there so no
-        /// GhostRemove follows (the destination promotes/replaces its ghost when the real character registers).
+        /// Player handoff to <paramref name="toZone"/> is starting: forget that we streamed this character ANYWHERE so
+        /// no GhostRemove follows. The destination promotes its ghost when the real character registers, and every
+        /// other neighbour keeps its ghost, which the new owner's snapshots take over (owner zone refreshed per
+        /// snapshot); a ghost the new owner does not stream to expires stale on its own.
         /// </summary>
         private void GhostingOnPlayerHandoffStart(string characterId, string toZone)
         {
-            if (_streamedToZone.TryGetValue(toZone, out HashSet<string> streamed))
+            foreach (HashSet<string> streamed in _streamedToZone.Values)
                 streamed.Remove(characterId);
         }
 
@@ -504,6 +521,10 @@ namespace MultiplayerARPG.MMO.Mesh
             if (_ghosts.TryGetValue(meshId, out MeshGhost stale) && stale.entity != null && stale.entity != entity)
                 stale.entity.NetworkDestroy(); // should not happen (a ghost and the real one on the same cell), be safe
             _ghosts[meshId] = new MeshGhost { entity = entity, kind = GhostKind.Player, lastSeen = Time.unscaledTime, lastTarget = entity.EntityTransform.position, hitHook = hitHook, vehicle = riddenMount };
+            // Out of the owned lists NOW: the periodic rescan would otherwise stream it once more and then emit a
+            // GhostRemove when it drops out, blinking it on every third cell that watches it.
+            _ownedCandidates.Remove(entity);
+            _ownedByMeshId.Remove(meshId);
             foreach (HashSet<string> streamed in _streamedToZone.Values)
                 streamed.Remove(meshId);
             Logging.Log("Mesh", $"Player {entity.CharacterName} demoted to ghost (owner {newOwnerZone}, silenced {silenced}, mounted={riddenMount != null})");
