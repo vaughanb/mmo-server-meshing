@@ -38,6 +38,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public const string ARG_USER = "-meshUser";
         public const string ARG_WALK_X = "-meshWalkX";
         public const string ARG_WALK_Z = "-meshWalkZ";
+        public const string ARG_MOUNT = "-meshMount";
 
 #if UNITY_EDITOR
         public const string PREF_ENABLE = "ServerMesh.AutoClient.Enabled";
@@ -46,6 +47,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public const string PREF_USER = "ServerMesh.AutoClient.User";
         public const string PREF_WALK_X = "ServerMesh.AutoClient.WalkX";
         public const string PREF_WALK_Z = "ServerMesh.AutoClient.WalkZ";
+        public const string PREF_MOUNT = "ServerMesh.AutoClient.Mount";
 #endif
 
         public enum Mode { none, walk, self, stand, pace, observe, fight }
@@ -65,6 +67,8 @@ namespace MultiplayerARPG.MMO.Mesh
         public float walkTargetX = 130f;
         [Tooltip("World Z to walk at (fight mode walks to (walkTargetX, walkTargetZ)).")]
         public float walkTargetZ = 0f;
+        [Tooltip("Use the first mount item in the inventory before the test (needs a MountItem in the character's bag).")]
+        public bool mountUp = false;
         [Tooltip("World X to walk back to after reaching walkTargetX (zone C).")]
         public float walkReturnX = 0f;
         [Tooltip("Seconds to wait after entering the map before starting the test.")]
@@ -94,6 +98,7 @@ namespace MultiplayerARPG.MMO.Mesh
             string user = ReadArg(args, ARG_USER, null);
             string walkX = ReadArg(args, ARG_WALK_X, null);
             string walkZ = ReadArg(args, ARG_WALK_Z, null);
+            bool mount = args.Contains(ARG_MOUNT);
 #if UNITY_EDITOR
             if (!enabled && EditorPrefs.GetBool(PREF_ENABLE, false))
             {
@@ -103,6 +108,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 user = user ?? EditorPrefs.GetString(PREF_USER, "meshtest");
                 walkX = walkX ?? EditorPrefs.GetString(PREF_WALK_X, "130");
                 walkZ = walkZ ?? EditorPrefs.GetString(PREF_WALK_Z, "0");
+                mount = mount || EditorPrefs.GetBool(PREF_MOUNT, false);
             }
 #endif
             if (!enabled)
@@ -116,6 +122,7 @@ namespace MultiplayerARPG.MMO.Mesh
             if (!string.IsNullOrEmpty(user)) { c.username = user; c.characterName = user + "Char"; } // names are global: derive from the user
             if (!string.IsNullOrEmpty(walkX) && float.TryParse(walkX, out float wx)) c.walkTargetX = wx;
             if (!string.IsNullOrEmpty(walkZ) && float.TryParse(walkZ, out float wz)) c.walkTargetZ = wz;
+            c.mountUp = mount;
         }
 
         private static string ReadArg(string[] args, string key, string fallback)
@@ -290,6 +297,9 @@ namespace MultiplayerARPG.MMO.Mesh
                 yield return new WaitForSecondsRealtime(1f);
             }
 
+            if (mountUp)
+                yield return MountUp();
+
             // 5) Test.
             switch (mode)
             {
@@ -331,6 +341,28 @@ namespace MultiplayerARPG.MMO.Mesh
             ClientMigrationController.Result r = ClientMigrationController.LastResult;
             Finished = true; Passed = r.connected && r.playerReady;
             Log($"RESULT self-migration: playerReady={r.playerReady} gap={r.playerReadyMs}ms jump={r.positionJump:0.##}m -> {(Passed ? "PASS" : "FAIL")}");
+        }
+
+        private IEnumerator MountUp()
+        {
+            Phase = "mount";
+            BasePlayerCharacterEntity self = GameInstance.PlayingCharacterEntity;
+            if (self == null) yield break;
+            if (self.PassengingVehicleEntity != null) { Log("Already mounted"); yield break; }
+            int index = -1;
+            for (int i = 0; i < self.NonEquipItems.Count; ++i)
+            {
+                if (self.NonEquipItems[i].GetItem() is IMountItem) { index = i; break; }
+            }
+            if (index < 0) { Log("No mount item in the inventory; continuing on foot"); yield break; }
+            bool sent = self.CallCmdUseItem(index);
+            float end = Time.realtimeSinceStartup + 10f;
+            while (Time.realtimeSinceStartup < end && (GameInstance.PlayingCharacterEntity == null || GameInstance.PlayingCharacterEntity.PassengingVehicleEntity == null))
+                yield return null;
+            self = GameInstance.PlayingCharacterEntity;
+            bool mounted = self != null && self.PassengingVehicleEntity != null;
+            Log($"Mount up: item slot {index} sent={sent} mounted={mounted}" + (mounted ? $" on '{self.PassengingVehicleEntity.Entity.name}' speed={self.GetMoveSpeed():0.#}" : ""));
+            yield return new WaitForSecondsRealtime(1f);
         }
 
         private IEnumerator RunWalk(float deadline)
@@ -432,6 +464,31 @@ namespace MultiplayerARPG.MMO.Mesh
                         swaps++;
                         Log($"'{name}' entity swapped (instance {prev} -> {inst}) at {pe.EntityTransform.position}");
                     }
+                    else if (!lastInstance.ContainsKey(name))
+                        Log($"Watching '{name}' from {pe.EntityTransform.position}");
+                    lastInstance[name] = inst;
+                }
+                foreach (VehicleEntity ve in FindObjectsByType<VehicleEntity>(FindObjectsSortMode.None))
+                {
+                    BaseGameEntity driver = ve.HasDriver ? ve.GetPassenger(0) : null; // GetPassenger indexes the seat map directly
+                    if (driver == null || ReferenceEquals(driver, GameInstance.PlayingCharacterEntity) || !(driver is BaseCharacterEntity dc) || string.IsNullOrEmpty(dc.CharacterName)) continue;
+                    string name = "mount of " + dc.CharacterName;
+                    presentNow.Add(name);
+                    int inst = ve.GetInstanceID();
+                    if (absentSince.TryGetValue(name, out float since))
+                    {
+                        float gapMs = (now - since) * 1000f;
+                        absences++; maxAbsenceMs = Mathf.Max(maxAbsenceMs, gapMs);
+                        absentSince.Remove(name);
+                        Log($"'{name}' absent for {gapMs:0} ms at {ve.EntityTransform.position}");
+                    }
+                    if (lastInstance.TryGetValue(name, out int prev) && prev != inst)
+                    {
+                        swaps++;
+                        Log($"'{name}' entity swapped (instance {prev} -> {inst}) at {ve.EntityTransform.position}");
+                    }
+                    else if (!lastInstance.ContainsKey(name))
+                        Log($"Watching '{name}' ({ve.name}) from {ve.EntityTransform.position}");
                     lastInstance[name] = inst;
                 }
                 foreach (string name in lastInstance.Keys)

@@ -195,6 +195,8 @@ namespace MultiplayerARPG.MMO.Mesh
         public byte extraMovementState;
         public int currentHp;
         public int maxHp;
+        public int mountEntityId;   // vehicle prefab entity id the owner is riding (0 = on foot)
+        public int mountLevel;
 
         public void Serialize(NetDataWriter writer)
         {
@@ -210,6 +212,8 @@ namespace MultiplayerARPG.MMO.Mesh
             writer.Put(extraMovementState);
             writer.Put(currentHp);
             writer.Put(maxHp);
+            writer.Put(mountEntityId);
+            writer.Put(mountLevel);
         }
 
         public void Deserialize(NetDataReader reader)
@@ -226,6 +230,8 @@ namespace MultiplayerARPG.MMO.Mesh
             extraMovementState = reader.GetByte();
             currentHp = reader.GetInt();
             maxHp = reader.GetInt();
+            mountEntityId = reader.GetInt();
+            mountLevel = reader.GetInt();
         }
     }
 

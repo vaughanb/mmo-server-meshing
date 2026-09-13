@@ -39,6 +39,8 @@ namespace MultiplayerARPG.MMO.Mesh
             public float resyncJump;        // seamless only: dead-reckoned stand-in vs where B spawned us (what the eye could see)
             public int framesWithoutCamera; // seamless only: frames during the gap with no rendering camera (must be 0)
             public int standIns;
+            public bool mountedBefore;      // the character was riding when the handoff started
+            public long mountedAfterMs;     // when the new entity was seen riding again (-1 = never during the swap)
         }
 
         public static Result LastResult;
@@ -49,6 +51,8 @@ namespace MultiplayerARPG.MMO.Mesh
             public GameObject go;
             public Vector3 velocity;
             public bool isLocalPlayer;
+            public bool isLocalVehicle;     // the local player's mount: parented to the local stand-in, moves with it
+            public BaseGameEntity source;
             public string modelName;
             public float bornAt;
         }
@@ -162,8 +166,11 @@ namespace MultiplayerARPG.MMO.Mesh
 
             // 1) Stand-ins for everything visible, made while the entities still exist.
             float localMoveSpeed = prevEntity != null ? prevEntity.GetMoveSpeed() : 0f;
+            bool mountedBefore = prevEntity != null && prevEntity.PassengingVehicleEntity != null;
+            long mountedAfterMs = -1;
             List<StandIn> standIns = CreateStandIns(prevEntity);
             StandIn localStandIn = standIns.Find(s => s.isLocalPlayer);
+            StandIn localVehicleStandIn = standIns.Find(s => s.isLocalVehicle);
             long tCapture = sw.ElapsedMilliseconds;
 
             // 2) Keep the controller / camera / HUD alive across the entity's death.
@@ -264,6 +271,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 yield return null;
             }
             long tPlayerReady = sw.ElapsedMilliseconds;
+            if (newEntity != null && newEntity.PassengingVehicleEntity != null)
+                mountedAfterMs = tPlayerReady;
             if (newEntity != null && keptController && controller != null)
             {
                 // Input resumes NOW on the new entity (it is already walking when the models swap). The HUD and
@@ -283,6 +292,7 @@ namespace MultiplayerARPG.MMO.Mesh
             //    character's data (stats arrive a few hundred ms after the spawn) so the re-created HUD never shows
             //    0/0 values. Then swap models and re-bind the controller — no pop, no flash.
             GameObject realModel = playerReady && newEntity.Model != null ? newEntity.Model.gameObject : null;
+            GameObject realVehicleModel = null;
             if (playerReady && localStandIn != null && localStandIn.go != null)
             {
                 if (realModel != null) realModel.SetActive(false);
@@ -292,7 +302,17 @@ namespace MultiplayerARPG.MMO.Mesh
                 while (newEntity != null)
                 {
                     float elapsed = Time.realtimeSinceStartup - t0;
-                    bool dataReady = newEntity.MaxHp > 0;
+                    // A rider's mount arrives a moment after the rider (re-owned or re-summoned by the new cell): keep
+                    // the mount stand-in until the real one exists, and hide the real one behind the stand-in meanwhile.
+                    bool riding = newEntity.PassengingVehicleEntity != null;
+                    if (riding && mountedAfterMs < 0)
+                        mountedAfterMs = sw.ElapsedMilliseconds;
+                    if (riding && realVehicleModel == null && localVehicleStandIn != null && newEntity.PassengingVehicleEntity.Entity.Model != null)
+                    {
+                        realVehicleModel = newEntity.PassengingVehicleEntity.Entity.Model.gameObject;
+                        realVehicleModel.SetActive(false);
+                    }
+                    bool dataReady = newEntity.MaxHp > 0 && (!mountedBefore || riding);
                     if (elapsed >= blend && (dataReady || elapsed >= blend + _manager.entityDataWaitSeconds))
                         break;
                     float remaining = Mathf.Max(blend - elapsed, Time.unscaledDeltaTime);
@@ -317,6 +337,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 ResetNotificationBadges(controller.UISceneGameplay);
             }
             if (realModel != null) realModel.SetActive(true);
+            if (realVehicleModel != null) realVehicleModel.SetActive(true);
             if (localStandIn != null && localStandIn.go != null)
             {
                 Destroy(localStandIn.go);
@@ -347,12 +368,14 @@ namespace MultiplayerARPG.MMO.Mesh
                 positionJump = playerReady ? Vector3.Distance(posBefore, posAfter) : -1f,
                 resyncJump = resyncJump, framesWithoutCamera = framesWithoutCamera, standIns = standIns.Count,
             };
+            LastResult.mountedBefore = mountedBefore;
+            LastResult.mountedAfterMs = mountedAfterMs;
             CompletedCount++;
             Logging.Log("Spike2",
                 $"Migration to {address}:{port} | SEAMLESS connected={connected} playerReady={playerReady} keptController={keptController} | " +
                 $"standIns={tCapture}ms stop={tStop}ms connected={tConnected}ms playerReady={tPlayerReady}ms settled={tSettled}ms retired={tFaded}ms | " +
                 $"pos {posBefore} -> {posAfter} (jump={LastResult.positionJump:0.##}m, resync={resyncJump:0.##}m) | " +
-                $"standIns={standIns.Count} framesWithoutCamera={framesWithoutCamera}");
+                $"standIns={standIns.Count} framesWithoutCamera={framesWithoutCamera} mounted={(mountedBefore ? (mountedAfterMs >= 0 ? mountedAfterMs + "ms" : "LOST") : "no")}");
         }
 
         /// <summary>
@@ -428,11 +451,25 @@ namespace MultiplayerARPG.MMO.Mesh
                 list.Add(new StandIn
                 {
                     go = clone,
+                    source = entity,
                     velocity = VelocityOf(entity),
                     isLocalPlayer = ReferenceEquals(entity, localEntity),
                     modelName = entity.Model.name,
                     bornAt = Time.unscaledTime,
                 });
+            }
+            // The local player's mount rides along with the local stand-in (input-predicted), not on its own velocity.
+            StandIn local = list.Find(s => s.isLocalPlayer);
+            BaseGameEntity localVehicle = localEntity != null && localEntity.PassengingVehicleEntity != null ? localEntity.PassengingVehicleEntity.Entity : null;
+            if (local != null && localVehicle != null)
+            {
+                StandIn v = list.Find(s => ReferenceEquals(s.source, localVehicle));
+                if (v != null && v.go != null)
+                {
+                    v.go.transform.SetParent(local.go.transform, true);
+                    v.velocity = Vector3.zero;
+                    v.isLocalVehicle = true;
+                }
             }
             root.SetActive(true);
             return list;

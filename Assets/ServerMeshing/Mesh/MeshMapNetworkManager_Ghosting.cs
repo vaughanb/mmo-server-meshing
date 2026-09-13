@@ -61,6 +61,8 @@ namespace MultiplayerARPG.MMO.Mesh
             public float lastSeen;
             public Vector3 lastTarget;
             public ReceiveDamageDelegate hitHook; // so a promoted puppet can drop its hit forwarding
+            public VehicleEntity vehicle;         // the mount this ghost rides (spawned here for a puppet, kept for a demoted player)
+            public bool mountPending;             // an async mount/dismount is in flight
         }
 
         private MeshLinkServer _linkServer;
@@ -271,8 +273,11 @@ namespace MultiplayerARPG.MMO.Mesh
                     if (DistanceToSharedEdge(pos, i) > ghostBandWidth)
                         continue;
                     string meshId = MeshEntityIdOf(entity);
+                    VehicleEntity mount = entity.PassengingVehicleEntity as VehicleEntity;
                     client.SendGhostSnapshot(new GhostSnapshotMessage
                     {
+                        mountEntityId = mount != null ? mount.EntityId : 0,
+                        mountLevel = mount != null ? mount.Level : 0,
                         kind = entity is BasePlayerCharacterEntity ? GhostKind.Player : GhostKind.Monster,
                         characterId = meshId,
                         entityId = entity.EntityId,
@@ -327,7 +332,11 @@ namespace MultiplayerARPG.MMO.Mesh
             if (ghost.entity != null)
             {
                 Logging.Log("Mesh", $"Ghost destroyed {ghost.kind} {ghost.entity.CharacterName} ({meshId}) reason={reason}");
+                VehicleEntity mount = ghost.entity.PassengingVehicleEntity as VehicleEntity;
+                if (mount == null) mount = ghost.vehicle;
                 ghost.entity.NetworkDestroy();
+                if (mount != null && mount.Identity != null && !mount.Identity.IsDestroyed)
+                    mount.NetworkDestroy();
             }
         }
 
@@ -336,14 +345,36 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (playerCharacter == null)
                 return;
-            if (_reservedArrivals.Remove(playerCharacter.Id) && playerCharacter.Identity != null)
+            if (_reservedArrivals.TryGetValue(playerCharacter.Id, out ReservedArrival reserved) && playerCharacter.Identity != null)
             {
+                _reservedArrivals.Remove(playerCharacter.Id);
                 // A fresh spawn is pushed to its owner at once. A re-owned entity would wait for the AOI's next pass
                 // (1 s): the kit's SetOwnerClient is deferred by the AOI (manuallyApplyOwnerChanges) and the owner's
                 // subscription only comes with that pass. Apply the owner now and subscribe the owner now.
                 Assets.SetObjectOwnerImmediately(playerCharacter.ObjectId, connectionId);
                 if (InterestManager != null)
                     InterestManager.NotifyNewObject(playerCharacter.Identity);
+                // The mount: the kept vehicle is re-owned by the driver the same way; otherwise re-summon from the
+                // saved data (what the kit's fresh-spawn path does). Summons likewise.
+                if (reserved.keepMount && reserved.mount != null && reserved.mount.Identity != null && !reserved.mount.Identity.IsDestroyed)
+                {
+                    Assets.SetObjectOwnerImmediately(reserved.mount.ObjectId, connectionId);
+                    if (InterestManager != null)
+                        InterestManager.NotifyNewObject(reserved.mount.Identity);
+                }
+                else if (!playerCharacter.IsDead() && playerCharacter.Mount.type != MountType.None)
+                {
+                    playerCharacter.SpawnMount(playerCharacter.Mount.type, playerCharacter.Mount.sourceId, playerCharacter.Mount.mountRemainsDuration, playerCharacter.Mount.level, playerCharacter.Mount.currentHp);
+                }
+                if (!playerCharacter.IsDead())
+                {
+                    for (int i = 0; i < playerCharacter.Summons.Count; ++i)
+                    {
+                        CharacterSummon summon = playerCharacter.Summons[i];
+                        summon.Summon(playerCharacter, summon.level, summon.summonRemainsDuration, summon.exp, summon.currentHp, summon.currentMp);
+                        playerCharacter.Summons[i] = summon;
+                    }
+                }
             }
             DestroyGhost(playerCharacter.Id, "promoted to real");
         }
@@ -353,7 +384,7 @@ namespace MultiplayerARPG.MMO.Mesh
         // Register, respawn RPC). Handing it the ghost entity means the arriving character IS the entity observers
         // here were already looking at: no swap, no pop.
 
-        private sealed class ReservedArrival { public BasePlayerCharacterEntity entity; public float time; }
+        private sealed class ReservedArrival { public BasePlayerCharacterEntity entity; public float time; public VehicleEntity mount; public bool keepMount; }
         private readonly Dictionary<string, ReservedArrival> _reservedArrivals = new Dictionary<string, ReservedArrival>();
         [Tooltip("If an arriving client never becomes ready, its promoted ghost is destroyed after this many seconds.")]
         public float reservedArrivalTimeout = 15f;
@@ -375,6 +406,24 @@ namespace MultiplayerARPG.MMO.Mesh
             id.IsGhost = false;
             id.OwnerZoneId = OwnZoneId;
             id.LastHandoffTime = Time.unscaledTime;
+            // The mount: keep the vehicle the ghost is riding when it is the one the saved data says (the usual case),
+            // otherwise drop it and let the registration re-summon from the saved data like a fresh spawn would.
+            VehicleEntity ridden = player.PassengingVehicleEntity as VehicleEntity;
+            bool keepMount = false;
+            if (ridden != null)
+            {
+                VehicleEntity wanted = null;
+                if (data.Mount.type != MountType.None)
+                    data.Mount.type.GetPrefab(data, data.Mount.sourceId, out wanted);
+                keepMount = wanted != null && wanted.EntityId == ridden.EntityId;
+                if (!keepMount)
+                {
+                    player.ExitVehicleAndForget();
+                    if (ridden.Identity != null && !ridden.Identity.IsDestroyed)
+                        ridden.NetworkDestroy();
+                    ridden = null;
+                }
+            }
             // Same setup the kit does for a fresh spawn, on the existing object.
             GameInstance.GetPlayerCharacterEntityHashAssetId(data.EntityId, out int metaDataId);
             GameInstance.SetupByMetaData(player, metaDataId);
@@ -383,8 +432,8 @@ namespace MultiplayerARPG.MMO.Mesh
             player.ForceMakeCaches();
             player.FillEmptySlots();
             player.Identity.DoNotDestroyWhenDisconnect = true;
-            _reservedArrivals[data.Id] = new ReservedArrival { entity = player, time = Time.unscaledTime };
-            Logging.Log("Mesh", $"Arrival {data.CharacterName} ({data.Id}) conn={connectionId}: ghost promoted in place at {player.EntityTransform.position}");
+            _reservedArrivals[data.Id] = new ReservedArrival { entity = player, time = Time.unscaledTime, mount = ridden, keepMount = keepMount };
+            Logging.Log("Mesh", $"Arrival {data.CharacterName} ({data.Id}) conn={connectionId}: ghost promoted in place at {player.EntityTransform.position} mount={(keepMount ? "kept" : data.Mount.type != MountType.None ? "re-summon" : "none")}");
             entity = player;
             return true;
         }
@@ -439,6 +488,9 @@ namespace MultiplayerARPG.MMO.Mesh
             entity.SetTargetEntity(null);
             entity.StopMove();
             Assets.SetObjectOwnerImmediately(entity.ObjectId, -1);
+            VehicleEntity riddenMount = entity.PassengingVehicleEntity as VehicleEntity;
+            if (riddenMount != null && riddenMount.Identity != null)
+                Assets.SetObjectOwnerImmediately(riddenMount.ObjectId, -1); // the mount survives the disconnect too
             MeshIdentity id = MeshIdentity.GetOrAdd(entity);
             id.MeshEntityId = meshId;
             id.IsGhost = true;
@@ -451,10 +503,10 @@ namespace MultiplayerARPG.MMO.Mesh
             entity.onReceiveDamage += hitHook;
             if (_ghosts.TryGetValue(meshId, out MeshGhost stale) && stale.entity != null && stale.entity != entity)
                 stale.entity.NetworkDestroy(); // should not happen (a ghost and the real one on the same cell), be safe
-            _ghosts[meshId] = new MeshGhost { entity = entity, kind = GhostKind.Player, lastSeen = Time.unscaledTime, lastTarget = entity.EntityTransform.position, hitHook = hitHook };
+            _ghosts[meshId] = new MeshGhost { entity = entity, kind = GhostKind.Player, lastSeen = Time.unscaledTime, lastTarget = entity.EntityTransform.position, hitHook = hitHook, vehicle = riddenMount };
             foreach (HashSet<string> streamed in _streamedToZone.Values)
                 streamed.Remove(meshId);
-            Logging.Log("Mesh", $"Player {entity.CharacterName} demoted to ghost (owner {newOwnerZone}, silenced {silenced})");
+            Logging.Log("Mesh", $"Player {entity.CharacterName} demoted to ghost (owner {newOwnerZone}, silenced {silenced}, mounted={riddenMount != null})");
         }
 
         internal void OnMeshNeighbourHello(long connectionId, string zoneId)
@@ -508,7 +560,97 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (gid != null && gid.OwnerZoneId != ownerZone)
                     gid.OwnerZoneId = ownerZone; // ownership moved (monster handoff between neighbours)
             }
+            SyncGhostMount(ghost, msg);
             SteerGhost(ghost, msg);
+        }
+
+        // ---- Mounts on ghosts ----
+        // A rider's snapshot names the vehicle prefab; the ghost cell spawns that vehicle (server-owned) and seats
+        // the ghost on it, so observers across the edge see the mount. Steering goes through the rider: the kit's
+        // ActiveMovement is the vehicle's movement while seated, so PointClickMovement/Teleport drive the mount.
+
+        private void SyncGhostMount(MeshGhost ghost, GhostSnapshotMessage msg)
+        {
+            if (ghost.entity == null || ghost.mountPending)
+                return;
+            VehicleEntity current = ghost.entity.PassengingVehicleEntity as VehicleEntity;
+            if (msg.mountEntityId != 0)
+            {
+                if (current != null && current.EntityId == msg.mountEntityId)
+                    return;
+                if (!GameInstance.VehicleEntities.TryGetValue(msg.mountEntityId, out VehicleEntity prefab) || prefab == null)
+                {
+                    WarnThrottled($"Ghost {msg.characterName} rides unknown vehicle entity id {msg.mountEntityId}; shown on foot");
+                    return;
+                }
+                MountGhost(ghost, prefab, msg.mountLevel, msg.position, msg.yaw).Forget();
+            }
+            else if (current != null)
+            {
+                DismountGhost(ghost).Forget();
+            }
+        }
+
+        private async UniTaskVoid MountGhost(MeshGhost ghost, VehicleEntity prefab, int level, Vector3 position, float yaw)
+        {
+            ghost.mountPending = true;
+            try
+            {
+                BaseCharacterEntity entity = ghost.entity;
+                if (entity == null)
+                    return;
+                if (entity.PassengingVehicleEntity != null)
+                {
+                    VehicleEntity old = entity.PassengingVehicleEntity as VehicleEntity;
+                    await entity.ExitVehicle();
+                    if (old != null && old.Identity != null && !old.Identity.IsDestroyed)
+                        old.NetworkDestroy();
+                }
+                LiteNetLibIdentity identity = Assets.NetworkSpawn(prefab.Identity.HashAssetId, position, Quaternion.Euler(0f, yaw, 0f));
+                VehicleEntity vehicle = identity != null ? identity.GetComponent<VehicleEntity>() : null;
+                if (vehicle == null)
+                {
+                    if (identity != null) identity.NetworkDestroy();
+                    return;
+                }
+                vehicle.Level = Mathf.Max(1, level);
+                vehicle.InitStats();
+                vehicle.CurrentHp = vehicle.MaxHp;
+                if (entity == null || entity.Identity == null || entity.Identity.IsDestroyed)
+                {
+                    vehicle.NetworkDestroy();
+                    return;
+                }
+                await entity.EnterVehicle(vehicle, 0);
+                ghost.vehicle = vehicle;
+                if (traceHandoffTiming)
+                    Logging.Log("Mesh", $"Ghost {entity.CharacterName} mounted on {prefab.name}");
+            }
+            finally
+            {
+                ghost.mountPending = false;
+            }
+        }
+
+        private async UniTaskVoid DismountGhost(MeshGhost ghost)
+        {
+            ghost.mountPending = true;
+            try
+            {
+                BaseCharacterEntity entity = ghost.entity;
+                VehicleEntity vehicle = entity != null ? entity.PassengingVehicleEntity as VehicleEntity : null;
+                if (entity != null)
+                    await entity.ExitVehicle();
+                if (vehicle != null && vehicle.Identity != null && !vehicle.Identity.IsDestroyed)
+                    vehicle.NetworkDestroy();
+                ghost.vehicle = null;
+                if (traceHandoffTiming && entity != null)
+                    Logging.Log("Mesh", $"Ghost {entity.CharacterName} dismounted");
+            }
+            finally
+            {
+                ghost.mountPending = false;
+            }
         }
 
         private BaseCharacterEntity SpawnGhostEntity(GhostSnapshotMessage msg)

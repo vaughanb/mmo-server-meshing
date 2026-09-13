@@ -1,0 +1,53 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0f6b96d4cdb9a4e40a9fa56a54f52e07, type: 3}
+  m_Name: TestMountItem-CE
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.MountItem
+  btnValidate: 0
+  id: testMountItem
+  defaultTitle: Test Mount Whistle
+  languageSpecificTitles: []
+  defaultDescription: 
+  languageSpecificDescriptions: []
+  category: 
+  icon: {fileID: 0}
+  sellPrice: 0
+  weight: 0
+  noSlotUsage: 0
+  maxStack: 1
+  overrideAmmoCapacity: 0
+  itemRefine: {fileID: 0}
+  lockDuration: 0
+  expireDurationUnit: 2
+  expireDuration: 0
+  dropModel: {fileID: 0}
+  dismantleReturnGold: 0
+  dismantleReturnItems: []
+  dismantleReturnCurrencies: []
+  restrictDealing: 0
+  restrictDropping: 0
+  restrictSelling: 0
+  deadDropProtected: 0
+  requirement:
+    availableClass: {fileID: 0}
+    availableClasses: []
+    availableFactions: []
+    level: 0
+    attributeAmounts: []
+  mountEntity: {fileID: 250242581902023355, guid: 32fd653acea533e4c938bf03a2d26359, type: 3}
+  mountDuration:
+    baseAmount: 0
+    amountIncreaseEachLevel: 0
+    rateIncreaseEachLevel: 0
+    amountIncreaseEachLevelByLevels: []
+  noMountDuration: 1
+  useItemCooldown: 0
