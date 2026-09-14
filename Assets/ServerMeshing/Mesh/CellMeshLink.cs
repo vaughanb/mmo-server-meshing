@@ -322,7 +322,7 @@ namespace MultiplayerARPG.MMO.Mesh
     }
 
     /// <summary>One authoritative snapshot of an entity that lives in the sender's border band.</summary>
-    public enum GhostKind : byte { Player = 0, Monster = 1, ItemDrop = 2 }
+    public enum GhostKind : byte { Player = 0, Monster = 1, ItemDrop = 2, Harvestable = 3 }
 
     public struct GhostSnapshotMessage : INetSerializable
     {

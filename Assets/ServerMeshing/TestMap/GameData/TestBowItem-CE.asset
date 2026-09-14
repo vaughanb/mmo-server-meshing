@@ -81,8 +81,8 @@ MonoBehaviour:
       amountIncreaseEachLevelByLevels: []
   harvestDamageAmount:
     baseAmount:
-      min: 0
-      max: 0
+      min: 5
+      max: 8
     amountIncreaseEachLevel:
       min: 0
       max: 0

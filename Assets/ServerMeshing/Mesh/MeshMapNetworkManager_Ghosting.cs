@@ -201,6 +201,10 @@ namespace MultiplayerARPG.MMO.Mesh
             _ownedDrops.Clear();
             _ownedDropSet.Clear();
             _ownedDropsByMeshId.Clear();
+            _ownedStatics.Clear();
+            _ownedStaticSet.Clear();
+            _ownedStaticsByMeshId.Clear();
+            _ghostStatics.Clear();
             _petGhostsBySummoner.Clear();
             _lentMonsters.Clear();
             _borrowedKillHooks.Clear();
@@ -273,6 +277,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 SendBandSnapshots();
                 ExpireGhosts();
                 ExpireGhostDrops();
+                ExpireGhostStatics();
                 ExpireReservedArrivals();
             }
         }
@@ -382,6 +387,8 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             else if (spawned is ItemDropEntity drop)
                 TrackOwnedDrop(drop);
+            else if (spawned is HarvestableEntity harvestable)
+                TrackOwnedStatic(harvestable);
         }
 
         private void OnAssetObjectDestroy(LiteNetLibIdentity identity)
@@ -441,6 +448,12 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (key != null && _ownedDropsByMeshId.TryGetValue(key, out ItemDropEntity dropUnder) && ReferenceEquals(dropUnder, drop))
                     _ownedDropsByMeshId.Remove(key);
             }
+            else if (entity is DamageableEntity stat && _ownedStaticSet.Remove(stat))
+            {
+                _ownedStatics.Remove(stat);
+                if (key != null && _ownedStaticsByMeshId.TryGetValue(key, out DamageableEntity statUnder) && ReferenceEquals(statUnder, stat))
+                    _ownedStaticsByMeshId.Remove(key);
+            }
         }
 
         /// <summary>What is already in the scene when the server starts (spawn areas spawn before the listeners exist).</summary>
@@ -461,7 +474,9 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             foreach (ItemDropEntity drop in FindObjectsByType<ItemDropEntity>(FindObjectsSortMode.None))
                 TrackOwnedDrop(drop);
-            Logging.Log("Mesh", $"Owned registry: {_ownedCandidates.Count} entities, {_ownedDrops.Count} drops at start");
+            foreach (HarvestableEntity harvestable in FindObjectsByType<HarvestableEntity>(FindObjectsSortMode.None))
+                TrackOwnedStatic(harvestable);
+            Logging.Log("Mesh", $"Owned registry: {_ownedCandidates.Count} entities, {_ownedDrops.Count} drops, {_ownedStatics.Count} statics at start");
         }
 
         /// <summary>Safety net for references no event released (rare). Runs every few seconds, touches only our own lists.</summary>
@@ -484,6 +499,14 @@ namespace MultiplayerARPG.MMO.Mesh
                     UntrackOwned(d);
             }
             _ownedDropSet.RemoveWhere(d => d == null);
+            for (int i = _ownedStatics.Count - 1; i >= 0; --i)
+            {
+                DamageableEntity st = _ownedStatics[i];
+                if (st == null) { _ownedStatics.RemoveAt(i); continue; }
+                if (st.Identity == null || st.Identity.IsDestroyed || MeshIdentity.IsGhostEntity(st))
+                    UntrackOwned(st);
+            }
+            _ownedStaticSet.RemoveWhere(st => st == null);
             _tmpIds.Clear();
             foreach (KeyValuePair<string, BaseCharacterEntity> kv in _ownedByMeshId)
                 if (kv.Value == null) _tmpIds.Add(kv.Key);
@@ -533,6 +556,9 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private void SendBandSnapshots()
         {
+            bool staticTick = Time.unscaledTime >= _nextStaticSnapshot;
+            if (staticTick)
+                _nextStaticSnapshot = Time.unscaledTime + Mathf.Max(ghostSnapshotInterval, staticSnapshotInterval);
             for (int i = 0; i < s_neighbourOffsets.Length; ++i)
             {
                 ServerMeshTestConfig.ZoneDefinition zone = meshConfig.GetZone(NeighbourCoord(i));
@@ -620,6 +646,37 @@ namespace MultiplayerARPG.MMO.Mesh
                         maxHp = item.amount,
                     });
                     streamed.Add(did.MeshEntityId);
+                }
+
+                // Static entities (harvestables) in the band: they never move, so a snapshot every staticSnapshotInterval
+                // carries their hp; they stay in the streamed set every tick so no GhostRemove follows a quiet tick.
+                for (int st = 0; st < _ownedStatics.Count; ++st)
+                {
+                    DamageableEntity stat = _ownedStatics[st];
+                    if (stat == null || stat.Identity == null || stat.Identity.IsDestroyed || stat.CurrentHp <= 0)
+                        continue;
+                    Vector3 spos = stat.EntityTransform.position;
+                    if (DistanceToSharedEdge(spos, i) > ghostBandWidth)
+                        continue;
+                    MeshIdentity sid = MeshIdentity.Get(stat);
+                    if (sid == null || string.IsNullOrEmpty(sid.MeshEntityId))
+                        continue;
+                    streamed.Add(sid.MeshEntityId);
+                    if (!staticTick && _tmpIds.Contains(sid.MeshEntityId))
+                        continue; // already known over there; the next slow tick refreshes it
+                    client.SendGhostSnapshot(new GhostSnapshotMessage
+                    {
+                        kind = GhostKind.Harvestable,
+                        characterId = sid.MeshEntityId,
+                        entityId = stat.EntityId,
+                        dataId = 0,
+                        characterName = string.Empty,
+                        level = stat is HarvestableEntity h ? h.SpawnLevel : 1,
+                        position = spos,
+                        yaw = stat.EntityTransform.eulerAngles.y,
+                        currentHp = stat.CurrentHp,
+                        maxHp = stat.MaxHp,
+                    });
                 }
 
                 // Anything streamed last tick but not now has left the band (or this cell, or died): tell the neighbour.
@@ -1031,6 +1088,11 @@ namespace MultiplayerARPG.MMO.Mesh
             if (msg.kind == GhostKind.ItemDrop)
             {
                 OnGhostDropSnapshot(connectionId, msg);
+                return;
+            }
+            if (msg.kind == GhostKind.Harvestable)
+            {
+                OnGhostStaticSnapshot(connectionId, msg);
                 return;
             }
             // Dedup: this cell owns the real thing → the neighbour's copy is stale; ignore.
@@ -1469,8 +1531,162 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (_ghostDrops.ContainsKey(meshId))
                 DestroyGhostDrop(meshId, "neighbour removed");
+            else if (_ghostStatics.ContainsKey(meshId))
+                DestroyGhostStatic(meshId, "neighbour removed");
             else
                 DestroyGhost(meshId, "neighbour removed");
+        }
+
+        // ---- Static entities across the edge (DESIGN §12: harvestables) ----
+        // A tree or an ore node a few metres past the line is spawned by the owning cell's spawn area only; without a
+        // puppet it is invisible from next door. Puppets are the same prefab, invincible and silent, refreshed once a
+        // second; a swing at one is forwarded like any hit, the owner's entity takes the damage and gives the yield —
+        // to the attacker's ghost over there, which MeshHarvestableEntity turns into a GiveItems action back to the
+        // attacker's real character (or a drop on the ground next to the node, ghosted back like any drop).
+
+        [Tooltip("Ghost harvestable entities (trees, ore) that stand within the band into the neighbour.")]
+        public bool ghostHarvestables = true;
+        [Tooltip("Seconds between snapshots of a static entity (position never changes; hp does).")]
+        public float staticSnapshotInterval = 1f;
+        private float _nextStaticSnapshot;
+
+        private sealed class GhostStatic { public DamageableEntity entity; public float lastSeen; public ReceiveDamageDelegate hitHook; }
+        private readonly Dictionary<string, GhostStatic> _ghostStatics = new Dictionary<string, GhostStatic>();
+        private readonly List<DamageableEntity> _ownedStatics = new List<DamageableEntity>();
+        private readonly HashSet<DamageableEntity> _ownedStaticSet = new HashSet<DamageableEntity>();
+        private readonly Dictionary<string, DamageableEntity> _ownedStaticsByMeshId = new Dictionary<string, DamageableEntity>();
+
+        /// <summary>
+        /// Harvestable prefabs of every spawn area in the map scene, including the areas outside our zone that the mesh
+        /// disables: a puppet of a neighbour's node is spawned from the same prefab and must be known here. The scene
+        /// loads after the server starts, so this runs lazily on the first unknown node (and rarely after).
+        /// </summary>
+        private float _nextHarvestablePrefabScan;
+        private bool RegisterHarvestablePrefabs()
+        {
+            if (Time.unscaledTime < _nextHarvestablePrefabScan)
+                return false;
+            _nextHarvestablePrefabScan = Time.unscaledTime + 5f;
+            int registered = 0;
+            foreach (HarvestableSpawnArea area in FindObjectsByType<HarvestableSpawnArea>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                if (area.prefab == null) continue;
+                GameInstance.AddHarvestableEntities(area.prefab);
+                Assets.RegisterPrefab(area.prefab.Identity);
+                registered++;
+            }
+            Logging.Log("Mesh", $"Harvestable prefabs registered for ghosting: {registered}");
+            return registered > 0;
+        }
+
+        private void TrackOwnedStatic(DamageableEntity entity)
+        {
+            if (!ghostHarvestables || entity == null || !entity.IsServer || entity.Identity == null || entity.Identity.IsDestroyed || MeshIdentity.IsGhostEntity(entity))
+                return;
+            MeshIdentity id = EnsureBirthMeshId(entity, entity.ObjectId);
+            _ownedStaticsByMeshId[id.MeshEntityId] = entity;
+            if (_ownedStaticSet.Add(entity))
+                _ownedStatics.Add(entity);
+        }
+
+        private void OnGhostStaticSnapshot(long connectionId, GhostSnapshotMessage msg)
+        {
+            if (!_ghostStatics.TryGetValue(msg.characterId, out GhostStatic ghost) || ghost.entity == null || ghost.entity.Identity == null || ghost.entity.Identity.IsDestroyed)
+            {
+                if (_recentlyRemoved.ContainsKey(msg.characterId))
+                    return;
+                HarvestableEntity prefab;
+                if ((!GameInstance.HarvestableEntities.TryGetValue(msg.entityId, out prefab) || prefab == null) && RegisterHarvestablePrefabs())
+                    GameInstance.HarvestableEntities.TryGetValue(msg.entityId, out prefab);
+                if (prefab == null)
+                {
+                    WarnThrottled($"Cannot spawn harvestable ghost: unknown entity id {msg.entityId} (no spawn area in this scene carries its prefab)");
+                    return;
+                }
+                // The spawn area that carries this prefab may sit outside our zone and be disabled here, so its prefab
+                // never reached the asset registry: register it now (idempotent).
+                Assets.RegisterPrefab(prefab.Identity);
+                Quaternion rot = Quaternion.Euler(0f, msg.yaw, 0f);
+                LiteNetLibIdentity identity;
+                _spawningPuppet = true;
+                try { identity = Assets.NetworkSpawn(prefab.Identity.HashAssetId, msg.position, rot); }
+                finally { _spawningPuppet = false; }
+                HarvestableEntity entity = identity != null ? identity.GetComponent<HarvestableEntity>() : null;
+                if (entity == null)
+                {
+                    if (identity != null) identity.NetworkDestroy();
+                    return;
+                }
+                MeshIdentity id = MeshIdentity.GetOrAdd(entity);
+                id.MeshEntityId = msg.characterId;
+                id.IsGhost = true;
+                id.OwnerZoneId = _neighbourZoneByConnection.TryGetValue(connectionId, out string z) ? z : "?";
+                GhostSuppression.Ghostify(entity, this, null, false, false, disableMovement: false);
+                entity.IsInvincible = true; // the local simulation never damages it: hits go to the owner
+                string capturedMeshId = msg.characterId;
+                ReceiveDamageDelegate hitHook = (target, position, fromPosition, instigator, damageAmounts, weapon, skill, skillLevel) =>
+                    ForwardGhostStaticHit(capturedMeshId, position, fromPosition, instigator, damageAmounts, weapon, skill, skillLevel);
+                entity.onReceiveDamage += hitHook;
+                ghost = new GhostStatic { entity = entity, hitHook = hitHook };
+                _ghostStatics[msg.characterId] = ghost;
+                if (traceHandoffTiming)
+                    Logging.Log("Mesh", $"Harvestable ghost spawned ({msg.characterId}) from zone {id.OwnerZoneId} at {msg.position} hp={msg.currentHp}/{msg.maxHp}");
+            }
+            ghost.lastSeen = Time.unscaledTime;
+            if (_neighbourZoneByConnection.TryGetValue(connectionId, out string ownerZone))
+            {
+                MeshIdentity gid = MeshIdentity.Get(ghost.entity);
+                if (gid != null && gid.OwnerZoneId != ownerZone)
+                    gid.OwnerZoneId = ownerZone;
+            }
+            int hp = Mathf.Max(1, msg.currentHp); // never 0 on a puppet: the owner's removal follows, not a local death
+            if (ghost.entity.CurrentHp != hp)
+                ghost.entity.CurrentHp = hp;
+        }
+
+        private void DestroyGhostStatic(string meshId, string reason)
+        {
+            if (!_ghostStatics.TryGetValue(meshId, out GhostStatic ghost))
+                return;
+            _ghostStatics.Remove(meshId);
+            _recentlyRemoved[meshId] = Time.unscaledTime;
+            if (ghost.entity != null)
+            {
+                if (ghost.hitHook != null)
+                    ghost.entity.onReceiveDamage -= ghost.hitHook;
+                ResetMeshIdentity(ghost.entity);
+                if (ghost.entity.Identity != null && !ghost.entity.Identity.IsDestroyed)
+                    ghost.entity.NetworkDestroy();
+            }
+            if (traceHandoffTiming)
+                Logging.Log("Mesh", $"Harvestable ghost destroyed ({meshId}) reason={reason}");
+        }
+
+        private void ExpireGhostStatics()
+        {
+            if (_ghostStatics.Count == 0)
+                return;
+            float stale = Mathf.Max(ghostStaleSeconds, staticSnapshotInterval * 3f + 1f);
+            _tmpIds.Clear();
+            foreach (KeyValuePair<string, GhostStatic> kv in _ghostStatics)
+            {
+                if (kv.Value.entity == null || kv.Value.entity.Identity == null || kv.Value.entity.Identity.IsDestroyed || Time.unscaledTime - kv.Value.lastSeen > stale)
+                    _tmpIds.Add(kv.Key);
+            }
+            for (int i = 0; i < _tmpIds.Count; ++i)
+                DestroyGhostStatic(_tmpIds[i], "stale");
+        }
+
+        private void ForwardGhostStaticHit(string targetMeshId, HitBoxPosition position, Vector3 fromPosition, EntityInfo instigator, Dictionary<DamageElement, MinMaxFloat> damageAmounts, CharacterItem weapon, BaseSkill skill, int skillLevel)
+        {
+            if (!forwardGhostHits || !_ghostStatics.TryGetValue(targetMeshId, out GhostStatic ghost) || ghost.entity == null)
+                return;
+            MeshIdentity id = MeshIdentity.Get(ghost.entity);
+            if (id == null || string.IsNullOrEmpty(id.OwnerZoneId) || !_linkClients.TryGetValue(id.OwnerZoneId, out MeshLinkClient link))
+                return;
+            link.SendGhostHit(BuildGhostHit(targetMeshId, position, fromPosition, instigator, damageAmounts, weapon, skill, skillLevel));
+            if (traceHandoffTiming)
+                Logging.Log("Mesh", $"Hit on harvestable ghost ({targetMeshId}) forwarded to zone {id.OwnerZoneId}");
         }
 
         // ---- Loot across the edge (DESIGN §12) ----
@@ -1914,6 +2130,13 @@ namespace MultiplayerARPG.MMO.Mesh
             MeshIdentity id = MeshIdentity.Get(ghost.entity);
             if (id == null || string.IsNullOrEmpty(id.OwnerZoneId) || !_linkClients.TryGetValue(id.OwnerZoneId, out MeshLinkClient link))
                 return;
+            link.SendGhostHit(BuildGhostHit(targetMeshId, position, fromPosition, instigator, damageAmounts, weapon, skill, skillLevel));
+            if (traceHandoffTiming)
+                Logging.Log("Mesh", $"Hit on ghost {ghost.entity.CharacterName} ({targetMeshId}) forwarded to zone {id.OwnerZoneId}");
+        }
+
+        private static GhostHitMessage BuildGhostHit(string targetMeshId, HitBoxPosition position, Vector3 fromPosition, EntityInfo instigator, Dictionary<DamageElement, MinMaxFloat> damageAmounts, CharacterItem weapon, BaseSkill skill, int skillLevel)
+        {
             string instigatorMeshId = string.Empty;
             if (instigator != null)
             {
@@ -1946,9 +2169,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     i++;
                 }
             }
-            link.SendGhostHit(msg);
-            if (traceHandoffTiming)
-                Logging.Log("Mesh", $"Hit on ghost {ghost.entity.CharacterName} ({targetMeshId}) forwarded to zone {id.OwnerZoneId}");
+            return msg;
         }
 
         internal void OnGhostHit(long connectionId, GhostHitMessage msg)
@@ -1960,7 +2181,13 @@ namespace MultiplayerARPG.MMO.Mesh
                 target = owned;
             else if (ServerUserHandlers.TryGetPlayerCharacterById(msg.targetMeshId, out IPlayerCharacterData data) && data is BaseCharacterEntity ce)
                 target = ce;
-            if (target == null || target.IsDead())
+            if (target == null)
+            {
+                if (_ownedStaticsByMeshId.TryGetValue(msg.targetMeshId, out DamageableEntity stat) && stat != null && stat.CurrentHp > 0)
+                    ApplyGhostHitToStatic(stat, msg);
+                return;
+            }
+            if (target.IsDead())
                 return;
 
             Dictionary<DamageElement, MinMaxFloat> damageAmounts = new Dictionary<DamageElement, MinMaxFloat>();
@@ -2567,6 +2794,28 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             Logging.LogWarning("Mesh", $"Handoff FAILED {pending.name} -> zone {fromZone}: {msg.reason}; releasing the demoted puppet here");
             ReleaseDemotedHandoff(msg.characterId, "handoff failed: " + msg.reason);
+        }
+
+        /// <summary>A forwarded swing at one of our harvestables: the entity takes it as the kit would, with the attacker as we know it.</summary>
+        private void ApplyGhostHitToStatic(DamageableEntity stat, GhostHitMessage msg)
+        {
+            Dictionary<DamageElement, MinMaxFloat> damageAmounts = new Dictionary<DamageElement, MinMaxFloat>();
+            for (int i = 0; i < msg.elementDataIds.Length; ++i)
+            {
+                DamageElement element = null;
+                if (msg.elementDataIds[i] == 0 || !GameInstance.DamageElements.TryGetValue(msg.elementDataIds[i], out element) || element == null)
+                    element = GameInstance.Singleton.DefaultDamageElement;
+                if (element == null) continue;
+                damageAmounts[element] = new MinMaxFloat { min = msg.mins[i], max = msg.maxs[i] };
+            }
+            BaseSkill skill = null;
+            if (msg.skillDataId != 0)
+                GameInstance.Skills.TryGetValue(msg.skillDataId, out skill);
+            EntityInfo instigator = ResolveInstigator(msg.instigatorMeshId);
+            int hpBefore = stat.CurrentHp;
+            stat.ApplyDamage((HitBoxPosition)msg.hitBoxPosition, msg.fromPosition, instigator, damageAmounts, msg.hasWeapon ? msg.weapon : CharacterItem.Empty, skill, msg.skillLevel, msg.randomSeed);
+            if (traceHandoffTiming)
+                Logging.Log("Mesh", $"Forwarded hit applied to harvestable ({msg.targetMeshId}) by {msg.instigatorMeshId}: {hpBefore} -> {stat.CurrentHp}");
         }
 
         /// <summary>Destination side: tell the origin its character registered here.</summary>

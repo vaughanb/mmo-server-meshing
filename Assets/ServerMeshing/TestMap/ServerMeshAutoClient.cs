@@ -52,7 +52,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public const string PREF_PET = "ServerMesh.AutoClient.Pet";
 #endif
 
-        public enum Mode { none, walk, self, stand, pace, observe, fight, pvp }
+        public enum Mode { none, walk, self, stand, pace, observe, fight, pvp, harvest }
 
         [Header("Session")]
         public string username = "meshtest";
@@ -350,6 +350,9 @@ namespace MultiplayerARPG.MMO.Mesh
                     break;
                 case Mode.pvp:
                     yield return RunPvp(deadline);
+                    break;
+                case Mode.harvest:
+                    yield return RunHarvest(deadline);
                     break;
                 case Mode.fight:
                     yield return RunFight(deadline);
@@ -745,6 +748,91 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             Log($"RESULT pvp: target='{targetName}' attacks={attacks} castsSent={castsSent} castsRefused={castsRefused} targetHurt={hurt} targetHp {targetHpStart}->{minTargetHp} -> {(attacks + castsSent + castsRefused > 0 ? "PASS" : "FAIL")}");
             Finished = true; Passed = attacks + castsSent + castsRefused > 0;
+        }
+
+        /// <summary>
+        /// Swing at the nearest harvestable node BEYOND the line (a ghost of the neighbour's node) from our side and
+        /// report whether the node lost hp, what came into the bag and how much exp — the yield must reach the real
+        /// character here although the node and its harvest logic live on the other cell.
+        /// </summary>
+        private IEnumerator RunHarvest(float deadline)
+        {
+            Phase = "harvest";
+            _walkZOverride = walkTargetZ;
+            bool reached = false;
+            yield return WalkTo(walkTargetX, deadline, ClientMigrationController.CompletedCount, r => reached = r);
+            _walkZOverride = null;
+            if (!reached) { Fail("never reached the harvest position"); yield break; }
+            BasePlayerCharacterEntity self = GameInstance.PlayingCharacterEntity;
+            float holdX = observeGhostBeyondX + 0.9f;
+            int expStart = self.Exp, levelStart = self.Level;
+            Dictionary<int, int> bagStart = new Dictionary<int, int>();
+            foreach (CharacterItem ci in self.NonEquipItems) { if (ci.IsEmptySlot()) continue; bagStart[ci.dataId] = (bagStart.TryGetValue(ci.dataId, out int n) ? n : 0) + ci.amount; }
+            float end = Time.realtimeSinceStartup + 120f, swingUntil = -1f;
+            float nextAttack = 0f, nextLog = 0f;
+            int attacks = 0, nodeHpStart = -1, minNodeHp = int.MaxValue, nodesSeen = 0;
+            HashSet<int> seen = new HashSet<int>();
+            while (Time.realtimeSinceStartup < end && (swingUntil < 0f || Time.realtimeSinceStartup < swingUntil))
+            {
+                self = GameInstance.PlayingCharacterEntity;
+                if (self == null || self.IsDead()) break;
+                HarvestableEntity target = null; float best = float.MaxValue;
+                foreach (HarvestableEntity he in FindObjectsByType<HarvestableEntity>(FindObjectsSortMode.None))
+                {
+                    if (he == null || !he.gameObject.activeInHierarchy || he.EntityTransform.position.x < observeGhostBeyondX) continue;
+                    if (seen.Add(he.GetInstanceID())) { nodesSeen++; Log($"harvest: node seen at {he.EntityTransform.position} hp={he.CurrentHp}/{he.MaxHp}"); }
+                    float d = Vector3.Distance(self.EntityTransform.position, he.EntityTransform.position);
+                    if (d < best) { best = d; target = he; }
+                }
+                float now = Time.realtimeSinceStartup;
+                float attackRange = Mathf.Max(1f, self.GetAttackDistance(false) - 0.3f) + 0.6f; // the node's collider is a metre wide
+                if (target != null)
+                {
+                    if (nodeHpStart < 0) nodeHpStart = target.CurrentHp;
+                    minNodeHp = Mathf.Min(minNodeHp, target.CurrentHp);
+                    if (best <= attackRange + 0.5f && swingUntil < 0f) swingUntil = now + 40f;
+                    if (best > attackRange)
+                    {
+                        if (self.EntityTransform.position.x < holdX)
+                        {
+                            Vector3 dest = target.EntityTransform.position; dest.x = Mathf.Min(dest.x, holdX);
+                            self.PointClickMovement(dest);
+                        }
+                        else self.StopMove();
+                    }
+                    else if (now >= nextAttack)
+                    {
+                        nextAttack = now + 0.6f;
+                        self.StopMove();
+                        Vector3 toTarget = target.EntityTransform.position - self.EntityTransform.position; toTarget.y = 0f;
+                        if (toTarget.sqrMagnitude > 0.001f) self.SetLookRotation(Quaternion.LookRotation(toTarget.normalized), true);
+                        self.SetTargetEntity(target);
+                        bool isLeftHand = false;
+                        self.AimPosition = self.GetAttackAimPosition(ref isLeftHand, target.EntityTransform.position + Vector3.up);
+                        WeaponHandlingState whs = WeaponHandlingState.None;
+                        self.Attack(ref whs);
+                        attacks++;
+                    }
+                }
+                if (now >= nextLog)
+                {
+                    nextLog = now + 5f;
+                    Log($"harvest: node={(target != null ? target.EntityTransform.position.ToString() : "none beyond the line")} dist={(target != null ? best : -1f):0.#} range={attackRange:0.#} attacks={attacks} nodeHp={(target != null ? target.CurrentHp : -1)} exp={self.Exp} selfX={self.EntityTransform.position.x:0.#}");
+                }
+                yield return null;
+            }
+            self = GameInstance.PlayingCharacterEntity;
+            List<string> gained = new List<string>();
+            if (self != null)
+            {
+                Dictionary<int, int> bagEnd = new Dictionary<int, int>();
+                foreach (CharacterItem ci in self.NonEquipItems) { if (ci.IsEmptySlot()) continue; bagEnd[ci.dataId] = (bagEnd.TryGetValue(ci.dataId, out int n) ? n : 0) + ci.amount; }
+                foreach (KeyValuePair<int, int> kv in bagEnd) { int before = bagStart.TryGetValue(kv.Key, out int b) ? b : 0; if (kv.Value > before) gained.Add($"{kv.Key}x{kv.Value - before}"); }
+            }
+            int expGain = self != null ? (self.Level > levelStart ? self.Exp + 1 : self.Exp - expStart) : 0;
+            bool hurt = nodeHpStart > 0 && minNodeHp < nodeHpStart;
+            Log($"RESULT harvest: nodesSeen={nodesSeen} attacks={attacks} nodeHurt={hurt} nodeHp {nodeHpStart}->{minNodeHp} itemsGained=[{string.Join(",", gained)}] exp+{expGain} -> {(nodesSeen > 0 && attacks > 0 ? "PASS" : "FAIL")}");
+            Finished = true; Passed = nodesSeen > 0 && attacks > 0;
         }
 
         private IEnumerator RunFight(float deadline)

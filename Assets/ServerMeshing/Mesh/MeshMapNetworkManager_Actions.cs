@@ -12,6 +12,7 @@
 // clients run the kit's normal non-owner path. A target object id means nothing on another cell: it travels as a
 // mesh id and is re-resolved on arrival. Damage, buffs and resources are untouched: they happen on the owner.
 using System.Collections.Generic;
+using Cysharp.Threading.Tasks;
 using LiteNetLib.Utils;
 using LiteNetLibManager;
 using UnityEngine;
@@ -21,6 +22,7 @@ namespace MultiplayerARPG.MMO.Mesh
     public enum GhostActionKind : ushort
     {
         ApplyBuff = 1,
+        GiveItems = 2,   // a harvest yield earned by a ghost: item dataId, amount, exp (see MeshHarvestableEntity)
     }
 
     public enum GhostReplayKind : ushort
@@ -45,6 +47,7 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             _ghostActionHandlers.Clear();
             _ghostActionHandlers[(ushort)GhostActionKind.ApplyBuff] = HandleApplyBuffAction;
+            _ghostActionHandlers[(ushort)GhostActionKind.GiveItems] = HandleGiveItemsAction;
             _ghostReplayHandlers.Clear();
             _ghostReplayHandlers[(ushort)GhostReplayKind.Attack] = HandleAttackReplay;
             _ghostReplayHandlers[(ushort)GhostReplayKind.AttackTrigger] = HandleAttackTriggerReplay;
@@ -213,6 +216,36 @@ namespace MultiplayerARPG.MMO.Mesh
                 Logging.Log("Mesh", $"Ghost action ApplyBuff applied on {target.CharacterName}: {type} {dataId} lv{level} (buffs={target.Buffs.Count})");
         }
 
+        private void HandleGiveItemsAction(BaseCharacterEntity target, EntityInfo instigator, NetDataReader payload)
+        {
+            int dataId = payload.GetInt();
+            int amount = payload.GetInt();
+            int exp = payload.GetInt();
+            if (amount > 0 && dataId != 0)
+            {
+                CharacterItem item = CharacterItem.Create(dataId, 1, amount);
+                if (target.IncreasingItemsWillOverwhelming(dataId, amount))
+                    ItemDropEntity.Drop(target, RewardGivenType.Harvestable, item, new[] { target.Id }).Forget(); // as the kit does when the bag is full
+                else
+                {
+                    target.IncreaseItems(item, characterItem => target.OnRewardItem(RewardGivenType.Harvestable, characterItem));
+                    target.FillEmptySlots();
+                }
+            }
+            if (exp > 0)
+                target.RewardExp(exp, 1, RewardGivenType.Harvestable, 1, 1);
+            if (traceHandoffTiming)
+                Logging.Log("Mesh", $"Ghost action GiveItems applied on {target.CharacterName}: item {dataId} x{amount}, exp {exp}");
+        }
+
+        /// <summary>Entity-side helper: the payload of a GiveItems action.</summary>
+        internal static void WriteGiveItemsPayload(NetDataWriter writer, int dataId, int amount, int exp)
+        {
+            writer.Put(dataId);
+            writer.Put(amount);
+            writer.Put(exp);
+        }
+
         /// <summary>Entity-side helper: the payload of an ApplyBuff action.</summary>
         internal static void WriteApplyBuffPayload(NetDataWriter writer, int dataId, BuffType type, int level, CharacterItem weapon)
         {
@@ -227,6 +260,7 @@ namespace MultiplayerARPG.MMO.Mesh
         internal void ForwardGhostReplay(BaseCharacterEntity actor, GhostReplayKind kind, uint targetObjectId, System.Action<NetDataWriter> writePayload) { }
         internal void OnGhostReplay(GhostReplayMessage msg) { }
         internal static void WriteApplyBuffPayload(NetDataWriter writer, int dataId, BuffType type, int level, CharacterItem weapon) { }
+        internal static void WriteGiveItemsPayload(NetDataWriter writer, int dataId, int amount, int exp) { }
 #endif
     }
 }
