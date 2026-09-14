@@ -31,6 +31,22 @@ namespace MultiplayerARPG.MMO.Mesh
         public const ushort GhostLoot = 110;
         public const ushort GhostKill = 111;
         public const ushort GhostAction = 112;
+        public const ushort HandoffAck = 113;
+    }
+
+    /// <summary>
+    /// Destination -> origin: the character named in a HandoffNotice registered here (ok) or never will (a reservation
+    /// or notice that expired unclaimed). The origin logs the end-to-end time and releases the demoted puppet at once
+    /// on failure instead of waiting for stale expiry.
+    /// </summary>
+    public struct HandoffAckMessage : INetSerializable
+    {
+        public string characterId;
+        public bool ok;
+        public string reason;
+        public int arrivalMs;   // ms between the notice and the registration on the destination (ok only)
+        public void Serialize(NetDataWriter writer) { writer.Put(characterId); writer.Put(ok); writer.Put(reason ?? string.Empty); writer.Put(arrivalMs); }
+        public void Deserialize(NetDataReader reader) { characterId = reader.GetString(); ok = reader.GetBool(); reason = reader.GetString(); arrivalMs = reader.GetInt(); }
     }
 
     /// <summary>
@@ -333,6 +349,7 @@ namespace MultiplayerARPG.MMO.Mesh
             RegisterMessageHandler(MeshLinkMessageTypes.GhostSnapshot, HandleGhostSnapshot);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostRemove, HandleGhostRemove);
             RegisterMessageHandler(MeshLinkMessageTypes.HandoffNotice, HandleHandoffNotice);
+            RegisterMessageHandler(MeshLinkMessageTypes.HandoffAck, HandleHandoffAck);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostHit, HandleGhostHit);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostHitResult, HandleGhostHitResult);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostReward, HandleGhostReward);
@@ -387,7 +404,13 @@ namespace MultiplayerARPG.MMO.Mesh
         private void HandleHandoffNotice(MessageHandlerData messageHandler)
         {
             HandoffNoticeMessage msg = messageHandler.ReadMessage<HandoffNoticeMessage>();
-            _manager.OnHandoffNotice(msg);
+            _manager.OnHandoffNotice(messageHandler.ConnectionId, msg);
+        }
+
+        private void HandleHandoffAck(MessageHandlerData messageHandler)
+        {
+            HandoffAckMessage msg = messageHandler.ReadMessage<HandoffAckMessage>();
+            _manager.OnHandoffAck(messageHandler.ConnectionId, msg);
         }
 
         private void HandleGhostHit(MessageHandlerData messageHandler)
@@ -509,6 +532,11 @@ namespace MultiplayerARPG.MMO.Mesh
         public void SendGhostSnapshot(GhostSnapshotMessage msg)
         {
             Send(MeshLinkMessageTypes.GhostSnapshot, msg, SNAPSHOT_CHANNEL, DeliveryMethod.Sequenced);
+        }
+
+        public void SendHandoffAck(HandoffAckMessage msg)
+        {
+            Send(MeshLinkMessageTypes.HandoffAck, msg);
         }
 
         public void SendHandoffNotice(string characterId, string userId)

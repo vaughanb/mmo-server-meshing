@@ -161,7 +161,7 @@ namespace MultiplayerARPG.MMO.Mesh
         /// </summary>
         private IEnumerator HeadlessGuards()
         {
-            WaitForSecondsRealtime wait = new WaitForSecondsRealtime(1f);
+            WaitForSecondsRealtime wait = new WaitForSecondsRealtime(0.1f); // the manager is created with the player entity; every frame until then is one NRE
             while (true)
             {
                 foreach (UtilsComponents.RaycastButtonManager3D m in FindObjectsByType<UtilsComponents.RaycastButtonManager3D>(FindObjectsInactive.Include, FindObjectsSortMode.None))

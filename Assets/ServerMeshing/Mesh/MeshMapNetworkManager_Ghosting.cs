@@ -128,6 +128,8 @@ namespace MultiplayerARPG.MMO.Mesh
             _killHooks.Clear();
             _reservedArrivals.Clear();
             _incomingHandoffs.Clear();
+            _incomingHandoffFrom.Clear();
+            _pendingHandoffAcks.Clear();
         }
 
         /// <summary>
@@ -183,6 +185,7 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 _nextSnapshotTime = Time.unscaledTime + Mathf.Max(0.02f, ghostSnapshotInterval);
                 MonsterHandoffTick();
+                TickHandoffAcks();
                 SendBandSnapshots();
                 ExpireGhosts();
                 ExpireGhostDrops();
@@ -420,7 +423,7 @@ namespace MultiplayerARPG.MMO.Mesh
             _tmpIds.Clear();
             foreach (KeyValuePair<string, MeshGhost> kv in _ghosts)
             {
-                if (kv.Value.entity == null || (!kv.Value.reserved && Time.unscaledTime - kv.Value.lastSeen > ghostStaleSeconds))
+                if (kv.Value.entity == null || (!kv.Value.reserved && !IsAwaitingHandoffAck(kv.Key, kv.Value) && Time.unscaledTime - kv.Value.lastSeen > ghostStaleSeconds))
                     _tmpIds.Add(kv.Key);
             }
             for (int i = 0; i < _tmpIds.Count; ++i)
@@ -478,6 +481,8 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (playerCharacter == null)
                 return;
+            AckHandoffArrival(playerCharacter.Id, playerCharacter.CharacterName);
+            _pendingHandoffAcks.Remove(playerCharacter.Id); // it is ours again (a handoff back before the ack, or a fresh login here)
             if (_reservedArrivals.TryGetValue(playerCharacter.Id, out ReservedArrival reserved) && playerCharacter.Identity != null)
             {
                 _reservedArrivals.Remove(playerCharacter.Id);
@@ -611,6 +616,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (!string.IsNullOrEmpty(r.userId) && _pendingSpawnPlayerCharactersByUserId.TryGetValue(r.userId, out IPlayerCharacterData pending) && ReferenceEquals(pending, r.entity))
                     _pendingSpawnPlayerCharactersByUserId.TryRemove(r.userId, out _);
                 Logging.LogWarning("Mesh", $"Arrival {_tmpIds[i]} was never claimed by its client; the reserved puppet is destroyed");
+                AckHandoffFailed(_tmpIds[i], "arrival never claimed by its client");
                 if (_ghosts.TryGetValue(_tmpIds[i], out MeshGhost g) && ReferenceEquals(g.entity, r.entity))
                     DestroyGhost(_tmpIds[i], "arrival never claimed");
                 else if (r.entity != null && r.entity.Identity != null && !r.entity.Identity.IsDestroyed)
@@ -1774,9 +1780,144 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private readonly Dictionary<string, float> _incomingHandoffs = new Dictionary<string, float>(); // characterId -> notice time
 
-        internal void OnHandoffNotice(HandoffNoticeMessage msg)
+        // ---- Handoff acknowledgement (DESIGN §11) ----
+        // The origin learns that its handoff completed (the character registered on the destination) or failed (the
+        // client never claimed it), instead of inferring either from silence. Until the ack (or its timeout) the
+        // demoted puppet and its pets are exempt from stale expiry, so a slow arrival never blinks them on the cell the
+        // player just left; a failed handoff releases them at once.
+
+        private sealed class IncomingHandoff { public string fromZone; public float time; }
+        private sealed class PendingHandoffAck { public string zone; public string name; public float startTime; public float sentTime; }
+        private readonly Dictionary<string, IncomingHandoff> _incomingHandoffFrom = new Dictionary<string, IncomingHandoff>(); // characterId -> who announced it
+        private readonly Dictionary<string, PendingHandoffAck> _pendingHandoffAcks = new Dictionary<string, PendingHandoffAck>(); // characterId -> our handoff awaiting the destination's ack
+
+        [Tooltip("Seconds after 'Handoff SENT' without the destination's ack before the demoted puppet is released and a warning logged.")]
+        public float handoffAckTimeoutSeconds = 5f;
+
+        internal void OnHandoffNotice(long connectionId, HandoffNoticeMessage msg)
         {
             _incomingHandoffs[msg.characterId] = Time.unscaledTime;
+            _incomingHandoffFrom[msg.characterId] = new IncomingHandoff
+            {
+                fromZone = _neighbourZoneByConnection.TryGetValue(connectionId, out string z) ? z : null,
+                time = Time.unscaledTime,
+            };
+        }
+
+        /// <summary>Origin side: remember a handoff we sent so the destination's ack can be matched and timed.</summary>
+        internal void RegisterPendingHandoffAck(string characterId, string name, string zone, float startTime)
+        {
+            _pendingHandoffAcks[characterId] = new PendingHandoffAck { zone = zone, name = name, startTime = startTime, sentTime = Time.unscaledTime };
+        }
+
+        internal bool IsNeighbourLinked(string zoneId)
+        {
+            return _linkClients.TryGetValue(zoneId, out MeshLinkClient link) && link.IsConnected;
+        }
+
+        internal void OnHandoffAck(long connectionId, HandoffAckMessage msg)
+        {
+            if (!IsServer || !_pendingHandoffAcks.TryGetValue(msg.characterId, out PendingHandoffAck pending))
+                return;
+            _pendingHandoffAcks.Remove(msg.characterId);
+            string fromZone = _neighbourZoneByConnection.TryGetValue(connectionId, out string z) ? z : "?";
+            if (msg.ok)
+            {
+                Logging.Log("Mesh", $"Handoff ACK {pending.name} by zone {fromZone}: registered {msg.arrivalMs} ms after the notice, {(Time.unscaledTime - pending.startTime) * 1000f:0} ms after START");
+                return;
+            }
+            Logging.LogWarning("Mesh", $"Handoff FAILED {pending.name} -> zone {fromZone}: {msg.reason}; releasing the demoted puppet here");
+            ReleaseDemotedHandoff(msg.characterId, "handoff failed: " + msg.reason);
+        }
+
+        /// <summary>Destination side: tell the origin its character registered here.</summary>
+        private void AckHandoffArrival(string characterId, string characterName)
+        {
+            if (!_incomingHandoffFrom.TryGetValue(characterId, out IncomingHandoff incoming))
+                return;
+            _incomingHandoffFrom.Remove(characterId);
+            _incomingHandoffs.Remove(characterId);
+            SendHandoffAck(incoming.fromZone, new HandoffAckMessage
+            {
+                characterId = characterId,
+                ok = true,
+                reason = string.Empty,
+                arrivalMs = Mathf.RoundToInt((Time.unscaledTime - incoming.time) * 1000f),
+            });
+        }
+
+        /// <summary>Destination side: the announced character will not register here.</summary>
+        private void AckHandoffFailed(string characterId, string reason)
+        {
+            if (!_incomingHandoffFrom.TryGetValue(characterId, out IncomingHandoff incoming))
+                return;
+            _incomingHandoffFrom.Remove(characterId);
+            _incomingHandoffs.Remove(characterId);
+            SendHandoffAck(incoming.fromZone, new HandoffAckMessage { characterId = characterId, ok = false, reason = reason, arrivalMs = 0 });
+        }
+
+        private void SendHandoffAck(string zoneId, HandoffAckMessage msg)
+        {
+            if (!string.IsNullOrEmpty(zoneId) && _linkClients.TryGetValue(zoneId, out MeshLinkClient client) && client.IsConnected)
+                client.SendHandoffAck(msg);
+        }
+
+        /// <summary>A ghost that is our own demoted handoff (or a pet demoted with it) still waiting for the ack.</summary>
+        private bool IsAwaitingHandoffAck(string meshId, MeshGhost ghost)
+        {
+            if (_pendingHandoffAcks.Count == 0)
+                return false;
+            if (_pendingHandoffAcks.ContainsKey(meshId))
+                return true;
+            return ghost.kind == GhostKind.Monster && !string.IsNullOrEmpty(ghost.summonerMeshId) && _pendingHandoffAcks.ContainsKey(ghost.summonerMeshId);
+        }
+
+        /// <summary>The handoff did not complete: the demoted puppet and the pets demoted with it go now.</summary>
+        private void ReleaseDemotedHandoff(string characterId, string reason)
+        {
+            if (_ghosts.TryGetValue(characterId, out MeshGhost g) && !g.reserved)
+                DestroyGhost(characterId, reason);
+            _tmpIds.Clear();
+            foreach (KeyValuePair<string, MeshGhost> kv in _ghosts)
+            {
+                if (kv.Value.kind == GhostKind.Monster && string.Equals(kv.Value.summonerMeshId, characterId) && !kv.Value.reserved)
+                    _tmpIds.Add(kv.Key);
+            }
+            for (int i = 0; i < _tmpIds.Count; ++i)
+                DestroyGhost(_tmpIds[i], reason);
+        }
+
+        private void TickHandoffAcks()
+        {
+            if (_pendingHandoffAcks.Count > 0)
+            {
+                _tmpIds.Clear();
+                foreach (KeyValuePair<string, PendingHandoffAck> kv in _pendingHandoffAcks)
+                {
+                    if (Time.unscaledTime - kv.Value.sentTime > handoffAckTimeoutSeconds)
+                        _tmpIds.Add(kv.Key);
+                }
+                for (int i = 0; i < _tmpIds.Count; ++i)
+                {
+                    PendingHandoffAck pending = _pendingHandoffAcks[_tmpIds[i]];
+                    _pendingHandoffAcks.Remove(_tmpIds[i]);
+                    Logging.LogWarning("Mesh", $"Handoff of {pending.name} to zone {pending.zone} not acknowledged after {handoffAckTimeoutSeconds:0.#} s; releasing the demoted puppet");
+                    ReleaseDemotedHandoff(_tmpIds[i], "handoff never acknowledged");
+                }
+            }
+            if (_incomingHandoffFrom.Count > 0)
+            {
+                _tmpIds.Clear();
+                foreach (KeyValuePair<string, IncomingHandoff> kv in _incomingHandoffFrom)
+                {
+                    // A notice whose client never connected (a reservation that was claimed then abandoned is acked by
+                    // ExpireReservedArrivals; one that registered was acked at registration).
+                    if (Time.unscaledTime - kv.Value.time > reservedArrivalTimeout && !_reservedArrivals.ContainsKey(kv.Key) && !ServerUserHandlers.TryGetPlayerCharacterById(kv.Key, out _))
+                        _tmpIds.Add(kv.Key);
+                }
+                for (int i = 0; i < _tmpIds.Count; ++i)
+                    AckHandoffFailed(_tmpIds[i], "client never arrived");
+            }
         }
 
         internal void SendHandoffNotice(string zoneId, string characterId, string userId)
@@ -1819,7 +1960,10 @@ namespace MultiplayerARPG.MMO.Mesh
         internal void OnMeshNeighbourDisconnected(long connectionId) { }
         internal void OnGhostSnapshot(long connectionId, GhostSnapshotMessage msg) { }
         internal void OnGhostRemove(string characterId) { }
-        internal void OnHandoffNotice(HandoffNoticeMessage msg) { }
+        internal void OnHandoffNotice(long connectionId, HandoffNoticeMessage msg) { }
+        internal void OnHandoffAck(long connectionId, HandoffAckMessage msg) { }
+        internal void RegisterPendingHandoffAck(string characterId, string name, string zone, float startTime) { }
+        internal bool IsNeighbourLinked(string zoneId) { return true; }
         internal void OnGhostHit(long connectionId, GhostHitMessage msg) { }
         internal void OnGhostHitResult(GhostHitResultMessage msg) { }
         internal void OnGhostReward(GhostRewardMessage msg) { }

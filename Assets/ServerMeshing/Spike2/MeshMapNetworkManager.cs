@@ -471,10 +471,19 @@ namespace MultiplayerARPG.MMO.Mesh
             long connectionId = entity.ConnectionId;
             if (!ServerUserHandlers.TryGetPlayerCharacter(connectionId, out _))
                 return;
+            if (!IsNeighbourLinked(zone.zoneId))
+            {
+                // The cluster still lists the peer but our link to it is down: the notice and the ack could not be
+                // delivered and the client might be warped to a dead cell. Stay, retry after the backoff.
+                WarnThrottled($"Mesh link to zone {zone.zoneId} is down; player {entity.CharacterName} stays on {OwnZoneId} (retry in {handoffRetrySeconds:0.#} s).");
+                _handoffRetryAfter[entity.Id] = Time.unscaledTime + handoffRetrySeconds;
+                return;
+            }
 
             string characterId = entity.Id;
             _handoffsInProgress.Add(characterId);
             System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
+            float startTime = Time.unscaledTime;
             Vector3 position = entity.EntityTransform.position;
             Vector3 rotation = entity.CurrentRotation;
             // Lead the saved position by the expected gap so the neighbour spawns the character where the
@@ -537,6 +546,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 // disconnect; observers on this cell keep seeing it, now steered by the neighbour's snapshots.
                 if (demotePlayerOnHandoff && entity != null)
                     DemotePlayerToGhost(entity, zone.zoneId);
+                RegisterPendingHandoffAck(characterId, entity.CharacterName, zone.zoneId, startTime);
                 Logging.Log("Mesh", $"Handoff SENT {entity.CharacterName} -> zone {zone.zoneId} saved={saved} serverSide={sw.ElapsedMilliseconds}ms demoted={demotePlayerOnHandoff}");
             }
             catch (System.Exception ex)
