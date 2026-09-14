@@ -19,6 +19,7 @@
 
 using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
+using LiteNetLib;
 using LiteNetLib.Utils;
 using LiteNetLibManager;
 using UnityEngine;
@@ -37,8 +38,8 @@ namespace MultiplayerARPG.MMO.Mesh
         [Tooltip("Only run spawn areas whose position lies inside this cell's zone (one owner per server-spawned entity).")]
         public bool ownSpawnAreasByZone = true;
 
-        [Tooltip("Border band B (metres from the shared edge) inside which entities are ghosted into the neighbour.")]
-        public float ghostBandWidth = 60f;
+        [Tooltip("Border band B (metres from the shared edge) inside which entities are ghosted into the neighbour. Size it to the kit's visible range (80 m in the demo) or the far scene pops in at the crossing; the speed rule (max speed x (AOI pass + snapshot + a link hop) + hysteresis) is far below that at any sane speed. Checked and logged at server start.")]
+        public float ghostBandWidth = 80f; // sized to the kit's visible range (Q1)
 
         [Tooltip("Seconds between ghost snapshots.")]
         public float ghostSnapshotInterval = 0.1f;
@@ -79,6 +80,70 @@ namespace MultiplayerARPG.MMO.Mesh
         private readonly List<BaseCharacterEntity> _ownedCandidates = new List<BaseCharacterEntity>();
         private float _nextSnapshotTime;
         private float _nextLinkCheck;
+
+        // ---- Load / sizing instrumentation (DESIGN §6 Q1, §14 risk 8) ----
+        [Tooltip("Every this many seconds log one 'Mesh stats' line: players, owned and ghost counts, link traffic per neighbour (kB/s in and out, packets/s) and the handoffs completed in the interval with their mean and max end-to-end time. 0 = off.")]
+        public float meshStatsIntervalSeconds = 10f;
+        [Tooltip("The fastest a character can move on this map (m/s; the mount in the demo). Used with the AOI cadence and the snapshot rate to check the ghost band is wide enough at server start.")]
+        public float expectedMaxSpeed = 8f;
+        private float _nextStatsTime;
+        private long _statsLinkBytesOut, _statsLinkBytesIn, _statsLinkPacketsOut, _statsLinkPacketsIn;
+        private int _statsHandoffs; private float _statsHandoffSumMs, _statsHandoffMaxMs;
+
+        private void NoteHandoffCompleted(float ms)
+        {
+            _statsHandoffs++;
+            _statsHandoffSumMs += ms;
+            if (ms > _statsHandoffMaxMs) _statsHandoffMaxMs = ms;
+        }
+
+        private void LogMeshStats()
+        {
+            long bytesOut = 0, packetsOut = 0, bytesIn = 0, packetsIn = 0;
+            System.Text.StringBuilder links = new System.Text.StringBuilder();
+            foreach (KeyValuePair<string, MeshLinkClient> kv in _linkClients)
+            {
+                NetStatistics st = kv.Value.Statistics;
+                if (st == null) continue;
+                bytesOut += st.BytesSent; packetsOut += st.PacketsSent;
+                links.Append(kv.Key).Append(kv.Value.IsConnected ? "=" : "(down)=").Append(st.BytesSent / 1024f / meshStatsIntervalSeconds).Append("kB/s ");
+            }
+            NetStatistics sst = _linkServer != null ? _linkServer.Statistics : null;
+            if (sst != null) { bytesIn = sst.BytesReceived; packetsIn = sst.PacketsReceived; }
+            float dOut = (bytesOut - _statsLinkBytesOut) / 1024f / meshStatsIntervalSeconds;
+            float dIn = (bytesIn - _statsLinkBytesIn) / 1024f / meshStatsIntervalSeconds;
+            float pOut = (packetsOut - _statsLinkPacketsOut) / meshStatsIntervalSeconds;
+            float pIn = (packetsIn - _statsLinkPacketsIn) / meshStatsIntervalSeconds;
+            _statsLinkBytesOut = bytesOut; _statsLinkBytesIn = bytesIn; _statsLinkPacketsOut = packetsOut; _statsLinkPacketsIn = packetsIn;
+            int players = 0;
+            foreach (IPlayerCharacterData _ in ServerUserHandlers.GetPlayerCharacters()) players++;
+            int ghostPlayers = 0, ghostMonsters = 0;
+            foreach (MeshGhost g in _ghosts.Values) { if (g.kind == GhostKind.Player) ghostPlayers++; else ghostMonsters++; }
+            string handoffs = _statsHandoffs > 0 ? $"{_statsHandoffs} (mean {_statsHandoffSumMs / _statsHandoffs:0} ms, max {_statsHandoffMaxMs:0} ms)" : "0";
+            Logging.Log("Mesh", $"Mesh stats: players={players} owned={_ownedCandidates.Count} drops={_ownedDrops.Count} ghosts={ghostPlayers}p/{ghostMonsters}m/{_ghostDrops.Count}d pendingAcks={_pendingHandoffAcks.Count} reserved={_reservedArrivals.Count} | link out {dOut:0.0} kB/s {pOut:0} pkt/s, in {dIn:0.0} kB/s {pIn:0} pkt/s | handoffs {handoffs} | fps {1f / Mathf.Max(0.0001f, Time.smoothDeltaTime):0}");
+            _statsHandoffs = 0; _statsHandoffSumMs = 0f; _statsHandoffMaxMs = 0f;
+        }
+
+        /// <summary>
+        /// The band must give a crossing character time to exist as a ghost on the neighbour and be subscribed by
+        /// its observers before the line (speed x (AOI pass + snapshot + a link hop) + hysteresis), and it must cover
+        /// the kit's visible range or the far scene pops in at the crossing (entities between the band and the visible
+        /// range are unknown to the origin). Logged at server start, as a warning when the configured band is short.
+        /// </summary>
+        private void LogBandSizing()
+        {
+            float aoi = 1f;
+            var grid = InterestManager as JobifiedGridSpatialPartitioningAOI;
+            if (grid != null) aoi = grid.updateInterval;
+            float visible = InterestManager != null ? InterestManager.defaultVisibleRange : 0f;
+            float speedBand = expectedMaxSpeed * (aoi + ghostSnapshotInterval + 0.2f) + handoffHysteresis;
+            float required = Mathf.Max(speedBand, visible);
+            string line = $"Band sizing: band={ghostBandWidth:0} m; for {expectedMaxSpeed:0.#} m/s with AOI every {aoi:0.##} s and snapshots every {ghostSnapshotInterval:0.##} s the crossing needs {speedBand:0.#} m; the visible range is {visible:0} m -> required {required:0.#} m";
+            if (ghostBandWidth < required)
+                Logging.LogWarning("Mesh", line + " (BAND TOO NARROW: " + (ghostBandWidth < visible ? "entities beyond the band pop in at the crossing" : "a fast crossing can outrun its ghost") + ")");
+            else
+                Logging.Log("Mesh", line);
+        }
         private float _nextMonsterScan;
         private string _cellIncarnation;
 
@@ -95,6 +160,9 @@ namespace MultiplayerARPG.MMO.Mesh
                 Logging.Log("Mesh", $"Mesh link listening on {port}");
             else
                 Logging.LogError("Mesh", $"Mesh link failed to listen on {port}");
+            if (_linkServer.Statistics != null)
+                ((LiteNetLibTransport)_linkServer.Transport).Server.EnableStatistics = true;
+            LogBandSizing();
             // Owned registry: event-driven from here on (spawn/destroy), one scan for what is already in the scene.
             Assets.onObjectSpawn.AddListener(OnAssetObjectSpawn);
             Assets.onObjectDestroy.AddListener(OnAssetObjectDestroy);
@@ -186,6 +254,11 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 _nextLinkCheck = Time.unscaledTime + 1f;
                 EnsureNeighbourLinks();
+            }
+            if (meshStatsIntervalSeconds > 0f && Time.unscaledTime >= _nextStatsTime)
+            {
+                _nextStatsTime = Time.unscaledTime + meshStatsIntervalSeconds;
+                LogMeshStats();
             }
             if (Time.unscaledTime >= _nextMonsterScan)
             {
@@ -2426,7 +2499,9 @@ namespace MultiplayerARPG.MMO.Mesh
             string fromZone = _neighbourZoneByConnection.TryGetValue(connectionId, out string z) ? z : "?";
             if (msg.ok)
             {
-                Logging.Log("Mesh", $"Handoff ACK {pending.name} by zone {fromZone}: registered {msg.arrivalMs} ms after the notice, {(Time.unscaledTime - pending.startTime) * 1000f:0} ms after START (promoted={msg.promoted})");
+                float totalMs = (Time.unscaledTime - pending.startTime) * 1000f;
+                NoteHandoffCompleted(totalMs);
+                Logging.Log("Mesh", $"Handoff ACK {pending.name} by zone {fromZone}: registered {msg.arrivalMs} ms after the notice, {totalMs:0} ms after START (promoted={msg.promoted})");
                 // The exemption from stale expiry ends with the ack; the destination's first snapshot is still a tick
                 // away, so the demoted puppets get a fresh stale window from now.
                 if (_ghosts.TryGetValue(msg.characterId, out MeshGhost demoted))

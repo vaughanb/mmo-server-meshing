@@ -504,7 +504,9 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             Phase = "pace";
             bool reached = false;
+            _walkZOverride = walkTargetZ != 0f ? walkTargetZ : (float?)null; // load runs spread the pacers along z
             yield return WalkTo(walkTargetX, deadline, ClientMigrationController.CompletedCount, r => reached = r);
+            _walkZOverride = null;
             if (!reached) { Fail("never reached the pacing start"); yield break; }
             Log($"Pacing between x={walkTargetX} and x={walkTargetX + 8f}");
             float far = walkTargetX + 8f;

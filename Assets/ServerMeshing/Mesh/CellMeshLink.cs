@@ -407,6 +407,9 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private readonly MeshMapNetworkManager _manager;
 
+        /// <summary>Bytes and packets on the wire, both directions, every neighbour (LiteNetLib's own counters).</summary>
+        public NetStatistics Statistics => (Transport as LiteNetLibTransport)?.Server?.Statistics;
+
         public MeshLinkServer(MeshMapNetworkManager manager) : base(new LiteNetLibTransport("MESH", 16, 16))
         {
             _manager = manager;
@@ -558,6 +561,9 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private readonly MeshMapNetworkManager _manager;
 
+        /// <summary>Bytes and packets on the wire toward (and back from) this neighbour.</summary>
+        public NetStatistics Statistics => (Transport as LiteNetLibTransport)?.Client?.Statistics;
+
         public MeshLinkClient(MeshMapNetworkManager manager, string targetZoneId) : base(new LiteNetLibTransport("MESH", 16, 16))
         {
             _manager = manager;
@@ -571,6 +577,8 @@ namespace MultiplayerARPG.MMO.Mesh
             StopClient();
             Logging.Log(LogTag, $"Connecting to neighbour {TargetZoneId} at {address}:{port}");
             StartClient(address, port);
+            if ((Transport as LiteNetLibTransport)?.Client != null)
+                ((LiteNetLibTransport)Transport).Client.EnableStatistics = true; // the transport builds its NetManager in StartClient
         }
 
         public override void OnClientReceive(TransportEventData eventData)
