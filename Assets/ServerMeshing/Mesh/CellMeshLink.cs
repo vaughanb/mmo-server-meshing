@@ -101,17 +101,18 @@ namespace MultiplayerARPG.MMO.Mesh
         public int sourceLevel;
         public int monsterDataId;
         public bool countKill;   // advance the member's quest kill counters too (the kit does for nearby members)
+        public bool broadcast;   // sent to every linked cell because the member's cell is unknown: only the cell holding it applies, the rest stay silent
         public void Serialize(NetDataWriter writer)
         {
             writer.Put(memberId); writer.Put(exp); writer.Put(expMultiplier); writer.Put(gold); writer.Put(goldMultiplier);
             writer.PutArray(currencyDataIds ?? System.Array.Empty<int>()); writer.PutArray(currencyAmounts ?? System.Array.Empty<int>());
-            writer.Put(giverLevel); writer.Put(sourceLevel); writer.Put(monsterDataId); writer.Put(countKill);
+            writer.Put(giverLevel); writer.Put(sourceLevel); writer.Put(monsterDataId); writer.Put(countKill); writer.Put(broadcast);
         }
         public void Deserialize(NetDataReader reader)
         {
             memberId = reader.GetString(); exp = reader.GetInt(); expMultiplier = reader.GetFloat(); gold = reader.GetInt(); goldMultiplier = reader.GetFloat();
             currencyDataIds = reader.GetIntArray(); currencyAmounts = reader.GetIntArray();
-            giverLevel = reader.GetInt(); sourceLevel = reader.GetInt(); monsterDataId = reader.GetInt(); countKill = reader.GetBool();
+            giverLevel = reader.GetInt(); sourceLevel = reader.GetInt(); monsterDataId = reader.GetInt(); countKill = reader.GetBool(); broadcast = reader.GetBool();
         }
     }
 
