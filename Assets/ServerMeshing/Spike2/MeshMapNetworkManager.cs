@@ -298,6 +298,13 @@ namespace MultiplayerARPG.MMO.Mesh
             OwnZoneCoord = new Vector2Int(-1, -1);
             OwnZoneId = string.Empty;
             TryResolveOwnZone();
+            // Test rig toggle: MESH_NO_MONSTER_HANDOFF=1 in the environment keeps monsters with their spawn cell even
+            // when they chase across the line (forces cross-edge kills so loot ghosting can be exercised).
+            if (System.Environment.GetEnvironmentVariable("MESH_NO_MONSTER_HANDOFF") == "1")
+            {
+                handoffMonsters = false;
+                Logging.Log("Mesh", "MESH_NO_MONSTER_HANDOFF=1: monster handoff disabled on this cell");
+            }
             GhostingOnStartServer();
         }
 

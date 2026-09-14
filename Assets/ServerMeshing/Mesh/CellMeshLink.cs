@@ -27,6 +27,38 @@ namespace MultiplayerARPG.MMO.Mesh
         public const ushort GhostReward = 106;
         public const ushort MonsterHandoff = 107;
         public const ushort MonsterGone = 108;
+        public const ushort GhostPickup = 109;
+        public const ushort GhostLoot = 110;
+    }
+
+    /// <summary>A player on this cell wants to loot a ghost of a drop the neighbour owns.</summary>
+    public struct GhostPickupMessage : INetSerializable
+    {
+        public string characterId;   // the requester (its ghost stands on the owner cell)
+        public string dropMeshId;
+        public void Serialize(NetDataWriter writer) { writer.Put(characterId); writer.Put(dropMeshId); }
+        public void Deserialize(NetDataReader reader) { characterId = reader.GetString(); dropMeshId = reader.GetString(); }
+    }
+
+    /// <summary>The owner resolved a ghost pickup: the items go to the requester's real character (or a message why not).</summary>
+    public struct GhostLootMessage : INetSerializable
+    {
+        public string characterId;
+        public byte givenType;
+        public ushort messageKey;    // UITextKeys; NONE when items follow
+        public CharacterItem[] items;
+        public void Serialize(NetDataWriter writer)
+        {
+            writer.Put(characterId); writer.Put(givenType); writer.Put(messageKey);
+            writer.Put(items != null ? items.Length : 0);
+            if (items != null) for (int i = 0; i < items.Length; ++i) writer.Put(items[i]);
+        }
+        public void Deserialize(NetDataReader reader)
+        {
+            characterId = reader.GetString(); givenType = reader.GetByte(); messageKey = reader.GetUShort();
+            int n = reader.GetInt(); items = new CharacterItem[n];
+            for (int i = 0; i < n; ++i) items[i] = reader.Get<CharacterItem>();
+        }
     }
 
     /// <summary>
@@ -179,7 +211,7 @@ namespace MultiplayerARPG.MMO.Mesh
     }
 
     /// <summary>One authoritative snapshot of an entity that lives in the sender's border band.</summary>
-    public enum GhostKind : byte { Player = 0, Monster = 1 }
+    public enum GhostKind : byte { Player = 0, Monster = 1, ItemDrop = 2 }
 
     public struct GhostSnapshotMessage : INetSerializable
     {
@@ -261,6 +293,8 @@ namespace MultiplayerARPG.MMO.Mesh
             RegisterMessageHandler(MeshLinkMessageTypes.GhostReward, HandleGhostReward);
             RegisterMessageHandler(MeshLinkMessageTypes.MonsterHandoff, HandleMonsterHandoff);
             RegisterMessageHandler(MeshLinkMessageTypes.MonsterGone, HandleMonsterGone);
+            RegisterMessageHandler(MeshLinkMessageTypes.GhostPickup, HandleGhostPickup);
+            RegisterMessageHandler(MeshLinkMessageTypes.GhostLoot, HandleGhostLoot);
         }
 
         public override void OnServerReceive(TransportEventData eventData)
@@ -337,6 +371,18 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             MonsterGoneMessage msg = messageHandler.ReadMessage<MonsterGoneMessage>();
             _manager.OnMonsterGone(msg.meshId);
+        }
+
+        private void HandleGhostPickup(MessageHandlerData messageHandler)
+        {
+            GhostPickupMessage msg = messageHandler.ReadMessage<GhostPickupMessage>();
+            _manager.OnGhostPickup(messageHandler.ConnectionId, msg);
+        }
+
+        private void HandleGhostLoot(MessageHandlerData messageHandler)
+        {
+            GhostLootMessage msg = messageHandler.ReadMessage<GhostLootMessage>();
+            _manager.OnGhostLoot(msg);
         }
     }
 
@@ -423,6 +469,18 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (!IsConnected) return;
             SendPacket(0, DeliveryMethod.ReliableOrdered, MeshLinkMessageTypes.MonsterHandoff, writer => msg.Serialize(writer));
+        }
+
+        public void SendGhostPickup(GhostPickupMessage msg)
+        {
+            if (!IsConnected) return;
+            SendPacket(0, DeliveryMethod.ReliableOrdered, MeshLinkMessageTypes.GhostPickup, writer => msg.Serialize(writer));
+        }
+
+        public void SendGhostLoot(GhostLootMessage msg)
+        {
+            if (!IsConnected) return;
+            SendPacket(0, DeliveryMethod.ReliableOrdered, MeshLinkMessageTypes.GhostLoot, writer => msg.Serialize(writer));
         }
 
         public void SendMonsterGone(string meshId)

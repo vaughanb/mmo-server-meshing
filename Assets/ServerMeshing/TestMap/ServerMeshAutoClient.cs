@@ -536,6 +536,15 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private float _deadSince = -1f;
         private int _respawnsUsed;
+        private static int CountBagItems(BasePlayerCharacterEntity self)
+        {
+            int n = 0;
+            if (self == null) return 0;
+            for (int i = 0; i < self.NonEquipItems.Count; ++i)
+                if (self.NonEquipItems[i].dataId != 0) n += self.NonEquipItems[i].amount;
+            return n;
+        }
+
         private IEnumerator RunFight(float deadline)
         {
             Phase = "fight";
@@ -558,6 +567,11 @@ namespace MultiplayerARPG.MMO.Mesh
             BaseMonsterCharacterEntity target = null;
             int targetHpStart = 0, minTargetHp = int.MaxValue, minSelfHp = selfHpStart, kills = 0;
             bool anyHurt = false;
+            // Loot: drops seen (any side), pickups attempted on drops within reach, items gained in the bag.
+            int itemsStart = CountBagItems(self), pickups = 0;
+            HashSet<uint> dropsSeen = new HashSet<uint>();
+            HashSet<uint> dropsTried = new HashSet<uint>();
+            float nextPickup = 0f;
             while (Time.realtimeSinceStartup < end)
             {
                 self = GameInstance.PlayingCharacterEntity;
@@ -614,6 +628,19 @@ namespace MultiplayerARPG.MMO.Mesh
                     self.PointClickMovement(back);
                 }
                 minSelfHp = Mathf.Min(minSelfHp, self.CurrentHp);
+                foreach (ItemDropEntity drop in FindObjectsByType<ItemDropEntity>(FindObjectsSortMode.None))
+                {
+                    if (drop == null) continue;
+                    if (dropsSeen.Add(drop.ObjectId))
+                        Log($"Drop seen '{drop.EntityTitle}' at {drop.EntityTransform.position} (ghost={drop.GetComponent<MeshIdentity>() != null && drop.GetComponent<MeshIdentity>().IsGhost})");
+                    if (Time.realtimeSinceStartup < nextPickup || dropsTried.Contains(drop.ObjectId)) continue;
+                    if (Vector3.Distance(drop.EntityTransform.position, self.EntityTransform.position) > 2.2f) continue;
+                    nextPickup = Time.realtimeSinceStartup + 1f;
+                    dropsTried.Add(drop.ObjectId);
+                    bool sent = self.CallCmdPickup(drop.ObjectId);
+                    pickups++;
+                    Log($"Pickup requested on '{drop.EntityTitle}' at {drop.EntityTransform.position} sent={sent}");
+                }
                 if (Time.realtimeSinceStartup >= nextLog)
                 {
                     nextLog = Time.realtimeSinceStartup + 3f;
@@ -631,7 +658,8 @@ namespace MultiplayerARPG.MMO.Mesh
             int levelGained = self != null ? self.Level - levelStart : 0;
             bool selfHurt = minSelfHp < selfHpStart;
             Finished = true; Passed = anyHurt;
-            Log($"RESULT fight: hurtTarget={anyHurt} kills={kills} selfHp {selfHpStart}/{selfMaxHp}->{minSelfHp} (hitBack={selfHurt}) exp+{expGained} gold+{goldGained} level+{levelGained} -> {(Passed ? "PASS" : "FAIL")}");
+            int itemsGained = self != null ? CountBagItems(self) - itemsStart : 0;
+            Log($"RESULT fight: hurtTarget={anyHurt} kills={kills} selfHp {selfHpStart}/{selfMaxHp}->{minSelfHp} (hitBack={selfHurt}) exp+{expGained} gold+{goldGained} level+{levelGained} drops={dropsSeen.Count} pickups={pickups} items+{itemsGained} -> {(Passed ? "PASS" : "FAIL")}");
             if (self != null && !self.IsDead())
             {
                 // Retreat to the zone start so the next run does not begin next to the neighbour's monsters.

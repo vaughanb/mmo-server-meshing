@@ -164,6 +164,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 MonsterHandoffTick();
                 SendBandSnapshots();
                 ExpireGhosts();
+                ExpireGhostDrops();
                 ExpireReservedArrivals();
             }
         }
@@ -228,6 +229,7 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             _ownedCandidates.Clear();
             _ownedByMeshId.Clear();
+            RescanOwnedDrops();
             foreach (IPlayerCharacterData data in ServerUserHandlers.GetPlayerCharacters())
             {
                 if (data is BasePlayerCharacterEntity entity && !entity.IsWarping)
@@ -307,6 +309,35 @@ namespace MultiplayerARPG.MMO.Mesh
                         maxHp = entity.MaxHp,
                     });
                     streamed.Add(meshId);
+                }
+
+                // Item drops in the band (loot from a kill near the line must be visible, and lootable, from next door).
+                for (int d = 0; d < _ownedDrops.Count; ++d)
+                {
+                    ItemDropEntity drop = _ownedDrops[d];
+                    if (drop == null || drop.Identity == null || drop.Identity.IsDestroyed || drop.DropItems.Count == 0)
+                        continue;
+                    Vector3 dpos = drop.EntityTransform.position;
+                    if (DistanceToSharedEdge(dpos, i) > ghostBandWidth)
+                        continue;
+                    MeshIdentity did = MeshIdentity.Get(drop);
+                    if (did == null || string.IsNullOrEmpty(did.MeshEntityId))
+                        continue;
+                    CharacterItem item = drop.DropItems[0];
+                    client.SendGhostSnapshot(new GhostSnapshotMessage
+                    {
+                        kind = GhostKind.ItemDrop,
+                        characterId = did.MeshEntityId,
+                        entityId = drop.EntityId,
+                        dataId = item.dataId,
+                        characterName = string.Empty,
+                        level = item.level,
+                        position = dpos,
+                        yaw = drop.EntityTransform.eulerAngles.y,
+                        currentHp = item.amount,
+                        maxHp = item.amount,
+                    });
+                    streamed.Add(did.MeshEntityId);
                 }
 
                 // Anything streamed last tick but not now has left the band (or this cell, or died): tell the neighbour.
@@ -545,6 +576,11 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (!IsServer || !enableBorderGhosting)
                 return;
+            if (msg.kind == GhostKind.ItemDrop)
+            {
+                OnGhostDropSnapshot(connectionId, msg);
+                return;
+            }
             // Dedup: this cell owns the real thing → the neighbour's copy is stale; ignore.
             if (msg.kind == GhostKind.Player && ServerUserHandlers.TryGetPlayerCharacterById(msg.characterId, out _))
                 return;
@@ -737,7 +773,181 @@ namespace MultiplayerARPG.MMO.Mesh
 
         internal void OnGhostRemove(string meshId)
         {
-            DestroyGhost(meshId, "neighbour removed");
+            if (_ghostDrops.ContainsKey(meshId))
+                DestroyGhostDrop(meshId, "neighbour removed");
+            else
+                DestroyGhost(meshId, "neighbour removed");
+        }
+
+        // ---- Loot across the edge (DESIGN §12) ----
+        // A drop near the line is streamed like a monster; the neighbour shows a puppet drop nobody can loot locally.
+        // A pickup on the puppet is forwarded to the owner, which validates against the requester's ghost, takes the
+        // items off the real drop and sends them to the requester's cell, where they enter the real character's bag.
+
+        private sealed class GhostDrop { public ItemDropEntity entity; public float lastSeen; }
+        private readonly Dictionary<string, GhostDrop> _ghostDrops = new Dictionary<string, GhostDrop>();
+        private readonly List<ItemDropEntity> _ownedDrops = new List<ItemDropEntity>();
+        private readonly Dictionary<string, ItemDropEntity> _ownedDropsByMeshId = new Dictionary<string, ItemDropEntity>();
+        private static readonly string[] s_ghostLooters = { "mesh-ghost-drop" }; // a looter id nobody has: the kit path never loots a puppet
+
+        private void RescanOwnedDrops()
+        {
+            _ownedDrops.Clear();
+            _ownedDropsByMeshId.Clear();
+            foreach (ItemDropEntity drop in FindObjectsByType<ItemDropEntity>(FindObjectsSortMode.None))
+            {
+                if (drop == null || !drop.IsServer || drop.Identity == null || drop.Identity.IsDestroyed || MeshIdentity.IsGhostEntity(drop))
+                    continue;
+                MeshIdentity id = MeshIdentity.GetOrAdd(drop);
+                if (string.IsNullOrEmpty(id.MeshEntityId))
+                {
+                    id.MeshEntityId = $"{OwnZoneId}:{_cellIncarnation}:{drop.ObjectId}";
+                    id.OwnerZoneId = OwnZoneId;
+                }
+                _ownedDrops.Add(drop);
+                _ownedDropsByMeshId[id.MeshEntityId] = drop;
+            }
+        }
+
+        private void OnGhostDropSnapshot(long connectionId, GhostSnapshotMessage msg)
+        {
+            if (!_ghostDrops.TryGetValue(msg.characterId, out GhostDrop ghost) || ghost.entity == null || ghost.entity.Identity.IsDestroyed)
+            {
+                if (!GameInstance.ItemDropEntities.TryGetValue(msg.entityId, out ItemDropEntity prefab) || prefab == null)
+                    prefab = GameInstance.Singleton.ItemDropEntityPrefab;
+                if (prefab == null)
+                {
+                    WarnThrottled($"Cannot spawn drop ghost: no item drop prefab for entity id {msg.entityId}");
+                    return;
+                }
+                CharacterItem item = CharacterItem.Create(msg.dataId, Mathf.Max(1, msg.level), Mathf.Max(1, msg.currentHp));
+                ItemDropEntity entity = ItemDropEntity.Drop(prefab, msg.position, Quaternion.Euler(0f, msg.yaw, 0f), RewardGivenType.None, item, s_ghostLooters, 3600f);
+                if (entity == null)
+                    return;
+                MeshIdentity id = MeshIdentity.GetOrAdd(entity);
+                id.MeshEntityId = msg.characterId;
+                id.IsGhost = true;
+                id.OwnerZoneId = _neighbourZoneByConnection.TryGetValue(connectionId, out string z) ? z : "?";
+                ghost = new GhostDrop { entity = entity };
+                _ghostDrops[msg.characterId] = ghost;
+                if (traceHandoffTiming)
+                    Logging.Log("Mesh", $"Drop ghost spawned ({msg.characterId}) from zone {id.OwnerZoneId} at {msg.position}: item {msg.dataId} x{msg.currentHp}");
+            }
+            ghost.lastSeen = Time.unscaledTime;
+            if (_neighbourZoneByConnection.TryGetValue(connectionId, out string ownerZone))
+            {
+                MeshIdentity gid = MeshIdentity.Get(ghost.entity);
+                if (gid != null && gid.OwnerZoneId != ownerZone)
+                    gid.OwnerZoneId = ownerZone;
+            }
+        }
+
+        private void DestroyGhostDrop(string meshId, string reason)
+        {
+            if (!_ghostDrops.TryGetValue(meshId, out GhostDrop ghost))
+                return;
+            _ghostDrops.Remove(meshId);
+            if (ghost.entity != null && ghost.entity.Identity != null && !ghost.entity.Identity.IsDestroyed)
+            {
+                if (traceHandoffTiming)
+                    Logging.Log("Mesh", $"Drop ghost destroyed ({meshId}) reason={reason}");
+                ghost.entity.NetworkDestroy();
+            }
+        }
+
+        private void ExpireGhostDrops()
+        {
+            if (_ghostDrops.Count == 0)
+                return;
+            _tmpIds.Clear();
+            foreach (KeyValuePair<string, GhostDrop> kv in _ghostDrops)
+            {
+                if (kv.Value.entity == null || Time.unscaledTime - kv.Value.lastSeen > ghostStaleSeconds)
+                    _tmpIds.Add(kv.Key);
+            }
+            for (int i = 0; i < _tmpIds.Count; ++i)
+                DestroyGhostDrop(_tmpIds[i], "stale");
+        }
+
+        /// <summary>A player here tried to loot a puppet drop: ask the owner.</summary>
+        internal void RequestGhostPickup(BasePlayerCharacterEntity player, ItemDropEntity ghostDrop)
+        {
+            MeshIdentity id = MeshIdentity.Get(ghostDrop);
+            if (player == null || id == null || !id.IsGhost || string.IsNullOrEmpty(id.OwnerZoneId))
+                return;
+            if (!_linkClients.TryGetValue(id.OwnerZoneId, out MeshLinkClient link) || !link.IsConnected)
+            {
+                GameInstance.ServerGameMessageHandlers.SendGameMessage(player.ConnectionId, UITextKeys.UI_ERROR_NOT_ABLE_TO_LOOT);
+                return;
+            }
+            link.SendGhostPickup(new GhostPickupMessage { characterId = player.Id, dropMeshId = id.MeshEntityId });
+            if (traceHandoffTiming)
+                Logging.Log("Mesh", $"Pickup on drop ghost {id.MeshEntityId} by {player.CharacterName} forwarded to zone {id.OwnerZoneId}");
+        }
+
+        internal void OnGhostPickup(long connectionId, GhostPickupMessage msg)
+        {
+            if (!IsServer)
+                return;
+            string fromZone = _neighbourZoneByConnection.TryGetValue(connectionId, out string z) ? z : "?";
+            if (!_linkClients.TryGetValue(fromZone, out MeshLinkClient reply) || !reply.IsConnected)
+                return;
+            ushort messageKey = (ushort)UITextKeys.NONE;
+            CharacterItem[] items = null;
+            RewardGivenType givenType = RewardGivenType.None;
+            if (!_ownedDropsByMeshId.TryGetValue(msg.dropMeshId, out ItemDropEntity drop) || drop == null || drop.Identity == null || drop.Identity.IsDestroyed || drop.DropItems.Count == 0)
+            {
+                messageKey = (ushort)UITextKeys.UI_ERROR_INVALID_DATA;
+            }
+            else if (!_ghosts.TryGetValue(msg.characterId, out MeshGhost requester) || requester.entity == null)
+            {
+                messageKey = (ushort)UITextKeys.UI_ERROR_CHARACTER_IS_TOO_FAR; // the requester is not even within our band
+            }
+            else if (Vector3.Distance(requester.entity.EntityTransform.position, drop.EntityTransform.position) > GameInstance.Singleton.pickUpItemDistance + 1.5f)
+            {
+                messageKey = (ushort)UITextKeys.UI_ERROR_CHARACTER_IS_TOO_FAR;
+            }
+            else if (!drop.IsAbleToLoot(requester.entity))
+            {
+                messageKey = (ushort)UITextKeys.UI_ERROR_NOT_ABLE_TO_LOOT;
+            }
+            else
+            {
+                items = drop.DropItems.ToArray();
+                givenType = drop.GivenType;
+                drop.PickedUp(); // gone here; the streamed-set diff tells every neighbour to drop its puppet
+                _ownedDropsByMeshId.Remove(msg.dropMeshId);
+                _ownedDrops.Remove(drop);
+                if (traceHandoffTiming)
+                    Logging.Log("Mesh", $"Drop {msg.dropMeshId} looted through zone {fromZone} by {msg.characterId}: {items.Length} item(s)");
+            }
+            reply.SendGhostLoot(new GhostLootMessage { characterId = msg.characterId, givenType = (byte)givenType, messageKey = messageKey, items = items });
+        }
+
+        internal void OnGhostLoot(GhostLootMessage msg)
+        {
+            if (!IsServer)
+                return;
+            if (!ServerUserHandlers.TryGetPlayerCharacterById(msg.characterId, out IPlayerCharacterData data) || !(data is BasePlayerCharacterEntity player))
+                return;
+            if (msg.messageKey != (ushort)UITextKeys.NONE || msg.items == null || msg.items.Length == 0)
+            {
+                if (msg.messageKey != (ushort)UITextKeys.NONE)
+                    GameInstance.ServerGameMessageHandlers.SendGameMessage(player.ConnectionId, (UITextKeys)msg.messageKey);
+                return;
+            }
+            List<CharacterItem> items = new List<CharacterItem>(msg.items);
+            if (player.IncreasingItemsWillOverwhelming(items))
+            {
+                GameInstance.ServerGameMessageHandlers.SendGameMessage(player.ConnectionId, UITextKeys.UI_ERROR_WILL_OVERWHELMING);
+                Logging.LogWarning("Mesh", $"Loot for {player.CharacterName} did not fit; {items.Count} item(s) lost (the owner already removed the drop)");
+                return;
+            }
+            RewardGivenType givenType = (RewardGivenType)msg.givenType;
+            player.IncreaseItems(items, characterItem => player.OnRewardItem(givenType, characterItem));
+            player.FillEmptySlots();
+            if (traceHandoffTiming)
+                Logging.Log("Mesh", $"Loot applied to {player.CharacterName}: {items.Count} item(s)");
         }
 
         // ---- P3/P4: monster handoff (DESIGN §12) ----
@@ -1218,6 +1428,9 @@ namespace MultiplayerARPG.MMO.Mesh
         internal void OnGhostReward(GhostRewardMessage msg) { }
         internal void OnMonsterHandoff(long connectionId, MonsterHandoffMessage msg) { }
         internal void OnMonsterGone(string meshId) { }
+        internal void OnGhostPickup(long connectionId, GhostPickupMessage msg) { }
+        internal void OnGhostLoot(GhostLootMessage msg) { }
+        internal void RequestGhostPickup(BasePlayerCharacterEntity player, ItemDropEntity ghostDrop) { }
         internal bool IsPlayerGhostNear(Vector3 position, float range) { return false; }
         internal void ForwardGhostReward(BasePlayerCharacterEntity ghost, int exp, int gold, IEnumerable<CurrencyAmount> currencies, float multiplier, RewardGivenType givenType, int giverLevel, int sourceLevel) { }
         internal void SendHandoffNotice(string zoneId, string characterId, string userId) { }
