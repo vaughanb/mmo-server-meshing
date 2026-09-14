@@ -64,6 +64,8 @@ namespace MultiplayerARPG.MMO.Mesh
             public VehicleEntity vehicle;         // the mount this ghost rides (spawned here for a puppet, kept for a demoted player)
             public bool mountPending;             // an async mount/dismount is in flight
             public bool reserved;                 // an arriving client has claimed this puppet (promotion finishes at registration)
+            public string summonerMeshId;         // a pet puppet: mesh id of its summoner, from its snapshots
+            public string summonId;               // ... and the CharacterSummon.id it is on that summoner
         }
 
         private MeshLinkServer _linkServer;
@@ -290,6 +292,30 @@ namespace MultiplayerARPG.MMO.Mesh
             return id != null ? id.MeshEntityId : entity.Id;
         }
 
+        /// <summary>For a summoned monster: who summoned it (mesh id) and which CharacterSummon entry it is on them.</summary>
+        private void SummonInfoOf(BaseCharacterEntity entity, out string summonerMeshId, out string summonId, out SummonType summonType)
+        {
+            summonerMeshId = string.Empty;
+            summonId = string.Empty;
+            summonType = SummonType.None;
+            BaseMonsterCharacterEntity monster = entity as BaseMonsterCharacterEntity;
+            if (monster == null || !monster.IsSummoned)
+                return;
+            BaseCharacterEntity summoner = monster.SummonerEntity;
+            if (summoner == null)
+                return;
+            summonType = monster.SummonType;
+            summonerMeshId = MeshEntityIdOf(summoner);
+            for (int i = 0; i < summoner.Summons.Count; ++i)
+            {
+                if (summoner.Summons[i].objectId == monster.ObjectId)
+                {
+                    summonId = summoner.Summons[i].id;
+                    break;
+                }
+            }
+        }
+
         private void SendBandSnapshots()
         {
             for (int i = 0; i < s_neighbourOffsets.Length; ++i)
@@ -318,8 +344,12 @@ namespace MultiplayerARPG.MMO.Mesh
                         continue;
                     string meshId = MeshEntityIdOf(entity);
                     VehicleEntity mount = entity.PassengingVehicleEntity as VehicleEntity;
+                    SummonInfoOf(entity, out string summonerMeshId, out string summonId, out SummonType summonType);
                     client.SendGhostSnapshot(new GhostSnapshotMessage
                     {
+                        summonerMeshId = summonerMeshId,
+                        summonId = summonId,
+                        summonType = (byte)summonType,
                         mountEntityId = mount != null ? mount.EntityId : 0,
                         mountLevel = mount != null ? mount.Level : 0,
                         kind = entity is BasePlayerCharacterEntity ? GhostKind.Player : GhostKind.Monster,
@@ -421,6 +451,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 // Nothing of the puppet survives into a pooled reuse of the instance: the hit hook and the identity.
                 if (ghost.hitHook != null)
                     ghost.entity.onReceiveDamage -= ghost.hitHook;
+                UnlinkSummonPuppets(ghost.entity.ObjectId);
                 ResetMeshIdentity(ghost.entity);
                 ghost.entity.NetworkDestroy();
             }
@@ -492,7 +523,10 @@ namespace MultiplayerARPG.MMO.Mesh
                     for (int i = 0; i < playerCharacter.Summons.Count; ++i)
                     {
                         CharacterSummon summon = playerCharacter.Summons[i];
-                        summon.Summon(playerCharacter, summon.level, summon.summonRemainsDuration, summon.exp, summon.currentHp, summon.currentMp);
+                        // The pet came along as a puppet: promote it in place (no pop). Otherwise re-summon from the
+                        // saved data, as the kit's fresh-spawn path does.
+                        if (!TryPromoteSummonPuppet(playerCharacter, ref summon))
+                            summon.Summon(playerCharacter, summon.level, summon.summonRemainsDuration, summon.exp, summon.currentHp, summon.currentMp);
                         playerCharacter.Summons[i] = summon;
                     }
                 }
@@ -618,7 +652,8 @@ namespace MultiplayerARPG.MMO.Mesh
             MeshIdentity id = MeshIdentity.GetOrAdd(entity);
             id.MeshEntityId = meshId;
             MakeGhostInPlace(entity, id, GhostKind.Player, newOwnerZone, riddenMount);
-            Logging.Log("Mesh", $"Player {entity.CharacterName} demoted to ghost (owner {newOwnerZone}, mounted={riddenMount != null})");
+            int pets = DemoteSummonsWith(entity, newOwnerZone);
+            Logging.Log("Mesh", $"Player {entity.CharacterName} demoted to ghost (owner {newOwnerZone}, mounted={riddenMount != null}, summons={pets})");
         }
 
         internal void OnMeshNeighbourHello(long connectionId, string zoneId)
@@ -707,7 +742,135 @@ namespace MultiplayerARPG.MMO.Mesh
             if (ghost.reserved)
                 return; // claimed by an arriving client: it sits where the saved data put it until registration
             SyncGhostMount(ghost, msg);
+            SyncGhostSummoner(ghost, msg);
             SteerGhost(ghost, msg);
+        }
+
+        // ---- Summons on ghosts ----
+        // A pet's snapshot names its summoner. The puppet here is linked to the summoner as this cell knows it (its
+        // ghost or the real character), so it reads as that player's ally rather than a wild monster, and so the
+        // arriving owner can promote it in place (TryPromoteSummonPuppet). A puppet whose summoner is not here is
+        // unlinked: the kit destroys a summoned monster whose summoner is gone, a puppet must never do that itself.
+
+        private void SyncGhostSummoner(MeshGhost ghost, GhostSnapshotMessage msg)
+        {
+            if (msg.kind != GhostKind.Monster || !(ghost.entity is BaseMonsterCharacterEntity monster))
+                return;
+            ghost.summonerMeshId = msg.summonerMeshId;
+            ghost.summonId = msg.summonId;
+            BaseCharacterEntity summoner = string.IsNullOrEmpty(msg.summonerMeshId) ? null : ResolveGhostOrReal(msg.summonerMeshId);
+            uint wanted = summoner != null ? summoner.ObjectId : 0u;
+            SummonType type = wanted != 0u ? (SummonType)msg.summonType : SummonType.None;
+            if (monster.Summoner.objectId != wanted || monster.SummonType != type)
+                monster.Summoner = new CharacterSummoner { type = type, objectId = wanted };
+        }
+
+        /// <summary>An entity by mesh id as this cell knows it: its ghost here, an owned monster, or the real character.</summary>
+        private BaseCharacterEntity ResolveGhostOrReal(string meshId)
+        {
+            if (string.IsNullOrEmpty(meshId))
+                return null;
+            if (_ghosts.TryGetValue(meshId, out MeshGhost g) && g.entity != null)
+                return g.entity;
+            if (_ownedByMeshId.TryGetValue(meshId, out BaseCharacterEntity owned) && owned != null)
+                return owned;
+            if (ServerUserHandlers.TryGetPlayerCharacterById(meshId, out IPlayerCharacterData data) && data is BasePlayerCharacterEntity player)
+                return player;
+            return null;
+        }
+
+        /// <summary>
+        /// A summoner entity is about to be destroyed here: pet puppets linked to it are unlinked first, so the kit's
+        /// "summoner disappeared" rule in the monster's update does not destroy the puppet underneath the ghost table.
+        /// </summary>
+        private void UnlinkSummonPuppets(uint summonerObjectId)
+        {
+            foreach (MeshGhost g in _ghosts.Values)
+            {
+                if (g.entity is BaseMonsterCharacterEntity m && m.IsSummoned && m.Summoner.objectId == summonerObjectId)
+                    m.Summoner = new CharacterSummoner();
+            }
+        }
+
+        /// <summary>
+        /// The departing player's live summons go with it: each becomes a puppet in place under its own mesh id, to be
+        /// steered by the new owner's snapshots once that cell promotes its puppet of the pet.
+        /// </summary>
+        private int DemoteSummonsWith(BasePlayerCharacterEntity player, string newOwnerZone)
+        {
+            int count = 0;
+            for (int i = 0; i < player.Summons.Count; ++i)
+            {
+                CharacterSummon summon = player.Summons[i];
+                BaseMonsterCharacterEntity pet = summon.CacheEntity;
+                if (pet == null && Assets.TryGetSpawnedObject(summon.objectId, out LiteNetLibIdentity petIdentity) && petIdentity != null)
+                    pet = petIdentity.GetComponent<BaseMonsterCharacterEntity>();
+                if (pet == null || pet.Identity == null || pet.Identity.IsDestroyed || pet.IsDead() || MeshIdentity.IsGhostEntity(pet))
+                    continue;
+                MeshIdentity pid = MeshIdentity.GetOrAdd(pet);
+                if (string.IsNullOrEmpty(pid.MeshEntityId))
+                {
+                    pid.MeshEntityId = $"{OwnZoneId}:{_cellIncarnation}:{pet.ObjectId}";
+                    pid.OwnerZoneId = OwnZoneId;
+                }
+                DemoteToGhost(pet, pid, newOwnerZone);
+                if (_ghosts.TryGetValue(pid.MeshEntityId, out MeshGhost g))
+                {
+                    g.summonerMeshId = player.Id;
+                    g.summonId = summon.id;
+                }
+                count++;
+            }
+            return count;
+        }
+
+        /// <summary>
+        /// The arriving character's summon is already standing here as a puppet (streamed by the departing cell, or
+        /// demoted with the player on a cell it came back to): make it the real pet in place, no pop.
+        /// </summary>
+        private bool TryPromoteSummonPuppet(BasePlayerCharacterEntity player, ref CharacterSummon summon)
+        {
+            MeshGhost found = null;
+            string foundId = null;
+            foreach (KeyValuePair<string, MeshGhost> kv in _ghosts)
+            {
+                MeshGhost g = kv.Value;
+                if (g.kind != GhostKind.Monster || g.reserved || g.entity == null || g.entity.IsDead())
+                    continue;
+                if (!string.Equals(g.summonerMeshId, player.Id) || !string.Equals(g.summonId, summon.id))
+                    continue;
+                found = g;
+                foundId = kv.Key;
+                break;
+            }
+            if (found == null || !(found.entity is BaseMonsterCharacterEntity pet) || pet.Identity == null || pet.Identity.IsDestroyed)
+                return false;
+            _ghosts.Remove(foundId);
+            if (found.hitHook != null)
+                pet.onReceiveDamage -= found.hitHook;
+            GhostSuppression.Unghostify(pet, this);
+            pet.IsInvincible = false;
+            MeshIdentity pid = MeshIdentity.GetOrAdd(pet);
+            pid.MeshEntityId = foundId;
+            pid.IsGhost = false;
+            pid.OwnerZoneId = OwnZoneId;
+            pid.LastHandoffTime = Time.unscaledTime;
+            pet.Summoner = new CharacterSummoner { type = summon.type, objectId = player.ObjectId };
+            pet.Level = summon.level;
+            pet.Exp = summon.exp;
+            if (summon.currentHp > 0)
+                pet.CurrentHp = summon.currentHp;
+            if (summon.currentMp > 0)
+                pet.CurrentMp = summon.currentMp;
+            summon.objectId = pet.ObjectId;
+            summon.CacheEntity = pet;
+            _ownedByMeshId[foundId] = pet;
+            if (!_ownedCandidates.Contains(pet))
+                _ownedCandidates.Add(pet);
+            if (InterestManager != null)
+                InterestManager.NotifyNewObject(pet.Identity);
+            Logging.Log("Mesh", $"Summon {pet.CharacterName} ({foundId}) promoted in place for {player.CharacterName}: {summon.type} lv{pet.Level} hp={pet.CurrentHp}");
+            return true;
         }
 
         // ---- Mounts on ghosts ----

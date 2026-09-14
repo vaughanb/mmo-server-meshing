@@ -39,6 +39,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public const string ARG_WALK_X = "-meshWalkX";
         public const string ARG_WALK_Z = "-meshWalkZ";
         public const string ARG_MOUNT = "-meshMount";
+        public const string ARG_PET = "-meshPet";
 
 #if UNITY_EDITOR
         public const string PREF_ENABLE = "ServerMesh.AutoClient.Enabled";
@@ -48,6 +49,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public const string PREF_WALK_X = "ServerMesh.AutoClient.WalkX";
         public const string PREF_WALK_Z = "ServerMesh.AutoClient.WalkZ";
         public const string PREF_MOUNT = "ServerMesh.AutoClient.Mount";
+        public const string PREF_PET = "ServerMesh.AutoClient.Pet";
 #endif
 
         public enum Mode { none, walk, self, stand, pace, observe, fight }
@@ -69,6 +71,8 @@ namespace MultiplayerARPG.MMO.Mesh
         public float walkTargetZ = 0f;
         [Tooltip("Use the first mount item in the inventory before the test (needs a MountItem in the character's bag).")]
         public bool mountUp = false;
+        [Tooltip("Use the first pet item in the inventory before the test (needs a PetItem in the character's bag).")]
+        public bool summonPet = false;
         [Tooltip("World X to walk back to after reaching walkTargetX (zone C).")]
         public float walkReturnX = 0f;
         [Tooltip("Seconds to wait after entering the map before starting the test.")]
@@ -99,6 +103,7 @@ namespace MultiplayerARPG.MMO.Mesh
             string walkX = ReadArg(args, ARG_WALK_X, null);
             string walkZ = ReadArg(args, ARG_WALK_Z, null);
             bool mount = args.Contains(ARG_MOUNT);
+            bool pet = args.Contains(ARG_PET);
 #if UNITY_EDITOR
             if (!enabled && EditorPrefs.GetBool(PREF_ENABLE, false))
             {
@@ -109,6 +114,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 walkX = walkX ?? EditorPrefs.GetString(PREF_WALK_X, "130");
                 walkZ = walkZ ?? EditorPrefs.GetString(PREF_WALK_Z, "0");
                 mount = mount || EditorPrefs.GetBool(PREF_MOUNT, false);
+                pet = pet || EditorPrefs.GetBool(PREF_PET, false);
             }
 #endif
             if (!enabled)
@@ -123,6 +129,7 @@ namespace MultiplayerARPG.MMO.Mesh
             if (!string.IsNullOrEmpty(walkX) && float.TryParse(walkX, out float wx)) c.walkTargetX = wx;
             if (!string.IsNullOrEmpty(walkZ) && float.TryParse(walkZ, out float wz)) c.walkTargetZ = wz;
             c.mountUp = mount;
+            c.summonPet = pet;
         }
 
         private static string ReadArg(string[] args, string key, string fallback)
@@ -320,6 +327,8 @@ namespace MultiplayerARPG.MMO.Mesh
 
             if (mountUp)
                 yield return MountUp();
+            if (summonPet)
+                yield return SummonPet();
 
             // 5) Test.
             switch (mode)
@@ -386,6 +395,40 @@ namespace MultiplayerARPG.MMO.Mesh
             yield return new WaitForSecondsRealtime(1f);
         }
 
+        private IEnumerator SummonPet()
+        {
+            Phase = "pet";
+            BasePlayerCharacterEntity self = GameInstance.PlayingCharacterEntity;
+            if (self == null) yield break;
+            if (self.Summons.Count > 0) { Log($"Already has {self.Summons.Count} summon(s)"); yield break; }
+            int index = -1;
+            for (int i = 0; i < self.NonEquipItems.Count; ++i)
+            {
+                if (self.NonEquipItems[i].GetItem() is IPetItem) { index = i; break; }
+            }
+            if (index < 0) { Log("No pet item in the inventory; continuing without a pet"); yield break; }
+            bool sent = self.CallCmdUseItem(index);
+            float end = Time.realtimeSinceStartup + 10f;
+            BaseMonsterCharacterEntity pet = null;
+            while (Time.realtimeSinceStartup < end && (pet = FindOwnPet()) == null)
+                yield return null;
+            self = GameInstance.PlayingCharacterEntity;
+            Log($"Summon pet: item slot {index} sent={sent} summons={(self != null ? self.Summons.Count : 0)}" + (pet != null ? $" pet '{pet.CharacterName}' lv{pet.Level} hp={pet.CurrentHp}/{pet.MaxHp} at {pet.EntityTransform.position}" : " (pet entity not seen)"));
+            yield return new WaitForSecondsRealtime(1f);
+        }
+
+        /// <summary>The playing character's summoned monster as this client sees it (null when none is spawned here).</summary>
+        private static BaseMonsterCharacterEntity FindOwnPet()
+        {
+            BasePlayerCharacterEntity self = GameInstance.PlayingCharacterEntity;
+            if (self == null) return null;
+            foreach (BaseMonsterCharacterEntity m in FindObjectsByType<BaseMonsterCharacterEntity>(FindObjectsSortMode.None))
+            {
+                if (m != null && m.IsSummoned && m.Summoner.objectId == self.ObjectId && !m.IsDead()) return m;
+            }
+            return null;
+        }
+
         private IEnumerator RunWalk(float deadline)
         {
             // Round trip: out to walkTargetX (zone E), back to walkReturnX (zone C). A character that was
@@ -412,7 +455,8 @@ namespace MultiplayerARPG.MMO.Mesh
             ClientMigrationController.Result last = ClientMigrationController.LastResult;
             Finished = true;
             Passed = allLegsReached && migrations >= 1 && _allMigrationsReady;
-            Log($"RESULT walk: migrations={migrations} allReady={_allMigrationsReady} maxGap={_maxGapMs}ms maxJump={_maxJump:0.##}m finalPos={finalPos} -> {(Passed ? "PASS" : "FAIL")}");
+            BasePlayerCharacterEntity walker = GameInstance.PlayingCharacterEntity;
+            Log($"RESULT walk: migrations={migrations} allReady={_allMigrationsReady} maxGap={_maxGapMs}ms maxJump={_maxJump:0.##}m finalPos={finalPos} summons={(walker != null ? walker.Summons.Count : -1)} pet={(FindOwnPet() != null ? "seen" : "none")} -> {(Passed ? "PASS" : "FAIL")}");
         }
 
         private IEnumerator RunStand(float deadline)
@@ -546,6 +590,30 @@ namespace MultiplayerARPG.MMO.Mesh
                     }
                     else if (!lastInstance.ContainsKey(name))
                         Log($"Watching '{name}' ({ve.name}) from {ve.EntityTransform.position}");
+                    lastInstance[name] = inst;
+                }
+                foreach (BaseMonsterCharacterEntity me in FindObjectsByType<BaseMonsterCharacterEntity>(FindObjectsSortMode.None))
+                {
+                    if (me == null || !me.IsSummoned || me.IsDead()) continue;
+                    BaseCharacterEntity owner = me.SummonerEntity;
+                    if (owner == null || ReferenceEquals(owner, GameInstance.PlayingCharacterEntity) || string.IsNullOrEmpty(owner.CharacterName)) continue;
+                    string name = "pet of " + owner.CharacterName;
+                    presentNow.Add(name);
+                    int inst = me.GetInstanceID();
+                    if (absentSince.TryGetValue(name, out float since))
+                    {
+                        float gapMs = (now - since) * 1000f;
+                        absences++; maxAbsenceMs = Mathf.Max(maxAbsenceMs, gapMs);
+                        absentSince.Remove(name);
+                        Log($"'{name}' absent for {gapMs:0} ms at {me.EntityTransform.position}");
+                    }
+                    if (lastInstance.TryGetValue(name, out int prev) && prev != inst)
+                    {
+                        swaps++;
+                        Log($"'{name}' entity swapped (instance {prev} -> {inst}) at {me.EntityTransform.position}");
+                    }
+                    else if (!lastInstance.ContainsKey(name))
+                        Log($"Watching '{name}' ({me.CharacterName}) from {me.EntityTransform.position}");
                     lastInstance[name] = inst;
                 }
                 foreach (string name in lastInstance.Keys)
@@ -824,7 +892,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     if (Time.realtimeSinceStartup - lastLogT > 2f)
                     {
                         lastLogT = Time.realtimeSinceStartup;
-                        Log($"pos={pos} migrations={ClientMigrationController.CompletedCount - migrationsBefore}");
+                        Log($"pos={pos} migrations={ClientMigrationController.CompletedCount - migrationsBefore}" + (p.Summons.Count > 0 ? $" summons={p.Summons.Count} pet={(FindOwnPet() != null ? "seen" : "missing")}" : ""));
                     }
                     if (Mathf.Abs(pos.x - targetX) < 1.5f && (!_walkZOverride.HasValue || Mathf.Abs(pos.z - start.z) < 1.5f))
                     {

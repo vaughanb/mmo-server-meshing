@@ -23,6 +23,7 @@ MonoBehaviour:
   damageElements: []
   items:
   - {fileID: 11400000, guid: cb070b93e2247624393ef1fcaf5edf4b, type: 2}
+  - {fileID: 11400000, guid: c5cd951ce46d42aaa3a0decc9f8b6e15, type: 2}
   itemCraftFormulas: []
   armorTypes: []
   weaponTypes: []

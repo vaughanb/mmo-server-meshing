@@ -1,0 +1,53 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a40f5200c68e57742bd63b32ac9e586c, type: 3}
+  m_Name: TestPetItem-CE
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.PetItem
+  btnValidate: 0
+  id: testPetItem
+  defaultTitle: Test Pet Whistle
+  languageSpecificTitles: []
+  defaultDescription: 
+  languageSpecificDescriptions: []
+  category: 
+  icon: {fileID: 0}
+  sellPrice: 0
+  weight: 0
+  noSlotUsage: 0
+  maxStack: 1
+  overrideAmmoCapacity: 0
+  itemRefine: {fileID: 0}
+  lockDuration: 0
+  expireDurationUnit: 2
+  expireDuration: 0
+  dropModel: {fileID: 0}
+  dismantleReturnGold: 0
+  dismantleReturnItems: []
+  dismantleReturnCurrencies: []
+  restrictDealing: 0
+  restrictDropping: 0
+  restrictSelling: 0
+  deadDropProtected: 0
+  requirement:
+    availableClass: {fileID: 0}
+    availableClasses: []
+    availableFactions: []
+    level: 0
+    attributeAmounts: []
+  petEntity: {fileID: 7923063247244202827, guid: ee924507d9fb2b648bd7f8c047769cf2, type: 3}
+  summonDuration:
+    baseAmount: 0
+    amountIncreaseEachLevel: 0
+    rateIncreaseEachLevel: 0
+    amountIncreaseEachLevelByLevels: []
+  noSummonDuration: 1
+  useItemCooldown: 0

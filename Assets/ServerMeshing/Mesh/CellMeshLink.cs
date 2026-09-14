@@ -265,6 +265,9 @@ namespace MultiplayerARPG.MMO.Mesh
         public int maxHp;
         public int mountEntityId;   // vehicle prefab entity id the owner is riding (0 = on foot)
         public int mountLevel;
+        public string summonerMeshId; // a summoned monster: mesh id of its summoner (empty for anything else)
+        public string summonId;       // ... and which CharacterSummon entry it is on that summoner (re-linked on arrival)
+        public byte summonType;       // SummonType of the summon
 
         public void Serialize(NetDataWriter writer)
         {
@@ -282,6 +285,9 @@ namespace MultiplayerARPG.MMO.Mesh
             writer.Put(maxHp);
             writer.Put(mountEntityId);
             writer.Put(mountLevel);
+            writer.Put(summonerMeshId ?? string.Empty);
+            writer.Put(summonId ?? string.Empty);
+            writer.Put(summonType);
         }
 
         public void Deserialize(NetDataReader reader)
@@ -300,6 +306,9 @@ namespace MultiplayerARPG.MMO.Mesh
             maxHp = reader.GetInt();
             mountEntityId = reader.GetInt();
             mountLevel = reader.GetInt();
+            summonerMeshId = reader.GetString();
+            summonId = reader.GetString();
+            summonType = reader.GetByte();
         }
     }
 
