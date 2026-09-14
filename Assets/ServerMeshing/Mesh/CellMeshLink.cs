@@ -44,13 +44,14 @@ namespace MultiplayerARPG.MMO.Mesh
     {
         public string attackerMeshId;
         public long peerTimestamp;
+        public bool isItem;      // a skill item: dataId is the item's data id (the kit resolves the skill from it)
         public int dataId;
         public int skillLevel;
         public byte weaponHandlingState;
         public string targetMeshId;
         public AimPosition aimPosition;
-        public void Serialize(NetDataWriter writer) { writer.Put(attackerMeshId); writer.Put(peerTimestamp); writer.Put(dataId); writer.Put(skillLevel); writer.Put(weaponHandlingState); writer.Put(targetMeshId ?? string.Empty); writer.Put(aimPosition); }
-        public void Deserialize(NetDataReader reader) { attackerMeshId = reader.GetString(); peerTimestamp = reader.GetLong(); dataId = reader.GetInt(); skillLevel = reader.GetInt(); weaponHandlingState = reader.GetByte(); targetMeshId = reader.GetString(); aimPosition = reader.Get<AimPosition>(); }
+        public void Serialize(NetDataWriter writer) { writer.Put(attackerMeshId); writer.Put(peerTimestamp); writer.Put(isItem); writer.Put(dataId); writer.Put(skillLevel); writer.Put(weaponHandlingState); writer.Put(targetMeshId ?? string.Empty); writer.Put(aimPosition); }
+        public void Deserialize(NetDataReader reader) { attackerMeshId = reader.GetString(); peerTimestamp = reader.GetLong(); isItem = reader.GetBool(); dataId = reader.GetInt(); skillLevel = reader.GetInt(); weaponHandlingState = reader.GetByte(); targetMeshId = reader.GetString(); aimPosition = reader.Get<AimPosition>(); }
     }
 
     /// <summary>The skill reached a trigger: the neighbour replays RpcSimulateActionTrigger (target by mesh id).</summary>

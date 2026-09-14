@@ -20,10 +20,12 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (!IsServer && _manager == null)
                 return default; // see MeshCharacterAttackComponent: the component has not started on this client yet
-            if (IsServer && !simulateState.UseItem && simulateState.Skill != null && !MeshIdentity.IsGhostEntity(Entity))
+            if (IsServer && simulateState.Skill != null && !MeshIdentity.IsGhostEntity(Entity))
             {
                 MeshMapNetworkManager mesh = BaseGameNetworkManager.Singleton as MeshMapNetworkManager;
-                mesh?.ForwardGhostSkill(Entity, peerTimestamp, simulateState.Skill.DataId, simulateState.SkillLevel, simulateState.WeaponHandlingState, simulateState.TargetObjectId, simulateState.AimPosition);
+                bool isItem = simulateState.ItemDataId.HasValue; // the kit's item path fills ItemDataId (UseItem is only set on the owner's index path)
+                int dataId = isItem ? simulateState.ItemDataId.Value : simulateState.Skill.DataId;
+                mesh?.ForwardGhostSkill(Entity, peerTimestamp, isItem, dataId, simulateState.SkillLevel, simulateState.WeaponHandlingState, simulateState.TargetObjectId, simulateState.AimPosition);
             }
             return base.UseSkillRoutine(peerTimestamp, simulateState);
         }
@@ -44,6 +46,13 @@ namespace MultiplayerARPG.MMO.Mesh
             if (!IsServer)
                 return;
             RPC(RpcUseSkill, BaseGameEntity.ACTION_DATA_CHANNEL, DeliveryMethod.ReliableOrdered, peerTimestamp, dataId, skillLevel, weaponHandlingState, targetObjectId, aimPosition);
+        }
+
+        public void ReplayUseSkillItem(long peerTimestamp, int itemDataId, WeaponHandlingState weaponHandlingState, uint targetObjectId, AimPosition aimPosition)
+        {
+            if (!IsServer)
+                return;
+            RPC(RpcUseSkillItem, BaseGameEntity.ACTION_DATA_CHANNEL, DeliveryMethod.ReliableOrdered, peerTimestamp, itemDataId, weaponHandlingState, targetObjectId, aimPosition);
         }
 
         public void ReplayTrigger(SimulateActionTriggerData data)

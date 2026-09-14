@@ -1,0 +1,48 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b0f15e2a1441df149879dbe596be73ca, type: 3}
+  m_Name: TestSkillItem-CE
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.SkillItem
+  btnValidate: 0
+  id: testSkillItem
+  defaultTitle: Test Debuff Scroll
+  languageSpecificTitles: []
+  defaultDescription:
+  languageSpecificDescriptions: []
+  category:
+  icon: {fileID: 0}
+  sellPrice: 0
+  weight: 0
+  noSlotUsage: 0
+  maxStack: 99
+  overrideAmmoCapacity: 0
+  itemRefine: {fileID: 0}
+  lockDuration: 0
+  expireDurationUnit: 2
+  expireDuration: 0
+  dropModel: {fileID: 0}
+  dismantleReturnGold: 0
+  dismantleReturnItems: []
+  dismantleReturnCurrencies: []
+  restrictDealing: 0
+  restrictDropping: 0
+  restrictSelling: 0
+  deadDropProtected: 0
+  requirement:
+    availableClass: {fileID: 0}
+    availableClasses: []
+    availableFactions: []
+    level: 0
+    attributeAmounts: []
+  usingSkill: {fileID: 11400000, guid: 68c24393504de114b9e3929e920df083, type: 2}
+  usingSkillLevel: 1
+  useItemCooldown: 0

@@ -382,7 +382,8 @@ namespace MultiplayerARPG.MMO.Mesh
             int index = -1;
             for (int i = 0; i < self.NonEquipItems.Count; ++i)
             {
-                if (self.NonEquipItems[i].GetItem() is IMountItem) { index = i; break; }
+                BaseItem bagItem = self.NonEquipItems[i].GetItem();
+                if (bagItem != null && bagItem.IsMount() && bagItem is IMountItem) { index = i; break; }
             }
             if (index < 0) { Log("No mount item in the inventory; continuing on foot"); yield break; }
             bool sent = self.CallCmdUseItem(index);
@@ -404,7 +405,8 @@ namespace MultiplayerARPG.MMO.Mesh
             int index = -1;
             for (int i = 0; i < self.NonEquipItems.Count; ++i)
             {
-                if (self.NonEquipItems[i].GetItem() is IPetItem) { index = i; break; }
+                BaseItem bagItem = self.NonEquipItems[i].GetItem();
+                if (bagItem != null && bagItem.IsPet() && bagItem is IPetItem) { index = i; break; }
             }
             if (index < 0) { Log("No pet item in the inventory; continuing without a pet"); yield break; }
             bool sent = self.CallCmdUseItem(index);
@@ -720,7 +722,14 @@ namespace MultiplayerARPG.MMO.Mesh
                 if ((sk.skillBuffType == Skill.SkillBuffType.BuffToAlly || sk.skillBuffType == Skill.SkillBuffType.BuffToTarget) && allySkillId == 0) allySkillId = sk.DataId;
             }
             Log($"fight: enemySkill={enemySkillId} allySkill={allySkillId}");
-            uint lastEnemyCastTarget = 0; float nextAllyCast = 0f;
+            uint lastEnemyCastTarget = 0, lastItemCastTarget = 0; float nextAllyCast = 0f; int itemTries = 0;
+            int skillItemIndex = -1;
+            for (int i = 0; i < self.NonEquipItems.Count; ++i)
+            {
+                BaseItem bagItem = self.NonEquipItems[i].GetItem();
+                if (bagItem != null && bagItem.IsSkill() && bagItem is ISkillItem) { skillItemIndex = i; break; }
+            }
+            Log($"fight: skillItemSlot={skillItemIndex}");
             HashSet<uint> dropsSeen = new HashSet<uint>();
             HashSet<uint> dropsTried = new HashSet<uint>();
             float nextPickup = 0f;
@@ -769,11 +778,20 @@ namespace MultiplayerARPG.MMO.Mesh
                         bool isLeftHand = false;
                         self.AimPosition = self.GetAttackAimPosition(ref isLeftHand, target.EntityTransform.position);
                         WeaponHandlingState whs = WeaponHandlingState.None;
-                        if (enemySkillId != 0 && lastEnemyCastTarget != target.ObjectId)
+                        // A cast is refused while another action plays (or on cooldown): latch a target only when accepted.
+                        // The skill item goes first (its skill may share a cooldown with the direct cast), a few tries at most.
+                        if (skillItemIndex >= 0 && lastItemCastTarget != target.ObjectId && itemTries < 5)
                         {
-                            lastEnemyCastTarget = target.ObjectId;
+                            itemTries++;
+                            self.ValidateSkillItemToUse(skillItemIndex, false, target.ObjectId, out _, out _, out _, out UITextKeys why);
+                            bool sent = self.UseSkillItem(skillItemIndex, WeaponHandlingState.None, target.ObjectId, AimPosition.CreatePosition(target.EntityTransform.position));
+                            if (sent) { lastItemCastTarget = target.ObjectId; itemTries = 0; casts++; }
+                            Log($"cast skill item (slot {skillItemIndex}) on '{target.name}' sent={sent} check={why}");
+                        }
+                        else if (enemySkillId != 0 && lastEnemyCastTarget != target.ObjectId)
+                        {
                             bool sent = self.UseSkill(enemySkillId, WeaponHandlingState.None, target.ObjectId, AimPosition.CreatePosition(target.EntityTransform.position));
-                            casts++;
+                            if (sent) { lastEnemyCastTarget = target.ObjectId; casts++; }
                             Log($"cast enemy skill {enemySkillId} on '{target.name}' sent={sent}");
                         }
                         else

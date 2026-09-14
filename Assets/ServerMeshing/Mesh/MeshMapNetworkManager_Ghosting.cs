@@ -1032,14 +1032,14 @@ namespace MultiplayerARPG.MMO.Mesh
             return entity != null && entity.Identity != null ? entity.ObjectId : 0u;
         }
 
-        internal void ForwardGhostSkill(BaseCharacterEntity caster, long peerTimestamp, int dataId, int skillLevel, WeaponHandlingState weaponHandlingState, uint targetObjectId, AimPosition aimPosition)
+        internal void ForwardGhostSkill(BaseCharacterEntity caster, long peerTimestamp, bool isItem, int dataId, int skillLevel, WeaponHandlingState weaponHandlingState, uint targetObjectId, AimPosition aimPosition)
         {
             if (!IsServer || caster == null || _streamedToZone.Count == 0)
                 return;
             string meshId = MeshEntityIdOf(caster);
             GhostSkillMessage msg = new GhostSkillMessage
             {
-                attackerMeshId = meshId, peerTimestamp = peerTimestamp, dataId = dataId, skillLevel = skillLevel,
+                attackerMeshId = meshId, peerTimestamp = peerTimestamp, isItem = isItem, dataId = dataId, skillLevel = skillLevel,
                 weaponHandlingState = (byte)weaponHandlingState, targetMeshId = MeshIdOfObject(targetObjectId), aimPosition = aimPosition,
             };
             SendToZonesStreaming(meshId, link => link.SendGhostSkill(msg));
@@ -1068,9 +1068,12 @@ namespace MultiplayerARPG.MMO.Mesh
             MeshCharacterUseSkillComponent skill = GhostUseSkillComponent(msg.attackerMeshId);
             if (skill == null)
                 return;
-            skill.ReplayUseSkill(msg.peerTimestamp, msg.dataId, msg.skillLevel, (WeaponHandlingState)msg.weaponHandlingState, ObjectIdOfMesh(msg.targetMeshId), msg.aimPosition);
+            if (msg.isItem)
+                skill.ReplayUseSkillItem(msg.peerTimestamp, msg.dataId, (WeaponHandlingState)msg.weaponHandlingState, ObjectIdOfMesh(msg.targetMeshId), msg.aimPosition);
+            else
+                skill.ReplayUseSkill(msg.peerTimestamp, msg.dataId, msg.skillLevel, (WeaponHandlingState)msg.weaponHandlingState, ObjectIdOfMesh(msg.targetMeshId), msg.aimPosition);
             if (traceHandoffTiming)
-                Logging.Log("Mesh", $"Ghost skill {msg.dataId} replayed on {skill.Entity.CharacterName} ({msg.attackerMeshId}) target={msg.targetMeshId}");
+                Logging.Log("Mesh", $"Ghost {(msg.isItem ? "skill item" : "skill")} {msg.dataId} replayed on {skill.Entity.CharacterName} ({msg.attackerMeshId}) target={msg.targetMeshId}");
         }
 
         internal void OnGhostSkillTrigger(GhostSkillTriggerMessage msg)
@@ -2424,7 +2427,7 @@ namespace MultiplayerARPG.MMO.Mesh
         internal void OnGhostAttackTrigger(GhostAttackTriggerMessage msg) { }
         internal void OnGhostSkill(GhostSkillMessage msg) { }
         internal void OnGhostSkillTrigger(GhostSkillTriggerMessage msg) { }
-        internal void ForwardGhostSkill(BaseCharacterEntity caster, long peerTimestamp, int dataId, int skillLevel, WeaponHandlingState weaponHandlingState, uint targetObjectId, AimPosition aimPosition) { }
+        internal void ForwardGhostSkill(BaseCharacterEntity caster, long peerTimestamp, bool isItem, int dataId, int skillLevel, WeaponHandlingState weaponHandlingState, uint targetObjectId, AimPosition aimPosition) { }
         internal void ForwardGhostSkillTrigger(BaseCharacterEntity caster, SimulateActionTriggerData data) { }
         internal void ForwardGhostAttack(BaseCharacterEntity attacker, long peerTimestamp, WeaponHandlingState weaponHandlingState) { }
         internal void ForwardGhostAttackTrigger(BaseCharacterEntity attacker, SimulateActionTriggerData data) { }
