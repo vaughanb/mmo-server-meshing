@@ -93,10 +93,16 @@ namespace MultiplayerARPG.MMO.Mesh
                 Logging.Log("Mesh", $"Mesh link listening on {port}");
             else
                 Logging.LogError("Mesh", $"Mesh link failed to listen on {port}");
+            // Owned registry: event-driven from here on (spawn/destroy), one scan for what is already in the scene.
+            Assets.onObjectSpawn.AddListener(OnAssetObjectSpawn);
+            Assets.onObjectDestroy.AddListener(OnAssetObjectDestroy);
+            InitialOwnedScan();
         }
 
         private void GhostingOnStopServer()
         {
+            Assets.onObjectSpawn.RemoveListener(OnAssetObjectSpawn);
+            Assets.onObjectDestroy.RemoveListener(OnAssetObjectDestroy);
             foreach (MeshLinkClient client in _linkClients.Values)
                 client.StopClient();
             _linkClients.Clear();
@@ -121,6 +127,7 @@ namespace MultiplayerARPG.MMO.Mesh
             _neighbourZoneByConnection.Clear();
             _ownedCandidates.Clear();
             _ownedByMeshId.Clear();
+            _ownedKeyOf.Clear();
             _ownedDrops.Clear();
             _ownedDropsByMeshId.Clear();
             _lentMonsters.Clear();
@@ -178,8 +185,8 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             if (Time.unscaledTime >= _nextMonsterScan)
             {
-                _nextMonsterScan = Time.unscaledTime + 1f;
-                RescanOwnedCandidates();
+                _nextMonsterScan = Time.unscaledTime + 5f;
+                PruneOwned();
             }
             if (Time.unscaledTime >= _nextSnapshotTime)
             {
@@ -246,45 +253,171 @@ namespace MultiplayerARPG.MMO.Mesh
             return Mathf.Max(dx, dz);
         }
 
-        /// <summary>Owned = registered players + server-owned monsters that are not ghosts. Monsters are rescanned once a second.</summary>
+        // ---- Owned registry ----
+        // Owned = registered players + server-owned monsters (and item drops) that are not ghosts. Kept by events:
+        // the asset manager's spawn/destroy, player registration, and the handoff/promotion/demotion paths that change
+        // what an entity is. No per-second FindObjectsByType; a rare prune drops references the events could not
+        // (a pooled instance destroyed outside the network path).
         private readonly Dictionary<string, BaseCharacterEntity> _ownedByMeshId = new Dictionary<string, BaseCharacterEntity>();
+        private readonly Dictionary<Component, string> _ownedKeyOf = new Dictionary<Component, string>(); // entity -> key it is registered under (re-keyed on handoff)
 
-        private void RescanOwnedCandidates()
+        private void OnAssetObjectSpawn(LiteNetLibIdentity identity)
         {
-            _ownedCandidates.Clear();
-            _ownedByMeshId.Clear();
-            RescanOwnedDrops();
-            PruneKillHooks();
-            foreach (IPlayerCharacterData data in ServerUserHandlers.GetPlayerCharacters())
-            {
-                if (data is BasePlayerCharacterEntity entity && !entity.IsWarping)
-                {
-                    _ownedCandidates.Add(entity);
-                    _ownedByMeshId[entity.Id] = entity;
-                }
-            }
-            if (!ghostMonsters)
+            if (!IsServer || identity == null)
                 return;
-            foreach (BaseMonsterCharacterEntity monster in FindObjectsByType<BaseMonsterCharacterEntity>(FindObjectsSortMode.None))
+            BaseMonsterCharacterEntity monster = identity.GetComponent<BaseMonsterCharacterEntity>();
+            if (monster != null)
             {
-                if (monster == null || !monster.IsServer || !monster.IsOwnedByServer || monster.IsDead() || MeshIdentity.IsGhostEntity(monster))
-                    continue;
-                MeshIdentity id = MeshIdentity.GetOrAdd(monster);
+                // A puppet spawned by the ghosting code is un-tracked right after it is flagged (OnGhostSnapshot).
+                if (ghostMonsters && monster.IsOwnedByServer)
+                    TrackOwned(monster);
+                return;
+            }
+            ItemDropEntity drop = identity.GetComponent<ItemDropEntity>();
+            if (drop != null)
+                TrackOwnedDrop(drop);
+        }
+
+        private void OnAssetObjectDestroy(LiteNetLibIdentity identity)
+        {
+            if (identity == null)
+                return;
+            BaseCharacterEntity character = identity.GetComponent<BaseCharacterEntity>();
+            if (character != null)
+            {
+                UntrackOwned(character);
+                return;
+            }
+            ItemDropEntity drop = identity.GetComponent<ItemDropEntity>();
+            if (drop != null)
+                UntrackOwned(drop);
+        }
+
+        /// <summary>Register (or re-key) an entity this cell owns: players by character id, monsters by mesh id.</summary>
+        private void TrackOwned(BaseCharacterEntity entity)
+        {
+            if (entity == null || entity.Identity == null || entity.Identity.IsDestroyed || MeshIdentity.IsGhostEntity(entity))
+                return;
+            string key;
+            if (entity is BasePlayerCharacterEntity)
+                key = entity.Id;
+            else
+            {
+                MeshIdentity id = MeshIdentity.GetOrAdd(entity);
                 if (string.IsNullOrEmpty(id.MeshEntityId))
                 {
-                    id.MeshEntityId = $"{OwnZoneId}:{_cellIncarnation}:{monster.ObjectId}"; // birth provenance, never the current owner
+                    id.MeshEntityId = $"{OwnZoneId}:{_cellIncarnation}:{entity.ObjectId}"; // birth provenance, never the current owner
                     id.OwnerZoneId = OwnZoneId;
                 }
-                if (!_killHooks.ContainsKey(monster))
-                {
-                    BaseMonsterCharacterEntity captured = monster;
-                    CharacterEntityKilledDelegate hook = (target, instigator) => OnOwnedMonsterKilled(captured, instigator);
-                    monster.onKilled += hook;
-                    _killHooks[monster] = hook;
-                }
-                _ownedCandidates.Add(monster);
-                _ownedByMeshId[id.MeshEntityId] = monster;
+                key = id.MeshEntityId;
             }
+            if (_ownedKeyOf.TryGetValue(entity, out string oldKey) && !string.Equals(oldKey, key) && _ownedByMeshId.TryGetValue(oldKey, out BaseCharacterEntity under) && ReferenceEquals(under, entity))
+                _ownedByMeshId.Remove(oldKey);
+            _ownedByMeshId[key] = entity;
+            _ownedKeyOf[entity] = key;
+            if (!_ownedCandidates.Contains(entity))
+                _ownedCandidates.Add(entity);
+            if (entity is BaseMonsterCharacterEntity monster && !_killHooks.ContainsKey(monster))
+            {
+                BaseMonsterCharacterEntity captured = monster;
+                CharacterEntityKilledDelegate hook = (target, instigator) => OnOwnedMonsterKilled(captured, instigator);
+                monster.onKilled += hook;
+                _killHooks[monster] = hook;
+            }
+        }
+
+        private void TrackOwnedDrop(ItemDropEntity drop)
+        {
+            if (drop == null || !drop.IsServer || drop.Identity == null || drop.Identity.IsDestroyed || MeshIdentity.IsGhostEntity(drop))
+                return;
+            MeshIdentity id = MeshIdentity.GetOrAdd(drop);
+            if (string.IsNullOrEmpty(id.MeshEntityId))
+            {
+                id.MeshEntityId = $"{OwnZoneId}:{_cellIncarnation}:{drop.ObjectId}";
+                id.OwnerZoneId = OwnZoneId;
+            }
+            if (_ownedKeyOf.TryGetValue(drop, out string oldKey) && !string.Equals(oldKey, id.MeshEntityId))
+                _ownedDropsByMeshId.Remove(oldKey);
+            _ownedDropsByMeshId[id.MeshEntityId] = drop;
+            _ownedKeyOf[drop] = id.MeshEntityId;
+            if (!_ownedDrops.Contains(drop))
+                _ownedDrops.Add(drop);
+        }
+
+        /// <summary>Forget an entity: destroyed, demoted to a puppet, spawned as a puppet, or unregistered.</summary>
+        private void UntrackOwned(Component entity)
+        {
+            if (entity == null)
+                return;
+            bool hadKey = _ownedKeyOf.TryGetValue(entity, out string key);
+            _ownedKeyOf.Remove(entity);
+            if (entity is BaseCharacterEntity character)
+            {
+                _ownedCandidates.Remove(character);
+                if (hadKey && _ownedByMeshId.TryGetValue(key, out BaseCharacterEntity under) && ReferenceEquals(under, character))
+                    _ownedByMeshId.Remove(key);
+                if (character is BaseMonsterCharacterEntity monster)
+                    UnhookKill(monster);
+            }
+            else if (entity is ItemDropEntity drop)
+            {
+                _ownedDrops.Remove(drop);
+                if (hadKey && _ownedDropsByMeshId.TryGetValue(key, out ItemDropEntity dropUnder) && ReferenceEquals(dropUnder, drop))
+                    _ownedDropsByMeshId.Remove(key);
+            }
+        }
+
+        /// <summary>What is already in the scene when the server starts (spawn areas spawn before the listeners exist).</summary>
+        private void InitialOwnedScan()
+        {
+            foreach (IPlayerCharacterData data in ServerUserHandlers.GetPlayerCharacters())
+            {
+                if (data is BasePlayerCharacterEntity entity)
+                    TrackOwned(entity);
+            }
+            if (ghostMonsters)
+            {
+                foreach (BaseMonsterCharacterEntity monster in FindObjectsByType<BaseMonsterCharacterEntity>(FindObjectsSortMode.None))
+                {
+                    if (monster != null && monster.IsServer && monster.IsOwnedByServer && !MeshIdentity.IsGhostEntity(monster))
+                        TrackOwned(monster);
+                }
+            }
+            foreach (ItemDropEntity drop in FindObjectsByType<ItemDropEntity>(FindObjectsSortMode.None))
+                TrackOwnedDrop(drop);
+            Logging.Log("Mesh", $"Owned registry: {_ownedCandidates.Count} entities, {_ownedDrops.Count} drops at start");
+        }
+
+        /// <summary>Safety net for references no event released (rare). Runs every few seconds, touches only our own lists.</summary>
+        private void PruneOwned()
+        {
+            PruneKillHooks();
+            for (int i = _ownedCandidates.Count - 1; i >= 0; --i)
+            {
+                BaseCharacterEntity e = _ownedCandidates[i];
+                if (e == null || e.Identity == null || e.Identity.IsDestroyed || MeshIdentity.IsGhostEntity(e))
+                    UntrackOwned(e == null ? null : (Component)e);
+                if (e == null)
+                    _ownedCandidates.RemoveAt(i);
+            }
+            for (int i = _ownedDrops.Count - 1; i >= 0; --i)
+            {
+                ItemDropEntity d = _ownedDrops[i];
+                if (d == null || d.Identity == null || d.Identity.IsDestroyed || MeshIdentity.IsGhostEntity(d))
+                    UntrackOwned(d == null ? null : (Component)d);
+                if (d == null)
+                    _ownedDrops.RemoveAt(i);
+            }
+            _tmpIds.Clear();
+            foreach (KeyValuePair<string, BaseCharacterEntity> kv in _ownedByMeshId)
+                if (kv.Value == null) _tmpIds.Add(kv.Key);
+            for (int i = 0; i < _tmpIds.Count; ++i)
+                _ownedByMeshId.Remove(_tmpIds[i]);
+            _tmpIds.Clear();
+            foreach (KeyValuePair<string, ItemDropEntity> kv in _ownedDropsByMeshId)
+                if (kv.Value == null) _tmpIds.Add(kv.Key);
+            for (int i = 0; i < _tmpIds.Count; ++i)
+                _ownedDropsByMeshId.Remove(_tmpIds[i]);
         }
 
         private string MeshEntityIdOf(BaseCharacterEntity entity)
@@ -483,6 +616,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 return;
             AckHandoffArrival(playerCharacter.Id, playerCharacter.CharacterName);
             _pendingHandoffAcks.Remove(playerCharacter.Id); // it is ours again (a handoff back before the ack, or a fresh login here)
+            TrackOwnedPlayerAfterRegistration(playerCharacter);
             if (_reservedArrivals.TryGetValue(playerCharacter.Id, out ReservedArrival reserved) && playerCharacter.Identity != null)
             {
                 _reservedArrivals.Remove(playerCharacter.Id);
@@ -505,6 +639,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 MeshIdentity id = MeshIdentity.GetOrAdd(playerCharacter);
                 id.IsGhost = false;
                 id.OwnerZoneId = OwnZoneId;
+                TrackOwned(playerCharacter);
                 // A fresh spawn is pushed to its owner at once. A re-owned entity would wait for the AOI's next pass
                 // (1 s): the kit's SetOwnerClient is deferred by the AOI (manuallyApplyOwnerChanges) and the owner's
                 // subscription only comes with that pass. Apply the owner now and subscribe the owner now.
@@ -627,7 +762,21 @@ namespace MultiplayerARPG.MMO.Mesh
         private void GhostingOnRealPlayerUnregistered(long connectionId)
         {
             if (ServerUserHandlers.TryGetPlayerCharacter(connectionId, out IPlayerCharacterData data) && data != null)
+            {
                 SendGhostRemoveToAll(data.Id);
+                if (data is BasePlayerCharacterEntity entity)
+                    UntrackOwned(entity);
+            }
+        }
+
+        /// <summary>
+        /// A registering player is owned from now on. For a promoted arrival the ghost flag is cleared further down
+        /// the registration path, so the tracking is deferred to the end of that path (see GhostingOnRealPlayerRegistered).
+        /// </summary>
+        private void TrackOwnedPlayerAfterRegistration(BasePlayerCharacterEntity playerCharacter)
+        {
+            if (!MeshIdentity.IsGhostEntity(playerCharacter))
+                TrackOwned(playerCharacter);
         }
 
         /// <summary>
@@ -721,6 +870,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 id.MeshEntityId = msg.characterId;
                 id.IsGhost = true;
                 id.OwnerZoneId = _neighbourZoneByConnection.TryGetValue(connectionId, out string z) ? z : "?";
+                UntrackOwned(entity); // the spawn event registered it as ours a moment ago
                 int silenced = GhostSuppression.Ghostify(entity, this, null, false, false, disableMovement: false);
                 entity.IsInvincible = true; // never damaged by the local simulation: hits are forwarded to the owner (P3)
                 string capturedMeshId = msg.characterId;
@@ -870,9 +1020,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 pet.CurrentMp = summon.currentMp;
             summon.objectId = pet.ObjectId;
             summon.CacheEntity = pet;
-            _ownedByMeshId[foundId] = pet;
-            if (!_ownedCandidates.Contains(pet))
-                _ownedCandidates.Add(pet);
+            TrackOwned(pet);
             if (InterestManager != null)
                 InterestManager.NotifyNewObject(pet.Identity);
             Logging.Log("Mesh", $"Summon {pet.CharacterName} ({foundId}) promoted in place for {player.CharacterName}: {summon.type} lv{pet.Level} hp={pet.CurrentHp}");
@@ -1048,25 +1196,6 @@ namespace MultiplayerARPG.MMO.Mesh
         private readonly Dictionary<string, ItemDropEntity> _ownedDropsByMeshId = new Dictionary<string, ItemDropEntity>();
         private static readonly string[] s_ghostLooters = { "mesh-ghost-drop" }; // a looter id nobody has: the kit path never loots a puppet
 
-        private void RescanOwnedDrops()
-        {
-            _ownedDrops.Clear();
-            _ownedDropsByMeshId.Clear();
-            foreach (ItemDropEntity drop in FindObjectsByType<ItemDropEntity>(FindObjectsSortMode.None))
-            {
-                if (drop == null || !drop.IsServer || drop.Identity == null || drop.Identity.IsDestroyed || MeshIdentity.IsGhostEntity(drop))
-                    continue;
-                MeshIdentity id = MeshIdentity.GetOrAdd(drop);
-                if (string.IsNullOrEmpty(id.MeshEntityId))
-                {
-                    id.MeshEntityId = $"{OwnZoneId}:{_cellIncarnation}:{drop.ObjectId}";
-                    id.OwnerZoneId = OwnZoneId;
-                }
-                _ownedDrops.Add(drop);
-                _ownedDropsByMeshId[id.MeshEntityId] = drop;
-            }
-        }
-
         private void OnGhostDropSnapshot(long connectionId, GhostSnapshotMessage msg)
         {
             if (!_ghostDrops.TryGetValue(msg.characterId, out GhostDrop ghost) || ghost.entity == null || ghost.entity.Identity.IsDestroyed)
@@ -1088,6 +1217,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 id.MeshEntityId = msg.characterId;
                 id.IsGhost = true;
                 id.OwnerZoneId = _neighbourZoneByConnection.TryGetValue(connectionId, out string z) ? z : "?";
+                UntrackOwned(entity); // the spawn event registered it as ours a moment ago
                 ghost = new GhostDrop { entity = entity };
                 _ghostDrops[msg.characterId] = ghost;
                 if (traceHandoffTiming)
@@ -1178,8 +1308,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 items = drop.DropItems.ToArray();
                 givenType = drop.GivenType;
                 drop.PickedUp(); // gone here; the streamed-set diff tells every neighbour to drop its puppet
-                _ownedDropsByMeshId.Remove(msg.dropMeshId);
-                _ownedDrops.Remove(drop);
+                UntrackOwned(drop);
                 if (traceHandoffTiming)
                     Logging.Log("Mesh", $"Drop {msg.dropMeshId} looted through zone {fromZone} by {msg.characterId}: {items.Length} item(s)");
             }
@@ -1332,8 +1461,7 @@ namespace MultiplayerARPG.MMO.Mesh
             _ghosts[meshId] = new MeshGhost { entity = entity, kind = kind, lastSeen = Time.unscaledTime, lastTarget = entity.EntityTransform.position, hitHook = hitHook, vehicle = mount };
             if (kind == GhostKind.Player)
                 _playerGhosts.Add(entity);
-            _ownedByMeshId.Remove(meshId);
-            _ownedCandidates.Remove(entity);
+            UntrackOwned(entity);
             foreach (HashSet<string> streamed in _streamedToZone.Values)
                 streamed.Remove(meshId);
         }
@@ -1413,9 +1541,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 monster.onKilled += killHook;
                 _borrowedKillHooks[msg.meshId] = killHook;
             }
-            _ownedByMeshId[msg.meshId] = monster;
-            if (!_ownedCandidates.Contains(monster))
-                _ownedCandidates.Add(monster);
+            TrackOwned(monster); // re-keys a fresh spawn from its birth id to the handed-over mesh id
             // Keep the chase going: the target is either the real player here or its ghost.
             string targetDesc = "none";
             if (!string.IsNullOrEmpty(msg.targetMeshId))
@@ -1437,7 +1563,8 @@ namespace MultiplayerARPG.MMO.Mesh
         private void OnBorrowedMonsterKilled(string meshId, string homeZone)
         {
             _borrowedKillHooks.Remove(meshId);
-            _ownedByMeshId.Remove(meshId);
+            if (_ownedByMeshId.TryGetValue(meshId, out BaseCharacterEntity dead))
+                UntrackOwned(dead);
             if (!_linkClients.TryGetValue(homeZone, out MeshLinkClient link) || !link.IsConnected)
             {
                 Logging.LogWarning("Mesh", $"Borrowed monster {meshId} died but home zone {homeZone} is not linked: its respawn is lost");
