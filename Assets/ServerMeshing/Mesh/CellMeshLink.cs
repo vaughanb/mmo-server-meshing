@@ -347,6 +347,10 @@ namespace MultiplayerARPG.MMO.Mesh
         public int rightWeaponLevel;
         public int leftWeaponDataId;
         public int leftWeaponLevel;
+        public int partyId;           // players: what the kit's ally/enemy rules read off the target (party, guild, faction, PK flag)
+        public int guildId;
+        public int factionId;
+        public bool isPkOn;
 
         public void Serialize(NetDataWriter writer)
         {
@@ -367,7 +371,7 @@ namespace MultiplayerARPG.MMO.Mesh
             writer.Put(summonerMeshId ?? string.Empty);
             writer.Put(summonId ?? string.Empty);
             writer.Put(summonType);
-            writer.Put(rightWeaponDataId); writer.Put(rightWeaponLevel); writer.Put(leftWeaponDataId); writer.Put(leftWeaponLevel);
+            writer.Put(rightWeaponDataId); writer.Put(rightWeaponLevel); writer.Put(leftWeaponDataId); writer.Put(leftWeaponLevel); writer.Put(partyId); writer.Put(guildId); writer.Put(factionId); writer.Put(isPkOn);
         }
 
         public void Deserialize(NetDataReader reader)
@@ -389,7 +393,7 @@ namespace MultiplayerARPG.MMO.Mesh
             summonerMeshId = reader.GetString();
             summonId = reader.GetString();
             summonType = reader.GetByte();
-            rightWeaponDataId = reader.GetInt(); rightWeaponLevel = reader.GetInt(); leftWeaponDataId = reader.GetInt(); leftWeaponLevel = reader.GetInt();
+            rightWeaponDataId = reader.GetInt(); rightWeaponLevel = reader.GetInt(); leftWeaponDataId = reader.GetInt(); leftWeaponLevel = reader.GetInt(); partyId = reader.GetInt(); guildId = reader.GetInt(); factionId = reader.GetInt(); isPkOn = reader.GetBool();
         }
     }
 

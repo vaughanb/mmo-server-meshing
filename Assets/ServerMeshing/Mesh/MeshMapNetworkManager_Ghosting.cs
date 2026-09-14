@@ -561,8 +561,13 @@ namespace MultiplayerARPG.MMO.Mesh
                     VehicleEntity mount = entity.PassengingVehicleEntity as VehicleEntity;
                     SummonInfoOf(entity, out string summonerMeshId, out string summonId, out SummonType summonType);
                     EquipWeapons weapons = entity is BasePlayerCharacterEntity ? entity.EquipWeapons : default;
+                    BasePlayerCharacterEntity asPlayer = entity as BasePlayerCharacterEntity;
                     client.SendGhostSnapshot(new GhostSnapshotMessage
                     {
+                        partyId = asPlayer != null ? asPlayer.PartyId : 0,
+                        guildId = asPlayer != null ? asPlayer.GuildId : 0,
+                        factionId = asPlayer != null ? asPlayer.FactionId : 0,
+                        isPkOn = asPlayer != null && asPlayer.IsPkOn,
                         rightWeaponDataId = weapons.rightHand.dataId,
                         rightWeaponLevel = weapons.rightHand.level,
                         leftWeaponDataId = weapons.leftHand.dataId,
@@ -1075,6 +1080,7 @@ namespace MultiplayerARPG.MMO.Mesh
             SyncGhostMount(ghost, msg);
             SyncGhostSummoner(ghost, msg);
             SyncGhostWeapons(ghost, msg);
+            SyncGhostAffiliation(ghost, msg);
             SteerGhost(ghost, msg);
         }
 
@@ -1082,6 +1088,35 @@ namespace MultiplayerARPG.MMO.Mesh
         // A puppet shows its owner's equipped weapons (so the model and the attack animation match), and replays the
         // owner's attack start and trigger RPCs to its own observers (MeshCharacterAttackComponent). Hits are not
         // computed here: the puppet's clients only see the swing and the missile.
+
+        /// <summary>
+        /// The kit's ally / enemy rules (party, guild, faction, PK flag; BaseMapInfo.IsPlayerAlly) read them off the
+        /// target entity, so a puppet must carry its owner's values or a party member's ghost reads as a stranger.
+        /// Also the dealing guard: the kit's dealing request sets both sides "dealing" and asks the target's client,
+        /// which a puppet has none of — the requester would be stuck. A puppet that already "deals with itself" makes
+        /// the kit refuse the request up front (UI_ERROR_CHARACTER_IS_DEALING); the guard expires with the kit's
+        /// request window, so it is renewed with every snapshot.
+        /// </summary>
+        private void SyncGhostAffiliation(MeshGhost ghost, GhostSnapshotMessage msg)
+        {
+            if (msg.kind != GhostKind.Player || !(ghost.entity is BasePlayerCharacterEntity player))
+                return;
+            if (player.PartyId != msg.partyId) player.PartyId = msg.partyId;
+            if (player.GuildId != msg.guildId) player.GuildId = msg.guildId;
+            if (player.FactionId != msg.factionId) player.FactionId = msg.factionId;
+            if (player.IsPkOn != msg.isPkOn) player.IsPkOn = msg.isPkOn;
+            SetDealingGuard(player, true);
+        }
+
+        private static void SetDealingGuard(BasePlayerCharacterEntity player, bool on)
+        {
+            if (player == null || player.DealingComponent == null)
+                return;
+            if (on)
+                player.DealingComponent.DealingCharacter = player;
+            else if (ReferenceEquals(player.DealingComponent.DealingCharacter, player))
+                player.DealingComponent.DealingCharacter = null;
+        }
 
         private void SyncGhostWeapons(MeshGhost ghost, GhostSnapshotMessage msg)
         {
@@ -1708,6 +1743,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 entity.onReceiveDamage -= ghost.hitHook;
             GhostSuppression.Unghostify(entity, this);
             entity.IsInvincible = false;
+            SetDealingGuard(entity as BasePlayerCharacterEntity, false);
             MeshIdentity id = MeshIdentity.GetOrAdd(entity);
             id.MeshEntityId = meshId;
             id.IsGhost = false;
@@ -1730,6 +1766,7 @@ namespace MultiplayerARPG.MMO.Mesh
             id.LastHandoffTime = Time.unscaledTime;
             GhostSuppression.Ghostify(entity, this, null, false, false, disableMovement: false);
             entity.IsInvincible = true;
+            SetDealingGuard(entity as BasePlayerCharacterEntity, true);
             ReceiveDamageDelegate hitHook = (target, position, fromPosition, instigator, damageAmounts, weapon, skill, skillLevel) =>
                 ForwardGhostHit(meshId, position, fromPosition, instigator, damageAmounts, weapon, skill, skillLevel);
             entity.onReceiveDamage += hitHook;
@@ -1938,10 +1975,18 @@ namespace MultiplayerARPG.MMO.Mesh
             BaseSkill skill = null;
             if (msg.skillDataId != 0)
                 GameInstance.Skills.TryGetValue(msg.skillDataId, out skill);
-            // The attacker is (usually) a ghost here: use it as the instigator so hit rules see a real entity.
-            EntityInfo instigator = EntityInfo.Empty;
-            if (!string.IsNullOrEmpty(msg.instigatorMeshId) && _ghosts.TryGetValue(msg.instigatorMeshId, out MeshGhost attackerGhost) && attackerGhost.entity != null)
-                instigator = attackerGhost.entity.GetInfo();
+            // The attacker as this cell knows it (its ghost here, or a real entity of ours), so the hit rules see an
+            // entity with party, guild, faction and PK state. The owner is the authority: the attacking cell judged
+            // the hit against its puppet of us, so the kit's rule is applied again here before any damage lands.
+            EntityInfo instigator = ResolveInstigator(msg.instigatorMeshId);
+            if (instigator.Type != 0 && !target.CanReceiveDamageFrom(instigator))
+            {
+                if (traceHandoffTiming)
+                    Logging.Log("Mesh", $"Forwarded hit on {target.CharacterName} ({msg.targetMeshId}) refused: not attackable by {msg.instigatorMeshId} here");
+                if (_neighbourZoneByConnection.TryGetValue(connectionId, out string refusedFrom) && _linkClients.TryGetValue(refusedFrom, out MeshLinkClient refusedBack))
+                    refusedBack.SendGhostHitResult(new GhostHitResultMessage { targetMeshId = msg.targetMeshId, combatAmountType = (byte)CombatAmountType.Immune, totalDamage = 0, currentHp = target.CurrentHp });
+                return;
+            }
 
             int hpBefore = target.CurrentHp;
             target.ApplyDamage((HitBoxPosition)msg.hitBoxPosition, msg.fromPosition, instigator, damageAmounts, msg.hasWeapon ? msg.weapon : CharacterItem.Empty, skill, msg.skillLevel, msg.randomSeed);

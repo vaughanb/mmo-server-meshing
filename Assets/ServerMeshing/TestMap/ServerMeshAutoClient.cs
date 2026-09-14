@@ -52,7 +52,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public const string PREF_PET = "ServerMesh.AutoClient.Pet";
 #endif
 
-        public enum Mode { none, walk, self, stand, pace, observe, fight }
+        public enum Mode { none, walk, self, stand, pace, observe, fight, pvp }
 
         [Header("Session")]
         public string username = "meshtest";
@@ -347,6 +347,9 @@ namespace MultiplayerARPG.MMO.Mesh
                     break;
                 case Mode.observe:
                     yield return RunObserve(deadline);
+                    break;
+                case Mode.pvp:
+                    yield return RunPvp(deadline);
                     break;
                 case Mode.fight:
                     yield return RunFight(deadline);
@@ -655,6 +658,93 @@ namespace MultiplayerARPG.MMO.Mesh
             for (int i = 0; i < self.NonEquipItems.Count; ++i)
                 if (self.NonEquipItems[i].dataId != 0) n += self.NonEquipItems[i].amount;
             return n;
+        }
+
+        /// <summary>
+        /// Hostile actions at the nearest OTHER player beyond the line (its ghost): melee attacks when within reach
+        /// and the hostile buff skill every few seconds within its range. With a party member over there the kit
+        /// must refuse both on this cell (ally) — and the owner refuses again if a hit were ever forwarded; with a
+        /// stranger on a PvP map the hits and the debuff must land on the real character next door.
+        /// </summary>
+        private IEnumerator RunPvp(float deadline)
+        {
+            Phase = "pvp";
+            _walkZOverride = walkTargetZ;
+            bool reached = false;
+            yield return WalkTo(walkTargetX, deadline, ClientMigrationController.CompletedCount, r => reached = r);
+            _walkZOverride = null;
+            if (!reached) { Fail("never reached the pvp position"); yield break; }
+            BasePlayerCharacterEntity self = GameInstance.PlayingCharacterEntity;
+            int enemySkillId = 0;
+            for (int i = 0; i < self.Skills.Count; ++i)
+                if (self.Skills[i].GetSkill() is Skill sk && sk.skillBuffType == Skill.SkillBuffType.BuffToEnemy) { enemySkillId = sk.DataId; break; }
+            float attackRange = Mathf.Max(1f, self.GetAttackDistance(false) - 0.3f);
+            float holdX = observeGhostBeyondX + 0.8f; // close in on a target across the line, never past the hysteresis (no handoff)
+            Log($"pvp: weapon={self.EquipWeapons.rightHand.dataId} range={attackRange:0.#} enemySkill={enemySkillId} hold x<={holdX:0.#}");
+            float end = Time.realtimeSinceStartup + 120f, attackUntil = -1f;
+            float nextAttack = 0f, nextCast = 0f, nextLog = 0f;
+            int attacks = 0, castsSent = 0, castsRefused = 0, targetHpStart = -1, minTargetHp = int.MaxValue;
+            string targetName = "";
+            bool hurt = false;
+            while (Time.realtimeSinceStartup < end && (attackUntil < 0f || Time.realtimeSinceStartup < attackUntil))
+            {
+                self = GameInstance.PlayingCharacterEntity;
+                if (self == null || self.IsDead()) break;
+                BasePlayerCharacterEntity target = null; float best = float.MaxValue;
+                foreach (BasePlayerCharacterEntity pe in FindObjectsByType<BasePlayerCharacterEntity>(FindObjectsSortMode.None))
+                {
+                    if (pe == self || pe.IsDead() || string.IsNullOrEmpty(pe.CharacterName) || pe.EntityTransform.position.x < observeGhostBeyondX) continue;
+                    float d = Vector3.Distance(self.EntityTransform.position, pe.EntityTransform.position);
+                    if (d < best) { best = d; target = pe; }
+                }
+                float now = Time.realtimeSinceStartup;
+                if (target != null)
+                {
+                    if (targetHpStart < 0 || target.CharacterName != targetName) { targetHpStart = target.CurrentHp; targetName = target.CharacterName; Log($"pvp target '{targetName}' hp={target.CurrentHp}/{target.MaxHp} party={target.PartyId} at {target.EntityTransform.position} dist={best:0.#}"); }
+                    minTargetHp = Mathf.Min(minTargetHp, target.CurrentHp);
+                    if (target.CurrentHp < targetHpStart) hurt = true;
+                    if (best <= 8f && attackUntil < 0f) attackUntil = now + 45f;
+                    attackRange = Mathf.Max(1f, self.GetAttackDistance(false) - 0.3f);
+                    if (enemySkillId != 0 && best <= 8f && now >= nextCast)
+                    {
+                        nextCast = now + 2.5f;
+                        self.SetTargetEntity(target);
+                        bool sent = self.UseSkill(enemySkillId, WeaponHandlingState.None, target.ObjectId, AimPosition.CreatePosition(target.EntityTransform.position));
+                        if (sent) castsSent++; else castsRefused++;
+                        Log($"pvp cast {enemySkillId} on '{targetName}' sent={sent} (dist {best:0.#})");
+                    }
+                    if (best > attackRange)
+                    {
+                        if (self.EntityTransform.position.x < holdX)
+                        {
+                            Vector3 dest = target.EntityTransform.position; dest.x = Mathf.Min(dest.x, holdX);
+                            self.PointClickMovement(dest);
+                        }
+                        else self.StopMove();
+                    }
+                    else if (now >= nextAttack)
+                    {
+                        nextAttack = now + 0.6f;
+                        self.StopMove();
+                        Vector3 toTarget = target.EntityTransform.position - self.EntityTransform.position; toTarget.y = 0f;
+                        if (toTarget.sqrMagnitude > 0.001f) self.SetLookRotation(Quaternion.LookRotation(toTarget.normalized), true);
+                        self.SetTargetEntity(target);
+                        bool isLeftHand = false;
+                        self.AimPosition = self.GetAttackAimPosition(ref isLeftHand, target.EntityTransform.position);
+                        WeaponHandlingState whs = WeaponHandlingState.None;
+                        self.Attack(ref whs);
+                        attacks++;
+                    }
+                }
+                if (now >= nextLog)
+                {
+                    nextLog = now + 5f;
+                    Log($"pvp: target={(target != null ? target.CharacterName : "none beyond the line")} dist={(target != null ? best : -1f):0.#} range={attackRange:0.#} attacks={attacks} casts={castsSent}/{castsSent + castsRefused} targetHp={(target != null ? target.CurrentHp : -1)} selfHp={self.CurrentHp} selfX={self.EntityTransform.position.x:0.#}");
+                }
+                yield return null;
+            }
+            Log($"RESULT pvp: target='{targetName}' attacks={attacks} castsSent={castsSent} castsRefused={castsRefused} targetHurt={hurt} targetHp {targetHpStart}->{minTargetHp} -> {(attacks + castsSent + castsRefused > 0 ? "PASS" : "FAIL")}");
+            Finished = true; Passed = attacks + castsSent + castsRefused > 0;
         }
 
         private IEnumerator RunFight(float deadline)
