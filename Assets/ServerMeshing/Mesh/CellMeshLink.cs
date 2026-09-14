@@ -33,6 +33,27 @@ namespace MultiplayerARPG.MMO.Mesh
         public const ushort GhostAction = 112;
         public const ushort HandoffAck = 113;
         public const ushort GhostPartyShare = 114;
+        public const ushort GhostAttack = 115;
+        public const ushort GhostAttackTrigger = 116;
+    }
+
+    /// <summary>An owned character started an attack: the neighbour replays the kit's RpcAttack on its puppet.</summary>
+    public struct GhostAttackMessage : INetSerializable
+    {
+        public string attackerMeshId;
+        public long peerTimestamp;
+        public byte weaponHandlingState;
+        public void Serialize(NetDataWriter writer) { writer.Put(attackerMeshId); writer.Put(peerTimestamp); writer.Put(weaponHandlingState); }
+        public void Deserialize(NetDataReader reader) { attackerMeshId = reader.GetString(); peerTimestamp = reader.GetLong(); weaponHandlingState = reader.GetByte(); }
+    }
+
+    /// <summary>The attack reached a trigger: the neighbour replays RpcSimulateActionTrigger (the visual missile/swing).</summary>
+    public struct GhostAttackTriggerMessage : INetSerializable
+    {
+        public string attackerMeshId;
+        public SimulateActionTriggerData data;
+        public void Serialize(NetDataWriter writer) { writer.Put(attackerMeshId); writer.Put(data); }
+        public void Deserialize(NetDataReader reader) { attackerMeshId = reader.GetString(); data = reader.Get<SimulateActionTriggerData>(); }
     }
 
     /// <summary>
@@ -317,6 +338,10 @@ namespace MultiplayerARPG.MMO.Mesh
         public string summonerMeshId; // a summoned monster: mesh id of its summoner (empty for anything else)
         public string summonId;       // ... and which CharacterSummon entry it is on that summoner (re-linked on arrival)
         public byte summonType;       // SummonType of the summon
+        public int rightWeaponDataId; // equipped weapons (players): the puppet shows and animates the same weapon
+        public int rightWeaponLevel;
+        public int leftWeaponDataId;
+        public int leftWeaponLevel;
 
         public void Serialize(NetDataWriter writer)
         {
@@ -337,6 +362,7 @@ namespace MultiplayerARPG.MMO.Mesh
             writer.Put(summonerMeshId ?? string.Empty);
             writer.Put(summonId ?? string.Empty);
             writer.Put(summonType);
+            writer.Put(rightWeaponDataId); writer.Put(rightWeaponLevel); writer.Put(leftWeaponDataId); writer.Put(leftWeaponLevel);
         }
 
         public void Deserialize(NetDataReader reader)
@@ -358,6 +384,7 @@ namespace MultiplayerARPG.MMO.Mesh
             summonerMeshId = reader.GetString();
             summonId = reader.GetString();
             summonType = reader.GetByte();
+            rightWeaponDataId = reader.GetInt(); rightWeaponLevel = reader.GetInt(); leftWeaponDataId = reader.GetInt(); leftWeaponLevel = reader.GetInt();
         }
     }
 
@@ -384,6 +411,8 @@ namespace MultiplayerARPG.MMO.Mesh
             RegisterMessageHandler(MeshLinkMessageTypes.HandoffNotice, HandleHandoffNotice);
             RegisterMessageHandler(MeshLinkMessageTypes.HandoffAck, HandleHandoffAck);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostPartyShare, HandleGhostPartyShare);
+            RegisterMessageHandler(MeshLinkMessageTypes.GhostAttack, HandleGhostAttack);
+            RegisterMessageHandler(MeshLinkMessageTypes.GhostAttackTrigger, HandleGhostAttackTrigger);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostHit, HandleGhostHit);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostHitResult, HandleGhostHitResult);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostReward, HandleGhostReward);
@@ -451,6 +480,18 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             GhostPartyShareMessage msg = messageHandler.ReadMessage<GhostPartyShareMessage>();
             _manager.OnGhostPartyShare(messageHandler.ConnectionId, msg);
+        }
+
+        private void HandleGhostAttack(MessageHandlerData messageHandler)
+        {
+            GhostAttackMessage msg = messageHandler.ReadMessage<GhostAttackMessage>();
+            _manager.OnGhostAttack(msg);
+        }
+
+        private void HandleGhostAttackTrigger(MessageHandlerData messageHandler)
+        {
+            GhostAttackTriggerMessage msg = messageHandler.ReadMessage<GhostAttackTriggerMessage>();
+            _manager.OnGhostAttackTrigger(msg);
         }
 
         private void HandleGhostHit(MessageHandlerData messageHandler)
@@ -582,6 +623,16 @@ namespace MultiplayerARPG.MMO.Mesh
         public void SendGhostPartyShare(GhostPartyShareMessage msg)
         {
             Send(MeshLinkMessageTypes.GhostPartyShare, msg);
+        }
+
+        public void SendGhostAttack(GhostAttackMessage msg)
+        {
+            Send(MeshLinkMessageTypes.GhostAttack, msg);
+        }
+
+        public void SendGhostAttackTrigger(GhostAttackTriggerMessage msg)
+        {
+            Send(MeshLinkMessageTypes.GhostAttackTrigger, msg);
         }
 
         public void SendHandoffNotice(string characterId, string userId)

@@ -23,10 +23,12 @@ MonoBehaviour:
   damageElements: []
   items:
   - {fileID: 11400000, guid: cb070b93e2247624393ef1fcaf5edf4b, type: 2}
+  - {fileID: 11400000, guid: 5fd9f324430b46928a4b2f0c93311ddf, type: 2}
   - {fileID: 11400000, guid: c5cd951ce46d42aaa3a0decc9f8b6e15, type: 2}
   itemCraftFormulas: []
   armorTypes: []
-  weaponTypes: []
+  weaponTypes:
+  - {fileID: 11400000, guid: 09dec2ea91e448de9f2a2241b5a5815d, type: 2}
   ammoTypes: []
   skills:
   - {fileID: 11400000, guid: 9818e2a9d73ff5c44a502b770634cf5a, type: 2}

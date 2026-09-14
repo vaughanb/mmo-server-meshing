@@ -541,6 +541,9 @@ namespace MultiplayerARPG.MMO.Mesh
             Dictionary<string, float> absentSince = new Dictionary<string, float>();
             HashSet<string> presentNow = new HashSet<string>();
             int swaps = 0, absences = 0; float maxAbsenceMs = 0f;
+            // Attacks and missiles seen on the far side of the line (replayed on ghosts): a swing is counted when an
+            // entity beyond the line goes from idle to attacking; missiles by distinct damage-entity instances.
+            int ghostAttacks = 0; HashSet<int> attackingNow = new HashSet<int>(); HashSet<int> missileIds = new HashSet<int>();
             float end = Time.realtimeSinceStartup + observeSeconds;
             float nextSample = 0f;
             while (Time.realtimeSinceStartup < end)
@@ -632,6 +635,15 @@ namespace MultiplayerARPG.MMO.Mesh
                         Vector3 pos = e.EntityTransform.position;
                         if (pos.x < observeGhostBeyondX) continue; // still on our own server; not a ghost
                         if (list.Count == 0 || Vector3.Distance(list[list.Count - 1], pos) > 0.5f) list.Add(pos);
+                        bool attacking = e.AttackComponent != null && e.AttackComponent.IsAttacking;
+                        int eid = e.GetInstanceID();
+                        if (attacking && attackingNow.Add(eid)) { ghostAttacks++; Log($"Ghost '{e.CharacterName}' attacks at {pos}"); }
+                        else if (!attacking) attackingNow.Remove(eid);
+                    }
+                    foreach (MissileDamageEntity m in FindObjectsByType<MissileDamageEntity>(FindObjectsSortMode.None))
+                    {
+                        if (m != null && m.gameObject.activeInHierarchy && m.transform.position.x >= observeGhostBeyondX - 5f && missileIds.Add(m.GetInstanceID()))
+                            Log($"Missile seen at {m.transform.position}");
                     }
                 }
                 yield return null;
@@ -650,7 +662,7 @@ namespace MultiplayerARPG.MMO.Mesh
             Finished = true;
             // Monsters in the demo idle unless aggroed, so movement is only required of player ghosts.
             Passed = ghostsSeen > 0 && (playerGhosts == 0 || movedGhost) && migrations == 0;
-            Log($"RESULT observe: ghostsSeen={ghostsSeen} (players={playerGhosts} monsters={monsterGhosts}) moved={movedGhost} migrationsDuringObserve={migrations} playerSwaps={swaps} absences={absences} maxAbsenceMs={maxAbsenceMs:0} -> {(Passed ? "PASS" : "FAIL")}");
+            Log($"RESULT observe: ghostsSeen={ghostsSeen} (players={playerGhosts} monsters={monsterGhosts}) moved={movedGhost} migrationsDuringObserve={migrations} playerSwaps={swaps} absences={absences} maxAbsenceMs={maxAbsenceMs:0} ghostAttacks={ghostAttacks} missiles={missileIds.Count} -> {(Passed ? "PASS" : "FAIL")}");
         }
 
         private float _deadSince = -1f;
@@ -679,7 +691,11 @@ namespace MultiplayerARPG.MMO.Mesh
             // Hold the line: stay on OUR side of the edge (x <= holdX) and fight whatever monster wanders within reach.
             // Our zone runs no spawn areas here, so every monster we see is a ghost owned by the neighbour; hits we land
             // are forwarded to the owner, hits the owner's real monster lands on our ghost come back the same way.
-            float holdX = observeGhostBeyondX - 0.5f;
+            // Hold the line from whichever side the fight position is on: west of the line (the usual C fighter) or east
+            // of it (a fighter standing in E, whose ghost on C is what an observer over there watches attack).
+            bool east = walkTargetX >= observeGhostBeyondX;
+            float holdX = east ? observeGhostBeyondX + 0.5f : observeGhostBeyondX - 0.5f;
+            bool Beyond(float x, float margin) => east ? x < holdX - margin : x > holdX + margin;
             float attackRange = Mathf.Max(1f, self.GetAttackDistance(false) - 0.3f);
             float end = Time.realtimeSinceStartup + 150f;
             float nextAttack = 0f, nextLog = 0f;
@@ -715,13 +731,13 @@ namespace MultiplayerARPG.MMO.Mesh
                     Log($"target died (kill #{kills}); exp={self.Exp} gold={self.Gold} level={self.Level}");
                     target = null;
                 }
-                if (target == null || target.EntityTransform.position.x > holdX + attackRange + 0.5f)
+                if (target == null || Beyond(target.EntityTransform.position.x, attackRange + 0.5f))
                 {
                     // Nearest alive monster we can reach without leaving our side.
                     target = null; float best = float.MaxValue;
                     foreach (BaseMonsterCharacterEntity m in FindObjectsByType<BaseMonsterCharacterEntity>(FindObjectsSortMode.None))
                     {
-                        if (m == null || m.IsDead() || m.EntityTransform.position.x > holdX + attackRange + 0.5f) continue;
+                        if (m == null || m.IsDead() || Beyond(m.EntityTransform.position.x, attackRange + 0.5f)) continue;
                         float d = Vector3.Distance(m.EntityTransform.position, self.EntityTransform.position);
                         if (d < best) { best = d; target = m; }
                     }
@@ -737,7 +753,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     if (toTarget.magnitude > attackRange)
                     {
                         Vector3 dest = target.EntityTransform.position - toTarget.normalized * (attackRange * 0.7f);
-                        dest.x = Mathf.Min(dest.x, holdX);
+                        dest.x = east ? Mathf.Max(dest.x, holdX) : Mathf.Min(dest.x, holdX);
                         self.PointClickMovement(dest);
                     }
                     else if (Time.realtimeSinceStartup >= nextAttack)
@@ -769,12 +785,12 @@ namespace MultiplayerARPG.MMO.Mesh
                     BaseMonsterCharacterEntity bait = null; float bestBait = float.MaxValue;
                     foreach (BaseMonsterCharacterEntity m in FindObjectsByType<BaseMonsterCharacterEntity>(FindObjectsSortMode.None))
                     {
-                        if (m == null || m.IsDead() || m.EntityTransform.position.x > holdX + 6f) continue;
+                        if (m == null || m.IsDead() || Beyond(m.EntityTransform.position.x, 6f)) continue;
                         float d = Mathf.Abs(m.EntityTransform.position.z - self.EntityTransform.position.z);
                         if (d < bestBait) { bestBait = d; bait = m; }
                     }
                     Vector3 dest = self.EntityTransform.position;
-                    dest.x = holdX - 0.3f;
+                    dest.x = east ? holdX + 0.3f : holdX - 0.3f;
                     if (bait != null) dest.z = bait.EntityTransform.position.z;
                     if (Vector3.Distance(dest, self.EntityTransform.position) > 0.8f)
                         self.PointClickMovement(dest);

@@ -444,9 +444,12 @@ namespace MultiplayerARPG.MMO.Mesh
             summonerMeshId = MeshEntityIdOf(summoner);
             for (int i = 0; i < summoner.Summons.Count; ++i)
             {
-                if (summoner.Summons[i].objectId == monster.ObjectId)
+                // By the cached entity first: the kit's spawn-time re-summon does not write the new object id back
+                // into the list, so a pet summoned at login carries a stale objectId until the next Update.
+                CharacterSummon summon = summoner.Summons[i];
+                if (ReferenceEquals(summon.CacheEntity, monster) || summon.objectId == monster.ObjectId)
                 {
-                    summonId = summoner.Summons[i].id;
+                    summonId = summon.id;
                     break;
                 }
             }
@@ -481,8 +484,13 @@ namespace MultiplayerARPG.MMO.Mesh
                     string meshId = MeshEntityIdOf(entity);
                     VehicleEntity mount = entity.PassengingVehicleEntity as VehicleEntity;
                     SummonInfoOf(entity, out string summonerMeshId, out string summonId, out SummonType summonType);
+                    EquipWeapons weapons = entity is BasePlayerCharacterEntity ? entity.EquipWeapons : default;
                     client.SendGhostSnapshot(new GhostSnapshotMessage
                     {
+                        rightWeaponDataId = weapons.rightHand.dataId,
+                        rightWeaponLevel = weapons.rightHand.level,
+                        leftWeaponDataId = weapons.leftHand.dataId,
+                        leftWeaponLevel = weapons.leftHand.level,
                         summonerMeshId = summonerMeshId,
                         summonId = summonId,
                         summonType = (byte)summonType,
@@ -671,7 +679,27 @@ namespace MultiplayerARPG.MMO.Mesh
                     }
                 }
             }
+            else if (!playerCharacter.IsDead())
+            {
+                // A fresh kit spawn (no puppet of this character was here to promote): the kit already re-summoned the
+                // saved summons, so any pet puppet still linked to this character is a leftover of the departing cell's
+                // stream — destroy it now instead of letting it stand next to the new pet until it expires stale.
+                for (int i = 0; i < playerCharacter.Summons.Count; ++i)
+                    DestroySummonPuppet(playerCharacter.Id, playerCharacter.Summons[i].id, "superseded by the kit's re-summon");
+            }
             DestroyGhost(playerCharacter.Id, "promoted to real");
+        }
+
+        private void DestroySummonPuppet(string summonerMeshId, string summonId, string reason)
+        {
+            _tmpIds.Clear();
+            foreach (KeyValuePair<string, MeshGhost> kv in _ghosts)
+            {
+                if (kv.Value.kind == GhostKind.Monster && !kv.Value.reserved && string.Equals(kv.Value.summonerMeshId, summonerMeshId) && string.Equals(kv.Value.summonId, summonId))
+                    _tmpIds.Add(kv.Key);
+            }
+            for (int i = 0; i < _tmpIds.Count; ++i)
+                DestroyGhost(_tmpIds[i], reason);
         }
 
         // ---- Arrival by handoff: promote the ghost in place (DESIGN §7) ----
@@ -899,7 +927,86 @@ namespace MultiplayerARPG.MMO.Mesh
                 return; // claimed by an arriving client: it sits where the saved data put it until registration
             SyncGhostMount(ghost, msg);
             SyncGhostSummoner(ghost, msg);
+            SyncGhostWeapons(ghost, msg);
             SteerGhost(ghost, msg);
+        }
+
+        // ---- Attacks on ghosts (DESIGN §12) ----
+        // A puppet shows its owner's equipped weapons (so the model and the attack animation match), and replays the
+        // owner's attack start and trigger RPCs to its own observers (MeshCharacterAttackComponent). Hits are not
+        // computed here: the puppet's clients only see the swing and the missile.
+
+        private void SyncGhostWeapons(MeshGhost ghost, GhostSnapshotMessage msg)
+        {
+            if (msg.kind != GhostKind.Player || !(ghost.entity is BasePlayerCharacterEntity player))
+                return;
+            EquipWeapons current = player.EquipWeapons;
+            if (current.rightHand.dataId == msg.rightWeaponDataId && current.leftHand.dataId == msg.leftWeaponDataId)
+                return;
+            player.EquipWeapons = new EquipWeapons
+            {
+                rightHand = msg.rightWeaponDataId != 0 ? CharacterItem.Create(msg.rightWeaponDataId, Mathf.Max(1, msg.rightWeaponLevel)) : CharacterItem.Empty,
+                leftHand = msg.leftWeaponDataId != 0 ? CharacterItem.Create(msg.leftWeaponDataId, Mathf.Max(1, msg.leftWeaponLevel)) : CharacterItem.Empty,
+            };
+        }
+
+        /// <summary>Owner side: tell every neighbour that currently sees this entity as a ghost.</summary>
+        private void SendToZonesStreaming(string meshId, System.Action<MeshLinkClient> send)
+        {
+            foreach (KeyValuePair<string, HashSet<string>> kv in _streamedToZone)
+            {
+                if (!kv.Value.Contains(meshId))
+                    continue;
+                if (_linkClients.TryGetValue(kv.Key, out MeshLinkClient link) && link.IsConnected)
+                    send(link);
+            }
+        }
+
+        internal void ForwardGhostAttack(BaseCharacterEntity attacker, long peerTimestamp, WeaponHandlingState weaponHandlingState)
+        {
+            if (!IsServer || attacker == null || _streamedToZone.Count == 0)
+                return;
+            string meshId = MeshEntityIdOf(attacker);
+            GhostAttackMessage msg = new GhostAttackMessage { attackerMeshId = meshId, peerTimestamp = peerTimestamp, weaponHandlingState = (byte)weaponHandlingState };
+            SendToZonesStreaming(meshId, link => link.SendGhostAttack(msg));
+        }
+
+        internal void ForwardGhostAttackTrigger(BaseCharacterEntity attacker, SimulateActionTriggerData data)
+        {
+            if (!IsServer || attacker == null || _streamedToZone.Count == 0)
+                return;
+            string meshId = MeshEntityIdOf(attacker);
+            GhostAttackTriggerMessage msg = new GhostAttackTriggerMessage { attackerMeshId = meshId, data = data };
+            SendToZonesStreaming(meshId, link => link.SendGhostAttackTrigger(msg));
+        }
+
+        private MeshCharacterAttackComponent GhostAttackComponent(string meshId)
+        {
+            if (!_ghosts.TryGetValue(meshId, out MeshGhost ghost) || ghost.entity == null || ghost.reserved || ghost.entity.IsDead())
+                return null;
+            return ghost.entity.GetComponent<MeshCharacterAttackComponent>();
+        }
+
+        internal void OnGhostAttack(GhostAttackMessage msg)
+        {
+            if (!IsServer)
+                return;
+            MeshCharacterAttackComponent attack = GhostAttackComponent(msg.attackerMeshId);
+            if (attack == null)
+                return;
+            attack.ReplayAttack(msg.peerTimestamp, (WeaponHandlingState)msg.weaponHandlingState);
+            if (traceHandoffTiming)
+                Logging.Log("Mesh", $"Ghost attack replayed on {attack.Entity.CharacterName} ({msg.attackerMeshId})");
+        }
+
+        internal void OnGhostAttackTrigger(GhostAttackTriggerMessage msg)
+        {
+            if (!IsServer)
+                return;
+            MeshCharacterAttackComponent attack = GhostAttackComponent(msg.attackerMeshId);
+            if (attack == null)
+                return;
+            attack.ReplayTrigger(msg.data);
         }
 
         // ---- Summons on ghosts ----
@@ -2224,6 +2331,10 @@ namespace MultiplayerARPG.MMO.Mesh
         internal void OnHandoffNotice(long connectionId, HandoffNoticeMessage msg) { }
         internal void OnHandoffAck(long connectionId, HandoffAckMessage msg) { }
         internal void OnGhostPartyShare(long connectionId, GhostPartyShareMessage msg) { }
+        internal void OnGhostAttack(GhostAttackMessage msg) { }
+        internal void OnGhostAttackTrigger(GhostAttackTriggerMessage msg) { }
+        internal void ForwardGhostAttack(BaseCharacterEntity attacker, long peerTimestamp, WeaponHandlingState weaponHandlingState) { }
+        internal void ForwardGhostAttackTrigger(BaseCharacterEntity attacker, SimulateActionTriggerData data) { }
         internal bool TryGetPlayerGhost(string characterId, out BasePlayerCharacterEntity ghost) { ghost = null; return false; }
         internal void CollectPartyMembers(BasePlayerCharacterEntity killer, PartyData party, List<BasePlayerCharacterEntity> expMembers, List<BasePlayerCharacterEntity> itemMembers, List<BasePlayerCharacterEntity> expGhosts, List<BasePlayerCharacterEntity> itemGhosts) { }
         internal void GivePartyShareHere(BasePlayerCharacterEntity member, int exp, float expMultiplier, int gold, float goldMultiplier, List<CurrencyAmount> currencies, RewardGivenType givenType, int giverLevel, int sourceLevel) { }
