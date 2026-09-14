@@ -63,6 +63,7 @@ namespace MultiplayerARPG.MMO.Mesh
             public ReceiveDamageDelegate hitHook; // so a promoted puppet can drop its hit forwarding
             public VehicleEntity vehicle;         // the mount this ghost rides (spawned here for a puppet, kept for a demoted player)
             public bool mountPending;             // an async mount/dismount is in flight
+            public bool reserved;                 // an arriving client has claimed this puppet (promotion finishes at registration)
         }
 
         private MeshLinkServer _linkServer;
@@ -98,15 +99,32 @@ namespace MultiplayerARPG.MMO.Mesh
             _linkClients.Clear();
             _linkServer?.StopServer();
             _linkServer = null;
-            foreach (MeshGhost ghost in _ghosts.Values)
+            _tmpIds.Clear(); _tmpIds.AddRange(_ghosts.Keys);
+            for (int i = 0; i < _tmpIds.Count; ++i)
+                DestroyGhost(_tmpIds[i], "server stopping");
+            _tmpIds.Clear(); _tmpIds.AddRange(_ghostDrops.Keys);
+            for (int i = 0; i < _tmpIds.Count; ++i)
+                DestroyGhostDrop(_tmpIds[i], "server stopping");
+            foreach (KeyValuePair<BaseMonsterCharacterEntity, CharacterEntityKilledDelegate> kv in _killHooks)
             {
-                if (ghost.entity != null)
-                    ghost.entity.NetworkDestroy();
+                if (kv.Key != null)
+                    kv.Key.onKilled -= kv.Value;
             }
             _ghosts.Clear();
+            _ghostDrops.Clear();
+            _playerGhosts.Clear();
+            _recentlyRemoved.Clear();
             _streamedToZone.Clear();
             _neighbourZoneByConnection.Clear();
             _ownedCandidates.Clear();
+            _ownedByMeshId.Clear();
+            _ownedDrops.Clear();
+            _ownedDropsByMeshId.Clear();
+            _lentMonsters.Clear();
+            _borrowedKillHooks.Clear();
+            _killHooks.Clear();
+            _reservedArrivals.Clear();
+            _incomingHandoffs.Clear();
         }
 
         /// <summary>
@@ -230,6 +248,7 @@ namespace MultiplayerARPG.MMO.Mesh
             _ownedCandidates.Clear();
             _ownedByMeshId.Clear();
             RescanOwnedDrops();
+            PruneKillHooks();
             foreach (IPlayerCharacterData data in ServerUserHandlers.GetPlayerCharacters())
             {
                 if (data is BasePlayerCharacterEntity entity && !entity.IsWarping)
@@ -250,10 +269,12 @@ namespace MultiplayerARPG.MMO.Mesh
                     id.MeshEntityId = $"{OwnZoneId}:{_cellIncarnation}:{monster.ObjectId}"; // birth provenance, never the current owner
                     id.OwnerZoneId = OwnZoneId;
                 }
-                if (_killHooked.Add(monster))
+                if (!_killHooks.ContainsKey(monster))
                 {
                     BaseMonsterCharacterEntity captured = monster;
-                    monster.onKilled += (target, instigator) => OnOwnedMonsterKilled(captured, instigator);
+                    CharacterEntityKilledDelegate hook = (target, instigator) => OnOwnedMonsterKilled(captured, instigator);
+                    monster.onKilled += hook;
+                    _killHooks[monster] = hook;
                 }
                 _ownedCandidates.Add(monster);
                 _ownedByMeshId[id.MeshEntityId] = monster;
@@ -368,11 +389,19 @@ namespace MultiplayerARPG.MMO.Mesh
             _tmpIds.Clear();
             foreach (KeyValuePair<string, MeshGhost> kv in _ghosts)
             {
-                if (kv.Value.entity == null || Time.unscaledTime - kv.Value.lastSeen > ghostStaleSeconds)
+                if (kv.Value.entity == null || (!kv.Value.reserved && Time.unscaledTime - kv.Value.lastSeen > ghostStaleSeconds))
                     _tmpIds.Add(kv.Key);
             }
             for (int i = 0; i < _tmpIds.Count; ++i)
                 DestroyGhost(_tmpIds[i], "stale");
+            if (_recentlyRemoved.Count > 0)
+            {
+                _tmpIds.Clear();
+                foreach (KeyValuePair<string, float> kv in _recentlyRemoved)
+                    if (Time.unscaledTime - kv.Value > RECENTLY_REMOVED_SECONDS) _tmpIds.Add(kv.Key);
+                for (int i = 0; i < _tmpIds.Count; ++i)
+                    _recentlyRemoved.Remove(_tmpIds[i]);
+            }
         }
 
         private void DestroyGhost(string meshId, string reason)
@@ -380,16 +409,37 @@ namespace MultiplayerARPG.MMO.Mesh
             if (!_ghosts.TryGetValue(meshId, out MeshGhost ghost))
                 return;
             _ghosts.Remove(meshId);
+            _recentlyRemoved[meshId] = Time.unscaledTime;
+            VehicleEntity mount = ghost.vehicle;
             if (ghost.entity != null)
             {
                 Logging.Log("Mesh", $"Ghost destroyed {ghost.kind} {ghost.entity.CharacterName} ({meshId}) reason={reason}");
-                VehicleEntity mount = ghost.entity.PassengingVehicleEntity as VehicleEntity;
-                if (mount == null) mount = ghost.vehicle;
+                _playerGhosts.Remove(ghost.entity);
+                if (ghost.entity.PassengingVehicleEntity is VehicleEntity ridden)
+                    mount = ridden;
+                // Nothing of the puppet survives into a pooled reuse of the instance: the hit hook and the identity.
+                if (ghost.hitHook != null)
+                    ghost.entity.onReceiveDamage -= ghost.hitHook;
+                ResetMeshIdentity(ghost.entity);
                 ghost.entity.NetworkDestroy();
-                if (mount != null && mount.Identity != null && !mount.Identity.IsDestroyed)
-                    mount.NetworkDestroy();
             }
+            if (mount != null && mount.Identity != null && !mount.Identity.IsDestroyed)
+                mount.NetworkDestroy();
         }
+
+        /// <summary>Remove the runtime identity so a pooled instance never comes back flagged as someone's ghost.</summary>
+        private static void ResetMeshIdentity(Component entity)
+        {
+            MeshIdentity id = MeshIdentity.Get(entity);
+            if (id != null)
+                Destroy(id);
+        }
+
+        // Ghosts by kind for cheap proximity queries (IsPlayerGhostNear), and ids removed a moment ago so a snapshot
+        // that overtakes its GhostRemove (snapshots are on the sequenced channel) does not resurrect the puppet.
+        private readonly List<BaseCharacterEntity> _playerGhosts = new List<BaseCharacterEntity>();
+        private readonly Dictionary<string, float> _recentlyRemoved = new Dictionary<string, float>();
+        private const float RECENTLY_REMOVED_SECONDS = 1f;
 
         /// <summary>Called when the real character registers on this cell (handoff-in): the ghost must go.</summary>
         private void GhostingOnRealPlayerRegistered(BasePlayerCharacterEntity playerCharacter, long connectionId)
@@ -399,6 +449,25 @@ namespace MultiplayerARPG.MMO.Mesh
             if (_reservedArrivals.TryGetValue(playerCharacter.Id, out ReservedArrival reserved) && playerCharacter.Identity != null)
             {
                 _reservedArrivals.Remove(playerCharacter.Id);
+                if (!ReferenceEquals(reserved.entity, playerCharacter))
+                {
+                    // A fresh kit spawn registered instead (the client re-entered): the reserved puppet must go.
+                    DestroyGhost(playerCharacter.Id, "superseded by a fresh spawn");
+                    return;
+                }
+                // Finish the promotion: from here on this is the real character.
+                if (_ghosts.TryGetValue(playerCharacter.Id, out MeshGhost ghost))
+                {
+                    _ghosts.Remove(playerCharacter.Id);
+                    _playerGhosts.Remove(playerCharacter);
+                    if (ghost.hitHook != null)
+                        playerCharacter.onReceiveDamage -= ghost.hitHook;
+                }
+                GhostSuppression.Unghostify(playerCharacter, this);
+                playerCharacter.IsInvincible = false;
+                MeshIdentity id = MeshIdentity.GetOrAdd(playerCharacter);
+                id.IsGhost = false;
+                id.OwnerZoneId = OwnZoneId;
                 // A fresh spawn is pushed to its owner at once. A re-owned entity would wait for the AOI's next pass
                 // (1 s): the kit's SetOwnerClient is deferred by the AOI (manuallyApplyOwnerChanges) and the owner's
                 // subscription only comes with that pass. Apply the owner now and subscribe the owner now.
@@ -435,27 +504,25 @@ namespace MultiplayerARPG.MMO.Mesh
         // Register, respawn RPC). Handing it the ghost entity means the arriving character IS the entity observers
         // here were already looking at: no swap, no pop.
 
-        private sealed class ReservedArrival { public BasePlayerCharacterEntity entity; public float time; public VehicleEntity mount; public bool keepMount; }
+        private sealed class ReservedArrival { public BasePlayerCharacterEntity entity; public string userId; public float time; public VehicleEntity mount; public bool keepMount; }
         private readonly Dictionary<string, ReservedArrival> _reservedArrivals = new Dictionary<string, ReservedArrival>();
         [Tooltip("If an arriving client never becomes ready, its promoted ghost is destroyed after this many seconds.")]
         public float reservedArrivalTimeout = 15f;
 
-        private bool TryPromoteGhostForArrival(long connectionId, PlayerCharacterData data, out BasePlayerCharacterEntity entity)
+        private bool TryPromoteGhostForArrival(long connectionId, string userId, PlayerCharacterData data, out BasePlayerCharacterEntity entity)
         {
             entity = null;
-            if (data == null || !_ghosts.TryGetValue(data.Id, out MeshGhost ghost) || ghost.entity == null)
+            if (data == null || !_ghosts.TryGetValue(data.Id, out MeshGhost ghost) || ghost.entity == null || ghost.reserved)
                 return false;
             BasePlayerCharacterEntity player = ghost.entity as BasePlayerCharacterEntity;
             if (player == null || player.Identity == null || player.Identity.IsDestroyed || player.EntityId != data.EntityId)
                 return false;
-            _ghosts.Remove(data.Id);
-            if (ghost.hitHook != null)
-                player.onReceiveDamage -= ghost.hitHook;
-            GhostSuppression.Unghostify(player, this);
-            player.IsInvincible = false;
+            // The puppet stays a puppet (silenced, invincible, still in _ghosts but no longer steered or expired) until
+            // the client's ready step registers it; only then is it un-ghosted. If ready never comes, nothing
+            // vulnerable or AI-driven ever stood here, and ExpireReservedArrivals reclaims it.
+            ghost.reserved = true;
+            ghost.lastSeen = Time.unscaledTime;
             MeshIdentity id = MeshIdentity.GetOrAdd(player);
-            id.IsGhost = false;
-            id.OwnerZoneId = OwnZoneId;
             id.LastHandoffTime = Time.unscaledTime;
             // The mount: keep the vehicle the ghost is riding when it is the one the saved data says (the usual case),
             // otherwise drop it and let the registration re-summon from the saved data like a fresh spawn would.
@@ -483,7 +550,7 @@ namespace MultiplayerARPG.MMO.Mesh
             player.ForceMakeCaches();
             player.FillEmptySlots();
             player.Identity.DoNotDestroyWhenDisconnect = true;
-            _reservedArrivals[data.Id] = new ReservedArrival { entity = player, time = Time.unscaledTime, mount = ridden, keepMount = keepMount };
+            _reservedArrivals[data.Id] = new ReservedArrival { entity = player, userId = userId, time = Time.unscaledTime, mount = ridden, keepMount = keepMount };
             Logging.Log("Mesh", $"Arrival {data.CharacterName} ({data.Id}) conn={connectionId}: ghost promoted in place at {player.EntityTransform.position} mount={(keepMount ? "kept" : data.Mount.type != MountType.None ? "re-summon" : "none")}");
             entity = player;
             return true;
@@ -503,11 +570,16 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 ReservedArrival r = _reservedArrivals[_tmpIds[i]];
                 _reservedArrivals.Remove(_tmpIds[i]);
-                if (r.entity != null && !ServerUserHandlers.TryGetPlayerCharacterById(_tmpIds[i], out _))
-                {
-                    Logging.LogWarning("Mesh", $"Promoted ghost {_tmpIds[i]} was never claimed by its client; destroying it");
+                if (ServerUserHandlers.TryGetPlayerCharacterById(_tmpIds[i], out _))
+                    continue;
+                // The kit must not hand this entity to a late ready step either.
+                if (!string.IsNullOrEmpty(r.userId) && _pendingSpawnPlayerCharactersByUserId.TryGetValue(r.userId, out IPlayerCharacterData pending) && ReferenceEquals(pending, r.entity))
+                    _pendingSpawnPlayerCharactersByUserId.TryRemove(r.userId, out _);
+                Logging.LogWarning("Mesh", $"Arrival {_tmpIds[i]} was never claimed by its client; the reserved puppet is destroyed");
+                if (_ghosts.TryGetValue(_tmpIds[i], out MeshGhost g) && ReferenceEquals(g.entity, r.entity))
+                    DestroyGhost(_tmpIds[i], "arrival never claimed");
+                else if (r.entity != null && r.entity.Identity != null && !r.entity.Identity.IsDestroyed)
                     r.entity.NetworkDestroy();
-                }
             }
         }
 
@@ -538,32 +610,14 @@ namespace MultiplayerARPG.MMO.Mesh
             if (entity == null || entity.Identity == null || entity.Identity.IsDestroyed)
                 return;
             string meshId = entity.Id;
-            entity.SetTargetEntity(null);
-            entity.StopMove();
             Assets.SetObjectOwnerImmediately(entity.ObjectId, -1);
             VehicleEntity riddenMount = entity.PassengingVehicleEntity as VehicleEntity;
             if (riddenMount != null && riddenMount.Identity != null)
                 Assets.SetObjectOwnerImmediately(riddenMount.ObjectId, -1); // the mount survives the disconnect too
             MeshIdentity id = MeshIdentity.GetOrAdd(entity);
             id.MeshEntityId = meshId;
-            id.IsGhost = true;
-            id.OwnerZoneId = newOwnerZone;
-            id.LastHandoffTime = Time.unscaledTime;
-            int silenced = GhostSuppression.Ghostify(entity, this, null, false, false, disableMovement: false);
-            entity.IsInvincible = true;
-            ReceiveDamageDelegate hitHook = (target, position, fromPosition, instigator, damageAmounts, weapon, skill, skillLevel) =>
-                ForwardGhostHit(meshId, position, fromPosition, instigator, damageAmounts, weapon, skill, skillLevel);
-            entity.onReceiveDamage += hitHook;
-            if (_ghosts.TryGetValue(meshId, out MeshGhost stale) && stale.entity != null && stale.entity != entity)
-                stale.entity.NetworkDestroy(); // should not happen (a ghost and the real one on the same cell), be safe
-            _ghosts[meshId] = new MeshGhost { entity = entity, kind = GhostKind.Player, lastSeen = Time.unscaledTime, lastTarget = entity.EntityTransform.position, hitHook = hitHook, vehicle = riddenMount };
-            // Out of the owned lists NOW: the periodic rescan would otherwise stream it once more and then emit a
-            // GhostRemove when it drops out, blinking it on every third cell that watches it.
-            _ownedCandidates.Remove(entity);
-            _ownedByMeshId.Remove(meshId);
-            foreach (HashSet<string> streamed in _streamedToZone.Values)
-                streamed.Remove(meshId);
-            Logging.Log("Mesh", $"Player {entity.CharacterName} demoted to ghost (owner {newOwnerZone}, silenced {silenced}, mounted={riddenMount != null})");
+            MakeGhostInPlace(entity, id, GhostKind.Player, newOwnerZone, riddenMount);
+            Logging.Log("Mesh", $"Player {entity.CharacterName} demoted to ghost (owner {newOwnerZone}, mounted={riddenMount != null})");
         }
 
         internal void OnMeshNeighbourHello(long connectionId, string zoneId)
@@ -574,7 +628,28 @@ namespace MultiplayerARPG.MMO.Mesh
 
         internal void OnMeshNeighbourDisconnected(long connectionId)
         {
-            _neighbourZoneByConnection.Remove(connectionId);
+            if (_neighbourZoneByConnection.TryGetValue(connectionId, out string zoneId))
+            {
+                _neighbourZoneByConnection.Remove(connectionId);
+                ReleaseLentMonsters(zoneId, "neighbour link lost");
+            }
+        }
+
+        /// <summary>A neighbour is gone: every monster it was holding for us respawns from its home spawn area.</summary>
+        private void ReleaseLentMonsters(string zoneId, string reason)
+        {
+            _tmpIds.Clear();
+            foreach (KeyValuePair<string, LentMonster> kv in _lentMonsters)
+                if (string.Equals(kv.Value.ownerZone, zoneId)) _tmpIds.Add(kv.Key);
+            for (int i = 0; i < _tmpIds.Count; ++i)
+            {
+                LentMonster lent = _lentMonsters[_tmpIds[i]];
+                _lentMonsters.Remove(_tmpIds[i]);
+                DestroyGhost(_tmpIds[i], reason);
+                if (lent.area != null && lent.prefab != null)
+                    lent.area.Spawn(lent.prefab, lent.level, lent.respawnDelay, lent.respawnDelay);
+                Logging.LogWarning("Mesh", $"Lent monster {_tmpIds[i]} released ({reason}); home spawn area respawns it in {lent.respawnDelay:0.#}s");
+            }
         }
 
         internal void OnGhostSnapshot(long connectionId, GhostSnapshotMessage msg)
@@ -595,6 +670,8 @@ namespace MultiplayerARPG.MMO.Mesh
 
             if (!_ghosts.TryGetValue(msg.characterId, out MeshGhost ghost) || ghost.entity == null)
             {
+                if (_recentlyRemoved.ContainsKey(msg.characterId))
+                    return; // a snapshot that overtook its GhostRemove on the sequenced channel
                 BaseCharacterEntity entity = SpawnGhostEntity(msg);
                 if (entity == null)
                     return;
@@ -612,6 +689,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 // by MeshGameplayRule and forwarded to the owner — see ForwardGhostReward.
                 ghost = new MeshGhost { entity = entity, kind = msg.kind, lastTarget = msg.position, hitHook = hitHook };
                 _ghosts[msg.characterId] = ghost;
+                if (msg.kind == GhostKind.Player)
+                    _playerGhosts.Add(entity);
                 Logging.Log("Mesh", $"Ghost spawned {msg.kind} {msg.characterName} ({msg.characterId}) from zone {id.OwnerZoneId} at {msg.position} (silenced {silenced})");
             }
 
@@ -621,7 +700,11 @@ namespace MultiplayerARPG.MMO.Mesh
                 MeshIdentity gid = MeshIdentity.Get(ghost.entity);
                 if (gid != null && gid.OwnerZoneId != ownerZone)
                     gid.OwnerZoneId = ownerZone; // ownership moved (monster handoff between neighbours)
+                if (_lentMonsters.TryGetValue(msg.characterId, out LentMonster lent))
+                    lent.ownerZone = ownerZone;
             }
+            if (ghost.reserved)
+                return; // claimed by an arriving client: it sits where the saved data put it until registration
             SyncGhostMount(ghost, msg);
             SteerGhost(ghost, msg);
         }
@@ -818,6 +901,8 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (!_ghostDrops.TryGetValue(msg.characterId, out GhostDrop ghost) || ghost.entity == null || ghost.entity.Identity.IsDestroyed)
             {
+                if (_recentlyRemoved.ContainsKey(msg.characterId))
+                    return;
                 if (!GameInstance.ItemDropEntities.TryGetValue(msg.entityId, out ItemDropEntity prefab) || prefab == null)
                     prefab = GameInstance.Singleton.ItemDropEntityPrefab;
                 if (prefab == null)
@@ -852,10 +937,12 @@ namespace MultiplayerARPG.MMO.Mesh
             if (!_ghostDrops.TryGetValue(meshId, out GhostDrop ghost))
                 return;
             _ghostDrops.Remove(meshId);
+            _recentlyRemoved[meshId] = Time.unscaledTime;
             if (ghost.entity != null && ghost.entity.Identity != null && !ghost.entity.Identity.IsDestroyed)
             {
                 if (traceHandoffTiming)
                     Logging.Log("Mesh", $"Drop ghost destroyed ({meshId}) reason={reason}");
+                ResetMeshIdentity(ghost.entity);
                 ghost.entity.NetworkDestroy();
             }
         }
@@ -968,6 +1055,7 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private sealed class LentMonster
         {
+            public string ownerZone;               // who has it now (refreshed from its ghost's snapshots)
             public GameSpawnArea<BaseMonsterCharacterEntity> area;
             public BaseMonsterCharacterEntity prefab;
             public int level;
@@ -1020,6 +1108,7 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 _lentMonsters[meshId] = new LentMonster
                 {
+                    ownerZone = zone.zoneId,
                     area = monster.SpawnArea, prefab = monster.SpawnPrefab, level = monster.SpawnLevel,
                     respawnDelay = monster.DestroyRespawnDelay, spawnPosition = monster.SpawnPosition,
                 };
@@ -1041,25 +1130,40 @@ namespace MultiplayerARPG.MMO.Mesh
         private void DemoteToGhost(BaseMonsterCharacterEntity monster, MeshIdentity id, string newOwnerZone)
         {
             string meshId = id.MeshEntityId;
-            monster.SetTargetEntity(null);
-            monster.StopMove();
-            id.IsGhost = true;
-            id.OwnerZoneId = newOwnerZone;
-            id.LastHandoffTime = Time.unscaledTime;
             if (_borrowedKillHooks.TryGetValue(meshId, out CharacterEntityKilledDelegate killHook))
             {
                 monster.onKilled -= killHook;
                 _borrowedKillHooks.Remove(meshId);
             }
-            GhostSuppression.Ghostify(monster, this, null, false, false, disableMovement: false);
-            monster.IsInvincible = true;
+            UnhookKill(monster);
+            MakeGhostInPlace(monster, id, GhostKind.Monster, newOwnerZone, null);
+        }
+
+        /// <summary>
+        /// The one place an owned entity turns into a puppet without being destroyed (player and monster handoff):
+        /// silence it, make it invincible, forward hits to the new owner, register it as a ghost and take it out of
+        /// everything that describes owned entities — including the streamed sets, so no GhostRemove follows.
+        /// </summary>
+        private void MakeGhostInPlace(BaseCharacterEntity entity, MeshIdentity id, GhostKind kind, string newOwnerZone, VehicleEntity mount)
+        {
+            string meshId = id.MeshEntityId;
+            entity.SetTargetEntity(null);
+            entity.StopMove();
+            id.IsGhost = true;
+            id.OwnerZoneId = newOwnerZone;
+            id.LastHandoffTime = Time.unscaledTime;
+            GhostSuppression.Ghostify(entity, this, null, false, false, disableMovement: false);
+            entity.IsInvincible = true;
             ReceiveDamageDelegate hitHook = (target, position, fromPosition, instigator, damageAmounts, weapon, skill, skillLevel) =>
                 ForwardGhostHit(meshId, position, fromPosition, instigator, damageAmounts, weapon, skill, skillLevel);
-            monster.onReceiveDamage += hitHook;
-            _ghosts[meshId] = new MeshGhost { entity = monster, kind = GhostKind.Monster, lastSeen = Time.unscaledTime, lastTarget = monster.EntityTransform.position, hitHook = hitHook };
+            entity.onReceiveDamage += hitHook;
+            if (_ghosts.TryGetValue(meshId, out MeshGhost stale) && stale.entity != null && stale.entity != entity)
+                DestroyGhost(meshId, "replaced by demotion"); // should not happen (a ghost and the real one on the same cell), be safe
+            _ghosts[meshId] = new MeshGhost { entity = entity, kind = kind, lastSeen = Time.unscaledTime, lastTarget = entity.EntityTransform.position, hitHook = hitHook, vehicle = mount };
+            if (kind == GhostKind.Player)
+                _playerGhosts.Add(entity);
             _ownedByMeshId.Remove(meshId);
-            _ownedCandidates.Remove(monster);
-            // We just handed it over: do not follow up with a GhostRemove for something we no longer stream.
+            _ownedCandidates.Remove(entity);
             foreach (HashSet<string> streamed in _streamedToZone.Values)
                 streamed.Remove(meshId);
         }
@@ -1329,22 +1433,43 @@ namespace MultiplayerARPG.MMO.Mesh
         internal bool IsPlayerGhostNear(Vector3 position, float range)
         {
             float sqr = range * range;
-            foreach (MeshGhost g in _ghosts.Values)
+            for (int i = 0; i < _playerGhosts.Count; ++i)
             {
-                if (g.kind != GhostKind.Player || g.entity == null || g.entity.IsDead())
+                BaseCharacterEntity g = _playerGhosts[i];
+                if (g == null || g.IsDead())
                     continue;
-                if ((g.entity.EntityTransform.position - position).sqrMagnitude <= sqr)
+                if ((g.EntityTransform.position - position).sqrMagnitude <= sqr)
                     return true;
             }
             return false;
         }
 
-        private readonly HashSet<BaseMonsterCharacterEntity> _killHooked = new HashSet<BaseMonsterCharacterEntity>();
+        private readonly Dictionary<BaseMonsterCharacterEntity, CharacterEntityKilledDelegate> _killHooks = new Dictionary<BaseMonsterCharacterEntity, CharacterEntityKilledDelegate>();
+        private readonly List<BaseMonsterCharacterEntity> _tmpMonsters = new List<BaseMonsterCharacterEntity>();
+
+        private void UnhookKill(BaseMonsterCharacterEntity monster)
+        {
+            if (monster == null) return;
+            if (_killHooks.TryGetValue(monster, out CharacterEntityKilledDelegate hook))
+            {
+                monster.onKilled -= hook;
+                _killHooks.Remove(monster);
+            }
+        }
+
+        private void PruneKillHooks()
+        {
+            _tmpMonsters.Clear();
+            foreach (BaseMonsterCharacterEntity m in _killHooks.Keys)
+                if (m == null) _tmpMonsters.Add(m);
+            for (int i = 0; i < _tmpMonsters.Count; ++i)
+                _killHooks.Remove(_tmpMonsters[i]);
+        }
 
         /// <summary>An owned monster died. If the last attacker is a ghost, its owner cell counts the kill.</summary>
         private void OnOwnedMonsterKilled(BaseMonsterCharacterEntity monster, EntityInfo instigator)
         {
-            _killHooked.Remove(monster);
+            UnhookKill(monster);
             if (monster == null || !instigator.TryGetEntity(out BaseCharacterEntity killer) || !(killer is BasePlayerCharacterEntity))
                 return;
             MeshIdentity killerId = MeshIdentity.Get(killer);
@@ -1524,7 +1649,7 @@ namespace MultiplayerARPG.MMO.Mesh
         private void GhostingOnRealPlayerRegistered(BasePlayerCharacterEntity playerCharacter, long connectionId) { }
         private void GhostingOnRealPlayerUnregistered(long connectionId) { }
         private void GhostingOnPlayerHandoffStart(string characterId, string toZone) { }
-        private bool TryPromoteGhostForArrival(long connectionId, PlayerCharacterData data, out BasePlayerCharacterEntity entity) { entity = null; return false; }
+        private bool TryPromoteGhostForArrival(long connectionId, string userId, PlayerCharacterData data, out BasePlayerCharacterEntity entity) { entity = null; return false; }
         private void DemotePlayerToGhost(BasePlayerCharacterEntity entity, string newOwnerZone) { }
         internal void OnMeshNeighbourHello(long connectionId, string zoneId) { }
         internal void OnMeshNeighbourDisconnected(long connectionId) { }

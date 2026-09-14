@@ -18,6 +18,7 @@ using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
 using Insthync.DevExtension;
 using LiteNetLib;
+using System.Net.Sockets;
 using LiteNetLib.Utils;
 using LiteNetLibManager;
 using UnityEngine;
@@ -245,7 +246,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 && ServerUserHandlers.TryGetUserId(connectionId, out string userId)
                 && _pendingSpawnPlayerCharactersByUserId.TryGetValue(userId, out IPlayerCharacterData pending)
                 && pending is PlayerCharacterData pendingData
-                && TryPromoteGhostForArrival(connectionId, pendingData, out BasePlayerCharacterEntity promoted))
+                && TryPromoteGhostForArrival(connectionId, userId, pendingData, out BasePlayerCharacterEntity promoted))
             {
                 _pendingSpawnPlayerCharactersByUserId[userId] = promoted;
                 Stamp($"arrival {pendingData.CharacterName}: ghost promoted in place, pending spawn replaced");
@@ -279,6 +280,9 @@ namespace MultiplayerARPG.MMO.Mesh
         // (the kit's copy is private, so we listen to the same cluster broadcast).
         private readonly Dictionary<string, CentralServerPeerInfo> _meshPeers = new Dictionary<string, CentralServerPeerInfo>();
         private readonly HashSet<string> _handoffsInProgress = new HashSet<string>();
+        private readonly Dictionary<string, float> _handoffRetryAfter = new Dictionary<string, float>(); // characterId -> unscaled time
+        [Tooltip("After a handoff is aborted (save failed) wait this long before the boundary tick tries that character again.")]
+        public float handoffRetrySeconds = 2f;
         private readonly List<BasePlayerCharacterEntity> _handoffCandidates = new List<BasePlayerCharacterEntity>();
         private float _nextBoundaryCheck;
         private float _nextMissingPeerWarning;
@@ -311,7 +315,26 @@ namespace MultiplayerARPG.MMO.Mesh
         public override void OnStopServer()
         {
             GhostingOnStopServer();
+            _velocities.Clear();
+            _handoffsInProgress.Clear();
+            _handoffRetryAfter.Clear();
             base.OnStopServer();
+        }
+
+        public override void OnPeerDisconnected(long connectionId, DisconnectReason reason, SocketError socketError)
+        {
+#if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
+            // The kit's relates-data loader destroys and kicks on a DB failure; with the background load of a handoff
+            // arrival that can hit an entity that is already registered. Unregister a dead entity first so the kit's
+            // despawn path (SetOwnerClient, StopMove, CloneTo) never runs on a destroyed object.
+            if (IsServer && ServerUserHandlers.TryGetPlayerCharacter(connectionId, out IPlayerCharacterData data)
+                && data is BasePlayerCharacterEntity dead && (dead == null || dead.Identity == null || dead.Identity.IsDestroyed))
+            {
+                Logging.LogWarning("Mesh", $"Connection {connectionId} disconnected with a destroyed character entity; unregistering before the kit's despawn");
+                UnregisterPlayerCharacter(connectionId);
+            }
+#endif
+            base.OnPeerDisconnected(connectionId, reason, socketError);
         }
 
         public override void UnregisterPlayerCharacter(long connectionId)
@@ -397,6 +420,12 @@ namespace MultiplayerARPG.MMO.Mesh
                 BasePlayerCharacterEntity entity = data as BasePlayerCharacterEntity;
                 if (entity == null || entity.IsWarping || _handoffsInProgress.Contains(entity.Id))
                     continue;
+                if (_handoffRetryAfter.TryGetValue(entity.Id, out float retryAt))
+                {
+                    if (Time.unscaledTime < retryAt)
+                        continue;
+                    _handoffRetryAfter.Remove(entity.Id);
+                }
                 Vector3 pos = entity.EntityTransform.position;
                 TrackVelocity(entity.Id, pos, now);
                 Vector2Int coord = meshConfig.WorldToZoneCoord(pos);
@@ -465,10 +494,30 @@ namespace MultiplayerARPG.MMO.Mesh
                 // its observers): make sure neither the unregister nor the next snapshot tick sends it a GhostRemove.
                 GhostingOnPlayerHandoffStart(characterId, zone.zoneId);
                 UnregisterPlayerCharacter(connectionId);
+                DataUpdater.PlayerCharacterDataSaved(characterId);
+                bool saved = false;
+                try
+                {
+                    saved = await WaitAndSaveCharacter(TransactionUpdateCharacterState.All, entity.CloneTo(new PlayerCharacterData()), true, mapName, savePosition, true, rotation);
+                }
+                catch (System.Exception ex)
+                {
+                    Logging.LogException("Mesh", ex);
+                }
+                if (!saved || entity == null || entity.Identity == null || entity.Identity.IsDestroyed || !ContainsConnectionId(connectionId))
+                {
+                    // The destination would load a stale row (or the client is gone): abort, keep the character here,
+                    // re-register it so the kit keeps saving it, and let the boundary tick retry after a short backoff.
+                    Logging.LogWarning("Mesh", $"Handoff ABORTED {entity?.CharacterName} -> zone {zone.zoneId}: saved={saved}; character stays on {OwnZoneId}");
+                    if (entity != null && entity.Identity != null && !entity.Identity.IsDestroyed && ContainsConnectionId(connectionId))
+                        RegisterPlayerCharacter(connectionId, entity);
+                    _handoffRetryAfter[characterId] = Time.unscaledTime + handoffRetrySeconds;
+                    return;
+                }
+                if (sw.ElapsedMilliseconds > 500)
+                    Logging.LogWarning("Mesh", $"Handoff save for {entity.CharacterName} took {sw.ElapsedMilliseconds} ms; the saved position may lag the client");
                 if (entity.TryGetComponent(out PlayerCharacterDataUpdater updater))
                     Destroy(updater);
-                DataUpdater.PlayerCharacterDataSaved(characterId);
-                bool saved = await WaitAndSaveCharacter(TransactionUpdateCharacterState.All, entity.CloneTo(new PlayerCharacterData()), true, mapName, savePosition, true, rotation);
                 if (!demotePlayerOnHandoff)
                     entity.NetworkDestroy();
 

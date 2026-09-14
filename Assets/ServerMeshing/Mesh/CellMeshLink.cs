@@ -454,70 +454,71 @@ namespace MultiplayerARPG.MMO.Mesh
             }
         }
 
-        public void SendGhostSnapshot(GhostSnapshotMessage msg)
+        /// <summary>Channel 0: state-changing messages, reliable and ordered.</summary>
+        private const byte STATE_CHANNEL = 0;
+        /// <summary>Channel 1: 10 Hz position snapshots, sequenced (a stale one is dropped) so a lost snapshot never
+        /// head-of-line blocks a handoff, a hit or a loot message behind it.</summary>
+        private const byte SNAPSHOT_CHANNEL = 1;
+
+        private void Send<T>(ushort msgType, T msg, byte channel = STATE_CHANNEL, DeliveryMethod delivery = DeliveryMethod.ReliableOrdered) where T : INetSerializable
         {
             if (!IsConnected) return;
-            SendPacket(0, DeliveryMethod.ReliableOrdered, MeshLinkMessageTypes.GhostSnapshot, writer => msg.Serialize(writer));
+            SendPacket(channel, delivery, msgType, writer => msg.Serialize(writer));
+        }
+
+        public void SendGhostSnapshot(GhostSnapshotMessage msg)
+        {
+            Send(MeshLinkMessageTypes.GhostSnapshot, msg, SNAPSHOT_CHANNEL, DeliveryMethod.Sequenced);
         }
 
         public void SendHandoffNotice(string characterId, string userId)
         {
-            if (!IsConnected) return;
-            SendPacket(0, DeliveryMethod.ReliableOrdered, MeshLinkMessageTypes.HandoffNotice, writer => new HandoffNoticeMessage { characterId = characterId, userId = userId }.Serialize(writer));
+            Send(MeshLinkMessageTypes.HandoffNotice, new HandoffNoticeMessage { characterId = characterId, userId = userId });
         }
 
         public void SendGhostHit(GhostHitMessage msg)
         {
-            if (!IsConnected) return;
-            SendPacket(0, DeliveryMethod.ReliableOrdered, MeshLinkMessageTypes.GhostHit, writer => msg.Serialize(writer));
+            Send(MeshLinkMessageTypes.GhostHit, msg);
         }
 
         public void SendGhostHitResult(GhostHitResultMessage msg)
         {
-            if (!IsConnected) return;
-            SendPacket(0, DeliveryMethod.ReliableOrdered, MeshLinkMessageTypes.GhostHitResult, writer => msg.Serialize(writer));
+            Send(MeshLinkMessageTypes.GhostHitResult, msg);
         }
 
         public void SendGhostReward(GhostRewardMessage msg)
         {
-            if (!IsConnected) return;
-            SendPacket(0, DeliveryMethod.ReliableOrdered, MeshLinkMessageTypes.GhostReward, writer => msg.Serialize(writer));
+            Send(MeshLinkMessageTypes.GhostReward, msg);
         }
 
         public void SendMonsterHandoff(MonsterHandoffMessage msg)
         {
-            if (!IsConnected) return;
-            SendPacket(0, DeliveryMethod.ReliableOrdered, MeshLinkMessageTypes.MonsterHandoff, writer => msg.Serialize(writer));
+            Send(MeshLinkMessageTypes.MonsterHandoff, msg);
         }
 
         public void SendGhostPickup(GhostPickupMessage msg)
         {
-            if (!IsConnected) return;
-            SendPacket(0, DeliveryMethod.ReliableOrdered, MeshLinkMessageTypes.GhostPickup, writer => msg.Serialize(writer));
+            Send(MeshLinkMessageTypes.GhostPickup, msg);
         }
 
         public void SendGhostLoot(GhostLootMessage msg)
         {
-            if (!IsConnected) return;
-            SendPacket(0, DeliveryMethod.ReliableOrdered, MeshLinkMessageTypes.GhostLoot, writer => msg.Serialize(writer));
+            Send(MeshLinkMessageTypes.GhostLoot, msg);
         }
 
         public void SendGhostKill(GhostKillMessage msg)
         {
-            if (!IsConnected) return;
-            SendPacket(0, DeliveryMethod.ReliableOrdered, MeshLinkMessageTypes.GhostKill, writer => msg.Serialize(writer));
+            Send(MeshLinkMessageTypes.GhostKill, msg);
         }
 
         public void SendMonsterGone(string meshId)
         {
-            if (!IsConnected) return;
-            SendPacket(0, DeliveryMethod.ReliableOrdered, MeshLinkMessageTypes.MonsterGone, writer => new MonsterGoneMessage { meshId = meshId }.Serialize(writer));
+            Send(MeshLinkMessageTypes.MonsterGone, new MonsterGoneMessage { meshId = meshId });
         }
 
         public void SendGhostRemove(string characterId)
         {
-            if (!IsConnected) return;
-            SendPacket(0, DeliveryMethod.ReliableOrdered, MeshLinkMessageTypes.GhostRemove, writer => new GhostRemoveMessage { characterId = characterId }.Serialize(writer));
+            Send(MeshLinkMessageTypes.GhostRemove, new GhostRemoveMessage { characterId = characterId });
         }
     }
 }
