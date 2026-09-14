@@ -138,6 +138,41 @@ namespace MultiplayerARPG.MMO.Mesh
             IsMigrating = false;
         }
 
+        /// <summary>Set while migrating when the new cell refused us or never answered; the controller reads and clears it.</summary>
+        internal bool MigrationDisconnected { get; private set; }
+        internal DisconnectReason MigrationDisconnectReason { get; private set; }
+        internal SocketError MigrationDisconnectError { get; private set; }
+        internal byte[] MigrationDisconnectData { get; private set; }
+
+        internal void ClearMigrationDisconnect() { MigrationDisconnected = false; }
+
+        /// <summary>
+        /// During a migration a disconnect is a failed hop, not the end of the session: the kit's handler would clear
+        /// the user id and access token (the fallback hop needs them) and show the disconnect dialog. The controller
+        /// retries the cell we came from; only when that fails too does the kit's handler run (see FailMigration).
+        /// </summary>
+        public override void OnClientDisconnected(DisconnectReason reason, SocketError socketError, byte[] data)
+        {
+            if (IsMigrating && !IsServer)
+            {
+                Logging.LogWarning("Mesh", $"Disconnected during a migration ({reason}, {socketError}); the controller decides");
+                MigrationDisconnected = true;
+                MigrationDisconnectReason = reason;
+                MigrationDisconnectError = socketError;
+                MigrationDisconnectData = data;
+                return;
+            }
+            base.OnClientDisconnected(reason, socketError, data);
+        }
+
+        /// <summary>The fallback failed as well: hand the session to the kit's disconnect handling.</summary>
+        internal void FailMigration()
+        {
+            EndMigration();
+            base.OnClientDisconnected(MigrationDisconnected ? MigrationDisconnectReason : DisconnectReason.Timeout, MigrationDisconnected ? MigrationDisconnectError : SocketError.TimedOut, MigrationDisconnected ? MigrationDisconnectData : null);
+            MigrationDisconnected = false;
+        }
+
         #endregion
 
         #region Timing trace (both sides) — millisecond stamps to attribute the migration gap
@@ -292,6 +327,42 @@ namespace MultiplayerARPG.MMO.Mesh
             base.Start();
             // base.Start() assigns the kit's handler with `=`; we append ours so both run.
             ClusterClient.onResponseAppServerAddress += OnMeshAppServerAddress;
+            ClusterClient.onResponseAppServerRegister += OnMeshAppServerRegister;
+        }
+
+        [Tooltip("A map server restarted by MapSpawn registers with the cluster before the cluster has timed out its dead predecessor (same channel + map key) and the kit does not retry the refused registration, leaving a server that serves nobody. Retry every this many seconds until it is accepted.")]
+        public float clusterRegisterRetrySeconds = 3f;
+        private int _clusterRegisterRetries;
+
+        private void OnMeshAppServerRegister(AckResponseCode responseCode)
+        {
+            if (responseCode == AckResponseCode.Success)
+            {
+                if (_clusterRegisterRetries > 0)
+                    Logging.Log("Mesh", $"Cluster registration accepted after {_clusterRegisterRetries} retr{(_clusterRegisterRetries == 1 ? "y" : "ies")}");
+                _clusterRegisterRetries = 0;
+                return;
+            }
+            if (!IsServer)
+                return;
+            _clusterRegisterRetries++;
+            Logging.LogWarning("Mesh", $"Cluster registration refused ({responseCode}); retrying in {clusterRegisterRetrySeconds:0.#} s (attempt {_clusterRegisterRetries})");
+            RetryClusterRegister().Forget();
+        }
+
+        private async UniTaskVoid RetryClusterRegister()
+        {
+            await UniTask.Delay(System.TimeSpan.FromSeconds(Mathf.Max(0.5f, clusterRegisterRetrySeconds)), true);
+            if (!IsServer || ClusterClient == null || ClusterClient.IsAppRegistered || !ClusterClient.IsNetworkActive)
+                return;
+            ClusterClient.RequestAppServerRegister(new CentralServerPeerInfo
+            {
+                peerType = PeerType,
+                networkAddress = AppAddress,
+                networkPort = AppPort,
+                channelId = ChannelId,
+                refId = RefId,
+            });
         }
 
         public override void OnStartServer()

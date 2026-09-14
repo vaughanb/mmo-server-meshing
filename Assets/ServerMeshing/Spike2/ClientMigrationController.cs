@@ -33,6 +33,7 @@ namespace MultiplayerARPG.MMO.Mesh
             public bool connected;
             public bool playerReady;
             public bool seamless;
+            public bool fellBack;           // the hop ended on the cell we came from (the destination refused or never answered)
             public long captureMs, stopMs, connectedMs, playerReadyMs, fadedMs;
             public Vector3 positionBefore, positionAfter;
             public float positionJump;      // real position before vs after (server-side continuity)
@@ -45,6 +46,31 @@ namespace MultiplayerARPG.MMO.Mesh
 
         public static Result LastResult;
         public static int CompletedCount;
+        /// <summary>Migrations that reached the cell they were sent to only through the fallback (or not at all).</summary>
+        public static int FallbackCount;
+
+        private string _prevAddress;
+        private int _prevPort;
+
+        /// <summary>
+        /// The new cell refused us, dropped us, or never connected: try the cell we came from once. It kept our entity
+        /// as a puppet for exactly this (a rolled-back handoff) and promotes it in place when we register there again.
+        /// Returns true when a fallback hop was started (the caller extends its wait).
+        /// </summary>
+        private bool TryFallbackHop(ref string address, ref int port, ref bool fellBack, string why)
+        {
+            if (fellBack || string.IsNullOrEmpty(_prevAddress))
+                return false;
+            fellBack = true;
+            FallbackCount++;
+            Logging.LogWarning("Spike2", $"Migration to {address}:{port} failed ({why}); falling back to {_prevAddress}:{_prevPort}");
+            _manager.ClearMigrationDisconnect();
+            _manager.StopClient();
+            address = _prevAddress;
+            port = _prevPort;
+            _manager.StartClient(address, port);
+            return true;
+        }
 
         private sealed class StandIn
         {
@@ -82,11 +108,29 @@ namespace MultiplayerARPG.MMO.Mesh
 
         public bool IsRunning => _running;
 
+        private void RunQueuedHop()
+        {
+            if (string.IsNullOrEmpty(_queuedAddress))
+                return;
+            string address = _queuedAddress; int port = _queuedPort;
+            _queuedAddress = null;
+            Logging.Log("Spike2", $"Running the queued hop to {address}:{port}");
+            Migrate(address, port);
+        }
+
+        // A warp that arrives while a hop is still settling (a character that lands past another cell's line, a
+        // rolled-back handoff re-sent the moment the client is back) is queued, not dropped: the server has already
+        // unregistered us there, so dropping it would leave the client connected to a cell that no longer owns it.
+        private string _queuedAddress;
+        private int _queuedPort;
+
         public void Migrate(string address, int port)
         {
             if (_running)
             {
-                Logging.LogWarning("Spike2", "Migration already in progress; ignoring request.");
+                Logging.LogWarning("Spike2", $"Migration already in progress; queuing the hop to {address}:{port}.");
+                _queuedAddress = address;
+                _queuedPort = port;
                 return;
             }
             if (_manager == null)
@@ -94,6 +138,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 Logging.LogError("Spike2", "No manager set on ClientMigrationController.");
                 return;
             }
+            _prevAddress = _manager.networkAddress;
+            _prevPort = _manager.networkPort;
             if (_manager.useVisualStandIns)
                 StartCoroutine(MigrateSeamlessRoutine(address, port));
             else
@@ -230,9 +276,18 @@ namespace MultiplayerARPG.MMO.Mesh
             float deadline = Time.realtimeSinceStartup + _manager.migrationReadyTimeoutSeconds;
             long tConnected = -1;
             int framesWithoutCamera = 0;
+            bool fellBack = false;
             BasePlayerCharacterEntity newEntity = null;
-            while (Time.realtimeSinceStartup < deadline)
+            while (true)
             {
+                if (Time.realtimeSinceStartup >= deadline || _manager.MigrationDisconnected)
+                {
+                    // Refused, dropped, or silent: one hop back to where we came from, then give up.
+                    if (!TryFallbackHop(ref address, ref port, ref fellBack, _manager.MigrationDisconnected ? _manager.MigrationDisconnectReason.ToString() : "timeout"))
+                        break;
+                    deadline = Time.realtimeSinceStartup + _manager.migrationReadyTimeoutSeconds;
+                    tConnected = -1;
+                }
                 if (tConnected < 0 && _manager.IsClientConnected)
                     tConnected = sw.ElapsedMilliseconds;
                 if (Camera.main == null)
@@ -271,6 +326,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 yield return null;
             }
             long tPlayerReady = sw.ElapsedMilliseconds;
+            if (newEntity == null)
+                _manager.FailMigration(); // both cells refused us: the kit's disconnect handling takes over
             if (newEntity != null && newEntity.PassengingVehicleEntity != null)
                 mountedAfterMs = tPlayerReady;
             if (newEntity != null && keptController && controller != null)
@@ -362,7 +419,7 @@ namespace MultiplayerARPG.MMO.Mesh
 
             LastResult = new Result
             {
-                address = address, port = port, connected = connected, playerReady = playerReady, seamless = true,
+                address = address, port = port, connected = connected, playerReady = playerReady, seamless = true, fellBack = fellBack,
                 captureMs = tCapture, stopMs = tStop, connectedMs = tConnected, playerReadyMs = tPlayerReady, fadedMs = tFaded,
                 positionBefore = posBefore, positionAfter = posAfter,
                 positionJump = playerReady ? Vector3.Distance(posBefore, posAfter) : -1f,
@@ -371,8 +428,9 @@ namespace MultiplayerARPG.MMO.Mesh
             LastResult.mountedBefore = mountedBefore;
             LastResult.mountedAfterMs = mountedAfterMs;
             CompletedCount++;
+            RunQueuedHop();
             Logging.Log("Spike2",
-                $"Migration to {address}:{port} | SEAMLESS connected={connected} playerReady={playerReady} keptController={keptController} | " +
+                $"Migration to {address}:{port} | SEAMLESS connected={connected} playerReady={playerReady} keptController={keptController} fellBack={fellBack} | " +
                 $"standIns={tCapture}ms stop={tStop}ms connected={tConnected}ms playerReady={tPlayerReady}ms settled={tSettled}ms retired={tFaded}ms | " +
                 $"pos {posBefore} -> {posAfter} (jump={LastResult.positionJump:0.##}m, resync={resyncJump:0.##}m) | " +
                 $"standIns={standIns.Count} framesWithoutCamera={framesWithoutCamera} mounted={(mountedBefore ? (mountedAfterMs >= 0 ? mountedAfterMs + "ms" : "LOST") : "no")}");
@@ -531,15 +589,28 @@ namespace MultiplayerARPG.MMO.Mesh
             _manager.StartClient(address, port);
 
             float deadline = Time.realtimeSinceStartup + _manager.migrationReadyTimeoutSeconds;
-            while (!_manager.IsClientConnected && Time.realtimeSinceStartup < deadline)
+            bool fellBack = false;
+            long tConnected = -1;
+            while (true)
+            {
+                if (Time.realtimeSinceStartup >= deadline || _manager.MigrationDisconnected)
+                {
+                    if (!TryFallbackHop(ref address, ref port, ref fellBack, _manager.MigrationDisconnected ? _manager.MigrationDisconnectReason.ToString() : "timeout"))
+                        break;
+                    deadline = Time.realtimeSinceStartup + _manager.migrationReadyTimeoutSeconds;
+                    tConnected = -1;
+                }
+                if (tConnected < 0 && _manager.IsClientConnected)
+                    tConnected = sw.ElapsedMilliseconds;
+                if (GameInstance.PlayingCharacterEntity != null && !ReferenceEquals(GameInstance.PlayingCharacterEntity, prevEntity))
+                    break;
                 yield return null;
-            long tConnected = sw.ElapsedMilliseconds;
-            bool connected = _manager.IsClientConnected;
-
-            while ((GameInstance.PlayingCharacterEntity == null || ReferenceEquals(GameInstance.PlayingCharacterEntity, prevEntity)) && Time.realtimeSinceStartup < deadline)
-                yield return null;
+            }
+            bool connected = tConnected >= 0;
             long tPlayerReady = sw.ElapsedMilliseconds;
             bool playerReady = GameInstance.PlayingCharacterEntity != null && !ReferenceEquals(GameInstance.PlayingCharacterEntity, prevEntity);
+            if (!playerReady)
+                _manager.FailMigration();
             Vector3 posAfter = playerReady ? GameInstance.PlayingCharacterEntity.EntityTransform.position : Vector3.zero;
 
             yield return null;
@@ -562,12 +633,13 @@ namespace MultiplayerARPG.MMO.Mesh
 
             LastResult = new Result
             {
-                address = address, port = port, connected = connected, playerReady = playerReady, seamless = false,
+                address = address, port = port, connected = connected, playerReady = playerReady, seamless = false, fellBack = fellBack,
                 captureMs = tCapture, stopMs = tStop, connectedMs = tConnected, playerReadyMs = tPlayerReady, fadedMs = tFaded,
                 positionBefore = posBefore, positionAfter = posAfter,
                 positionJump = playerReady ? Vector3.Distance(posBefore, posAfter) : -1f, resyncJump = -1f,
             };
             CompletedCount++;
+            RunQueuedHop();
             Logging.Log("Spike2",
                 $"Migration to {address}:{port} | MASK connected={connected} playerReady={playerReady} | " +
                 $"capture={tCapture}ms stop={tStop}ms connected={tConnected}ms playerReady={tPlayerReady}ms faded={tFaded}ms | " +

@@ -67,6 +67,7 @@ namespace MultiplayerARPG.MMO.Mesh
             public bool reserved;                 // an arriving client has claimed this puppet (promotion finishes at registration)
             public string summonerMeshId;         // a pet puppet: mesh id of its summoner, from its snapshots
             public string summonId;               // ... and the CharacterSummon.id it is on that summoner
+            public float holdUntil;               // a demoted handoff rolled back: kept (not stale) until then for the client's return
         }
 
         private MeshLinkServer _linkServer;
@@ -139,6 +140,7 @@ namespace MultiplayerARPG.MMO.Mesh
             _reservedArrivals.Clear();
             _incomingHandoffFrom.Clear();
             _pendingHandoffAcks.Clear();
+            _rolledBackHandoffs.Clear();
         }
 
         /// <summary>
@@ -565,11 +567,15 @@ namespace MultiplayerARPG.MMO.Mesh
             _tmpIds.Clear();
             foreach (KeyValuePair<string, MeshGhost> kv in _ghosts)
             {
-                if (kv.Value.entity == null || (!kv.Value.reserved && Time.unscaledTime - kv.Value.lastSeen > ghostStaleSeconds && !IsAwaitingHandoffAck(kv.Key, kv.Value)))
+                if (kv.Value.entity == null || (!kv.Value.reserved && Time.unscaledTime - kv.Value.lastSeen > ghostStaleSeconds && Time.unscaledTime >= kv.Value.holdUntil && !IsAwaitingHandoffAck(kv.Key, kv.Value)))
                     _tmpIds.Add(kv.Key);
             }
             for (int i = 0; i < _tmpIds.Count; ++i)
+            {
+                if (_rolledBackHandoffs.Remove(_tmpIds[i]))
+                    Logging.LogWarning("Mesh", $"Handoff ROLLBACK of {_tmpIds[i]} expired: its client never returned to {OwnZoneId}; a later login spawns it fresh");
                 DestroyGhost(_tmpIds[i], "stale");
+            }
             if (_recentlyRemoved.Count > 0)
             {
                 _tmpIds.Clear();
@@ -625,6 +631,8 @@ namespace MultiplayerARPG.MMO.Mesh
             if (playerCharacter == null)
                 return;
             _pendingHandoffAcks.Remove(playerCharacter.Id); // it is ours again (a handoff back before the ack, or a fresh login here)
+            if (_rolledBackHandoffs.Remove(playerCharacter.Id))
+                Logging.Log("Mesh", $"Handoff ROLLBACK complete: {playerCharacter.CharacterName} is back on {OwnZoneId} ({(_reservedArrivals.ContainsKey(playerCharacter.Id) ? "its puppet promoted" : "fresh spawn")})");
             TrackOwnedPlayerAfterRegistration(playerCharacter);
             bool promoted = false;
             if (_reservedArrivals.TryGetValue(playerCharacter.Id, out ReservedArrival reserved) && playerCharacter.Identity != null)
@@ -876,12 +884,48 @@ namespace MultiplayerARPG.MMO.Mesh
             Logging.Log("Mesh", $"Neighbour zone {zoneId} linked (conn {connectionId})");
         }
 
+        /// <summary>
+        /// A neighbour's link dropped (it died, or the network between us did). Nothing of ours may depend on it any
+        /// longer: monsters it held for us respawn at home, monsters we hold for it go (its spawn areas own their
+        /// respawn and will re-spawn them when it returns), handoffs we sent it and never saw acknowledged roll back.
+        /// Its ghosts here expire stale on their own; a client mid-arrival from it is still served (the notice and
+        /// the warp were sent before it died).
+        /// </summary>
         internal void OnMeshNeighbourDisconnected(long connectionId)
         {
             if (_neighbourZoneByConnection.TryGetValue(connectionId, out string zoneId))
             {
                 _neighbourZoneByConnection.Remove(connectionId);
+                Logging.LogWarning("Mesh", $"Neighbour zone {zoneId} link lost (conn {connectionId})");
                 ReleaseLentMonsters(zoneId, "neighbour link lost");
+                ReleaseBorrowedMonsters(zoneId, "home zone link lost");
+                RollBackHandoffsToward(zoneId, "link to the destination lost");
+            }
+        }
+
+        /// <summary>Monsters handed to us by a zone that is gone: their respawn belongs to its spawn areas, which respawn everything when it returns.</summary>
+        private void ReleaseBorrowedMonsters(string homeZone, string reason)
+        {
+            _tmpIds.Clear();
+            foreach (KeyValuePair<string, BaseCharacterEntity> kv in _ownedByMeshId)
+            {
+                MeshIdentity id = kv.Value != null ? MeshIdentity.Get(kv.Value) : null;
+                if (id != null && string.Equals(id.HomeZoneId, homeZone) && kv.Value is BaseMonsterCharacterEntity)
+                    _tmpIds.Add(kv.Key);
+            }
+            for (int i = 0; i < _tmpIds.Count; ++i)
+            {
+                if (!_ownedByMeshId.TryGetValue(_tmpIds[i], out BaseCharacterEntity monster) || monster == null)
+                    continue;
+                if (_borrowedKillHooks.TryGetValue(_tmpIds[i], out CharacterEntityKilledDelegate hook))
+                {
+                    monster.onKilled -= hook;
+                    _borrowedKillHooks.Remove(_tmpIds[i]);
+                }
+                UntrackOwned(monster);
+                if (monster.Identity != null && !monster.Identity.IsDestroyed)
+                    monster.NetworkDestroy();
+                Logging.LogWarning("Mesh", $"Borrowed monster {_tmpIds[i]} released ({reason})");
             }
         }
 
@@ -2286,15 +2330,76 @@ namespace MultiplayerARPG.MMO.Mesh
         // player just left; a failed handoff releases them at once.
 
         private sealed class IncomingHandoff { public string fromZone; public float time; public bool fastSpawned; }
+        private static readonly string s_faultDieOnNoticeZone = System.Environment.GetEnvironmentVariable("MESH_FAULT_DIE_ON_NOTICE"); // a zone id: that cell dies on its next handoff notice
         private sealed class PendingHandoffAck { public string zone; public string name; public float startTime; public float sentTime; }
         private readonly Dictionary<string, IncomingHandoff> _incomingHandoffFrom = new Dictionary<string, IncomingHandoff>(); // characterId -> who announced it
         private readonly Dictionary<string, PendingHandoffAck> _pendingHandoffAcks = new Dictionary<string, PendingHandoffAck>(); // characterId -> our handoff awaiting the destination's ack
 
-        [Tooltip("Seconds after 'Handoff SENT' without the destination's ack before the demoted puppet is released and a warning logged.")]
-        public float handoffAckTimeoutSeconds = 5f;
+        [Tooltip("Seconds after 'Handoff SENT' with the destination linked but silent (no ack either way; it acks a failed arrival itself after its reservation timeout) before the handoff is rolled back.")]
+        public float handoffAckGuardSeconds = 20f;
+
+        [Tooltip("After a rollback, how long the demoted puppet is kept for its client to come back to this cell (the client falls back to the cell it left when the destination refuses or times out).")]
+        public float handoffRollbackHoldSeconds = 20f;
+
+        // Handoffs rolled back and still holding their puppet for the client's return (characterId).
+        private readonly HashSet<string> _rolledBackHandoffs = new HashSet<string>();
+
+        /// <summary>
+        /// The commit point of a handoff is the destination's ack (the character registered there). Until then the
+        /// character is still ours to take back: the destination died, its link did, or it never answered. The row in
+        /// the DB is untouched (the handoff save carries OUR channel; only the destination's own saves move it), so a
+        /// client that comes back here, by the migration fallback or by a fresh login, promotes the puppet it left.
+        /// </summary>
+        private void RollBackHandoff(string characterId, PendingHandoffAck pending, string reason)
+        {
+            _pendingHandoffAcks.Remove(characterId);
+            float until = Time.unscaledTime + handoffRollbackHoldSeconds;
+            bool held = false;
+            if (_ghosts.TryGetValue(characterId, out MeshGhost puppet) && puppet.entity != null && !puppet.reserved)
+            {
+                puppet.holdUntil = until;
+                held = true;
+            }
+            foreach (string petId in PetGhostsOf(characterId))
+            {
+                if (_ghosts.TryGetValue(petId, out MeshGhost pet))
+                    pet.holdUntil = until;
+            }
+            if (held)
+                _rolledBackHandoffs.Add(characterId);
+            Logging.LogWarning("Mesh", $"Handoff ROLLBACK {pending.name} -> zone {pending.zone}: {reason}; {(held ? $"the puppet is held {handoffRollbackHoldSeconds:0}s for the client's return" : "no puppet left to hold")}");
+        }
+
+        private void RollBackHandoffsToward(string zoneId, string reason)
+        {
+            if (_pendingHandoffAcks.Count == 0)
+                return;
+            List<string> toward = null;
+            foreach (KeyValuePair<string, PendingHandoffAck> kv in _pendingHandoffAcks)
+                if (string.Equals(kv.Value.zone, zoneId)) (toward ??= new List<string>()).Add(kv.Key);
+            if (toward == null)
+                return;
+            foreach (string characterId in toward)
+                if (_pendingHandoffAcks.TryGetValue(characterId, out PendingHandoffAck pending))
+                    RollBackHandoff(characterId, pending, reason);
+        }
 
         internal void OnHandoffNotice(long connectionId, HandoffNoticeMessage msg)
         {
+            if (!string.IsNullOrEmpty(s_faultDieOnNoticeZone) && string.Equals(s_faultDieOnNoticeZone, OwnZoneId))
+            {
+                // Test switch (MESH_FAULT_DIE_ON_NOTICE=<zoneId>): that destination dies in the window between the
+                // origin's notice and the client's arrival, the one moment a crash cannot be produced by hand. Once
+                // per test run: the kit's MapSpawn restarts the dead server (with this environment) within seconds,
+                // and the marker file keeps the restarted incarnation alive.
+                string marker = System.IO.Path.Combine("Temp", $"ServerMesh.FaultFired.{OwnZoneId}");
+                if (!System.IO.File.Exists(marker))
+                {
+                    try { System.IO.Directory.CreateDirectory("Temp"); System.IO.File.WriteAllText(marker, System.DateTime.Now.ToString("HH:mm:ss.fff")); } catch { }
+                    Logging.LogError("Mesh", $"FAULT: dying on handoff notice for {msg.characterId} (MESH_FAULT_DIE_ON_NOTICE)");
+                    System.Diagnostics.Process.GetCurrentProcess().Kill();
+                }
+            }
             _incomingHandoffFrom[msg.characterId] = new IncomingHandoff
             {
                 fromZone = _neighbourZoneByConnection.TryGetValue(connectionId, out string z) ? z : null,
@@ -2407,7 +2512,9 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 foreach (KeyValuePair<string, PendingHandoffAck> kv in _pendingHandoffAcks)
                 {
-                    if (Time.unscaledTime - kv.Value.sentTime > handoffAckTimeoutSeconds)
+                    // A linked destination always answers: promoted, or failed once its reservation timed out. Silence
+                    // past that is a wedged destination; a dead link is a dead destination. Both roll back.
+                    if (!IsNeighbourLinked(kv.Value.zone) || Time.unscaledTime - kv.Value.sentTime > handoffAckGuardSeconds)
                         (expired ??= new List<string>()).Add(kv.Key);
                 }
                 if (expired != null)
@@ -2416,9 +2523,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     {
                         if (!_pendingHandoffAcks.TryGetValue(characterId, out PendingHandoffAck pending))
                             continue;
-                        _pendingHandoffAcks.Remove(characterId);
-                        Logging.LogWarning("Mesh", $"Handoff of {pending.name} to zone {pending.zone} not acknowledged after {handoffAckTimeoutSeconds:0.#} s; releasing the demoted puppet");
-                        ReleaseDemotedHandoff(characterId, "handoff never acknowledged");
+                        RollBackHandoff(characterId, pending, IsNeighbourLinked(pending.zone) ? $"no ack from the destination in {handoffAckGuardSeconds:0} s" : "link to the destination is down");
                     }
                 }
             }
