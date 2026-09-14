@@ -33,54 +33,30 @@ namespace MultiplayerARPG.MMO.Mesh
         public const ushort GhostAction = 112;
         public const ushort HandoffAck = 113;
         public const ushort GhostPartyShare = 114;
-        public const ushort GhostAttack = 115;
-        public const ushort GhostAttackTrigger = 116;
-        public const ushort GhostSkill = 117;
-        public const ushort GhostSkillTrigger = 118;
+        public const ushort GhostReplay = 115;   // 116-118 were the per-verb attack/skill messages, folded into GhostReplay
     }
 
-    /// <summary>An owned character started a skill: the neighbour replays RpcUseSkill on its puppet (target by mesh id).</summary>
-    public struct GhostSkillMessage : INetSerializable
+    /// <summary>
+    /// Something an owned character showed its own observers (an attack or skill start, a trigger) that the puppet on
+    /// the neighbour must show too. Dispatched by <see cref="kind"/> (see MeshMapNetworkManager_Actions); the target,
+    /// an object id local to the owner, travels as a mesh id and is re-resolved on the puppet's cell.
+    /// </summary>
+    public struct GhostReplayMessage : INetSerializable
     {
-        public string attackerMeshId;
-        public long peerTimestamp;
-        public bool isItem;      // a skill item: dataId is the item's data id (the kit resolves the skill from it)
-        public int dataId;
-        public int skillLevel;
-        public byte weaponHandlingState;
+        public string actorMeshId;
+        public ushort kind;
         public string targetMeshId;
-        public AimPosition aimPosition;
-        public void Serialize(NetDataWriter writer) { writer.Put(attackerMeshId); writer.Put(peerTimestamp); writer.Put(isItem); writer.Put(dataId); writer.Put(skillLevel); writer.Put(weaponHandlingState); writer.Put(targetMeshId ?? string.Empty); writer.Put(aimPosition); }
-        public void Deserialize(NetDataReader reader) { attackerMeshId = reader.GetString(); peerTimestamp = reader.GetLong(); isItem = reader.GetBool(); dataId = reader.GetInt(); skillLevel = reader.GetInt(); weaponHandlingState = reader.GetByte(); targetMeshId = reader.GetString(); aimPosition = reader.Get<AimPosition>(); }
-    }
-
-    /// <summary>The skill reached a trigger: the neighbour replays RpcSimulateActionTrigger (target by mesh id).</summary>
-    public struct GhostSkillTriggerMessage : INetSerializable
-    {
-        public string attackerMeshId;
-        public string targetMeshId;
-        public SimulateActionTriggerData data;
-        public void Serialize(NetDataWriter writer) { writer.Put(attackerMeshId); writer.Put(targetMeshId ?? string.Empty); writer.Put(data); }
-        public void Deserialize(NetDataReader reader) { attackerMeshId = reader.GetString(); targetMeshId = reader.GetString(); data = reader.Get<SimulateActionTriggerData>(); }
-    }
-
-    /// <summary>An owned character started an attack: the neighbour replays the kit's RpcAttack on its puppet.</summary>
-    public struct GhostAttackMessage : INetSerializable
-    {
-        public string attackerMeshId;
-        public long peerTimestamp;
-        public byte weaponHandlingState;
-        public void Serialize(NetDataWriter writer) { writer.Put(attackerMeshId); writer.Put(peerTimestamp); writer.Put(weaponHandlingState); }
-        public void Deserialize(NetDataReader reader) { attackerMeshId = reader.GetString(); peerTimestamp = reader.GetLong(); weaponHandlingState = reader.GetByte(); }
-    }
-
-    /// <summary>The attack reached a trigger: the neighbour replays RpcSimulateActionTrigger (the visual missile/swing).</summary>
-    public struct GhostAttackTriggerMessage : INetSerializable
-    {
-        public string attackerMeshId;
-        public SimulateActionTriggerData data;
-        public void Serialize(NetDataWriter writer) { writer.Put(attackerMeshId); writer.Put(data); }
-        public void Deserialize(NetDataReader reader) { attackerMeshId = reader.GetString(); data = reader.Get<SimulateActionTriggerData>(); }
+        public byte[] payload;
+        public void Serialize(NetDataWriter writer)
+        {
+            writer.Put(actorMeshId); writer.Put(kind); writer.Put(targetMeshId ?? string.Empty);
+            writer.PutBytesWithLength(payload ?? System.Array.Empty<byte>());
+        }
+        public void Deserialize(NetDataReader reader)
+        {
+            actorMeshId = reader.GetString(); kind = reader.GetUShort(); targetMeshId = reader.GetString();
+            payload = reader.GetBytesWithLength();
+        }
     }
 
     /// <summary>
@@ -440,10 +416,7 @@ namespace MultiplayerARPG.MMO.Mesh
             RegisterMessageHandler(MeshLinkMessageTypes.HandoffNotice, HandleHandoffNotice);
             RegisterMessageHandler(MeshLinkMessageTypes.HandoffAck, HandleHandoffAck);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostPartyShare, HandleGhostPartyShare);
-            RegisterMessageHandler(MeshLinkMessageTypes.GhostAttack, HandleGhostAttack);
-            RegisterMessageHandler(MeshLinkMessageTypes.GhostAttackTrigger, HandleGhostAttackTrigger);
-            RegisterMessageHandler(MeshLinkMessageTypes.GhostSkill, HandleGhostSkill);
-            RegisterMessageHandler(MeshLinkMessageTypes.GhostSkillTrigger, HandleGhostSkillTrigger);
+            RegisterMessageHandler(MeshLinkMessageTypes.GhostReplay, HandleGhostReplay);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostHit, HandleGhostHit);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostHitResult, HandleGhostHitResult);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostReward, HandleGhostReward);
@@ -513,28 +486,10 @@ namespace MultiplayerARPG.MMO.Mesh
             _manager.OnGhostPartyShare(messageHandler.ConnectionId, msg);
         }
 
-        private void HandleGhostAttack(MessageHandlerData messageHandler)
+        private void HandleGhostReplay(MessageHandlerData messageHandler)
         {
-            GhostAttackMessage msg = messageHandler.ReadMessage<GhostAttackMessage>();
-            _manager.OnGhostAttack(msg);
-        }
-
-        private void HandleGhostAttackTrigger(MessageHandlerData messageHandler)
-        {
-            GhostAttackTriggerMessage msg = messageHandler.ReadMessage<GhostAttackTriggerMessage>();
-            _manager.OnGhostAttackTrigger(msg);
-        }
-
-        private void HandleGhostSkill(MessageHandlerData messageHandler)
-        {
-            GhostSkillMessage msg = messageHandler.ReadMessage<GhostSkillMessage>();
-            _manager.OnGhostSkill(msg);
-        }
-
-        private void HandleGhostSkillTrigger(MessageHandlerData messageHandler)
-        {
-            GhostSkillTriggerMessage msg = messageHandler.ReadMessage<GhostSkillTriggerMessage>();
-            _manager.OnGhostSkillTrigger(msg);
+            GhostReplayMessage msg = messageHandler.ReadMessage<GhostReplayMessage>();
+            _manager.OnGhostReplay(msg);
         }
 
         private void HandleGhostHit(MessageHandlerData messageHandler)
@@ -647,7 +602,8 @@ namespace MultiplayerARPG.MMO.Mesh
         /// head-of-line blocks a handoff, a hit or a loot message behind it.</summary>
         private const byte SNAPSHOT_CHANNEL = 1;
 
-        private void Send<T>(ushort msgType, T msg, byte channel = STATE_CHANNEL, DeliveryMethod delivery = DeliveryMethod.ReliableOrdered) where T : INetSerializable
+        /// <summary>Any message on the state channel; the typed senders below are the documented vocabulary.</summary>
+        internal void Send<T>(ushort msgType, T msg, byte channel = STATE_CHANNEL, DeliveryMethod delivery = DeliveryMethod.ReliableOrdered) where T : INetSerializable
         {
             if (!IsConnected) return;
             SendPacket(channel, delivery, msgType, writer => msg.Serialize(writer));
@@ -666,26 +622,6 @@ namespace MultiplayerARPG.MMO.Mesh
         public void SendGhostPartyShare(GhostPartyShareMessage msg)
         {
             Send(MeshLinkMessageTypes.GhostPartyShare, msg);
-        }
-
-        public void SendGhostAttack(GhostAttackMessage msg)
-        {
-            Send(MeshLinkMessageTypes.GhostAttack, msg);
-        }
-
-        public void SendGhostAttackTrigger(GhostAttackTriggerMessage msg)
-        {
-            Send(MeshLinkMessageTypes.GhostAttackTrigger, msg);
-        }
-
-        public void SendGhostSkill(GhostSkillMessage msg)
-        {
-            Send(MeshLinkMessageTypes.GhostSkill, msg);
-        }
-
-        public void SendGhostSkillTrigger(GhostSkillTriggerMessage msg)
-        {
-            Send(MeshLinkMessageTypes.GhostSkillTrigger, msg);
         }
 
         public void SendHandoffNotice(string characterId, string userId)

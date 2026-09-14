@@ -1,9 +1,16 @@
-// Server Meshing add-on — MeshMapNetworkManager (generic ghost actions, DESIGN.md §12).
+// Server Meshing add-on — MeshMapNetworkManager (generic ghost actions and replays, DESIGN.md §12).
 //
-// Anything the kit does TO a target entity that is a ghost here (a buff, a debuff, a heal-over-time, a resurrection)
-// must happen on the entity's owner instead. Entity subclasses intercept the kit call on a ghost and forward it as a
-// GhostActionMessage; the owner resolves the target and the instigator (its ghost or real entity here) and dispatches
-// by action id. Adding a verb = one payload writer on the ghost side + one handler here; no new message type, no stub.
+// Two envelopes, one shape each, dispatched by a handler table; adding a verb = one payload writer on the sending side
+// + one handler here, no new message type, no stub.
+//
+// GhostAction — puppet to owner. Anything the kit does TO a target entity that is a ghost here (a buff, a debuff, a
+// heal-over-time, a resurrection) must happen on the entity's owner instead. Entity subclasses intercept the kit call
+// on a ghost and forward it; the owner resolves the target and the instigator (its ghost or real entity here).
+//
+// GhostReplay — owner to puppets. What an owned character showed its own observers (an attack or skill start, the
+// trigger that launches the missile or swing) is replayed on the puppet by the neighbours streaming it, so their
+// clients run the kit's normal non-owner path. A target object id means nothing on another cell: it travels as a
+// mesh id and is re-resolved on arrival. Damage, buffs and resources are untouched: they happen on the owner.
 using System.Collections.Generic;
 using LiteNetLib.Utils;
 using LiteNetLibManager;
@@ -16,6 +23,14 @@ namespace MultiplayerARPG.MMO.Mesh
         ApplyBuff = 1,
     }
 
+    public enum GhostReplayKind : ushort
+    {
+        Attack = 1,         // RpcAttack: peerTimestamp, weaponHandlingState
+        AttackTrigger = 2,  // RpcSimulateActionTrigger: SimulateActionTriggerData
+        Skill = 3,          // RpcUseSkill / RpcUseSkillItem: peerTimestamp, isItem, dataId, skillLevel, weaponHandlingState, aimPosition
+        SkillTrigger = 4,   // RpcSimulateActionTrigger: SimulateActionTriggerData (target re-resolved)
+    }
+
     public partial class MeshMapNetworkManager
     {
 #if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
@@ -23,10 +38,18 @@ namespace MultiplayerARPG.MMO.Mesh
         private readonly Dictionary<ushort, GhostActionHandler> _ghostActionHandlers = new Dictionary<ushort, GhostActionHandler>();
         private readonly NetDataWriter _actionWriter = new NetDataWriter();
 
+        private delegate void GhostReplayHandler(BaseCharacterEntity puppet, uint targetObjectId, NetDataReader payload);
+        private readonly Dictionary<ushort, GhostReplayHandler> _ghostReplayHandlers = new Dictionary<ushort, GhostReplayHandler>();
+
         private void RegisterGhostActionHandlers()
         {
             _ghostActionHandlers.Clear();
             _ghostActionHandlers[(ushort)GhostActionKind.ApplyBuff] = HandleApplyBuffAction;
+            _ghostReplayHandlers.Clear();
+            _ghostReplayHandlers[(ushort)GhostReplayKind.Attack] = HandleAttackReplay;
+            _ghostReplayHandlers[(ushort)GhostReplayKind.AttackTrigger] = HandleAttackTriggerReplay;
+            _ghostReplayHandlers[(ushort)GhostReplayKind.Skill] = HandleSkillReplay;
+            _ghostReplayHandlers[(ushort)GhostReplayKind.SkillTrigger] = HandleSkillTriggerReplay;
         }
 
         /// <summary>
@@ -97,15 +120,87 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>Who did it, as this cell knows them: their ghost here, their real entity here, or nobody.</summary>
         private EntityInfo ResolveInstigator(string meshId)
         {
-            if (string.IsNullOrEmpty(meshId))
-                return EntityInfo.Empty;
-            if (_ghosts.TryGetValue(meshId, out MeshGhost ghost) && ghost.entity != null)
-                return ghost.entity.GetInfo();
-            BaseCharacterEntity real = ResolveOwnedCharacter(meshId);
-            return real != null ? real.GetInfo() : EntityInfo.Empty;
+            BaseCharacterEntity entity = ResolveGhostOrReal(meshId);
+            return entity != null ? entity.GetInfo() : EntityInfo.Empty;
         }
 
-        // ---- handlers ----
+        // ---- replays: owner to puppets ----
+
+        /// <summary>Owner side: replay something on every puppet of an owned character (a no-op when nobody streams it).</summary>
+        internal void ForwardGhostReplay(BaseCharacterEntity actor, GhostReplayKind kind, uint targetObjectId, System.Action<NetDataWriter> writePayload)
+        {
+            if (!IsServer || actor == null || _streamedToZone.Count == 0)
+                return;
+            string meshId = MeshEntityIdOf(actor);
+            _actionWriter.Reset();
+            writePayload?.Invoke(_actionWriter);
+            SendToZonesStreaming(meshId, MeshLinkMessageTypes.GhostReplay, new GhostReplayMessage
+            {
+                actorMeshId = meshId,
+                kind = (ushort)kind,
+                targetMeshId = MeshIdOfObject(targetObjectId),
+                payload = _actionWriter.CopyData(),
+            });
+        }
+
+        internal void OnGhostReplay(GhostReplayMessage msg)
+        {
+            if (!IsServer)
+                return;
+            // Not on a puppet that is mid-promotion or dead: the kit would reject the RPC on the client anyway.
+            if (!_ghosts.TryGetValue(msg.actorMeshId, out MeshGhost ghost) || ghost.entity == null || ghost.reserved || ghost.entity.IsDead())
+                return;
+            if (!_ghostReplayHandlers.TryGetValue(msg.kind, out GhostReplayHandler handler))
+            {
+                WarnThrottled($"Ghost replay {msg.kind} has no handler");
+                return;
+            }
+            handler(ghost.entity, ObjectIdOfMesh(msg.targetMeshId), new NetDataReader(msg.payload ?? System.Array.Empty<byte>()));
+        }
+
+        private void HandleAttackReplay(BaseCharacterEntity puppet, uint targetObjectId, NetDataReader payload)
+        {
+            if (!puppet.TryGetComponent(out MeshCharacterAttackComponent attack))
+                return;
+            attack.ReplayAttack(payload.GetLong(), (WeaponHandlingState)payload.GetByte());
+            if (traceHandoffTiming)
+                Logging.Log("Mesh", $"Ghost attack replayed on {puppet.CharacterName}");
+        }
+
+        private void HandleAttackTriggerReplay(BaseCharacterEntity puppet, uint targetObjectId, NetDataReader payload)
+        {
+            if (puppet.TryGetComponent(out MeshCharacterAttackComponent attack))
+                attack.ReplayTrigger(payload.Get<SimulateActionTriggerData>());
+        }
+
+        private void HandleSkillReplay(BaseCharacterEntity puppet, uint targetObjectId, NetDataReader payload)
+        {
+            if (!puppet.TryGetComponent(out MeshCharacterUseSkillComponent skill))
+                return;
+            long peerTimestamp = payload.GetLong();
+            bool isItem = payload.GetBool();
+            int dataId = payload.GetInt();
+            int skillLevel = payload.GetInt();
+            WeaponHandlingState weaponHandlingState = (WeaponHandlingState)payload.GetByte();
+            AimPosition aimPosition = payload.Get<AimPosition>();
+            if (isItem)
+                skill.ReplayUseSkillItem(peerTimestamp, dataId, weaponHandlingState, targetObjectId, aimPosition);
+            else
+                skill.ReplayUseSkill(peerTimestamp, dataId, skillLevel, weaponHandlingState, targetObjectId, aimPosition);
+            if (traceHandoffTiming)
+                Logging.Log("Mesh", $"Ghost {(isItem ? "skill item" : "skill")} {dataId} replayed on {puppet.CharacterName} target={targetObjectId}");
+        }
+
+        private void HandleSkillTriggerReplay(BaseCharacterEntity puppet, uint targetObjectId, NetDataReader payload)
+        {
+            if (!puppet.TryGetComponent(out MeshCharacterUseSkillComponent skill))
+                return;
+            SimulateActionTriggerData data = payload.Get<SimulateActionTriggerData>();
+            data.targetObjectId = targetObjectId;
+            skill.ReplayTrigger(data);
+        }
+
+        // ---- action handlers: puppet to owner ----
 
         private void HandleApplyBuffAction(BaseCharacterEntity target, EntityInfo instigator, NetDataReader payload)
         {
@@ -129,6 +224,8 @@ namespace MultiplayerARPG.MMO.Mesh
 #else
         internal bool ForwardGhostAction(BaseCharacterEntity ghost, GhostActionKind kind, EntityInfo instigator, System.Action<NetDataWriter> writePayload) { return false; }
         internal void OnGhostAction(long connectionId, GhostActionMessage msg) { }
+        internal void ForwardGhostReplay(BaseCharacterEntity actor, GhostReplayKind kind, uint targetObjectId, System.Action<NetDataWriter> writePayload) { }
+        internal void OnGhostReplay(GhostReplayMessage msg) { }
         internal static void WriteApplyBuffPayload(NetDataWriter writer, int dataId, BuffType type, int level, CharacterItem weapon) { }
 #endif
     }

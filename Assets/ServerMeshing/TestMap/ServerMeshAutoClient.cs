@@ -413,7 +413,7 @@ namespace MultiplayerARPG.MMO.Mesh
             float end = Time.realtimeSinceStartup + 10f;
             BaseMonsterCharacterEntity pet = null;
             while (Time.realtimeSinceStartup < end && (pet = FindOwnPet()) == null)
-                yield return null;
+                yield return new WaitForSecondsRealtime(0.25f);
             self = GameInstance.PlayingCharacterEntity;
             Log($"Summon pet: item slot {index} sent={sent} summons={(self != null ? self.Summons.Count : 0)}" + (pet != null ? $" pet '{pet.CharacterName}' lv{pet.Level} hp={pet.CurrentHp}/{pet.MaxHp} at {pet.EntityTransform.position}" : " (pet entity not seen)"));
             yield return new WaitForSecondsRealtime(1f);
@@ -546,96 +546,63 @@ namespace MultiplayerARPG.MMO.Mesh
             // Attacks and missiles seen on the far side of the line (replayed on ghosts): a swing is counted when an
             // entity beyond the line goes from idle to attacking; missiles by distinct damage-entity instances.
             int ghostAttacks = 0, ghostSkills = 0; HashSet<int> attackingNow = new HashSet<int>(), castingNow = new HashSet<int>(); HashSet<int> missileIds = new HashSet<int>();
+            const string petPrefix = "pet of ";
+            // One entity we watch under one name: present again after a gap (an absence), a different instance under
+            // the same name (a swap), or first seen.
+            void Track(string name, int inst, Vector3 pos, float now, string detail)
+            {
+                presentNow.Add(name);
+                if (absentSince.TryGetValue(name, out float since))
+                {
+                    float gapMs = (now - since) * 1000f;
+                    absences++; maxAbsenceMs = Mathf.Max(maxAbsenceMs, gapMs);
+                    absentSince.Remove(name);
+                    Log($"'{name}' absent for {gapMs:0} ms at {pos}");
+                }
+                if (lastInstance.TryGetValue(name, out int prev) && prev != inst)
+                {
+                    swaps++;
+                    Log($"'{name}' entity swapped (instance {prev} -> {inst}) at {pos}");
+                }
+                else if (!lastInstance.ContainsKey(name))
+                    Log($"Watching '{name}' {detail}from {pos}");
+                lastInstance[name] = inst;
+            }
             float end = Time.realtimeSinceStartup + observeSeconds;
             float nextSample = 0f;
             while (Time.realtimeSinceStartup < end)
             {
                 presentNow.Clear();
                 float now = Time.realtimeSinceStartup;
+                // Players and their mounts every frame: an absence is measured in frames.
                 foreach (BasePlayerCharacterEntity pe in FindObjectsByType<BasePlayerCharacterEntity>(FindObjectsSortMode.None))
                 {
                     if (pe == GameInstance.PlayingCharacterEntity || string.IsNullOrEmpty(pe.CharacterName)) continue;
-                    string name = pe.CharacterName;
-                    presentNow.Add(name);
-                    int inst = pe.GetInstanceID();
-                    if (absentSince.TryGetValue(name, out float since))
-                    {
-                        float gapMs = (now - since) * 1000f;
-                        absences++; maxAbsenceMs = Mathf.Max(maxAbsenceMs, gapMs);
-                        absentSince.Remove(name);
-                        Log($"'{name}' absent for {gapMs:0} ms at {pe.EntityTransform.position}");
-                    }
-                    if (lastInstance.TryGetValue(name, out int prev) && prev != inst)
-                    {
-                        swaps++;
-                        Log($"'{name}' entity swapped (instance {prev} -> {inst}) at {pe.EntityTransform.position}");
-                    }
-                    else if (!lastInstance.ContainsKey(name))
-                        Log($"Watching '{name}' from {pe.EntityTransform.position}");
-                    lastInstance[name] = inst;
+                    Track(pe.CharacterName, pe.GetInstanceID(), pe.EntityTransform.position, now, "");
                 }
                 foreach (VehicleEntity ve in FindObjectsByType<VehicleEntity>(FindObjectsSortMode.None))
                 {
                     BaseGameEntity driver = ve.HasDriver ? ve.GetPassenger(0) : null; // GetPassenger indexes the seat map directly
                     if (driver == null || ReferenceEquals(driver, GameInstance.PlayingCharacterEntity) || !(driver is BaseCharacterEntity dc) || string.IsNullOrEmpty(dc.CharacterName)) continue;
-                    string name = "mount of " + dc.CharacterName;
-                    presentNow.Add(name);
-                    int inst = ve.GetInstanceID();
-                    if (absentSince.TryGetValue(name, out float since))
-                    {
-                        float gapMs = (now - since) * 1000f;
-                        absences++; maxAbsenceMs = Mathf.Max(maxAbsenceMs, gapMs);
-                        absentSince.Remove(name);
-                        Log($"'{name}' absent for {gapMs:0} ms at {ve.EntityTransform.position}");
-                    }
-                    if (lastInstance.TryGetValue(name, out int prev) && prev != inst)
-                    {
-                        swaps++;
-                        Log($"'{name}' entity swapped (instance {prev} -> {inst}) at {ve.EntityTransform.position}");
-                    }
-                    else if (!lastInstance.ContainsKey(name))
-                        Log($"Watching '{name}' ({ve.name}) from {ve.EntityTransform.position}");
-                    lastInstance[name] = inst;
+                    Track("mount of " + dc.CharacterName, ve.GetInstanceID(), ve.EntityTransform.position, now, $"({ve.name}) ");
                 }
-                foreach (BaseMonsterCharacterEntity me in FindObjectsByType<BaseMonsterCharacterEntity>(FindObjectsSortMode.None))
-                {
-                    if (me == null || !me.IsSummoned || me.IsDead()) continue;
-                    BaseCharacterEntity owner = me.SummonerEntity;
-                    if (owner == null || ReferenceEquals(owner, GameInstance.PlayingCharacterEntity) || string.IsNullOrEmpty(owner.CharacterName)) continue;
-                    string name = "pet of " + owner.CharacterName;
-                    presentNow.Add(name);
-                    int inst = me.GetInstanceID();
-                    if (absentSince.TryGetValue(name, out float since))
-                    {
-                        float gapMs = (now - since) * 1000f;
-                        absences++; maxAbsenceMs = Mathf.Max(maxAbsenceMs, gapMs);
-                        absentSince.Remove(name);
-                        Log($"'{name}' absent for {gapMs:0} ms at {me.EntityTransform.position}");
-                    }
-                    if (lastInstance.TryGetValue(name, out int prev) && prev != inst)
-                    {
-                        swaps++;
-                        if (swaps <= 6)
-                            Log($"'{name}' entity swapped (instance {prev} -> {inst}) at {me.EntityTransform.position}: objectId={me.ObjectId} hp={me.CurrentHp}/{me.MaxHp} dead={me.IsDead()} active={me.gameObject.activeInHierarchy} destroyed={me.Identity.IsDestroyed} summoner={me.Summoner.objectId} meshId={(MeshIdentity.Get(me) != null ? MeshIdentity.Get(me).MeshEntityId : "-")}");
-                    }
-                    else if (!lastInstance.ContainsKey(name))
-                        Log($"Watching '{name}' ({me.CharacterName}) from {me.EntityTransform.position} objectId={me.ObjectId}");
-                    lastInstance[name] = inst;
-                }
-                foreach (string name in lastInstance.Keys)
-                {
-                    if (!presentNow.Contains(name) && !absentSince.ContainsKey(name))
-                        absentSince[name] = now;
-                }
-                if (Time.realtimeSinceStartup >= nextSample)
+                // Everything else twice a second: pets, positions beyond the line, attacks, skills, missiles.
+                bool sampled = Time.realtimeSinceStartup >= nextSample;
+                if (sampled)
                 {
                     nextSample = Time.realtimeSinceStartup + 0.5f;
                     foreach (BaseCharacterEntity e in FindObjectsByType<BaseCharacterEntity>(FindObjectsSortMode.None))
                     {
                         if (e == GameInstance.PlayingCharacterEntity) continue;
-                        string key = $"{e.GetType().Name}|{e.CharacterName}|{e.ObjectId}";
-                        if (!seen.TryGetValue(key, out List<Vector3> list)) { list = new List<Vector3>(); seen[key] = list; Log($"Saw other entity '{e.CharacterName}' ({e.GetType().Name}) at {e.EntityTransform.position}"); }
                         Vector3 pos = e.EntityTransform.position;
+                        if (e is BaseMonsterCharacterEntity me && me.IsSummoned && !me.IsDead())
+                        {
+                            BaseCharacterEntity owner = me.SummonerEntity;
+                            if (owner != null && !ReferenceEquals(owner, GameInstance.PlayingCharacterEntity) && !string.IsNullOrEmpty(owner.CharacterName))
+                                Track(petPrefix + owner.CharacterName, me.GetInstanceID(), pos, now, $"({me.CharacterName}, objectId={me.ObjectId}) ");
+                        }
+                        string key = $"{e.GetType().Name}|{e.CharacterName}|{e.ObjectId}";
+                        if (!seen.TryGetValue(key, out List<Vector3> list)) { list = new List<Vector3>(); seen[key] = list; Log($"Saw other entity '{e.CharacterName}' ({e.GetType().Name}) at {pos}"); }
                         if (pos.x < observeGhostBeyondX) continue; // still on our own server; not a ghost
                         if (list.Count == 0 || Vector3.Distance(list[list.Count - 1], pos) > 0.5f) list.Add(pos);
                         bool attacking = e.AttackComponent != null && e.AttackComponent.IsAttacking;
@@ -651,6 +618,12 @@ namespace MultiplayerARPG.MMO.Mesh
                         if (m != null && m.gameObject.activeInHierarchy && m.transform.position.x >= observeGhostBeyondX - 5f && missileIds.Add(m.GetInstanceID()))
                             Log($"Missile seen at {m.transform.position}");
                     }
+                }
+                foreach (string name in lastInstance.Keys)
+                {
+                    if (!sampled && name.StartsWith(petPrefix)) continue; // pets were not looked for this frame
+                    if (!presentNow.Contains(name) && !absentSince.ContainsKey(name))
+                        absentSince[name] = now;
                 }
                 yield return null;
             }
@@ -699,7 +672,7 @@ namespace MultiplayerARPG.MMO.Mesh
             // are forwarded to the owner, hits the owner's real monster lands on our ghost come back the same way.
             // Hold the line from whichever side the fight position is on: west of the line (the usual C fighter) or east
             // of it (a fighter standing in E, whose ghost on C is what an observer over there watches attack).
-            bool east = walkTargetX >= observeGhostBeyondX;
+            bool east = self.EntityTransform.position.x >= observeGhostBeyondX;
             float holdX = east ? observeGhostBeyondX + 0.5f : observeGhostBeyondX - 0.5f;
             bool Beyond(float x, float margin) => east ? x < holdX - margin : x > holdX + margin;
             float attackRange = Mathf.Max(1f, self.GetAttackDistance(false) - 0.3f);

@@ -9,6 +9,7 @@
 using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
 using LiteNetLib;
+using LiteNetLib.Utils;
 using LiteNetLibManager;
 
 namespace MultiplayerARPG.MMO.Mesh
@@ -20,22 +21,27 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (_manager == null)
                 _manager = GetComponent<CharacterActionComponentManager>(); // see MeshCharacterAttackComponent
-            if (IsServer && simulateState.Skill != null && !MeshIdentity.IsGhostEntity(Entity))
+            if (IsServer && simulateState.Skill != null && !MeshIdentity.IsGhostEntity(Entity) && BaseGameNetworkManager.Singleton is MeshMapNetworkManager mesh)
             {
-                MeshMapNetworkManager mesh = BaseGameNetworkManager.Singleton as MeshMapNetworkManager;
                 bool isItem = simulateState.ItemDataId.HasValue; // the kit's item path fills ItemDataId (UseItem is only set on the owner's index path)
                 int dataId = isItem ? simulateState.ItemDataId.Value : simulateState.Skill.DataId;
-                mesh?.ForwardGhostSkill(Entity, peerTimestamp, isItem, dataId, simulateState.SkillLevel, simulateState.WeaponHandlingState, simulateState.TargetObjectId, simulateState.AimPosition);
+                int skillLevel = simulateState.SkillLevel;
+                byte weaponHandlingState = (byte)simulateState.WeaponHandlingState;
+                AimPosition aimPosition = simulateState.AimPosition;
+                mesh.ForwardGhostReplay(Entity, GhostReplayKind.Skill, simulateState.TargetObjectId, w =>
+                {
+                    w.Put(peerTimestamp); w.Put(isItem); w.Put(dataId); w.Put(skillLevel); w.Put(weaponHandlingState); w.Put(aimPosition);
+                });
             }
             return base.UseSkillRoutine(peerTimestamp, simulateState);
         }
 
         protected override void ApplySkillUsing(BaseSkill skill, int skillLevel, WeaponHandlingState weaponHandlingState, CharacterItem weapon, int simulateSeed, byte triggerIndex, List<Dictionary<DamageElement, MinMaxFloat>> damageAmounts, uint targetObjectId, AimPosition aimPosition)
         {
-            if (IsServer && !MeshIdentity.IsGhostEntity(Entity))
+            if (IsServer && !MeshIdentity.IsGhostEntity(Entity) && BaseGameNetworkManager.Singleton is MeshMapNetworkManager mesh)
             {
-                MeshMapNetworkManager mesh = BaseGameNetworkManager.Singleton as MeshMapNetworkManager;
-                mesh?.ForwardGhostSkillTrigger(Entity, new SimulateActionTriggerData { simulateSeed = simulateSeed, triggerIndex = triggerIndex, targetObjectId = targetObjectId, aimPosition = aimPosition });
+                SimulateActionTriggerData data = new SimulateActionTriggerData { simulateSeed = simulateSeed, triggerIndex = triggerIndex, targetObjectId = targetObjectId, aimPosition = aimPosition };
+                mesh.ForwardGhostReplay(Entity, GhostReplayKind.SkillTrigger, targetObjectId, w => w.Put(data));
             }
             base.ApplySkillUsing(skill, skillLevel, weaponHandlingState, weapon, simulateSeed, triggerIndex, damageAmounts, targetObjectId, aimPosition);
         }

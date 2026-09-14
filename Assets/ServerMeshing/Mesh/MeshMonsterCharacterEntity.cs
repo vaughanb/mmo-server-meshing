@@ -61,75 +61,32 @@ namespace MultiplayerARPG.MMO.Mesh
                 base.GivingRewardToParty(playerCharacterEntity, isLastAttacker, reward, rewardRate, shareGuildExpRate, makeMostDamage, out givenRewardExp, out givenRewardGold, out givenRewardCurrencies);
                 return;
             }
-            List<BasePlayerCharacterEntity> expMembers = new List<BasePlayerCharacterEntity>();
-            List<BasePlayerCharacterEntity> itemMembers = new List<BasePlayerCharacterEntity>();
-            List<BasePlayerCharacterEntity> expGhosts = new List<BasePlayerCharacterEntity>();
-            List<BasePlayerCharacterEntity> itemGhosts = new List<BasePlayerCharacterEntity>();
-            List<string> expRemote = new List<string>();
-            List<string> itemRemote = new List<string>();
-            mesh.CollectPartyMembers(playerCharacterEntity, party, expMembers, itemMembers, expGhosts, itemGhosts, expRemote, itemRemote);
-            if (expGhosts.Count == 0 && itemGhosts.Count == 0 && expRemote.Count == 0 && itemRemote.Count == 0)
+            MeshMapNetworkManager.PartyShareSets sets = mesh.CollectPartyMembers(playerCharacterEntity, party);
+            if (!sets.AnyAcrossTheLine)
             {
                 // Nobody across the line: the kit's own routine is exact.
                 base.GivingRewardToParty(playerCharacterEntity, isLastAttacker, reward, rewardRate, shareGuildExpRate, makeMostDamage, out givenRewardExp, out givenRewardGold, out givenRewardCurrencies);
                 return;
             }
-            // Mirrors BaseMonsterCharacterEntity.GivingRewardToParty with the ghosts counted in the split; their
-            // share and kill progress go to the cell that owns them.
+            // Mirrors BaseMonsterCharacterEntity.GivingRewardToParty with the ghosts and remote members counted in the
+            // split; their share and kill progress go to the cell that owns them.
             if (isLastAttacker)
-            {
-                // Kill progress for every online member, as the kit does (independent of the share flags); a member on
-                // another cell gets it through its own cell.
-                foreach (string memberId in party.GetMemberIds())
-                {
-                    if (memberId == playerCharacterEntity.Id)
-                        continue;
-                    if (GameInstance.ServerUserHandlers.TryGetPlayerCharacterById(memberId, out BasePlayerCharacterEntity member) && member != null)
-                    {
-                        if (!member.IsDead())
-                            member.OnKillMonster(this);
-                    }
-                    else if (mesh.TryGetPlayerGhost(memberId, out BasePlayerCharacterEntity memberGhost))
-                        mesh.ForwardPartyShare(memberGhost, 0, 0f, 0, 0f, null, Level, Level, DataId, true);
-                    else if (mesh.linkAllZones && mesh.IsPartyMemberOnline(party, memberId))
-                        mesh.BroadcastPartyShare(memberId, 0, 0f, 0, 0f, null, Level, Level, DataId, true);
-                }
-            }
-            if (CurrentGameInstance.monsterExpRewardingMode == RewardingMode.Immediately && !reward.NoExp() && expMembers.Count + expGhosts.Count + expRemote.Count > 0)
-            {
-                float count = expMembers.Count + expGhosts.Count + expRemote.Count;
-                float expMultiplier = (1f - shareGuildExpRate) / count * rewardRate;
-                foreach (BasePlayerCharacterEntity member in expMembers)
-                    mesh.GivePartyShareHere(member, reward.exp, expMultiplier, 0, 0f, null, member.ObjectId == playerCharacterEntity.ObjectId ? RewardGivenType.KillMonster : RewardGivenType.PartyShare, Level, Level);
-                foreach (BasePlayerCharacterEntity ghost in expGhosts)
-                    mesh.ForwardPartyShare(ghost, reward.exp, expMultiplier, 0, 0f, null, Level, Level, DataId, false);
-                foreach (string remote in expRemote)
-                    mesh.BroadcastPartyShare(remote, reward.exp, expMultiplier, 0, 0f, null, Level, Level, DataId, false);
-            }
+                mesh.CreditKillToPartyMembers(playerCharacterEntity, party, Level, Level, DataId, member => { member.OnKillMonster(this); return true; }, out _);
+            if (CurrentGameInstance.monsterExpRewardingMode == RewardingMode.Immediately && !reward.NoExp())
+                mesh.SharePartyReward(playerCharacterEntity, sets.expMembers, sets.expGhosts, sets.expRemote, reward.exp, (1f - shareGuildExpRate) * rewardRate, 0, 0f, null, Level, Level);
             bool giveGold = CurrentGameInstance.monsterGoldRewardingMode == RewardingMode.Immediately && !reward.NoGold();
             bool giveCurrencies = CurrentGameInstance.monsterCurrencyRewardingMode == RewardingMode.Immediately && !reward.NoCurrencies();
-            if ((giveGold || giveCurrencies) && itemMembers.Count + itemGhosts.Count + itemRemote.Count > 0)
+            if (giveGold || giveCurrencies)
             {
-                float count = itemMembers.Count + itemGhosts.Count + itemRemote.Count;
-                float multiplier = 1f / count * rewardRate;
-                foreach (BasePlayerCharacterEntity member in itemMembers)
+                if (makeMostDamage)
                 {
-                    if (makeMostDamage)
-                        _looters.Add(member.Id);
-                    mesh.GivePartyShareHere(member, 0, 0f, giveGold ? reward.gold : 0, multiplier, giveCurrencies ? reward.currencies : null, member.ObjectId == playerCharacterEntity.ObjectId ? RewardGivenType.KillMonster : RewardGivenType.PartyShare, Level, Level);
+                    // As the kit does for every sharing member: a member across the line loots the drop through its
+                    // ghost (GhostPickup validates the same id); a remote one only if it comes within reach.
+                    foreach (BasePlayerCharacterEntity member in sets.itemMembers) _looters.Add(member.Id);
+                    foreach (BasePlayerCharacterEntity ghost in sets.itemGhosts) _looters.Add(ghost.Id);
+                    foreach (string remote in sets.itemRemote) _looters.Add(remote);
                 }
-                foreach (BasePlayerCharacterEntity ghost in itemGhosts)
-                {
-                    if (makeMostDamage)
-                        _looters.Add(ghost.Id); // its real character loots the drop through its ghost (GhostPickup validates the same id)
-                    mesh.ForwardPartyShare(ghost, 0, 0f, giveGold ? reward.gold : 0, multiplier, giveCurrencies ? reward.currencies : null, Level, Level, DataId, false);
-                }
-                foreach (string remote in itemRemote)
-                {
-                    if (makeMostDamage)
-                        _looters.Add(remote); // as the kit does for every sharing member; it can only loot if it comes within reach
-                    mesh.BroadcastPartyShare(remote, 0, 0f, giveGold ? reward.gold : 0, multiplier, giveCurrencies ? reward.currencies : null, Level, Level, DataId, false);
-                }
+                mesh.SharePartyReward(playerCharacterEntity, sets.itemMembers, sets.itemGhosts, sets.itemRemote, 0, 0f, giveGold ? reward.gold : 0, rewardRate, giveCurrencies ? reward.currencies : null, Level, Level);
             }
             if (party.shareExp)
                 givenRewardExp = true;
