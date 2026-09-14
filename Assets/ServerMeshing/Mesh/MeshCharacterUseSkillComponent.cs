@@ -18,8 +18,8 @@ namespace MultiplayerARPG.MMO.Mesh
 #if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
         protected override UniTaskVoid UseSkillRoutine(long peerTimestamp, UseSkillState simulateState)
         {
-            if (!IsServer && _manager == null)
-                return default; // see MeshCharacterAttackComponent: the component has not started on this client yet
+            if (_manager == null)
+                _manager = GetComponent<CharacterActionComponentManager>(); // see MeshCharacterAttackComponent
             if (IsServer && simulateState.Skill != null && !MeshIdentity.IsGhostEntity(Entity))
             {
                 MeshMapNetworkManager mesh = BaseGameNetworkManager.Singleton as MeshMapNetworkManager;

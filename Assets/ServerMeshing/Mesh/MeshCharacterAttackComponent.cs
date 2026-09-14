@@ -19,9 +19,9 @@ namespace MultiplayerARPG.MMO.Mesh
         protected override UniTaskVoid AttackRoutine(long peerTimestamp, AttackState simulateState)
         {
             // A replayed attack can reach a client's freshly spawned puppet before this component's Start ran (the
-            // kit's action manager is fetched there); the kit routine would throw on it. Skip that one swing.
-            if (!IsServer && _manager == null)
-                return default;
+            // kit's action manager is fetched there): resolve it now (it is a required component) and play the swing.
+            if (_manager == null)
+                _manager = GetComponent<CharacterActionComponentManager>();
             if (IsServer && !MeshIdentity.IsGhostEntity(Entity))
             {
                 MeshMapNetworkManager mesh = BaseGameNetworkManager.Singleton as MeshMapNetworkManager;

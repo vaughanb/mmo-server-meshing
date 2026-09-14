@@ -636,18 +636,22 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (playerCharacter == null)
                 return;
-            AckHandoffArrival(playerCharacter.Id, playerCharacter.CharacterName, _reservedArrivals.ContainsKey(playerCharacter.Id));
             _pendingHandoffAcks.Remove(playerCharacter.Id); // it is ours again (a handoff back before the ack, or a fresh login here)
             TrackOwnedPlayerAfterRegistration(playerCharacter);
+            bool promoted = false;
             if (_reservedArrivals.TryGetValue(playerCharacter.Id, out ReservedArrival reserved) && playerCharacter.Identity != null)
             {
                 _reservedArrivals.Remove(playerCharacter.Id);
                 if (!ReferenceEquals(reserved.entity, playerCharacter))
                 {
-                    // A fresh kit spawn registered instead (the client re-entered): the reserved puppet must go.
+                    // A fresh kit spawn registered instead (the client re-entered): the reserved puppet must go, and so
+                    // must the pet puppets that were waiting for it (the kit re-summoned the pets for the fresh spawn).
                     DestroyGhost(playerCharacter.Id, "superseded by a fresh spawn");
+                    DestroyLeftoverSummonPuppets(playerCharacter, "superseded by a fresh spawn");
+                    AckHandoffArrival(playerCharacter.Id, playerCharacter.CharacterName, false);
                     return;
                 }
+                promoted = true;
                 // Finish the promotion: from here on this is the real character.
                 if (_ghosts.TryGetValue(playerCharacter.Id, out MeshGhost ghost))
                 {
@@ -698,22 +702,34 @@ namespace MultiplayerARPG.MMO.Mesh
                 // A fresh kit spawn (no puppet of this character was here to promote): the kit already re-summoned the
                 // saved summons, so any pet puppet still linked to this character is a leftover of the departing cell's
                 // stream — destroy it now instead of letting it stand next to the new pet until it expires stale.
-                for (int i = 0; i < playerCharacter.Summons.Count; ++i)
-                    DestroySummonPuppet(playerCharacter.Id, playerCharacter.Summons[i].id, "superseded by the kit's re-summon");
+                DestroyLeftoverSummonPuppets(playerCharacter, "superseded by the kit's re-summon");
             }
+            // The ack goes out once the registration path has decided what happened: the origin releases the pets it
+            // demoted only when we did NOT promote (their mesh ids are dead over here otherwise).
+            AckHandoffArrival(playerCharacter.Id, playerCharacter.CharacterName, promoted);
             DestroyGhost(playerCharacter.Id, "promoted to real");
         }
 
+        private void DestroyLeftoverSummonPuppets(BasePlayerCharacterEntity playerCharacter, string reason)
+        {
+            for (int i = 0; i < playerCharacter.Summons.Count; ++i)
+                DestroySummonPuppet(playerCharacter.Id, playerCharacter.Summons[i].id, reason);
+        }
+
+        // Pet puppets are scanned by summoner on their own list: the callers sit inside loops over _tmpIds.
+        private readonly List<string> _tmpPetIds = new List<string>();
+
+        /// <summary>Destroy the pet puppets of a summoner here (a null summon id means every one of them), reserved or not.</summary>
         private void DestroySummonPuppet(string summonerMeshId, string summonId, string reason)
         {
-            _tmpIds.Clear();
+            _tmpPetIds.Clear();
             foreach (KeyValuePair<string, MeshGhost> kv in _ghosts)
             {
-                if (kv.Value.kind == GhostKind.Monster && !kv.Value.reserved && string.Equals(kv.Value.summonerMeshId, summonerMeshId) && string.Equals(kv.Value.summonId, summonId))
-                    _tmpIds.Add(kv.Key);
+                if (kv.Value.kind == GhostKind.Monster && string.Equals(kv.Value.summonerMeshId, summonerMeshId) && (summonId == null || string.Equals(kv.Value.summonId, summonId)))
+                    _tmpPetIds.Add(kv.Key);
             }
-            for (int i = 0; i < _tmpIds.Count; ++i)
-                DestroyGhost(_tmpIds[i], reason);
+            for (int i = 0; i < _tmpPetIds.Count; ++i)
+                DestroyGhost(_tmpPetIds[i], reason);
         }
 
         // ---- Arrival by handoff: promote the ghost in place (DESIGN §7) ----
@@ -739,6 +755,16 @@ namespace MultiplayerARPG.MMO.Mesh
             // vulnerable or AI-driven ever stood here, and ExpireReservedArrivals reclaims it.
             ghost.reserved = true;
             ghost.lastSeen = Time.unscaledTime;
+            // The pets that came along as puppets wait with the player: the origin stopped streaming them at demotion,
+            // so without this they would expire stale before a slow client registers and could not be promoted.
+            foreach (KeyValuePair<string, MeshGhost> kv in _ghosts)
+            {
+                if (kv.Value.kind == GhostKind.Monster && string.Equals(kv.Value.summonerMeshId, data.Id))
+                {
+                    kv.Value.reserved = true;
+                    kv.Value.lastSeen = Time.unscaledTime;
+                }
+            }
             MeshIdentity id = MeshIdentity.GetOrAdd(player);
             id.LastHandoffTime = Time.unscaledTime;
             // The mount: keep the vehicle the ghost is riding when it is the one the saved data says (the usual case),
@@ -794,6 +820,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     _pendingSpawnPlayerCharactersByUserId.TryRemove(r.userId, out _);
                 Logging.LogWarning("Mesh", $"Arrival {_tmpIds[i]} was never claimed by its client; the reserved puppet is destroyed");
                 AckHandoffFailed(_tmpIds[i], "arrival never claimed by its client");
+                DestroySummonPuppet(_tmpIds[i], null, "arrival never claimed");
                 if (_ghosts.TryGetValue(_tmpIds[i], out MeshGhost g) && ReferenceEquals(g.entity, r.entity))
                     DestroyGhost(_tmpIds[i], "arrival never claimed");
                 else if (r.entity != null && r.entity.Identity != null && !r.entity.Identity.IsDestroyed)
@@ -1114,7 +1141,20 @@ namespace MultiplayerARPG.MMO.Mesh
             uint wanted = summoner != null ? summoner.ObjectId : 0u;
             SummonType type = wanted != 0u ? (SummonType)msg.summonType : SummonType.None;
             if (monster.Summoner.objectId != wanted || monster.SummonType != type)
-                monster.Summoner = new CharacterSummoner { type = type, objectId = wanted };
+                LinkSummoner(monster, summoner, type);
+        }
+
+        /// <summary>
+        /// Set a monster's summoner. The kit caches the resolved entity privately and only re-resolves it when the cache
+        /// is null, so writing the sync field alone leaves a re-linked puppet following (and dying with) a stale entity;
+        /// the add-on's monster subclass reaches the protected setters, a foreign monster class gets the sync field.
+        /// </summary>
+        private static void LinkSummoner(BaseMonsterCharacterEntity monster, BaseCharacterEntity summoner, SummonType type)
+        {
+            if (monster is MeshMonsterCharacterEntity mesh)
+                mesh.MeshLinkSummoner(summoner, type);
+            else
+                monster.Summoner = new CharacterSummoner { type = type, objectId = summoner != null ? summoner.ObjectId : 0u };
         }
 
         /// <summary>An entity by mesh id as this cell knows it: its ghost here, an owned monster, or the real character.</summary>
@@ -1140,7 +1180,7 @@ namespace MultiplayerARPG.MMO.Mesh
             foreach (MeshGhost g in _ghosts.Values)
             {
                 if (g.entity is BaseMonsterCharacterEntity m && m.IsSummoned && m.Summoner.objectId == summonerObjectId)
-                    m.Summoner = new CharacterSummoner();
+                    LinkSummoner(m, null, SummonType.None);
             }
         }
 
@@ -1187,7 +1227,7 @@ namespace MultiplayerARPG.MMO.Mesh
             foreach (KeyValuePair<string, MeshGhost> kv in _ghosts)
             {
                 MeshGhost g = kv.Value;
-                if (g.kind != GhostKind.Monster || g.reserved || g.entity == null || g.entity.IsDead())
+                if (g.kind != GhostKind.Monster || g.entity == null || g.entity.IsDead())
                     continue;
                 if (!string.Equals(g.summonerMeshId, player.Id) || !string.Equals(g.summonId, summon.id))
                     continue;
@@ -1207,7 +1247,7 @@ namespace MultiplayerARPG.MMO.Mesh
             pid.IsGhost = false;
             pid.OwnerZoneId = OwnZoneId;
             pid.LastHandoffTime = Time.unscaledTime;
-            pet.Summoner = new CharacterSummoner { type = summon.type, objectId = player.ObjectId };
+            LinkSummoner(pet, player, summon.type);
             pet.Level = summon.level;
             pet.Exp = summon.exp;
             if (summon.currentHp > 0)
@@ -1370,7 +1410,11 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             ghost.lastTarget = msg.position;
             if (entity.CurrentHp != msg.currentHp && msg.maxHp > 0)
+            {
                 entity.CurrentHp = msg.currentHp;
+                if (msg.currentHp <= 0)
+                    UnlinkSummonPuppets(entity.ObjectId); // the kit unsummons a monster whose summoner is dead; puppets must not
+            }
         }
 
         internal void OnGhostRemove(string meshId)
@@ -1899,24 +1943,16 @@ namespace MultiplayerARPG.MMO.Mesh
                 Logging.LogWarning("Mesh", $"Reward for ghost {ghost.CharacterName} dropped: no link to owner zone {id.OwnerZoneId}");
                 return;
             }
-            List<int> ids = new List<int>(), amounts = new List<int>();
-            if (currencies != null)
-            {
-                foreach (CurrencyAmount c in currencies)
-                {
-                    if (c.currency == null || c.amount <= 0) continue;
-                    ids.Add(c.currency.DataId); amounts.Add(c.amount);
-                }
-            }
-            if (exp <= 0 && gold <= 0 && ids.Count == 0)
+            PackCurrencies(currencies, out int[] currencyIds, out int[] currencyAmounts);
+            if (exp <= 0 && gold <= 0 && currencyIds.Length == 0)
                 return;
             link.SendGhostReward(new GhostRewardMessage
             {
                 attackerMeshId = id.MeshEntityId, exp = exp, gold = gold, multiplier = multiplier, givenType = (byte)givenType,
-                giverLevel = giverLevel, sourceLevel = sourceLevel, currencyDataIds = ids.ToArray(), currencyAmounts = amounts.ToArray(),
+                giverLevel = giverLevel, sourceLevel = sourceLevel, currencyDataIds = currencyIds, currencyAmounts = currencyAmounts,
             });
             if (traceHandoffTiming)
-                Logging.Log("Mesh", $"Reward on ghost {ghost.CharacterName} forwarded to zone {id.OwnerZoneId}: exp {exp} gold {gold} currencies {ids.Count} x{multiplier} ({givenType})");
+                Logging.Log("Mesh", $"Reward on ghost {ghost.CharacterName} forwarded to zone {id.OwnerZoneId}: exp {exp} gold {gold} currencies {currencyIds.Length} x{multiplier} ({givenType})");
         }
 
         /// <summary>
@@ -2008,7 +2044,7 @@ namespace MultiplayerARPG.MMO.Mesh
                         ForwardPartyShare(memberGhost, 0, 0f, 0, 0f, null, player.Level, msg.monsterLevel, msg.monsterDataId, true);
                         forwarded++;
                     }
-                    else if (linkAllZones)
+                    else if (linkAllZones && !_pendingHandoffAcks.ContainsKey(memberId) && IsPartyMemberOnline(party, memberId))
                     {
                         BroadcastPartyShare(memberId, 0, 0f, 0, 0f, null, player.Level, msg.monsterLevel, msg.monsterDataId, true);
                         forwarded++;
@@ -2099,16 +2135,9 @@ namespace MultiplayerARPG.MMO.Mesh
                 player.RewardExp(msg.exp, (1f - shareGuildExpRate) * msg.multiplier, givenType, msg.giverLevel, msg.sourceLevel);
             if (msg.gold > 0 && !sharedGold)
                 player.RewardGold(msg.gold, msg.multiplier, givenType, msg.giverLevel, msg.sourceLevel);
-            if (msg.currencyDataIds != null && msg.currencyDataIds.Length > 0)
-            {
-                List<CurrencyAmount> currencies = new List<CurrencyAmount>();
-                for (int i = 0; i < msg.currencyDataIds.Length; ++i)
-                {
-                    if (GameInstance.Currencies.TryGetValue(msg.currencyDataIds[i], out Currency currency))
-                        currencies.Add(new CurrencyAmount { currency = currency, amount = msg.currencyAmounts[i] });
-                }
+            List<CurrencyAmount> currencies = UnpackCurrencies(msg.currencyDataIds, msg.currencyAmounts);
+            if (currencies != null)
                 player.RewardCurrencies(currencies, msg.multiplier, givenType, msg.giverLevel, msg.sourceLevel);
-            }
             if (traceHandoffTiming)
                 Logging.Log("Mesh", $"Forwarded reward applied to {player.CharacterName}: exp {msg.exp} gold {msg.gold} x{msg.multiplier} -> level={player.Level} exp={player.Exp} gold={player.Gold}");
         }
@@ -2120,11 +2149,14 @@ namespace MultiplayerARPG.MMO.Mesh
         // applies it to the real character (and its pet, as the kit does) with no further sharing. A member beyond the
         // band is treated as out of range even when the share distance is "unlimited" (0) — open, see DESIGN.
 
-        /// <summary>A party member's ghost standing here (alive, not a reserved arrival).</summary>
+        /// <summary>
+        /// A party member's ghost standing here (alive, not a reserved arrival, not our own demoted handoff still in
+        /// flight — that character is registered nowhere yet and a share sent to it would be dropped).
+        /// </summary>
         internal bool TryGetPlayerGhost(string characterId, out BasePlayerCharacterEntity ghost)
         {
             ghost = null;
-            if (!_ghosts.TryGetValue(characterId, out MeshGhost g) || g.kind != GhostKind.Player || g.reserved || !(g.entity is BasePlayerCharacterEntity pg) || pg.IsDead())
+            if (!_ghosts.TryGetValue(characterId, out MeshGhost g) || g.kind != GhostKind.Player || g.reserved || _pendingHandoffAcks.ContainsKey(characterId) || !(g.entity is BasePlayerCharacterEntity pg) || pg.IsDead())
                 return false;
             ghost = pg;
             return true;
@@ -2149,12 +2181,12 @@ namespace MultiplayerARPG.MMO.Mesh
                     here = false;
                 else
                 {
-                    if (memberId != killer.Id && linkAllZones)
+                    if (memberId != killer.Id && linkAllZones && !_pendingHandoffAcks.ContainsKey(memberId) && IsPartyMemberOnline(party, memberId))
                     {
                         if (party.shareExp && expDist <= 0f && expRemote != null) expRemote.Add(memberId);
                         if (party.shareItem && itemDist <= 0f && itemRemote != null) itemRemote.Add(memberId);
                     }
-                    continue; // offline, or on a cell too far for a ghost here
+                    continue; // offline, mid-handoff, or on a cell too far for a ghost here
                 }
                 if (member.IsDead())
                     continue;
@@ -2164,6 +2196,24 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (party.shareItem && (itemDist <= 0f || dist <= itemDist))
                     (here ? itemMembers : itemGhosts).Add(member);
             }
+        }
+
+        [Tooltip("A party member on another cell counts as online when the kit's online table saw it within this many seconds (the cluster relays every online player once a second).")]
+        public float partyMemberOnlineWindowSeconds = 5f;
+
+        /// <summary>
+        /// Online somewhere on the cluster, as the kit knows it: DefaultServerCharacterHandlers marks local players by
+        /// character id and, through the cluster's online relay, players on other map servers by user id.
+        /// </summary>
+        internal bool IsPartyMemberOnline(PartyData party, string memberId)
+        {
+            float now = Time.unscaledTime;
+            if (DefaultServerCharacterHandlers.OnlineCharacterIds.TryGetValue(memberId, out float seen) && now - seen <= partyMemberOnlineWindowSeconds)
+                return true;
+            if (party != null && party.TryGetMember(memberId, out SocialCharacterData member) && !string.IsNullOrEmpty(member.userId)
+                && DefaultServerCharacterHandlers.OnlineCharacterIds.TryGetValue(member.userId, out seen) && now - seen <= partyMemberOnlineWindowSeconds)
+                return true;
+            return false;
         }
 
         /// <summary>Apply a share to a member that is real here, splitting exp with its pet as the kit does.</summary>
@@ -2189,6 +2239,39 @@ namespace MultiplayerARPG.MMO.Mesh
                 member.RewardCurrencies(currencies, goldMultiplier, givenType, giverLevel, sourceLevel);
         }
 
+        /// <summary>Currencies on the wire: parallel data-id and amount arrays (empty arrays for none).</summary>
+        private static void PackCurrencies(IEnumerable<CurrencyAmount> currencies, out int[] ids, out int[] amounts)
+        {
+            if (currencies == null)
+            {
+                ids = System.Array.Empty<int>();
+                amounts = System.Array.Empty<int>();
+                return;
+            }
+            List<int> idList = new List<int>(), amountList = new List<int>();
+            foreach (CurrencyAmount c in currencies)
+            {
+                if (c.currency == null || c.amount <= 0) continue;
+                idList.Add(c.currency.DataId); amountList.Add(c.amount);
+            }
+            ids = idList.ToArray();
+            amounts = amountList.ToArray();
+        }
+
+        /// <summary>The inverse of PackCurrencies; null when there is nothing to give.</summary>
+        private static List<CurrencyAmount> UnpackCurrencies(int[] ids, int[] amounts)
+        {
+            if (ids == null || amounts == null || ids.Length == 0)
+                return null;
+            List<CurrencyAmount> currencies = new List<CurrencyAmount>();
+            for (int i = 0; i < ids.Length && i < amounts.Length; ++i)
+            {
+                if (GameInstance.Currencies.TryGetValue(ids[i], out Currency currency))
+                    currencies.Add(new CurrencyAmount { currency = currency, amount = amounts[i] });
+            }
+            return currencies.Count > 0 ? currencies : null;
+        }
+
         /// <summary>Send a member's share to the cell that owns it (the member is a ghost here).</summary>
         internal void ForwardPartyShare(BasePlayerCharacterEntity memberGhost, int exp, float expMultiplier, int gold, float goldMultiplier, IEnumerable<CurrencyAmount> currencies, int giverLevel, int sourceLevel, int monsterDataId, bool countKill)
         {
@@ -2200,19 +2283,11 @@ namespace MultiplayerARPG.MMO.Mesh
                 WarnThrottled($"Party share for {memberGhost.CharacterName} dropped: no link to owner zone {id.OwnerZoneId}");
                 return;
             }
-            List<int> ids = new List<int>(), amounts = new List<int>();
-            if (currencies != null)
-            {
-                foreach (CurrencyAmount c in currencies)
-                {
-                    if (c.currency == null || c.amount <= 0) continue;
-                    ids.Add(c.currency.DataId); amounts.Add(c.amount);
-                }
-            }
+            PackCurrencies(currencies, out int[] currencyIds, out int[] currencyAmounts);
             link.SendGhostPartyShare(new GhostPartyShareMessage
             {
                 memberId = memberGhost.Id, exp = exp, expMultiplier = expMultiplier, gold = gold, goldMultiplier = goldMultiplier,
-                currencyDataIds = ids.ToArray(), currencyAmounts = amounts.ToArray(), giverLevel = giverLevel, sourceLevel = sourceLevel,
+                currencyDataIds = currencyIds, currencyAmounts = currencyAmounts, giverLevel = giverLevel, sourceLevel = sourceLevel,
                 monsterDataId = monsterDataId, countKill = countKill,
             });
             if (traceHandoffTiming)
@@ -2222,19 +2297,11 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>A member whose cell is unknown: every linked cell gets the share; the one holding the character applies it.</summary>
         internal void BroadcastPartyShare(string memberId, int exp, float expMultiplier, int gold, float goldMultiplier, IEnumerable<CurrencyAmount> currencies, int giverLevel, int sourceLevel, int monsterDataId, bool countKill)
         {
-            List<int> ids = new List<int>(), amounts = new List<int>();
-            if (currencies != null)
-            {
-                foreach (CurrencyAmount c in currencies)
-                {
-                    if (c.currency == null || c.amount <= 0) continue;
-                    ids.Add(c.currency.DataId); amounts.Add(c.amount);
-                }
-            }
+            PackCurrencies(currencies, out int[] currencyIds, out int[] currencyAmounts);
             GhostPartyShareMessage msg = new GhostPartyShareMessage
             {
                 memberId = memberId, exp = exp, expMultiplier = expMultiplier, gold = gold, goldMultiplier = goldMultiplier,
-                currencyDataIds = ids.ToArray(), currencyAmounts = amounts.ToArray(), giverLevel = giverLevel, sourceLevel = sourceLevel,
+                currencyDataIds = currencyIds, currencyAmounts = currencyAmounts, giverLevel = giverLevel, sourceLevel = sourceLevel,
                 monsterDataId = monsterDataId, countKill = countKill, broadcast = true,
             };
             int sent = 0;
@@ -2258,17 +2325,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     WarnThrottled($"Party share for {msg.memberId} dropped: character not on this cell");
                 return;
             }
-            List<CurrencyAmount> currencies = null;
-            if (msg.currencyDataIds != null && msg.currencyDataIds.Length > 0)
-            {
-                currencies = new List<CurrencyAmount>();
-                for (int i = 0; i < msg.currencyDataIds.Length; ++i)
-                {
-                    if (GameInstance.Currencies.TryGetValue(msg.currencyDataIds[i], out Currency currency))
-                        currencies.Add(new CurrencyAmount { currency = currency, amount = msg.currencyAmounts[i] });
-                }
-            }
-            GivePartyShareHere(member, msg.exp, msg.expMultiplier, msg.gold, msg.goldMultiplier, currencies, RewardGivenType.PartyShare, msg.giverLevel, msg.sourceLevel);
+            GivePartyShareHere(member, msg.exp, msg.expMultiplier, msg.gold, msg.goldMultiplier, UnpackCurrencies(msg.currencyDataIds, msg.currencyAmounts), RewardGivenType.PartyShare, msg.giverLevel, msg.sourceLevel);
             bool counted = msg.countKill && CountQuestKill(member, msg.monsterDataId);
             if (traceHandoffTiming)
                 Logging.Log("Mesh", $"Party share applied to {member.CharacterName}: exp {msg.exp} x{msg.expMultiplier:0.###} gold {msg.gold} x{msg.goldMultiplier:0.###} questKill={counted} -> level={member.Level} exp={member.Exp} gold={member.Gold}");
@@ -2279,6 +2336,8 @@ namespace MultiplayerARPG.MMO.Mesh
             if (!IsServer || !_ghosts.TryGetValue(msg.targetMeshId, out MeshGhost ghost) || ghost.entity == null)
                 return;
             ghost.entity.CurrentHp = msg.currentHp;
+            if (msg.currentHp <= 0)
+                UnlinkSummonPuppets(ghost.entity.ObjectId); // see SteerGhost
             ghost.entity.CallRpcAppendCombatText((CombatAmountType)msg.combatAmountType, HitEffectsSourceType.None, 0, msg.totalDamage);
         }
 
@@ -2333,6 +2392,15 @@ namespace MultiplayerARPG.MMO.Mesh
             if (msg.ok)
             {
                 Logging.Log("Mesh", $"Handoff ACK {pending.name} by zone {fromZone}: registered {msg.arrivalMs} ms after the notice, {(Time.unscaledTime - pending.startTime) * 1000f:0} ms after START (promoted={msg.promoted})");
+                // The exemption from stale expiry ends with the ack; the destination's first snapshot is still a tick
+                // away, so the demoted puppets get a fresh stale window from now.
+                if (_ghosts.TryGetValue(msg.characterId, out MeshGhost demoted))
+                    demoted.lastSeen = Time.unscaledTime;
+                foreach (KeyValuePair<string, MeshGhost> kv in _ghosts)
+                {
+                    if (kv.Value.kind == GhostKind.Monster && string.Equals(kv.Value.summonerMeshId, msg.characterId))
+                        kv.Value.lastSeen = Time.unscaledTime;
+                }
                 if (!msg.promoted)
                 {
                     // The destination had no puppet to promote and re-summoned the pets from the saved data: the pets we
@@ -2397,48 +2465,61 @@ namespace MultiplayerARPG.MMO.Mesh
             ReleaseDemotedPets(characterId, reason);
         }
 
+        /// <summary>
+        /// The pets demoted here with a player (their mesh ids were born on this cell — a puppet the new owner streams for a
+        /// re-summoned pet carries that cell's prefix and is left alone).
+        /// </summary>
         private void ReleaseDemotedPets(string characterId, string reason)
         {
-            _tmpIds.Clear();
+            string ownPrefix = OwnZoneId + ":";
+            _tmpPetIds.Clear();
             foreach (KeyValuePair<string, MeshGhost> kv in _ghosts)
             {
-                if (kv.Value.kind == GhostKind.Monster && string.Equals(kv.Value.summonerMeshId, characterId) && !kv.Value.reserved)
-                    _tmpIds.Add(kv.Key);
+                if (kv.Value.kind == GhostKind.Monster && string.Equals(kv.Value.summonerMeshId, characterId) && !kv.Value.reserved && kv.Key.StartsWith(ownPrefix))
+                    _tmpPetIds.Add(kv.Key);
             }
-            for (int i = 0; i < _tmpIds.Count; ++i)
-                DestroyGhost(_tmpIds[i], reason);
+            for (int i = 0; i < _tmpPetIds.Count; ++i)
+                DestroyGhost(_tmpPetIds[i], reason);
         }
 
         private void TickHandoffAcks()
         {
+            // Own lists: the release path below reuses the shared scratch lists while these are being iterated.
+            List<string> expired = null;
             if (_pendingHandoffAcks.Count > 0)
             {
-                _tmpIds.Clear();
                 foreach (KeyValuePair<string, PendingHandoffAck> kv in _pendingHandoffAcks)
                 {
                     if (Time.unscaledTime - kv.Value.sentTime > handoffAckTimeoutSeconds)
-                        _tmpIds.Add(kv.Key);
+                        (expired ??= new List<string>()).Add(kv.Key);
                 }
-                for (int i = 0; i < _tmpIds.Count; ++i)
+                if (expired != null)
                 {
-                    PendingHandoffAck pending = _pendingHandoffAcks[_tmpIds[i]];
-                    _pendingHandoffAcks.Remove(_tmpIds[i]);
-                    Logging.LogWarning("Mesh", $"Handoff of {pending.name} to zone {pending.zone} not acknowledged after {handoffAckTimeoutSeconds:0.#} s; releasing the demoted puppet");
-                    ReleaseDemotedHandoff(_tmpIds[i], "handoff never acknowledged");
+                    foreach (string characterId in expired)
+                    {
+                        if (!_pendingHandoffAcks.TryGetValue(characterId, out PendingHandoffAck pending))
+                            continue;
+                        _pendingHandoffAcks.Remove(characterId);
+                        Logging.LogWarning("Mesh", $"Handoff of {pending.name} to zone {pending.zone} not acknowledged after {handoffAckTimeoutSeconds:0.#} s; releasing the demoted puppet");
+                        ReleaseDemotedHandoff(characterId, "handoff never acknowledged");
+                    }
                 }
             }
             if (_incomingHandoffFrom.Count > 0)
             {
-                _tmpIds.Clear();
+                List<string> unclaimed = null;
                 foreach (KeyValuePair<string, IncomingHandoff> kv in _incomingHandoffFrom)
                 {
                     // A notice whose client never connected (a reservation that was claimed then abandoned is acked by
                     // ExpireReservedArrivals; one that registered was acked at registration).
                     if (Time.unscaledTime - kv.Value.time > reservedArrivalTimeout && !_reservedArrivals.ContainsKey(kv.Key) && !ServerUserHandlers.TryGetPlayerCharacterById(kv.Key, out _))
-                        _tmpIds.Add(kv.Key);
+                        (unclaimed ??= new List<string>()).Add(kv.Key);
                 }
-                for (int i = 0; i < _tmpIds.Count; ++i)
-                    AckHandoffFailed(_tmpIds[i], "client never arrived");
+                if (unclaimed != null)
+                {
+                    foreach (string characterId in unclaimed)
+                        AckHandoffFailed(characterId, "client never arrived");
+                }
             }
         }
 
@@ -2494,6 +2575,7 @@ namespace MultiplayerARPG.MMO.Mesh
         internal void ForwardGhostAttack(BaseCharacterEntity attacker, long peerTimestamp, WeaponHandlingState weaponHandlingState) { }
         internal void ForwardGhostAttackTrigger(BaseCharacterEntity attacker, SimulateActionTriggerData data) { }
         internal bool TryGetPlayerGhost(string characterId, out BasePlayerCharacterEntity ghost) { ghost = null; return false; }
+        internal bool IsPartyMemberOnline(PartyData party, string memberId) { return false; }
         internal void CollectPartyMembers(BasePlayerCharacterEntity killer, PartyData party, List<BasePlayerCharacterEntity> expMembers, List<BasePlayerCharacterEntity> itemMembers, List<BasePlayerCharacterEntity> expGhosts, List<BasePlayerCharacterEntity> itemGhosts, List<string> expRemote = null, List<string> itemRemote = null) { }
         internal void BroadcastPartyShare(string memberId, int exp, float expMultiplier, int gold, float goldMultiplier, IEnumerable<CurrencyAmount> currencies, int giverLevel, int sourceLevel, int monsterDataId, bool countKill) { }
         internal void GivePartyShareHere(BasePlayerCharacterEntity member, int exp, float expMultiplier, int gold, float goldMultiplier, List<CurrencyAmount> currencies, RewardGivenType givenType, int giverLevel, int sourceLevel) { }

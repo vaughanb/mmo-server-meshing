@@ -9,6 +9,16 @@ namespace MultiplayerARPG.MMO.Mesh
 {
     public class MeshMonsterCharacterEntity : MonsterCharacterEntity
     {
+        /// <summary>
+        /// Set the summoner through the kit's protected setters, so its private entity cache follows the change (the
+        /// public sync field alone leaves a re-linked puppet following, and dying with, a stale entity). Null unlinks.
+        /// </summary>
+        public void MeshLinkSummoner(BaseCharacterEntity summoner, SummonType type)
+        {
+            SummonType = summoner != null ? type : SummonType.None;
+            SummonerEntity = summoner;
+        }
+
         public override void ApplyBuff(int dataId, BuffType type, int level, EntityInfo buffApplier, CharacterItem buffApplierWeapon)
         {
             if (IsServer && MeshIdentity.IsGhostEntity(this))
@@ -22,11 +32,29 @@ namespace MultiplayerARPG.MMO.Mesh
         }
 
 #if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
+        /// <summary>
+        /// A killer that is a ghost here (a player who crossed the edge and keeps fighting in the band keeps its party
+        /// and guild ids) is rewarded by its OWNER cell: the kit's reward to the ghost is forwarded raw (MeshGameplayRule)
+        /// and the owner runs the guild and party split with the real character, and GhostKill carries the kill
+        /// progress. Sharing here as well would pay and count every member twice.
+        /// </summary>
+        protected override void GivingRewardToGuild(BasePlayerCharacterEntity playerCharacterEntity, Reward reward, float rewardRate, out float shareGuildExpRate)
+        {
+            if (MeshIdentity.IsGhostEntity(playerCharacterEntity))
+            {
+                shareGuildExpRate = 0f;
+                return;
+            }
+            base.GivingRewardToGuild(playerCharacterEntity, reward, rewardRate, out shareGuildExpRate);
+        }
+
         protected override void GivingRewardToParty(BasePlayerCharacterEntity playerCharacterEntity, bool isLastAttacker, Reward reward, float rewardRate, float shareGuildExpRate, bool makeMostDamage, out bool givenRewardExp, out bool givenRewardGold, out bool givenRewardCurrencies)
         {
             givenRewardExp = false;
             givenRewardGold = false;
             givenRewardCurrencies = false;
+            if (MeshIdentity.IsGhostEntity(playerCharacterEntity))
+                return; // see GivingRewardToGuild: the kit rewards the ghost in full, the owner cell splits it
             MeshMapNetworkManager mesh = BaseGameNetworkManager.Singleton as MeshMapNetworkManager;
             if (mesh == null || !GameInstance.ServerPartyHandlers.TryGetParty(playerCharacterEntity.PartyId, out PartyData party) || party == null)
             {
@@ -63,7 +91,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     }
                     else if (mesh.TryGetPlayerGhost(memberId, out BasePlayerCharacterEntity memberGhost))
                         mesh.ForwardPartyShare(memberGhost, 0, 0f, 0, 0f, null, Level, Level, DataId, true);
-                    else if (mesh.linkAllZones)
+                    else if (mesh.linkAllZones && mesh.IsPartyMemberOnline(party, memberId))
                         mesh.BroadcastPartyShare(memberId, 0, 0f, 0, 0f, null, Level, Level, DataId, true);
                 }
             }
