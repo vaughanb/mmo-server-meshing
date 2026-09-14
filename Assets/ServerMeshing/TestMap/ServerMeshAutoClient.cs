@@ -398,9 +398,39 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             Phase = "stand";
             bool reached = false;
+            _walkZOverride = walkTargetZ != 0f ? walkTargetZ : (float?)null;
             yield return WalkTo(walkTargetX, deadline, ClientMigrationController.CompletedCount, r => reached = r);
+            _walkZOverride = null;
+            BasePlayerCharacterEntity self = GameInstance.PlayingCharacterEntity;
+            Log($"Standing at {(self != null ? self.EntityTransform.position : Vector3.zero)} party={(self != null ? self.PartyId : 0)}; watching exp/gold/quests for {observeSeconds}s");
+            int expStart = self != null ? self.Exp : 0, goldStart = self != null ? self.Gold : 0, levelStart = self != null ? self.Level : 0, killsStart = CountQuestKills(self);
+            float end = Time.realtimeSinceStartup + observeSeconds, nextLog = 0f;
+            while (Time.realtimeSinceStartup < end)
+            {
+                self = GameInstance.PlayingCharacterEntity;
+                if (self != null && Time.realtimeSinceStartup >= nextLog)
+                {
+                    nextLog = Time.realtimeSinceStartup + 10f;
+                    Log($"stand: level={self.Level} exp={self.Exp} gold={self.Gold} questKills={CountQuestKills(self)}");
+                }
+                yield return null;
+            }
+            self = GameInstance.PlayingCharacterEntity;
             Finished = true; Passed = reached;
-            Log($"RESULT stand: reached={reached} pos={(GameInstance.PlayingCharacterEntity != null ? GameInstance.PlayingCharacterEntity.EntityTransform.position : Vector3.zero)} -> {(Passed ? "PASS" : "FAIL")} (holding position)");
+            Log($"RESULT stand: reached={reached} exp+{(self != null ? self.Exp - expStart : 0)} gold+{(self != null ? self.Gold - goldStart : 0)} level+{(self != null ? self.Level - levelStart : 0)} questKills+{CountQuestKills(self) - killsStart} -> {(Passed ? "PASS" : "FAIL")}");
+        }
+
+        private static int CountQuestKills(BasePlayerCharacterEntity self)
+        {
+            if (self == null) return 0;
+            int n = 0;
+            for (int i = 0; i < self.Quests.Count; ++i)
+            {
+                CharacterQuest q = self.Quests[i];
+                if (q.killedMonsters == null) continue;
+                foreach (KeyValuePair<int, int> kv in q.killedMonsters) n += kv.Value;
+            }
+            return n;
         }
 
         private IEnumerator RunPace(float deadline)
@@ -568,7 +598,8 @@ namespace MultiplayerARPG.MMO.Mesh
             int targetHpStart = 0, minTargetHp = int.MaxValue, minSelfHp = selfHpStart, kills = 0;
             bool anyHurt = false;
             // Loot: drops seen (any side), pickups attempted on drops within reach, items gained in the bag.
-            int itemsStart = CountBagItems(self), pickups = 0;
+            int itemsStart = CountBagItems(self), pickups = 0, questKillsStart = CountQuestKills(self);
+            Log($"fight: party={self.PartyId} quests={self.Quests.Count} questKills={questKillsStart}");
             HashSet<uint> dropsSeen = new HashSet<uint>();
             HashSet<uint> dropsTried = new HashSet<uint>();
             float nextPickup = 0f;
@@ -622,10 +653,22 @@ namespace MultiplayerARPG.MMO.Mesh
                     if (target.CurrentHp < targetHpStart) anyHurt = true;
                     minTargetHp = Mathf.Min(minTargetHp, target.CurrentHp);
                 }
-                else if (self.EntityTransform.position.x > holdX)
+                else
                 {
-                    Vector3 back = self.EntityTransform.position; back.x = holdX - 1f;
-                    self.PointClickMovement(back);
+                    // Nothing within reach: bait. Stand on the line level with the nearest monster that is close enough
+                    // to the line to notice our ghost over there (visual range ~5 m), so it comes to us.
+                    BaseMonsterCharacterEntity bait = null; float bestBait = float.MaxValue;
+                    foreach (BaseMonsterCharacterEntity m in FindObjectsByType<BaseMonsterCharacterEntity>(FindObjectsSortMode.None))
+                    {
+                        if (m == null || m.IsDead() || m.EntityTransform.position.x > holdX + 6f) continue;
+                        float d = Mathf.Abs(m.EntityTransform.position.z - self.EntityTransform.position.z);
+                        if (d < bestBait) { bestBait = d; bait = m; }
+                    }
+                    Vector3 dest = self.EntityTransform.position;
+                    dest.x = holdX - 0.3f;
+                    if (bait != null) dest.z = bait.EntityTransform.position.z;
+                    if (Vector3.Distance(dest, self.EntityTransform.position) > 0.8f)
+                        self.PointClickMovement(dest);
                 }
                 minSelfHp = Mathf.Min(minSelfHp, self.CurrentHp);
                 foreach (ItemDropEntity drop in FindObjectsByType<ItemDropEntity>(FindObjectsSortMode.None))
@@ -659,7 +702,7 @@ namespace MultiplayerARPG.MMO.Mesh
             bool selfHurt = minSelfHp < selfHpStart;
             Finished = true; Passed = anyHurt;
             int itemsGained = self != null ? CountBagItems(self) - itemsStart : 0;
-            Log($"RESULT fight: hurtTarget={anyHurt} kills={kills} selfHp {selfHpStart}/{selfMaxHp}->{minSelfHp} (hitBack={selfHurt}) exp+{expGained} gold+{goldGained} level+{levelGained} drops={dropsSeen.Count} pickups={pickups} items+{itemsGained} -> {(Passed ? "PASS" : "FAIL")}");
+            Log($"RESULT fight: hurtTarget={anyHurt} kills={kills} selfHp {selfHpStart}/{selfMaxHp}->{minSelfHp} (hitBack={selfHurt}) exp+{expGained} gold+{goldGained} level+{levelGained} drops={dropsSeen.Count} pickups={pickups} items+{itemsGained} questKills+{CountQuestKills(self) - questKillsStart} -> {(Passed ? "PASS" : "FAIL")}");
             if (self != null && !self.IsDead())
             {
                 // Retreat to the zone start so the next run does not begin next to the neighbour's monsters.

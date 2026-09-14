@@ -44,6 +44,21 @@ namespace MultiplayerARPG.MMO.Mesh
         /// If true, silence EVERY IManagedUpdate on the entity except the entity itself (most thorough,
         /// useful for the spike's discovery; may also silence benign things like footstep sounds).
         /// </param>
+        /// <summary>
+        /// Components that must be silent on a puppet regardless of their concrete type name: the monster AI family
+        /// (projects subclass it — this add-on's MeshMonsterActivityComponent does) and the action components.
+        /// </summary>
+        private static bool IsDeniedFamily(IManagedUpdate mu)
+        {
+            return mu is BaseMonsterActivityComponent
+                || mu is CharacterRecoveryComponent
+                || mu is CharacterSkillAndBuffComponent
+                || mu is ICharacterAttackComponent
+                || mu is ICharacterUseSkillComponent
+                || mu is ICharacterChargeComponent
+                || mu is ICharacterReloadComponent;
+        }
+
         public static int Ghostify(BaseGameEntity entity, object disablerKey,
             IEnumerable<string> extraTypeNames = null, bool stripAllManagedUpdates = false, bool logDetails = true,
             bool disableMovement = true)
@@ -75,7 +90,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     continue;
 
                 string typeName = mu.GetType().Name;
-                if (stripAllManagedUpdates || deny.Contains(typeName))
+                if (stripAllManagedUpdates || deny.Contains(typeName) || IsDeniedFamily(mu))
                 {
                     UpdateManager.Unregister(mu);
                     silenced++;
@@ -107,7 +122,7 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 if (mu is BaseGameEntity)
                     continue;
-                if (deny.Contains(mu.GetType().Name))
+                if (deny.Contains(mu.GetType().Name) || IsDeniedFamily(mu))
                 {
                     UpdateManager.Register(mu);
                     restored++;
