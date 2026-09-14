@@ -32,6 +32,39 @@ namespace MultiplayerARPG.MMO.Mesh
         public const ushort GhostKill = 111;
         public const ushort GhostAction = 112;
         public const ushort HandoffAck = 113;
+        public const ushort GhostPartyShare = 114;
+    }
+
+    /// <summary>
+    /// A party member's share of a kill, computed by the killer's cell for a member that stands on THIS cell (it was a
+    /// ghost over there). Amounts are raw with the share multiplier already folded in; the owner applies them to the
+    /// real character (and its pet) as a PartyShare, with no further party or guild processing.
+    /// </summary>
+    public struct GhostPartyShareMessage : INetSerializable
+    {
+        public string memberId;
+        public int exp;
+        public float expMultiplier;
+        public int gold;
+        public float goldMultiplier;
+        public int[] currencyDataIds;
+        public int[] currencyAmounts;
+        public int giverLevel;
+        public int sourceLevel;
+        public int monsterDataId;
+        public bool countKill;   // advance the member's quest kill counters too (the kit does for nearby members)
+        public void Serialize(NetDataWriter writer)
+        {
+            writer.Put(memberId); writer.Put(exp); writer.Put(expMultiplier); writer.Put(gold); writer.Put(goldMultiplier);
+            writer.PutArray(currencyDataIds ?? System.Array.Empty<int>()); writer.PutArray(currencyAmounts ?? System.Array.Empty<int>());
+            writer.Put(giverLevel); writer.Put(sourceLevel); writer.Put(monsterDataId); writer.Put(countKill);
+        }
+        public void Deserialize(NetDataReader reader)
+        {
+            memberId = reader.GetString(); exp = reader.GetInt(); expMultiplier = reader.GetFloat(); gold = reader.GetInt(); goldMultiplier = reader.GetFloat();
+            currencyDataIds = reader.GetIntArray(); currencyAmounts = reader.GetIntArray();
+            giverLevel = reader.GetInt(); sourceLevel = reader.GetInt(); monsterDataId = reader.GetInt(); countKill = reader.GetBool();
+        }
     }
 
     /// <summary>
@@ -350,6 +383,7 @@ namespace MultiplayerARPG.MMO.Mesh
             RegisterMessageHandler(MeshLinkMessageTypes.GhostRemove, HandleGhostRemove);
             RegisterMessageHandler(MeshLinkMessageTypes.HandoffNotice, HandleHandoffNotice);
             RegisterMessageHandler(MeshLinkMessageTypes.HandoffAck, HandleHandoffAck);
+            RegisterMessageHandler(MeshLinkMessageTypes.GhostPartyShare, HandleGhostPartyShare);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostHit, HandleGhostHit);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostHitResult, HandleGhostHitResult);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostReward, HandleGhostReward);
@@ -411,6 +445,12 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             HandoffAckMessage msg = messageHandler.ReadMessage<HandoffAckMessage>();
             _manager.OnHandoffAck(messageHandler.ConnectionId, msg);
+        }
+
+        private void HandleGhostPartyShare(MessageHandlerData messageHandler)
+        {
+            GhostPartyShareMessage msg = messageHandler.ReadMessage<GhostPartyShareMessage>();
+            _manager.OnGhostPartyShare(messageHandler.ConnectionId, msg);
         }
 
         private void HandleGhostHit(MessageHandlerData messageHandler)
@@ -537,6 +577,11 @@ namespace MultiplayerARPG.MMO.Mesh
         public void SendHandoffAck(HandoffAckMessage msg)
         {
             Send(MeshLinkMessageTypes.HandoffAck, msg);
+        }
+
+        public void SendGhostPartyShare(GhostPartyShareMessage msg)
+        {
+            Send(MeshLinkMessageTypes.GhostPartyShare, msg);
         }
 
         public void SendHandoffNotice(string characterId, string userId)

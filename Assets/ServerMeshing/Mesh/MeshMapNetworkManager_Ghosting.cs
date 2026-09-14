@@ -1792,18 +1792,30 @@ namespace MultiplayerARPG.MMO.Mesh
                 return;
             // Quest kill counters for the killer and (as the kit does) every party member online here.
             int counted = CountQuestKill(player, msg.monsterDataId) ? 1 : 0;
+            int forwarded = 0;
             if (GameInstance.ServerPartyHandlers.TryGetParty(player.PartyId, out PartyData party) && party != null)
             {
                 foreach (string memberId in party.GetMemberIds())
                 {
-                    if (memberId == player.Id || !ServerUserHandlers.TryGetPlayerCharacterById(memberId, out BasePlayerCharacterEntity member) || member == null || member.IsDead())
+                    if (memberId == player.Id)
                         continue;
-                    if (CountQuestKill(member, msg.monsterDataId))
-                        counted++;
+                    if (ServerUserHandlers.TryGetPlayerCharacterById(memberId, out BasePlayerCharacterEntity member) && member != null)
+                    {
+                        if (!member.IsDead() && CountQuestKill(member, msg.monsterDataId))
+                            counted++;
+                        continue;
+                    }
+                    // A member standing on another cell: its ghost here tells us it is near enough (the kit shares kill
+                    // progress with every online member on the map); its own cell advances the counters.
+                    if (TryGetPlayerGhost(memberId, out BasePlayerCharacterEntity memberGhost))
+                    {
+                        ForwardPartyShare(memberGhost, 0, 0f, 0, 0f, null, player.Level, msg.monsterLevel, msg.monsterDataId, true);
+                        forwarded++;
+                    }
                 }
             }
             if (traceHandoffTiming)
-                Logging.Log("Mesh", $"Kill credit for {player.CharacterName}: monster {msg.monsterDataId} lv{msg.monsterLevel}, quest counters advanced on {counted} character(s)");
+                Logging.Log("Mesh", $"Kill credit for {player.CharacterName}: monster {msg.monsterDataId} lv{msg.monsterLevel}, quest counters advanced on {counted} character(s) here, forwarded to {forwarded} member(s) on other cells");
         }
 
         private static bool CountQuestKill(BasePlayerCharacterEntity character, int monsterDataId)
@@ -1845,33 +1857,35 @@ namespace MultiplayerARPG.MMO.Mesh
                 }
                 if (GameInstance.ServerPartyHandlers.TryGetParty(player.PartyId, out PartyData party) && party != null)
                 {
+                    // Members online here share as the kit does; members standing on another cell whose ghost is here
+                    // (near enough by the same distance rule) get their share forwarded to their own cell.
                     List<BasePlayerCharacterEntity> expMembers = new List<BasePlayerCharacterEntity>();
                     List<BasePlayerCharacterEntity> goldMembers = new List<BasePlayerCharacterEntity>();
-                    float expDist = GameInstance.Singleton.partyShareExpDistance, itemDist = GameInstance.Singleton.partyShareItemDistance;
-                    foreach (string memberId in party.GetMemberIds())
+                    List<BasePlayerCharacterEntity> expGhosts = new List<BasePlayerCharacterEntity>();
+                    List<BasePlayerCharacterEntity> goldGhosts = new List<BasePlayerCharacterEntity>();
+                    CollectPartyMembers(player, party, expMembers, goldMembers, expGhosts, goldGhosts);
+                    if (party.shareExp && expMembers.Count + expGhosts.Count > 0 && msg.exp > 0)
                     {
-                        if (!ServerUserHandlers.TryGetPlayerCharacterById(memberId, out BasePlayerCharacterEntity member) || member == null || member.IsDead())
-                            continue; // offline, dead, or on another cell (its own cell shares nothing for it — open)
-                        float dist = Vector3.Distance(player.EntityTransform.position, member.EntityTransform.position);
-                        if (party.shareExp && (expDist <= 0f || dist <= expDist)) expMembers.Add(member);
-                        if (party.shareItem && (itemDist <= 0f || dist <= itemDist)) goldMembers.Add(member);
-                    }
-                    if (party.shareExp && expMembers.Count > 0 && msg.exp > 0)
-                    {
-                        float count = expMembers.Count;
+                        float count = expMembers.Count + expGhosts.Count;
+                        float expMultiplier = (1f - shareGuildExpRate) / count * msg.multiplier;
                         foreach (BasePlayerCharacterEntity member in expMembers)
-                            member.RewardExp(msg.exp, (1f - shareGuildExpRate) / count * msg.multiplier, member == player ? RewardGivenType.KillMonster : RewardGivenType.PartyShare, msg.giverLevel, msg.sourceLevel);
+                            GivePartyShareHere(member, msg.exp, expMultiplier, 0, 0f, null, member == player ? RewardGivenType.KillMonster : RewardGivenType.PartyShare, msg.giverLevel, msg.sourceLevel);
+                        foreach (BasePlayerCharacterEntity ghost in expGhosts)
+                            ForwardPartyShare(ghost, msg.exp, expMultiplier, 0, 0f, null, msg.giverLevel, msg.sourceLevel, 0, false);
                         sharedExp = true;
                     }
-                    if (party.shareItem && goldMembers.Count > 0 && msg.gold > 0)
+                    if (party.shareItem && goldMembers.Count + goldGhosts.Count > 0 && msg.gold > 0)
                     {
-                        float count = goldMembers.Count;
+                        float count = goldMembers.Count + goldGhosts.Count;
+                        float goldMultiplier = 1f / count * msg.multiplier;
                         foreach (BasePlayerCharacterEntity member in goldMembers)
-                            member.RewardGold(msg.gold, 1f / count * msg.multiplier, member == player ? RewardGivenType.KillMonster : RewardGivenType.PartyShare, msg.giverLevel, msg.sourceLevel);
+                            GivePartyShareHere(member, 0, 0f, msg.gold, goldMultiplier, null, member == player ? RewardGivenType.KillMonster : RewardGivenType.PartyShare, msg.giverLevel, msg.sourceLevel);
+                        foreach (BasePlayerCharacterEntity ghost in goldGhosts)
+                            ForwardPartyShare(ghost, 0, 0f, msg.gold, goldMultiplier, null, msg.giverLevel, msg.sourceLevel, 0, false);
                         sharedGold = true;
                     }
                     if (traceHandoffTiming && (sharedExp || sharedGold))
-                        Logging.Log("Mesh", $"Party {party.id}: shared exp with {expMembers.Count}, gold with {goldMembers.Count} member(s) here");
+                        Logging.Log("Mesh", $"Party {party.id}: shared exp with {expMembers.Count} here + {expGhosts.Count} on other cells, gold with {goldMembers.Count} + {goldGhosts.Count}");
                 }
             }
             if (msg.exp > 0 && !sharedExp)
@@ -1890,6 +1904,126 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             if (traceHandoffTiming)
                 Logging.Log("Mesh", $"Forwarded reward applied to {player.CharacterName}: exp {msg.exp} gold {msg.gold} x{msg.multiplier} -> level={player.Level} exp={player.Exp} gold={player.Gold}");
+        }
+
+        // ---- Party share across cells (DESIGN §12) ----
+        // The kit shares a kill with party members online on the same map server, by distance. On the mesh a member can
+        // stand on another cell; if it is near enough it is a ghost here (the band is wider than any sane share
+        // distance), so the sharing cell counts it in the split and forwards its share to the cell that owns it, which
+        // applies it to the real character (and its pet, as the kit does) with no further sharing. A member beyond the
+        // band is treated as out of range even when the share distance is "unlimited" (0) — open, see DESIGN.
+
+        /// <summary>A party member's ghost standing here (alive, not a reserved arrival).</summary>
+        internal bool TryGetPlayerGhost(string characterId, out BasePlayerCharacterEntity ghost)
+        {
+            ghost = null;
+            if (!_ghosts.TryGetValue(characterId, out MeshGhost g) || g.kind != GhostKind.Player || g.reserved || !(g.entity is BasePlayerCharacterEntity pg) || pg.IsDead())
+                return false;
+            ghost = pg;
+            return true;
+        }
+
+        /// <summary>The kit's member selection (online, alive, by distance), plus the members whose ghost stands here.</summary>
+        internal void CollectPartyMembers(BasePlayerCharacterEntity killer, PartyData party, List<BasePlayerCharacterEntity> expMembers, List<BasePlayerCharacterEntity> itemMembers, List<BasePlayerCharacterEntity> expGhosts, List<BasePlayerCharacterEntity> itemGhosts)
+        {
+            float expDist = GameInstance.Singleton.partyShareExpDistance, itemDist = GameInstance.Singleton.partyShareItemDistance;
+            Vector3 killerPos = killer.EntityTransform.position;
+            foreach (string memberId in party.GetMemberIds())
+            {
+                BasePlayerCharacterEntity member;
+                bool here;
+                if (ServerUserHandlers.TryGetPlayerCharacterById(memberId, out member) && member != null)
+                    here = true;
+                else if (TryGetPlayerGhost(memberId, out member))
+                    here = false;
+                else
+                    continue; // offline, or on a cell too far for a ghost here
+                if (member.IsDead())
+                    continue;
+                float dist = Vector3.Distance(killerPos, member.EntityTransform.position);
+                if (party.shareExp && (expDist <= 0f || dist <= expDist))
+                    (here ? expMembers : expGhosts).Add(member);
+                if (party.shareItem && (itemDist <= 0f || dist <= itemDist))
+                    (here ? itemMembers : itemGhosts).Add(member);
+            }
+        }
+
+        /// <summary>Apply a share to a member that is real here, splitting exp with its pet as the kit does.</summary>
+        internal void GivePartyShareHere(BasePlayerCharacterEntity member, int exp, float expMultiplier, int gold, float goldMultiplier, List<CurrencyAmount> currencies, RewardGivenType givenType, int giverLevel, int sourceLevel)
+        {
+            if (member == null)
+                return;
+            if (exp > 0 && expMultiplier > 0f)
+            {
+                int petIndex = member.IndexOfSummon(SummonType.PetItem);
+                BaseMonsterCharacterEntity pet = petIndex >= 0 ? member.Summons[petIndex].CacheEntity : null;
+                if (pet != null)
+                {
+                    pet.RewardExp(exp, expMultiplier * 0.5f, RewardGivenType.PartyShare, giverLevel, sourceLevel);
+                    member.RewardExp(exp, expMultiplier * 0.5f, givenType, giverLevel, sourceLevel);
+                }
+                else
+                    member.RewardExp(exp, expMultiplier, givenType, giverLevel, sourceLevel);
+            }
+            if (gold > 0 && goldMultiplier > 0f)
+                member.RewardGold(gold, goldMultiplier, givenType, giverLevel, sourceLevel);
+            if (currencies != null && currencies.Count > 0 && goldMultiplier > 0f)
+                member.RewardCurrencies(currencies, goldMultiplier, givenType, giverLevel, sourceLevel);
+        }
+
+        /// <summary>Send a member's share to the cell that owns it (the member is a ghost here).</summary>
+        internal void ForwardPartyShare(BasePlayerCharacterEntity memberGhost, int exp, float expMultiplier, int gold, float goldMultiplier, IEnumerable<CurrencyAmount> currencies, int giverLevel, int sourceLevel, int monsterDataId, bool countKill)
+        {
+            MeshIdentity id = MeshIdentity.Get(memberGhost);
+            if (id == null || !id.IsGhost || string.IsNullOrEmpty(id.OwnerZoneId))
+                return;
+            if (!_linkClients.TryGetValue(id.OwnerZoneId, out MeshLinkClient link) || !link.IsConnected)
+            {
+                WarnThrottled($"Party share for {memberGhost.CharacterName} dropped: no link to owner zone {id.OwnerZoneId}");
+                return;
+            }
+            List<int> ids = new List<int>(), amounts = new List<int>();
+            if (currencies != null)
+            {
+                foreach (CurrencyAmount c in currencies)
+                {
+                    if (c.currency == null || c.amount <= 0) continue;
+                    ids.Add(c.currency.DataId); amounts.Add(c.amount);
+                }
+            }
+            link.SendGhostPartyShare(new GhostPartyShareMessage
+            {
+                memberId = memberGhost.Id, exp = exp, expMultiplier = expMultiplier, gold = gold, goldMultiplier = goldMultiplier,
+                currencyDataIds = ids.ToArray(), currencyAmounts = amounts.ToArray(), giverLevel = giverLevel, sourceLevel = sourceLevel,
+                monsterDataId = monsterDataId, countKill = countKill,
+            });
+            if (traceHandoffTiming)
+                Logging.Log("Mesh", $"Party share for {memberGhost.CharacterName} forwarded to zone {id.OwnerZoneId}: exp {exp} x{expMultiplier:0.###} gold {gold} x{goldMultiplier:0.###} countKill={countKill}");
+        }
+
+        internal void OnGhostPartyShare(long connectionId, GhostPartyShareMessage msg)
+        {
+            if (!IsServer)
+                return;
+            if (!ServerUserHandlers.TryGetPlayerCharacterById(msg.memberId, out IPlayerCharacterData data) || !(data is BasePlayerCharacterEntity member) || member.IsDead())
+            {
+                WarnThrottled($"Party share for {msg.memberId} dropped: character not on this cell");
+                return;
+            }
+            List<CurrencyAmount> currencies = null;
+            if (msg.currencyDataIds != null && msg.currencyDataIds.Length > 0)
+            {
+                currencies = new List<CurrencyAmount>();
+                for (int i = 0; i < msg.currencyDataIds.Length; ++i)
+                {
+                    if (GameInstance.Currencies.TryGetValue(msg.currencyDataIds[i], out Currency currency))
+                        currencies.Add(new CurrencyAmount { currency = currency, amount = msg.currencyAmounts[i] });
+                }
+            }
+            GivePartyShareHere(member, msg.exp, msg.expMultiplier, msg.gold, msg.goldMultiplier, currencies, RewardGivenType.PartyShare, msg.giverLevel, msg.sourceLevel);
+            bool counted = msg.countKill && CountQuestKill(member, msg.monsterDataId);
+            if (traceHandoffTiming)
+                Logging.Log("Mesh", $"Party share applied to {member.CharacterName}: exp {msg.exp} x{msg.expMultiplier:0.###} gold {msg.gold} x{msg.goldMultiplier:0.###} questKill={counted} -> level={member.Level} exp={member.Exp} gold={member.Gold}");
         }
 
         internal void OnGhostHitResult(GhostHitResultMessage msg)
@@ -2089,6 +2223,11 @@ namespace MultiplayerARPG.MMO.Mesh
         internal void OnGhostRemove(string characterId) { }
         internal void OnHandoffNotice(long connectionId, HandoffNoticeMessage msg) { }
         internal void OnHandoffAck(long connectionId, HandoffAckMessage msg) { }
+        internal void OnGhostPartyShare(long connectionId, GhostPartyShareMessage msg) { }
+        internal bool TryGetPlayerGhost(string characterId, out BasePlayerCharacterEntity ghost) { ghost = null; return false; }
+        internal void CollectPartyMembers(BasePlayerCharacterEntity killer, PartyData party, List<BasePlayerCharacterEntity> expMembers, List<BasePlayerCharacterEntity> itemMembers, List<BasePlayerCharacterEntity> expGhosts, List<BasePlayerCharacterEntity> itemGhosts) { }
+        internal void GivePartyShareHere(BasePlayerCharacterEntity member, int exp, float expMultiplier, int gold, float goldMultiplier, List<CurrencyAmount> currencies, RewardGivenType givenType, int giverLevel, int sourceLevel) { }
+        internal void ForwardPartyShare(BasePlayerCharacterEntity memberGhost, int exp, float expMultiplier, int gold, float goldMultiplier, IEnumerable<CurrencyAmount> currencies, int giverLevel, int sourceLevel, int monsterDataId, bool countKill) { }
         internal void RegisterPendingHandoffAck(string characterId, string name, string zone, float startTime) { }
         internal bool IsNeighbourLinked(string zoneId) { return true; }
         internal void OnGhostHit(long connectionId, GhostHitMessage msg) { }
