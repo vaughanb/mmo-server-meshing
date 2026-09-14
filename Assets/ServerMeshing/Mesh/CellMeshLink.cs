@@ -30,6 +30,30 @@ namespace MultiplayerARPG.MMO.Mesh
         public const ushort GhostPickup = 109;
         public const ushort GhostLoot = 110;
         public const ushort GhostKill = 111;
+        public const ushort GhostAction = 112;
+    }
+
+    /// <summary>
+    /// Generic "do this to the entity you own" envelope: an action landed on a ghost here; the owner applies it to the
+    /// real entity. New cross-edge verbs (buffs, heals, resurrection, ...) are payloads of this message, dispatched by
+    /// <see cref="action"/> on the owner (see MeshMapNetworkManager_Actions).
+    /// </summary>
+    public struct GhostActionMessage : INetSerializable
+    {
+        public string targetMeshId;
+        public string instigatorMeshId;  // who did it (empty when unknown); resolved on the owner as its ghost or real entity
+        public ushort action;
+        public byte[] payload;
+        public void Serialize(NetDataWriter writer)
+        {
+            writer.Put(targetMeshId); writer.Put(instigatorMeshId); writer.Put(action);
+            writer.PutBytesWithLength(payload ?? System.Array.Empty<byte>());
+        }
+        public void Deserialize(NetDataReader reader)
+        {
+            targetMeshId = reader.GetString(); instigatorMeshId = reader.GetString(); action = reader.GetUShort();
+            payload = reader.GetBytesWithLength();
+        }
     }
 
     /// <summary>A monster died here with a ghost as its last attacker: the killer's owner counts the kill (quests, party).</summary>
@@ -308,6 +332,7 @@ namespace MultiplayerARPG.MMO.Mesh
             RegisterMessageHandler(MeshLinkMessageTypes.GhostPickup, HandleGhostPickup);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostLoot, HandleGhostLoot);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostKill, HandleGhostKill);
+            RegisterMessageHandler(MeshLinkMessageTypes.GhostAction, HandleGhostAction);
         }
 
         public override void OnServerReceive(TransportEventData eventData)
@@ -402,6 +427,12 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             GhostKillMessage msg = messageHandler.ReadMessage<GhostKillMessage>();
             _manager.OnGhostKill(msg);
+        }
+
+        private void HandleGhostAction(MessageHandlerData messageHandler)
+        {
+            GhostActionMessage msg = messageHandler.ReadMessage<GhostActionMessage>();
+            _manager.OnGhostAction(messageHandler.ConnectionId, msg);
         }
     }
 
@@ -504,6 +535,11 @@ namespace MultiplayerARPG.MMO.Mesh
         public void SendGhostLoot(GhostLootMessage msg)
         {
             Send(MeshLinkMessageTypes.GhostLoot, msg);
+        }
+
+        public void SendGhostAction(GhostActionMessage msg)
+        {
+            Send(MeshLinkMessageTypes.GhostAction, msg);
         }
 
         public void SendGhostKill(GhostKillMessage msg)

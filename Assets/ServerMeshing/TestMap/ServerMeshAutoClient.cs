@@ -143,6 +143,27 @@ namespace MultiplayerARPG.MMO.Mesh
         private void Start()
         {
             StartCoroutine(Run());
+            if (Application.isBatchMode)
+                StartCoroutine(HeadlessGuards());
+        }
+
+        /// <summary>
+        /// Headless (-batchmode -nographics) client: the kit's RaycastButtonManager3D (created by the vending sign's
+        /// RaycastButton3D on every player character) polls the Input System mouse each frame, and Mouse.current is null
+        /// without a display — an NRE per frame. Test tooling only: keep it disabled while the bot runs.
+        /// </summary>
+        private IEnumerator HeadlessGuards()
+        {
+            WaitForSecondsRealtime wait = new WaitForSecondsRealtime(1f);
+            while (true)
+            {
+                foreach (UtilsComponents.RaycastButtonManager3D m in FindObjectsByType<UtilsComponents.RaycastButtonManager3D>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                {
+                    if (m != null && m.enabled)
+                        m.enabled = false;
+                }
+                yield return wait;
+            }
         }
 
         private void Log(string msg) => Debug.Log($"[MeshAuto] {msg}");
@@ -411,7 +432,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (self != null && Time.realtimeSinceStartup >= nextLog)
                 {
                     nextLog = Time.realtimeSinceStartup + 10f;
-                    Log($"stand: level={self.Level} exp={self.Exp} gold={self.Gold} questKills={CountQuestKills(self)}");
+                    Log($"stand: level={self.Level} exp={self.Exp} gold={self.Gold} questKills={CountQuestKills(self)} hp={self.CurrentHp}/{self.MaxHp} buffs={self.Buffs.Count}");
                 }
                 yield return null;
             }
@@ -599,7 +620,19 @@ namespace MultiplayerARPG.MMO.Mesh
             bool anyHurt = false;
             // Loot: drops seen (any side), pickups attempted on drops within reach, items gained in the bag.
             int itemsStart = CountBagItems(self), pickups = 0, questKillsStart = CountQuestKills(self);
-            Log($"fight: party={self.PartyId} quests={self.Quests.Count} questKills={questKillsStart}");
+            Log($"fight: party={self.PartyId} quests={self.Quests.Count} questKills={questKillsStart} skills={self.Skills.Count}");
+            // Skills: an enemy-buff skill is cast on each engaged target once, an ally-buff skill on the nearest OTHER player
+            // (a ghost across the line, when the bot stands over there) every few seconds. Skill outcomes are verified on
+            // the servers (GhostAction logs); here we only count casts.
+            int enemySkillId = 0, allySkillId = 0, casts = 0;
+            for (int i = 0; i < self.Skills.Count; ++i)
+            {
+                if (!(self.Skills[i].GetSkill() is Skill sk)) continue;
+                if (sk.skillBuffType == Skill.SkillBuffType.BuffToEnemy && enemySkillId == 0) enemySkillId = sk.DataId;
+                if ((sk.skillBuffType == Skill.SkillBuffType.BuffToAlly || sk.skillBuffType == Skill.SkillBuffType.BuffToTarget) && allySkillId == 0) allySkillId = sk.DataId;
+            }
+            Log($"fight: enemySkill={enemySkillId} allySkill={allySkillId}");
+            uint lastEnemyCastTarget = 0; float nextAllyCast = 0f;
             HashSet<uint> dropsSeen = new HashSet<uint>();
             HashSet<uint> dropsTried = new HashSet<uint>();
             float nextPickup = 0f;
@@ -648,7 +681,15 @@ namespace MultiplayerARPG.MMO.Mesh
                         bool isLeftHand = false;
                         self.AimPosition = self.GetAttackAimPosition(ref isLeftHand, target.EntityTransform.position);
                         WeaponHandlingState whs = WeaponHandlingState.None;
-                        self.Attack(ref whs);
+                        if (enemySkillId != 0 && lastEnemyCastTarget != target.ObjectId)
+                        {
+                            lastEnemyCastTarget = target.ObjectId;
+                            bool sent = self.UseSkill(enemySkillId, WeaponHandlingState.None, target.ObjectId, AimPosition.CreatePosition(target.EntityTransform.position));
+                            casts++;
+                            Log($"cast enemy skill {enemySkillId} on '{target.name}' sent={sent}");
+                        }
+                        else
+                            self.Attack(ref whs);
                     }
                     if (target.CurrentHp < targetHpStart) anyHurt = true;
                     minTargetHp = Mathf.Min(minTargetHp, target.CurrentHp);
@@ -671,6 +712,24 @@ namespace MultiplayerARPG.MMO.Mesh
                         self.PointClickMovement(dest);
                 }
                 minSelfHp = Mathf.Min(minSelfHp, self.CurrentHp);
+                if (allySkillId != 0 && Time.realtimeSinceStartup >= nextAllyCast)
+                {
+                    nextAllyCast = Time.realtimeSinceStartup + 5f;
+                    BasePlayerCharacterEntity ally = null; float bestAlly = 12f;
+                    foreach (BasePlayerCharacterEntity pe in FindObjectsByType<BasePlayerCharacterEntity>(FindObjectsSortMode.None))
+                    {
+                        if (pe == null || ReferenceEquals(pe, self) || pe.IsDead()) continue;
+                        float d = Vector3.Distance(pe.EntityTransform.position, self.EntityTransform.position);
+                        if (d < bestAlly) { bestAlly = d; ally = pe; }
+                    }
+                    if (ally != null)
+                    {
+                        self.SetTargetEntity(ally);
+                        bool sent = self.UseSkill(allySkillId, WeaponHandlingState.None, ally.ObjectId, AimPosition.CreatePosition(ally.EntityTransform.position));
+                        casts++;
+                        Log($"cast ally skill {allySkillId} on '{ally.CharacterName}' at {ally.EntityTransform.position} (dist {bestAlly:0.#}) sent={sent}");
+                    }
+                }
                 foreach (ItemDropEntity drop in FindObjectsByType<ItemDropEntity>(FindObjectsSortMode.None))
                 {
                     if (drop == null) continue;
@@ -702,7 +761,7 @@ namespace MultiplayerARPG.MMO.Mesh
             bool selfHurt = minSelfHp < selfHpStart;
             Finished = true; Passed = anyHurt;
             int itemsGained = self != null ? CountBagItems(self) - itemsStart : 0;
-            Log($"RESULT fight: hurtTarget={anyHurt} kills={kills} selfHp {selfHpStart}/{selfMaxHp}->{minSelfHp} (hitBack={selfHurt}) exp+{expGained} gold+{goldGained} level+{levelGained} drops={dropsSeen.Count} pickups={pickups} items+{itemsGained} questKills+{CountQuestKills(self) - questKillsStart} -> {(Passed ? "PASS" : "FAIL")}");
+            Log($"RESULT fight: hurtTarget={anyHurt} kills={kills} selfHp {selfHpStart}/{selfMaxHp}->{minSelfHp} (hitBack={selfHurt}) exp+{expGained} gold+{goldGained} level+{levelGained} drops={dropsSeen.Count} pickups={pickups} items+{itemsGained} questKills+{CountQuestKills(self) - questKillsStart} casts={casts} -> {(Passed ? "PASS" : "FAIL")}");
             if (self != null && !self.IsDead())
             {
                 // Retreat to the zone start so the next run does not begin next to the neighbour's monsters.

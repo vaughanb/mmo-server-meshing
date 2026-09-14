@@ -81,6 +81,7 @@ namespace MultiplayerARPG.MMO.Mesh
 #if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
         private void GhostingOnStartServer()
         {
+            RegisterGhostActionHandlers();
             _cellIncarnation = System.DateTime.UtcNow.Ticks.ToString("x");
             if (!enableBorderGhosting)
                 return;

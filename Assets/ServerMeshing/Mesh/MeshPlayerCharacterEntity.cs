@@ -10,6 +10,19 @@ namespace MultiplayerARPG.MMO.Mesh
 {
     public class MeshPlayerCharacterEntity : PlayerCharacterEntity
     {
+        /// <summary>A puppet must not take buffs/debuffs/heals locally: forward them to the owner of the real character.</summary>
+        public override void ApplyBuff(int dataId, BuffType type, int level, EntityInfo buffApplier, CharacterItem buffApplierWeapon)
+        {
+            if (IsServer && MeshIdentity.IsGhostEntity(this))
+            {
+                MeshMapNetworkManager mesh = BaseGameNetworkManager.Singleton as MeshMapNetworkManager;
+                if (mesh != null && mesh.ForwardGhostAction(this, GhostActionKind.ApplyBuff, buffApplier,
+                        writer => MeshMapNetworkManager.WriteApplyBuffPayload(writer, dataId, type, level, buffApplierWeapon)))
+                    return;
+            }
+            base.ApplyBuff(dataId, type, level, buffApplier, buffApplierWeapon);
+        }
+
         [ServerRpc]
         protected override void CmdPickup(uint objectId)
         {

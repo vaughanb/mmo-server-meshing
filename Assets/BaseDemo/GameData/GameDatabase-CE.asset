@@ -27,7 +27,9 @@ MonoBehaviour:
   armorTypes: []
   weaponTypes: []
   ammoTypes: []
-  skills: []
+  skills:
+  - {fileID: 11400000, guid: 9818e2a9d73ff5c44a502b770634cf5a, type: 2}
+  - {fileID: 11400000, guid: 68c24393504de114b9e3929e920df083, type: 2}
   playerIcons: []
   playerFrames: []
   playerBackgrounds: []
