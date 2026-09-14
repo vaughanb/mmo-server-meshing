@@ -35,6 +35,32 @@ namespace MultiplayerARPG.MMO.Mesh
         public const ushort GhostPartyShare = 114;
         public const ushort GhostAttack = 115;
         public const ushort GhostAttackTrigger = 116;
+        public const ushort GhostSkill = 117;
+        public const ushort GhostSkillTrigger = 118;
+    }
+
+    /// <summary>An owned character started a skill: the neighbour replays RpcUseSkill on its puppet (target by mesh id).</summary>
+    public struct GhostSkillMessage : INetSerializable
+    {
+        public string attackerMeshId;
+        public long peerTimestamp;
+        public int dataId;
+        public int skillLevel;
+        public byte weaponHandlingState;
+        public string targetMeshId;
+        public AimPosition aimPosition;
+        public void Serialize(NetDataWriter writer) { writer.Put(attackerMeshId); writer.Put(peerTimestamp); writer.Put(dataId); writer.Put(skillLevel); writer.Put(weaponHandlingState); writer.Put(targetMeshId ?? string.Empty); writer.Put(aimPosition); }
+        public void Deserialize(NetDataReader reader) { attackerMeshId = reader.GetString(); peerTimestamp = reader.GetLong(); dataId = reader.GetInt(); skillLevel = reader.GetInt(); weaponHandlingState = reader.GetByte(); targetMeshId = reader.GetString(); aimPosition = reader.Get<AimPosition>(); }
+    }
+
+    /// <summary>The skill reached a trigger: the neighbour replays RpcSimulateActionTrigger (target by mesh id).</summary>
+    public struct GhostSkillTriggerMessage : INetSerializable
+    {
+        public string attackerMeshId;
+        public string targetMeshId;
+        public SimulateActionTriggerData data;
+        public void Serialize(NetDataWriter writer) { writer.Put(attackerMeshId); writer.Put(targetMeshId ?? string.Empty); writer.Put(data); }
+        public void Deserialize(NetDataReader reader) { attackerMeshId = reader.GetString(); targetMeshId = reader.GetString(); data = reader.Get<SimulateActionTriggerData>(); }
     }
 
     /// <summary>An owned character started an attack: the neighbour replays the kit's RpcAttack on its puppet.</summary>
@@ -99,8 +125,9 @@ namespace MultiplayerARPG.MMO.Mesh
         public bool ok;
         public string reason;
         public int arrivalMs;   // ms between the notice and the registration on the destination (ok only)
-        public void Serialize(NetDataWriter writer) { writer.Put(characterId); writer.Put(ok); writer.Put(reason ?? string.Empty); writer.Put(arrivalMs); }
-        public void Deserialize(NetDataReader reader) { characterId = reader.GetString(); ok = reader.GetBool(); reason = reader.GetString(); arrivalMs = reader.GetInt(); }
+        public bool promoted;   // the destination promoted its puppet (pets included); false = the kit spawned fresh (pets re-summoned)
+        public void Serialize(NetDataWriter writer) { writer.Put(characterId); writer.Put(ok); writer.Put(reason ?? string.Empty); writer.Put(arrivalMs); writer.Put(promoted); }
+        public void Deserialize(NetDataReader reader) { characterId = reader.GetString(); ok = reader.GetBool(); reason = reader.GetString(); arrivalMs = reader.GetInt(); promoted = reader.GetBool(); }
     }
 
     /// <summary>
@@ -413,6 +440,8 @@ namespace MultiplayerARPG.MMO.Mesh
             RegisterMessageHandler(MeshLinkMessageTypes.GhostPartyShare, HandleGhostPartyShare);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostAttack, HandleGhostAttack);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostAttackTrigger, HandleGhostAttackTrigger);
+            RegisterMessageHandler(MeshLinkMessageTypes.GhostSkill, HandleGhostSkill);
+            RegisterMessageHandler(MeshLinkMessageTypes.GhostSkillTrigger, HandleGhostSkillTrigger);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostHit, HandleGhostHit);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostHitResult, HandleGhostHitResult);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostReward, HandleGhostReward);
@@ -492,6 +521,18 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             GhostAttackTriggerMessage msg = messageHandler.ReadMessage<GhostAttackTriggerMessage>();
             _manager.OnGhostAttackTrigger(msg);
+        }
+
+        private void HandleGhostSkill(MessageHandlerData messageHandler)
+        {
+            GhostSkillMessage msg = messageHandler.ReadMessage<GhostSkillMessage>();
+            _manager.OnGhostSkill(msg);
+        }
+
+        private void HandleGhostSkillTrigger(MessageHandlerData messageHandler)
+        {
+            GhostSkillTriggerMessage msg = messageHandler.ReadMessage<GhostSkillTriggerMessage>();
+            _manager.OnGhostSkillTrigger(msg);
         }
 
         private void HandleGhostHit(MessageHandlerData messageHandler)
@@ -633,6 +674,16 @@ namespace MultiplayerARPG.MMO.Mesh
         public void SendGhostAttackTrigger(GhostAttackTriggerMessage msg)
         {
             Send(MeshLinkMessageTypes.GhostAttackTrigger, msg);
+        }
+
+        public void SendGhostSkill(GhostSkillMessage msg)
+        {
+            Send(MeshLinkMessageTypes.GhostSkill, msg);
+        }
+
+        public void SendGhostSkillTrigger(GhostSkillTriggerMessage msg)
+        {
+            Send(MeshLinkMessageTypes.GhostSkillTrigger, msg);
         }
 
         public void SendHandoffNotice(string characterId, string userId)

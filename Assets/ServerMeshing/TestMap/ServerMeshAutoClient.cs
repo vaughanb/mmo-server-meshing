@@ -543,7 +543,7 @@ namespace MultiplayerARPG.MMO.Mesh
             int swaps = 0, absences = 0; float maxAbsenceMs = 0f;
             // Attacks and missiles seen on the far side of the line (replayed on ghosts): a swing is counted when an
             // entity beyond the line goes from idle to attacking; missiles by distinct damage-entity instances.
-            int ghostAttacks = 0; HashSet<int> attackingNow = new HashSet<int>(); HashSet<int> missileIds = new HashSet<int>();
+            int ghostAttacks = 0, ghostSkills = 0; HashSet<int> attackingNow = new HashSet<int>(), castingNow = new HashSet<int>(); HashSet<int> missileIds = new HashSet<int>();
             float end = Time.realtimeSinceStartup + observeSeconds;
             float nextSample = 0f;
             while (Time.realtimeSinceStartup < end)
@@ -613,10 +613,11 @@ namespace MultiplayerARPG.MMO.Mesh
                     if (lastInstance.TryGetValue(name, out int prev) && prev != inst)
                     {
                         swaps++;
-                        Log($"'{name}' entity swapped (instance {prev} -> {inst}) at {me.EntityTransform.position}");
+                        if (swaps <= 6)
+                            Log($"'{name}' entity swapped (instance {prev} -> {inst}) at {me.EntityTransform.position}: objectId={me.ObjectId} hp={me.CurrentHp}/{me.MaxHp} dead={me.IsDead()} active={me.gameObject.activeInHierarchy} destroyed={me.Identity.IsDestroyed} summoner={me.Summoner.objectId} meshId={(MeshIdentity.Get(me) != null ? MeshIdentity.Get(me).MeshEntityId : "-")}");
                     }
                     else if (!lastInstance.ContainsKey(name))
-                        Log($"Watching '{name}' ({me.CharacterName}) from {me.EntityTransform.position}");
+                        Log($"Watching '{name}' ({me.CharacterName}) from {me.EntityTransform.position} objectId={me.ObjectId}");
                     lastInstance[name] = inst;
                 }
                 foreach (string name in lastInstance.Keys)
@@ -639,6 +640,9 @@ namespace MultiplayerARPG.MMO.Mesh
                         int eid = e.GetInstanceID();
                         if (attacking && attackingNow.Add(eid)) { ghostAttacks++; Log($"Ghost '{e.CharacterName}' attacks at {pos}"); }
                         else if (!attacking) attackingNow.Remove(eid);
+                        bool casting = e.UseSkillComponent != null && e.UseSkillComponent.IsUsingSkill;
+                        if (casting && castingNow.Add(eid)) { ghostSkills++; Log($"Ghost '{e.CharacterName}' uses a skill at {pos}"); }
+                        else if (!casting) castingNow.Remove(eid);
                     }
                     foreach (MissileDamageEntity m in FindObjectsByType<MissileDamageEntity>(FindObjectsSortMode.None))
                     {
@@ -662,7 +666,7 @@ namespace MultiplayerARPG.MMO.Mesh
             Finished = true;
             // Monsters in the demo idle unless aggroed, so movement is only required of player ghosts.
             Passed = ghostsSeen > 0 && (playerGhosts == 0 || movedGhost) && migrations == 0;
-            Log($"RESULT observe: ghostsSeen={ghostsSeen} (players={playerGhosts} monsters={monsterGhosts}) moved={movedGhost} migrationsDuringObserve={migrations} playerSwaps={swaps} absences={absences} maxAbsenceMs={maxAbsenceMs:0} ghostAttacks={ghostAttacks} missiles={missileIds.Count} -> {(Passed ? "PASS" : "FAIL")}");
+            Log($"RESULT observe: ghostsSeen={ghostsSeen} (players={playerGhosts} monsters={monsterGhosts}) moved={movedGhost} migrationsDuringObserve={migrations} playerSwaps={swaps} absences={absences} maxAbsenceMs={maxAbsenceMs:0} ghostAttacks={ghostAttacks} ghostSkills={ghostSkills} missiles={missileIds.Count} -> {(Passed ? "PASS" : "FAIL")}");
         }
 
         private float _deadSince = -1f;

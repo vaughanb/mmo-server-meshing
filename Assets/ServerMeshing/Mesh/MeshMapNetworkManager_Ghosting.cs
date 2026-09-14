@@ -597,7 +597,11 @@ namespace MultiplayerARPG.MMO.Mesh
                     ghost.entity.onReceiveDamage -= ghost.hitHook;
                 UnlinkSummonPuppets(ghost.entity.ObjectId);
                 ResetMeshIdentity(ghost.entity);
+                uint destroyedObjectId = ghost.entity.ObjectId;
+                int subscribers = ghost.entity.Identity != null ? ghost.entity.Identity.CountSubscribers() : -1;
                 ghost.entity.NetworkDestroy();
+                if (traceHandoffTiming)
+                    Logging.Log("Mesh", $"Ghost destroy of object {destroyedObjectId}: subscribers={subscribers} identityDestroyed={(ghost.entity != null && ghost.entity.Identity != null ? ghost.entity.Identity.IsDestroyed.ToString() : "n/a")} stillSpawned={Assets.TryGetSpawnedObject(destroyedObjectId, out _)}");
             }
             if (mount != null && mount.Identity != null && !mount.Identity.IsDestroyed)
                 mount.NetworkDestroy();
@@ -622,7 +626,7 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (playerCharacter == null)
                 return;
-            AckHandoffArrival(playerCharacter.Id, playerCharacter.CharacterName);
+            AckHandoffArrival(playerCharacter.Id, playerCharacter.CharacterName, _reservedArrivals.ContainsKey(playerCharacter.Id));
             _pendingHandoffAcks.Remove(playerCharacter.Id); // it is ours again (a handoff back before the ack, or a fresh login here)
             TrackOwnedPlayerAfterRegistration(playerCharacter);
             if (_reservedArrivals.TryGetValue(playerCharacter.Id, out ReservedArrival reserved) && playerCharacter.Identity != null)
@@ -1007,6 +1011,78 @@ namespace MultiplayerARPG.MMO.Mesh
             if (attack == null)
                 return;
             attack.ReplayTrigger(msg.data);
+        }
+
+        // ---- Skills on ghosts ----
+        // Same as attacks, with the skill's target carried as a mesh id: an object id means nothing on another cell.
+
+        /// <summary>The mesh id of a local object id (a character here, real or ghost), or empty.</summary>
+        private string MeshIdOfObject(uint objectId)
+        {
+            if (objectId == 0 || !Assets.TryGetSpawnedObject(objectId, out LiteNetLibIdentity identity) || identity == null)
+                return string.Empty;
+            BaseCharacterEntity character = identity.GetComponent<BaseCharacterEntity>();
+            return character != null ? MeshEntityIdOf(character) : string.Empty;
+        }
+
+        /// <summary>The local object id of a mesh id (its ghost or real entity here), or 0.</summary>
+        private uint ObjectIdOfMesh(string meshId)
+        {
+            BaseCharacterEntity entity = ResolveGhostOrReal(meshId);
+            return entity != null && entity.Identity != null ? entity.ObjectId : 0u;
+        }
+
+        internal void ForwardGhostSkill(BaseCharacterEntity caster, long peerTimestamp, int dataId, int skillLevel, WeaponHandlingState weaponHandlingState, uint targetObjectId, AimPosition aimPosition)
+        {
+            if (!IsServer || caster == null || _streamedToZone.Count == 0)
+                return;
+            string meshId = MeshEntityIdOf(caster);
+            GhostSkillMessage msg = new GhostSkillMessage
+            {
+                attackerMeshId = meshId, peerTimestamp = peerTimestamp, dataId = dataId, skillLevel = skillLevel,
+                weaponHandlingState = (byte)weaponHandlingState, targetMeshId = MeshIdOfObject(targetObjectId), aimPosition = aimPosition,
+            };
+            SendToZonesStreaming(meshId, link => link.SendGhostSkill(msg));
+        }
+
+        internal void ForwardGhostSkillTrigger(BaseCharacterEntity caster, SimulateActionTriggerData data)
+        {
+            if (!IsServer || caster == null || _streamedToZone.Count == 0)
+                return;
+            string meshId = MeshEntityIdOf(caster);
+            GhostSkillTriggerMessage msg = new GhostSkillTriggerMessage { attackerMeshId = meshId, targetMeshId = MeshIdOfObject(data.targetObjectId), data = data };
+            SendToZonesStreaming(meshId, link => link.SendGhostSkillTrigger(msg));
+        }
+
+        private MeshCharacterUseSkillComponent GhostUseSkillComponent(string meshId)
+        {
+            if (!_ghosts.TryGetValue(meshId, out MeshGhost ghost) || ghost.entity == null || ghost.reserved || ghost.entity.IsDead())
+                return null;
+            return ghost.entity.GetComponent<MeshCharacterUseSkillComponent>();
+        }
+
+        internal void OnGhostSkill(GhostSkillMessage msg)
+        {
+            if (!IsServer)
+                return;
+            MeshCharacterUseSkillComponent skill = GhostUseSkillComponent(msg.attackerMeshId);
+            if (skill == null)
+                return;
+            skill.ReplayUseSkill(msg.peerTimestamp, msg.dataId, msg.skillLevel, (WeaponHandlingState)msg.weaponHandlingState, ObjectIdOfMesh(msg.targetMeshId), msg.aimPosition);
+            if (traceHandoffTiming)
+                Logging.Log("Mesh", $"Ghost skill {msg.dataId} replayed on {skill.Entity.CharacterName} ({msg.attackerMeshId}) target={msg.targetMeshId}");
+        }
+
+        internal void OnGhostSkillTrigger(GhostSkillTriggerMessage msg)
+        {
+            if (!IsServer)
+                return;
+            MeshCharacterUseSkillComponent skill = GhostUseSkillComponent(msg.attackerMeshId);
+            if (skill == null)
+                return;
+            SimulateActionTriggerData data = msg.data;
+            data.targetObjectId = ObjectIdOfMesh(msg.targetMeshId);
+            skill.ReplayTrigger(data);
         }
 
         // ---- Summons on ghosts ----
@@ -2191,7 +2267,14 @@ namespace MultiplayerARPG.MMO.Mesh
             string fromZone = _neighbourZoneByConnection.TryGetValue(connectionId, out string z) ? z : "?";
             if (msg.ok)
             {
-                Logging.Log("Mesh", $"Handoff ACK {pending.name} by zone {fromZone}: registered {msg.arrivalMs} ms after the notice, {(Time.unscaledTime - pending.startTime) * 1000f:0} ms after START");
+                Logging.Log("Mesh", $"Handoff ACK {pending.name} by zone {fromZone}: registered {msg.arrivalMs} ms after the notice, {(Time.unscaledTime - pending.startTime) * 1000f:0} ms after START (promoted={msg.promoted})");
+                if (!msg.promoted)
+                {
+                    // The destination had no puppet to promote and re-summoned the pets from the saved data: the pets we
+                    // demoted with the player will never be steered (new mesh ids over there) — drop them now instead of
+                    // standing beside the new ones until they expire stale.
+                    ReleaseDemotedPets(msg.characterId, "destination re-summoned");
+                }
                 return;
             }
             Logging.LogWarning("Mesh", $"Handoff FAILED {pending.name} -> zone {fromZone}: {msg.reason}; releasing the demoted puppet here");
@@ -2199,7 +2282,7 @@ namespace MultiplayerARPG.MMO.Mesh
         }
 
         /// <summary>Destination side: tell the origin its character registered here.</summary>
-        private void AckHandoffArrival(string characterId, string characterName)
+        private void AckHandoffArrival(string characterId, string characterName, bool promoted)
         {
             if (!_incomingHandoffFrom.TryGetValue(characterId, out IncomingHandoff incoming))
                 return;
@@ -2211,6 +2294,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 ok = true,
                 reason = string.Empty,
                 arrivalMs = Mathf.RoundToInt((Time.unscaledTime - incoming.time) * 1000f),
+                promoted = promoted,
             });
         }
 
@@ -2245,6 +2329,11 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (_ghosts.TryGetValue(characterId, out MeshGhost g) && !g.reserved)
                 DestroyGhost(characterId, reason);
+            ReleaseDemotedPets(characterId, reason);
+        }
+
+        private void ReleaseDemotedPets(string characterId, string reason)
+        {
             _tmpIds.Clear();
             foreach (KeyValuePair<string, MeshGhost> kv in _ghosts)
             {
@@ -2333,6 +2422,10 @@ namespace MultiplayerARPG.MMO.Mesh
         internal void OnGhostPartyShare(long connectionId, GhostPartyShareMessage msg) { }
         internal void OnGhostAttack(GhostAttackMessage msg) { }
         internal void OnGhostAttackTrigger(GhostAttackTriggerMessage msg) { }
+        internal void OnGhostSkill(GhostSkillMessage msg) { }
+        internal void OnGhostSkillTrigger(GhostSkillTriggerMessage msg) { }
+        internal void ForwardGhostSkill(BaseCharacterEntity caster, long peerTimestamp, int dataId, int skillLevel, WeaponHandlingState weaponHandlingState, uint targetObjectId, AimPosition aimPosition) { }
+        internal void ForwardGhostSkillTrigger(BaseCharacterEntity caster, SimulateActionTriggerData data) { }
         internal void ForwardGhostAttack(BaseCharacterEntity attacker, long peerTimestamp, WeaponHandlingState weaponHandlingState) { }
         internal void ForwardGhostAttackTrigger(BaseCharacterEntity attacker, SimulateActionTriggerData data) { }
         internal bool TryGetPlayerGhost(string characterId, out BasePlayerCharacterEntity ghost) { ghost = null; return false; }

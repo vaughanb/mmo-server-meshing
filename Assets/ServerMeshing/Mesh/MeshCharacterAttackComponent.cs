@@ -18,6 +18,10 @@ namespace MultiplayerARPG.MMO.Mesh
 #if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
         protected override UniTaskVoid AttackRoutine(long peerTimestamp, AttackState simulateState)
         {
+            // A replayed attack can reach a client's freshly spawned puppet before this component's Start ran (the
+            // kit's action manager is fetched there); the kit routine would throw on it. Skip that one swing.
+            if (!IsServer && _manager == null)
+                return default;
             if (IsServer && !MeshIdentity.IsGhostEntity(Entity))
             {
                 MeshMapNetworkManager mesh = BaseGameNetworkManager.Singleton as MeshMapNetworkManager;
