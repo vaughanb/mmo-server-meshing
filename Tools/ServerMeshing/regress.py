@@ -307,8 +307,8 @@ def run_scenario(name, rep):
         # and NE; C2 stays asleep. The bot logs in on E's west half (which wakes C2, 100 m ahead of the seam), walks across the
         # seam into C2 and back — seamless. Then the bot leaves; with only the tester on C, C2 is unwanted and exits after the
         # grace period.
-        # The bot logs in on E's west half: its login wakes C2 (E's ring), 90 m ahead of the seam. Not at (200, 0): a login
-        # exactly on a scene spawn point trips an unexplained teleport to another spawn point (open bug, DESIGN 0.55).
+        # The bot logs in on E's west half: its login wakes C2 (E's ring), 90 m ahead of the seam. Not at (200, 0): the test
+        # map's WarpPortal_E_to_W stands there and warps whoever spawns inside it to (-200, 1, 0) (DESIGN 0.55).
         db_reset((20, 0), (210, 0))
         request_play("stand", 20, 0, env={"MESH_SLEEP": "1", "MESH_SLEEP_RINGS": "1", "MESH_SLEEP_AFTER": "30"})
         wait_status(lambda st: st.get("isPlaying") == "True", 60, "Play")
