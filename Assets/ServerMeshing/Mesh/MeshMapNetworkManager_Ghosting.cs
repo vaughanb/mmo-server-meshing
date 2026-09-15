@@ -96,6 +96,7 @@ namespace MultiplayerARPG.MMO.Mesh
         private int _statsHandoffs; private float _statsHandoffSumMs, _statsHandoffMaxMs;
         // Steering error: distance between a moving ghost and the owner's freshly reported position, sampled at every snapshot.
         private int _steerSamples; private float _steerErrorSum, _steerErrorMax;
+        private float _nextSteerLagLog;
         private struct SnapshotPose { public Vector3 position; public float time; }
         private readonly Dictionary<string, SnapshotPose> _lastSnapshotPose = new Dictionary<string, SnapshotPose>();
         private readonly Dictionary<string, long> _statsLinkPrevOut = new Dictionary<string, long>();
@@ -681,7 +682,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 {
                     float dt = now - last.time;
                     Vector3 delta = pos - last.position;
-                    if (dt > 0.01f && dt < 1f && delta.sqrMagnitude < 400f)
+                    // Faster than anything walks or rides (20 m/s) is a teleport (a pet catching up, a warp): no lead from it.
+                    if (dt > 0.01f && dt < 1f && delta.sqrMagnitude < 400f * dt * dt)
                         velocity = delta / dt;
                 }
                 _lastSnapshotPose[meshId] = new SnapshotPose { position = pos, time = now };
@@ -1700,8 +1702,19 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 // How far the puppet trails the real entity at the moment the owner sampled it.
                 _steerSamples++; _steerErrorSum += dist; if (dist > _steerErrorMax) _steerErrorMax = dist;
+                if (traceHandoffTiming && dist > 1.5f && Time.unscaledTime >= _nextSteerLagLog)
+                {
+                    _nextSteerLagLog = Time.unscaledTime + 1f;
+                    Logging.Log("Mesh", $"Ghost lag: {msg.kind} {entity.CharacterName} {dist:0.0} m behind, owner v={msg.velocity.magnitude:0.0} m/s, puppet speed={entity.GetMoveSpeed():0.0} m/s, state={entity.MovementState}, extra={entity.ExtraMovementState}");
+                }
             }
             Vector3 target = moving ? msg.position + msg.velocity * ghostLeadSeconds : msg.position;
+            // The puppet replays the owner's attacks, and the kit slows or stops a character while it attacks (and for a
+            // moment after); the owner's reported velocity is the truth, so the puppet moves at that speed (with a margin
+            // to catch up) whatever its replayed action state says. Restored when the owner stands still.
+            float wantedSpeed = moving ? msg.velocity.magnitude * 1.5f + Mathf.Min(dist, ghostTeleportDistance) : -1f;
+            if (Mathf.Abs(entity.OverrideMoveSpeed - wantedSpeed) > 0.05f)
+                entity.OverrideMoveSpeed = wantedSpeed;
             if (dist > ghostTeleportDistance)
             {
                 entity.Teleport(msg.position, Quaternion.Euler(0f, msg.yaw, 0f), false);

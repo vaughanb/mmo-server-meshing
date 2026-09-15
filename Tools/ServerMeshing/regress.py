@@ -35,6 +35,7 @@ ZONES = [("C", MAP), ("E", MAP), ("N", MAP), ("NE", MAP), ("C2", MAP2)]
 TESTER = "493cd2454f4949ebbf2f09748fe78af8"   # MeshTester2 (the editor client)
 BOT = "8cb502da59bf43b4a654875dc2934c11"      # meshbotChar (the headless bot)
 ITEM_BUILDING, ITEM_YIELD, ITEM_SKILL = 1802134084, 970799895, 357861288
+ITEM_BOW = -137752354      # TestBowItem-CE, equipped in both test characters' right hand since 0.30
 ENV_KEYS = ["MESH_NO_MONSTER_HANDOFF", "MESH_FAULT_DIE_ON_NOTICE", "MESH_GHOST_LEAD"]
 EXTRA_ENV = {}   # --env KEY=VALUE from the command line, applied to every Play request of the run
 
@@ -237,6 +238,15 @@ def run_scenario(name, rep):
         rep.check("-> PASS" in st.get("result", ""), f"fighter: {st.get('result', '')[:140]}")
         m = re.search(r"questKills\+(\d+)", st.get("result", ""))
         rep.check(m is not None and int(m.group(1)) >= 1, "the fighter's quest kill counter advanced for kills on the neighbour's monsters (kill credit forwarded)")
+        # Projectiles: the tester fights with the test bow (right hand), so its hits on E's monsters are arrows that struck
+        # puppets on C and were forwarded; E replays the shots on the tester's puppet so its players see them.
+        c = sqlite3.connect(DB)
+        weapon = c.execute("select dataId from characteritem where characterId=? and inventoryType=2", (TESTER,)).fetchone()
+        c.close()
+        rep.check(weapon is not None and weapon[0] == ITEM_BOW, "the fighter's right hand holds the test bow (projectile weapon)")
+        c_lines = zone_lines("C", start, day)
+        rep.check(count(c_lines, r"Hit on ghost .* forwarded to zone E") >= 1, "arrow hits on the neighbour's monster puppets were forwarded to E")
+        rep.check(count(zone_lines("E", start, day), r"Ghost attack replayed on MeshTester2") >= 1, "E replayed the fighter's shots on its puppet")
         c_lines, e_lines = zone_lines("C", start, day), zone_lines("E", start, day)
         rep.check(count(c_lines, r"Party 1: shared") >= 1, "C split a kill with the ghost member")
         # Either direction counts: the fighter's kills on C forward to the member on E, and monsters the member kills
