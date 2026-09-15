@@ -7,7 +7,7 @@
 | | |
 |---|---|
 | **Status** | **Working on the 2x2 rig (C, E, N, NE; 2026-09-13):** P0 spikes pass; P1 seamless handoff done (~200 ms, no visible break for the crossing player; observers on either cell see the same entity throughout — no swap, no blink; mounts ride across with the rider); P2 players + monsters ghost across the edge (shared world frame); P3 hits on ghosts resolved by the owner, kill credit forwarded to the real character, edge monsters aggro on ghosts, monsters hand off by position (in place, no pop) with respawn accounting kept by the home spawn area; loot near the line is visible and lootable from next door; kills across the line credit the real character's party, guild and quests; buffs, debuffs and heals cast on a ghost land on the real character/monster (generic forward-to-owner action envelope); pets cross with their summoner in place (no pop, no duplicate) and read as the summoner's ally from next door. Handoffs are acknowledged cell-to-cell (end-to-end time logged, failed arrivals released at once, no handoff toward a cell whose link is down). Owned entities and drops are tracked by spawn/destroy events (no per-second scene scans). Party exp/gold/kill progress reaches members standing on another cell. Attacks and missiles are seen across the edge (the owner's attack RPCs replayed on the puppet; puppets hold the same weapons); missile hits on puppets forward like any hit. Skills and skill items cast by a character are seen on its puppet next door (cast animation and effects, target re-resolved by mesh id). With an unlimited share distance, party exp/gold/kill progress reaches members on any cell of the logical map. A cell that dies mid-handoff is rolled back on the origin and the client falls back to it; a cell that dies after the commit is restarted by the kit and re-registers, its neighbours clean up. Band sized to the visible range (80 m) with a start-up check; first load run: 16 bots, 4 handoffs/s, p95 330 ms server-side, 0 blinks for an observer, ~15 kB/s per link. Kit systems audited with a ghost as the counterpart (§12 table): affiliation synced to puppets, forwarded hits re-validated by the owner, dealing refused cleanly. Harvestables and buildings ghosted (a building belongs to the cell that owns its position; the yield of a node reaches the real character). Login routes by saved position with a live-cell fallback. Open: per-cell coordinate frames (only needed beyond ±960 m), dynamic cells |
-| **Doc version** | 0.49 |
+| **Doc version** | 0.50 |
 | **Last updated** | 2026-09-15 |
 | **Owner** | brenden.vaughan@gmail.com |
 | **Scope target** | Fully seamless (Phases 1–3) on a **uniform grid of equal cells** |
@@ -17,6 +17,7 @@
 
 | Version | Date | Change |
 |---|---|---|
+| 0.50 | 2026-09-15 | **Consolidation.** §6 (world & coordinate model), §9 (routing) and §10 (modules) rewritten to the verified state after 0.46–0.49: frames per map, the registry as static shared configuration, cells as channels, no coordinator process; roadmap P0–P2 rows updated; Q2, Q3, Q8 and Q12 marked resolved with their outcomes. Known limits of the seam pre-load recorded (probes and static data stay at the authored origin until the swap). |
 | 0.49 | 2026-09-15 | **Cold seam crossing verified; stale config object removed.** New harness scenario `seamcold`: the bot crosses the seam both ways with the client pre-load disabled (`-meshSeamPreload 0` sets the map manager's `seamPreloadDistance` on that client). Result: the kit reloads the scene at each hop (its `Resources.UnloadUnusedAssets` marker once per crossing, ~70 ms for the test scene), the stand-ins and the kept controller die with the old scene and the seamless swap's null guards hold, the hop completes both ways with 0 exceptions on five zones and the bot — the fallback without a pre-load is safe, just not seamless. The two "referenced script missing" warnings were the `Config` object in `BaseInit-CE` still carrying the deleted `ServerMeshTestConfig` component (0.46); the empty object is gone. |
 | 0.48 | 2026-09-15 | **Client seam crossing between different scenes** (slice 2 of the plan in Q12; the check first: the kit's client scene handling tolerates a second loaded scene — `HandleServerSceneChange` is overridable and compares the server's scene name with the *active* scene, `RegisterSceneObjects` scans every loaded scene). Rig: map 2 now has its own scene `ServerMeshTestMap2` (a copy of the test scene, in the build list), so E→C2 is a real scene change. Client (`MeshMapNetworkManager_Seam`): (a) **pre-load** — every half second the client finds its cell and the nearest neighbour of another map whose scene differs; within `seamPreloadDistance` (80 m, the band) that map's scene is loaded additively and its roots moved to the frame offset (the far side of the seam is visible before the line); its cameras, audio listeners and event systems are silenced, its networked scene objects deactivated (as the kit does until the server spawns them) and its navmesh re-added at the moved transform; unloaded again `seamUnloadHysteresis` (40 m) further out. (b) **swap** — when the new server names a scene that is pre-loaded, `HandleServerSceneChange` first swaps frames: the pre-loaded scene becomes active, every root of the old scene that was not in the scene file (controller, HUD, gameplay and minimap cameras, target indicators, stand-ins — the scene file's roots are snapshotted when a scene comes up) is moved into the new scene, the kit's pooled instances are cleared, the old scene is unloaded, the new scene's roots go to their natural origin and the carried objects move by the same shift, cameras take over the old scene's cameras' enabled state by name, the navmesh is re-added; then the kit's own handling sees the right active scene and continues without a load. The seamless swap (stand-ins, kept controller, held RPCs) runs unchanged around it; the migration metrics account for the frame shift. Without a pre-load the kit's normal scene load runs (loading screen). First run carried only roots with known components and missed the kit's runtime objects (target indicator, camera follower): 2,800 null references in a minute — the scene-file snapshot fixed it. Measured on the seam scenario: the bot pre-loads map 2's scene in the band, swaps into it at the hop (13 runtime roots carried), swaps back on the return; 0 exceptions on five zones and on the bot. Regression: all six scenarios pass (pet 12/12, party 9/9, crash 14/14, harvest 8/8, build 10/10, seam 16/16; 0 exceptions on five zones and the bots) |
 | 0.47 | 2026-09-15 | **Second map on the rig and the seam: frames per map, crossings between maps** (slice 1 of the revised plan in Q12). Revised decision: frames per **map**, not per cell — the kit's quantized movement grid (the 960 m figure) is disabled by default, so a 10 km map keeps one scene at its own origin (±5 km of float is fine) and the only frame change is a seam between two maps; the registry already modelled that (a layout's `worldOrigin`; every cell of a map shares its frame). Rig: a second kit map `ServerMeshTestMap2` (same scene, its own map info) placed 400 m east in the registry as a single cell **C2** (world x 300–500) touching E's east edge and NE's corner; a ground plane `Zone_Seam` (x 300–500) and a navmesh rebake so a character can walk across (the old ground ended exactly at the seam). **Frame translation:** every cell link learns the sender's frame at hello (`frame offset` in the link log, zero inside a map) and every position that arrives on a link is translated in the dispatcher before any handler sees it — ghost snapshots, hits (`fromPosition`), monster handoffs (pose and spawn position), building placements, and the aim positions inside attack/skill replays (the link now passes the connection to `OnGhostReplay`); the handoff **save** is written in the destination cell's frame and with the destination's map id, so a seam crossing is a map change and a frame change in one hop, through the same notice/ack/promote-in-place path. **Cells as channels everywhere:** `MeshCentralNetworkManager` (swapped onto the server-instance prefab) appends every cell of the registry to the central's channel list (the kit's character selection and connection-limit checks accept only listed channels), and `MeshMapSpawnNetworkManager` now takes over the start-up spawn after cluster registration: a meshed map is started on its own cells only, through the kit's private `SpawnMap` by reflection (the nine-parameter overload), maps without a layout stay on the kit's own loop — the cartesian-product limit of 0.46 is gone. Tooling: the auto client's walk takes `-meshReturnX` and `-meshStopOnMigration` (a leg ends when a hop completes: the target was in the previous frame); the harness grades the fifth zone C2 on its own map's log, resets the characters' map, and has a **seam** scenario: the tester stands on E 8 m from the seam, the bot walks from E into C2 and back. Measured: E→C2 hop acked **318 ms** after START (ghost promoted in place at the translated position −98), C2→E **233 ms**; C2 saw the standing tester's ghost at x = −108 (292 − 400); the client's seamless swap held on both hops (same scene name, so the kit did not reload — the different-scene case is slice 2). Regression: all six scenarios pass on the five-zone rig (pet 12/12, party 9/9, crash 14/14, harvest 8/8, build 10/10, seam 13/13; 0 exceptions on five zones) |
@@ -222,35 +223,42 @@ the player's current cell over a server-to-server channel, keeping the single co
 
 ## 6. World & coordinate model
 
-The kit **already** serializes movement as a **byte `cellId` + quantized local position** within a
-finite, clamping grid (`DefaultGridManagerComponent`: `cellSize` 128, `gridSize ≤ 15` → ~1920 m/axis).
-A single global Unity transform space would overflow that grid and lose float precision far from
-origin. So:
+*Rewritten 2026-09-15 (0.50) to the verified state after 0.46–0.49; the earlier text described per-cell
+frames and the movement-grid limit, both of which turned out not to apply.*
 
-- **Each mesh-cell server keeps a LOCAL Unity frame.** Its world is authored near origin and spans
-  **the mesh cell + border band `B`** (comfortably inside the movement grid's ~1920 m range).
-- **Logical global position = `(meshCellId, localPosition)`.** This is what's persisted (for routing)
-  and sent in handoff/ghost messages. The Unity transform stays local; the kit's movement grid is
-  unchanged.
-- **Coordinate translation IS required for ghosts** (this *removes* a benefit claimed in v0.1–0.4):
-  a neighbor entity arrives as `(neighborCellId, neighborLocalPos)`; render it at
-  `myLocalPos = neighborLocalPos + (neighborCellOrigin − myCellOrigin)`. For a uniform grid this
-  offset is a **deterministic constant per adjacent-cell pair**. Ghosts only live in the band, so the
-  translated position stays within this server's local frame and movement-grid range.
-- **Sizing `B`** must budget for AOI cadence, not just visible range. AOI `updateInterval` (1.0 s)
-  means ghost subscription can lag a crossing; a player at speed `v` covers `v·updateInterval`.
-  Require `B ≥ maxVisibleRange + maxProjectileReach + v_max·updateInterval + H` (order of 128–192 m
-  with `defaultVisibleRange = 80`), and/or add a mesh-specific faster ghost-subscription path near the
-  seam ([Q1](#18-open-questions)).
-- **Validate per-cell movement-grid config** (`cellSize`/`gridSize`) covers cell + band so band
-  positions don't clamp ([Spike 0](#16-phase-0-spikes)). ✅ *Validated 2026-06-13 — 256/128 on the
-  default 128/15 grid: no clamping, exact identity + cross-edge translation.*
-- **Authoritative state uses full-precision coordinates; the movement quantization is client-facing
-  only.** Spike 0 showed the kit's broadcast encoding is lossy (mm near players, but ~8.5 m vertical
-  buckets at distance). So **CellMeshLink S2S transfers (handoff state, ghost authoritative position)
-  carry `(meshCellId, float3 localPosition)` or a global double — never the compressed movement
-  encoding** — else repeated handoffs/ghost round-trips accumulate drift. Clients keep the normal
-  compressed stream; ghosts use it like any entity.
+- **Frames per map, not per cell.** A kit map (one scene) is one Unity frame at its own origin. The
+  kit's quantized movement grid (`DefaultGridManagerComponent`, the source of the old ±960 m figure)
+  is **disabled by default** with the kit's own note to re-enable it only after a rework, so the only
+  limit on a map's size is float precision: at 5 km from the origin one float step is 0.5 mm. Target
+  maps are up to **10 km × 10 km**, one scene each, no floating origin unless jitter shows up in a test.
+- **The world registry** (`MeshWorldRegistry` asset, one `MeshMapLayout` per meshed map) places each
+  map's scene origin in a **shared world frame** that exists only to compute adjacency: a uniform grid
+  per map cuts it into **cells** (world rectangles), and two cells whose rectangles touch (edge or
+  corner, `touchTolerance`) are **neighbours, whichever map each comes from**. Continents placed next
+  to each other in the world join through their touching cells with no further data. Every cell of a
+  map shares the map's frame (`frameOrigin` = the layout's `worldOrigin`).
+- **A crossing inside a map changes nothing:** the frame offset between two cells of one map is
+  zero. **A seam between two maps is a frame change and a map change in one hop.** Each cell link
+  learns the sender's frame at hello (`sender.OffsetTo(receiver)`), and every position that arrives
+  on a link is translated in the dispatcher before any handler sees it: ghost snapshots, hits, monster
+  handoffs (pose and spawn position), building placements, the aim positions inside attack and skill
+  replays. The handoff **save** is written in the destination cell's frame with the destination's
+  map id, so a plain login on that cell agrees with it.
+- **The band** is measured as the distance from a position to the neighbour's rectangle (Chebyshev),
+  which equals the old shared-line / shared-corner rule on a uniform grid; a cell's neighbour list
+  (up to 32, one bit each) replaces the fixed eight grid offsets. `B` is sized by Q1.
+- **Full precision on the links.** Spike 0 showed the kit's client-facing movement encoding is lossy,
+  so S2S transfers (handoff state, ghost positions) carry float positions in the sender's frame — never
+  the compressed movement encoding. Clients keep the normal stream; ghosts use it like any entity.
+- **The client at a seam** (0.48–0.49): while the player stands in the band of a neighbour of another
+  map, that map's scene is loaded additively and moved to the frame offset, so the far side is visible
+  before the line; at the hop the client swaps frames before the kit's scene-change handling runs (old
+  scene unloaded, its runtime objects carried, the new scene at its natural origin). Without a
+  pre-load the kit's normal scene load runs, with its loading screen, and the hop still completes.
+- **Known limits of the pre-load:** a scene's light probes, reflection probes, static batching and
+  occlusion data are bound to the scene's authored origin and do not move with its roots, so lighting
+  in the pre-loaded strip can differ until the swap puts the scene at its natural origin. The rig's
+  two maps share identical geometry, so their seam overlaps visually; real maps are authored to meet.
 
 ---
 
@@ -303,41 +311,47 @@ changes on handoff, `ObjectId` is per-process and reset on restart. Replaced wit
 
 ## 9. Map-server routing: cells vs logical maps
 
-Today the cluster keys map servers `{channelId}_{refId}` with `refId = mapName`, and warp/login
-resolve a character to a server via `currentMapName` (`ClusterServer.MapServerPeersByKey`,
-`WarpCharacterRoutine → GetPeerInfoKey(ChannelId, mapName)`). Meshing must route by **position within a
-logical map**. Plan:
+*Rewritten 2026-09-15 (0.50): the plan below is implemented; no coordinator process exists.*
 
-- **Cells register as map servers** with `refId = cellId` (e.g. `"{worldMap}#{cx}_{cz}"`), so the
-  existing peer registry/broadcast works unchanged. (Decide whether cells are spawned via the
-  existing **MapSpawn** flow or launched directly — [Q11](#18-open-questions).)
-- **`currentMapName` stays the logical world map** — don't overwrite saved character data with cell
-  ids; keeps non-meshed maps and tooling working. The character's **persisted global position** +
-  the Coordinator's cell-grid definition resolve the owning cell.
-- **Login / character-enter** must consult the Coordinator: `(worldMap, position) → cellId →
-  cell-server address`. This is the key routing integration point and likely touches the
-  login/enter-game flow → confirm whether it's reachable via a handler/`ManagerComponent` seam or
-  needs a documented core edit ([CE-4](#17-core-edit-registry)).
-- **Warp into a meshed map** (from a dungeon or non-meshed map) resolves to the destination cell the
-  same way.
+- **A cell is a channel.** A cell's map server registers with the kit's cluster under the kit's own key
+  `{channelId}_{mapName}` with the cell id as the channel and the map id as the map name (e.g.
+  `C_ServerMeshTestMap`, `C2_ServerMeshTestMap2`), so the peer registry and address broadcast work
+  unchanged (Q11). `MeshCentralNetworkManager` appends every cell of the registry to the central's
+  channel list (character selection and the per-channel connection limit accept listed channels only);
+  `MeshMapSpawnNetworkManager` starts a meshed map once per cell through the kit's private
+  `SpawnMap` (reflection; the kit's own loop would start every map on every channel) and leaves maps
+  without a layout to the kit.
+- **`currentMapName` stays the map id.** A cell's server resolves its own cell from its channel id
+  and `-mapName` at start-up (`OwnCell`); a character's saved position resolves the owning cell.
+  Crossing a seam changes the map id, as the kit's own map change would.
+- **Login / character-enter:** `MeshLoginNetworkManager` rewrites the selected channel to the cell
+  that owns the saved position, for any map that has a layout (a subclass on the login server; no core
+  edit — CE-4 was not needed). A character saved on another cell is handed to the owner at its first
+  boundary tick, which also covers a kit warp that lands on the wrong cell (not exercised by the harness).
+- **Positions outside every grid** belong to the nearest cell of the map (clamped), so an unserved
+  strip behaves as before.
 - **Non-meshed maps** keep the classic single-map-server path untouched.
 
 ---
 
 ## 10. New modules & how they attach
 
-| Module | Role | How it attaches | Core edit? |
-|---|---|---|---|
-| **MeshCoordinator** | Standalone role: adjacency, ownership directory, **position→cell routing**, `MeshEntityId`/`cellIncarnation` allocation, handoff broker | New `LiteNetLibServer` | **No if run as an independent process**; **possible (CE-3)** if wired into `MMOServerInstance`/`ProcessArguments` |
-| **MeshCoordinatorClient** | Cell's link to the coordinator | `LiteNetLibClient`, started by a ManagerComponent | No |
-| **CellMeshLink** | S2S border-band snapshot streaming (coord-translated) | New `LiteNetLibServer`/`Client` pair | No |
-| **MeshInterestManager** | Pull neighbor ghosts near the band; optional faster-than-AOI subscription | Subclass `JobifiedGridSpatialPartitioningAOI`; attach to prefab | No |
-| **MeshServerComponent(s)** | **Per-tick boundary check** (primary trigger), drive CellMeshLink, ownership, ghost sync | `BaseGameNetworkManagerComponent` on prefab | No |
-| **GhostEntity + MeshGhostController** | Read-only replica; authoritative behaviours disabled ([Q9](#18-open-questions)) | ManagerComponent spawns via `NetworkSpawn`; controller neuters logic | No |
-| **MeshIdentity** | Holds `MeshEntityId`; ghost/real tag | `LiteNetLibBehaviour` on entity prefabs | No |
-| **MeshMapNetworkManager** | Intercept explicit in-grid `WarpCharacter` + `HandleWarpAtClient` | `MapNetworkManager` subclass on prefab | No |
-| **Cell routing hook** | `(worldMap,pos)→cell` at login/enter/warp | handler/ManagerComponent if reachable | **Possible (CE-4)** |
-| **HandoffController + client migration** | State transfer + masked client migration | ManagerComponent + subclass | **Maybe (CE-1)** if masking insufficient |
+*Table rewritten 2026-09-15 (0.50) to the classes that exist (`Assets/ServerMeshing/`). No core edit
+is needed by any of them; the registry of the few core touches stays in §17.*
+
+| Module | Role | How it attaches |
+|---|---|---|
+| **MeshWorldRegistry** (`Mesh/`) | The world as a graph of cells: one layout per meshed map placed in a shared frame; cells with world rectangles, frame origin, neighbours; `OwnerOf`, `DistanceTo`, `DistanceToEdge`, `OffsetTo` | ScriptableObject asset referenced by the map, login, central and spawner managers |
+| **MeshMapNetworkManager** (`Spike2/` + `Mesh/…_Ghosting`, `…_Actions`, `Spike2/…_Seam`) | The cell server and the client: boundary tick and handoff (notice, ack, promote in place, rollback), border ghosting over the links, forwarded hits/actions/replays/party share/loot/buildings, monster handoff, the client's held RPCs and seam pre-load/swap | `MapNetworkManager` subclass on the map-manager prefab |
+| **CellMeshLink** (`Mesh/`) | S2S link between neighbouring cells: hello (zone id, frame offset), sequenced snapshots, reliable messages, timeouts | `LiteNetLibServer`/`Client` pair owned by the map manager |
+| **MeshIdentity** (`Mesh/`) | `MeshEntityId` (character id for players; `{cell}:{incarnation}:{objectId}` birth provenance for everything else), ghost/owner/home tags | `LiteNetLibBehaviour` on entity prefabs |
+| **MeshPlayerCharacterEntity / MeshMonsterCharacterEntity / MeshHarvestableEntity / MeshMonsterActivityComponent / MeshGameplayRule** (`Mesh/`) | Entity-side hooks: ghost neutering, forwarded damage and kill credit, activity handoff, rules with a ghost as the counterpart | Prefab component swaps / subclass on the game database |
+| **MeshCharacterAttackComponent / MeshCharacterUseSkillComponent** (`Mesh/`) | Forward attack and skill triggers to the neighbours' puppets (with aim positions, translated at the seam) | Component swaps on character prefabs |
+| **ClientMigrationController** (`Spike2/`) | The seamless client swap: stand-ins, kept controller/camera/HUD, blend, fallback hop, frame-shift-aware metrics | Created by the map manager on the client |
+| **MeshLoginNetworkManager** (`Mesh/`) | Position → cell routing at character selection | `LoginNetworkManager` subclass on the server-instance prefab |
+| **MeshCentralNetworkManager** (`Mesh/`) | Registry cells as channels | `CentralNetworkManager` subclass on the server-instance prefab |
+| **MeshMapSpawnNetworkManager** (`Mesh/`) | One map server per cell | `MapSpawnNetworkManager` subclass on the server-instance prefab |
+| **Test rig** (`TestMap/`) | Auto client (bots and the editor player), zone bootstrap and process arguments, boundary detector, grid visualizer, editor launcher and play runner; `Tools/ServerMeshing/regress.py` grades the scenarios | Test scenes and editor tooling only |
 
 ---
 
@@ -497,9 +511,9 @@ logical map**. Plan:
 
 | Phase | Deliverable | Felt result |
 |---|---|---|
-| **P0 Foundations** | Coordinate model (Spike 0) + cell grid; `MeshIdentity`/`MeshEntityId`; routing; 2-cell harness; MeshCoordinator role | Scaffolding |
-| **P1 Fast handoff** | Boundary tick + in-memory transfer + masked client migration. *2026-09-12: ✅ boundary tick, save-and-warp replay, seamless client swap (stand-ins, kept controller/camera/HUD, blend) — no loading screen, no stall, no visible break; in-memory S2S transfer still pending (CE-5)* | **No loading screen / stall** |
-| **P2 Border ghosting** | CellMeshLink + GhostEntity (suppressed) + MeshInterestManager + coord translation. *2026-09-12: CellMeshLink + player "puppet" ghosts working on the rig (shared frame, no translation yet, no MeshInterestManager — plain AOI suffices at B = 60 m); monsters/NPCs and per-cell frames still open* | Players **see** across |
+| **P0 Foundations** | Coordinate model (Spike 0) + cell grid; `MeshIdentity`/`MeshEntityId`; routing; 2-cell harness; MeshCoordinator role. *2026-09-15: ✅ complete without a coordinator — the world registry (0.46) is static config shared by every process, cells are channels (0.47), routing is the login subclass; a coordinator only appears with dynamic cells (Q13)* | Scaffolding |
+| **P1 Fast handoff** | Boundary tick + in-memory transfer + masked client migration. *2026-09-12: ✅ boundary tick, save-and-warp replay, seamless client swap (stand-ins, kept controller/camera/HUD, blend) — no loading screen, no stall, no visible break; in-memory S2S transfer still pending (CE-5). 2026-09-15: hops across a map seam use the same path, with the save in the destination's frame (0.47) and the client swapping scenes without a load (0.48)* | **No loading screen / stall** |
+| **P2 Border ghosting** | CellMeshLink + GhostEntity (suppressed) + MeshInterestManager + coord translation. *2026-09-12: CellMeshLink + player "puppet" ghosts working on the rig (shared frame, no translation yet, no MeshInterestManager — plain AOI suffices at B = 60 m); monsters/NPCs and per-cell frames still open. 2026-09-15: ✅ ghosts of every kind, and coordinate translation at map seams (0.47) — frames are per map, so inside a map no translation is needed* | Players **see** across |
 | **P3 Cross-border interaction** | Authority arbitration, ghost colliders, cross-cell lag comp, mob/projectile handoff. *2026-09-12: hits on ghosts are forwarded to and resolved by the owner (melee, both directions, verified); kill credit forwarded to the real character (verified); edge monsters aggro on ghosts (CE-7, verified); monsters hand off by position in place, respawn stays with the home spawn area (verified). Open: party/guild share and quest counters for cross-edge kills, projectiles, lag comp, summoned monsters following their summoner across* | **See and fight** across |
 | **P4 Dynamic load** *(optional)* | Split/merge cells | Elastic scale |
 
@@ -561,17 +575,17 @@ Marked in-code `// MESH-EDIT: CE-<n> — <reason>. See Docs/ServerMeshing/DESIGN
 | # | Question | By |
 |---|---|---|
 | Q1 | ✅ **RESOLVED (2026-09-14, 0.37).** Two rules, the band takes the larger: **(speed)** `B ≥ vmax × (AOI pass + snapshot interval + one link hop) + H` — the crossing character must exist as a ghost on the neighbour and be subscribed by its observers before the line; with the demo's 8 m/s mount, 1 s AOI, 0.1 s snapshots and a 0.2 s hop that is 11.4 m, so any band that satisfies the other rule satisfies this one; **(view)** `B ≥ visible range` — the origin knows nothing beyond the band, so everything between the band and the kit's visible range pops in at the crossing. The demo's visible range is 80 m; the band was 60 m and is now 80 m. `H` (1 m) and the 0.1 s boundary tick are fine: the lead prediction (`handoffLeadSeconds` 0.3 s) puts the arrival within 1.8 m of the stand-in at 8 m/s. Skill and projectile reach (25 m bow, 8 m skills) are far inside the band. The server logs `Band sizing:` at start and warns when the configured band breaks either rule (`expectedMaxSpeed` is the input; the AOI cadence and the visible range are read from the interest manager). Measured: an observer standing 1 m from the line saw a rider cross at 8 m/s both ways with 0 swaps / 0 absences. Density: see the load run in 0.37. | — |
-| Q2 | Cell scenes authored at the same *local* origin; per-cell world offset is logical only — confirm no per-scene lightmap/navmesh issue | P0 |
-| Q3 | `MeshEntityId` for non-players = Coordinator-allocated vs birth-provenance `(spawnCell,incarnation,counter)`? | P0 |
+| Q2 | ✅ **RESOLVED (2026-09-15, 0.47–0.48):** scenes are per *map*, each at its own authored origin; cells of a map share it, so no per-cell scene exists. The only origin shift is the client's pre-load of a neighbouring map's scene at the seam: its navmesh is re-added at the moved transform, while light/reflection probes and static batching stay at the authored origin until the swap (cosmetic, §6). | P0 |
+| Q3 | ✅ **RESOLVED:** birth provenance — `{cell}:{incarnation}:{objectId}`, the incarnation being a per-process value taken at start-up, so a restarted cell never reuses an id; no allocator is needed. | P0 |
 | Q4 | Target concurrency: players/cell + world size → `S`, `B`, P4 | P0 |
 | Q5 | ✅ **RESOLVED (Spike 2, 2026-09-12): masking is sufficient.** First measurement 2.2 s; after skipping the client's post-scene-load settle+GC during a hop (extension) and removing the kit's 100 ms request-poll floor ([CE-6](#17-core-edit-registry)) the `playerReady` gap is **450–650 ms** with 0.3 m position continuity, no scene reload, player keeps walking. CE-1 **not needed**. Further reduction (S2S relates-data transfer) needs [CE-5](#17-core-edit-registry) or reflection | — |
 | Q6 | Parties/guild/social (cluster-relayed) vs ownership at borders — conflicts? | P2 |
 | Q7 | Navmesh/physics/colliders in the band — which physical components survive on a ghost? (couples Q9) — **central to P3** | P2/P3 |
-| Q8 | MeshCoordinator in-process with Central, or its own process? (drives CE-3) | P0 |
+| Q8 | ✅ **RESOLVED (2026-09-15):** neither — with static cells there is no coordinator. The registry asset is configuration every process loads, the kit's cluster carries the addresses, the central subclass lists the cells as channels. A coordinator becomes necessary only with dynamic cells (Q13). | P0 |
 | Q9 | ✅ **RESOLVED (Spike 1a, 2026-06-13):** `MovementDisablers` + `UpdateManager.Unregister` the server-driver `IManagedUpdate` components (AI + regen + buff-tick + action = 4 on a monster). Idle drift = 0, entity stays live. Extension-only; no ghost-variant prefab needed | — |
 | Q10 | ✅ **RESOLVED (Spike 0, 2026-06-13):** default grid (128/15) covers cell+band with margin (±960 m vs 256 m needed); no clamping; the movement `cellId` is an independent within-server sub-cell index — no conceptual collision with mesh cell ids | — |
 | Q11 | ✅ **RESOLVED for the rig (2026-09-12):** cells are spawned by the existing **MapSpawn** flow (one channel per zone, same `mapName`); each cell learns neighbour addresses from the **cluster broadcast** (`ClusterClient.onResponseAppServerAddress`, appended in `MeshMapNetworkManager.Start`). A Coordinator is not needed for adjacency/routing in the uniform-grid case | — |
-| Q12 | **Per-cell coordinate frames — scope (2026-09-14).** Needed only when the logical map exceeds the movement grid / float budget (about ±960 m from the shared origin; the rig's 300 m grid never does). What it takes, all add-on side: (a) a per-zone origin in `ServerMeshTestConfig` and a translation at every link receive/send: snapshots, hit and loot positions, monster-handoff pose/spawn position, action aim positions, and the handoff **save position** (the departing cell writes the row in the destination's frame; a plain login on that channel then spawns consistently); (b) **per-cell scenes** — the kit loads one scene per map, and a cell's geometry must sit at its local origin, so each cell becomes its own kit map (scene) with the shared logical name kept only for routing (§9), which turns a crossing into a scene change for the client; (c) the seamless client migration must then pre-load the neighbour scene additively and shift the rendered world (camera, stand-ins, UI markers) by the frame delta at the swap, or the "no reload" property of P1 is lost. Estimated as the largest remaining item; a decision on the target world size should precede it. **Decision (2026-09-15):** maps up to 10 km × 10 km, and seamless crossings between maps (continents joined through touching cells) — frames are required. **Revised (2026-09-15, 0.47): frames per map, not per cell** — the kit's quantized movement grid is off by default, so a 10 km map keeps one scene at its own origin and the only frame change is a seam between maps. Plan: (1) world registry (**done, 0.46**); (2) second map on the rig, link and save translation at the seam, cells as channels in the central and the spawner (**done, 0.47**); (3) client seam crossing between different scenes: additive pre-load of the neighbour map at its offset while in the band, one re-base at the hop (**done, 0.48**); (4) cell grouping / sleeping cells only if a load target demands it (Q13). | — |
+| Q12 | ✅ **RESOLVED (0.46–0.49; frames per map).** Original scope (2026-09-14): Needed only when the logical map exceeds the movement grid / float budget (about ±960 m from the shared origin; the rig's 300 m grid never does). What it takes, all add-on side: (a) a per-zone origin in `ServerMeshTestConfig` and a translation at every link receive/send: snapshots, hit and loot positions, monster-handoff pose/spawn position, action aim positions, and the handoff **save position** (the departing cell writes the row in the destination's frame; a plain login on that channel then spawns consistently); (b) **per-cell scenes** — the kit loads one scene per map, and a cell's geometry must sit at its local origin, so each cell becomes its own kit map (scene) with the shared logical name kept only for routing (§9), which turns a crossing into a scene change for the client; (c) the seamless client migration must then pre-load the neighbour scene additively and shift the rendered world (camera, stand-ins, UI markers) by the frame delta at the swap, or the "no reload" property of P1 is lost. Estimated as the largest remaining item; a decision on the target world size should precede it. **Decision (2026-09-15):** maps up to 10 km × 10 km, and seamless crossings between maps (continents joined through touching cells) — frames are required. **Revised (2026-09-15, 0.47): frames per map, not per cell** — the kit's quantized movement grid is off by default, so a 10 km map keeps one scene at its own origin and the only frame change is a seam between maps. Plan: (1) world registry (**done, 0.46**); (2) second map on the rig, link and save translation at the seam, cells as channels in the central and the spawner (**done, 0.47**); (3) client seam crossing between different scenes: additive pre-load of the neighbour map at its offset while in the band, one re-base at the hop (**done, 0.48**); (4) cell grouping / sleeping cells only if a load target demands it (Q13). | — |
 | Q13 | **Dynamic cells (P4) — scope (2026-09-14).** Splitting/merging cells at runtime needs: a coordinator that owns the cell→server map (today it is static config + the cluster's channel list), cells that can start/stop serving a sub-rectangle (spawn-area activation is already per zone — §12 risk 6), a bulk handoff of every entity in a moved rectangle (the player handoff and monster handoff exist; a batch form and a freeze/unfreeze of the band during the move do not), and clients re-pointed mid-session (the migration path exists). Optional by the roadmap; only worth starting once a load target is set. | — |
 
 ---
