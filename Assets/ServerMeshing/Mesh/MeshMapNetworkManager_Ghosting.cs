@@ -74,9 +74,12 @@ namespace MultiplayerARPG.MMO.Mesh
         private readonly Dictionary<string, MeshLinkClient> _linkClients = new Dictionary<string, MeshLinkClient>();   // zoneId -> link
         private readonly Dictionary<long, string> _neighbourZoneByConnection = new Dictionary<long, string>();
         private readonly Dictionary<string, MeshGhost> _ghosts = new Dictionary<string, MeshGhost>();                  // meshEntityId -> ghost
-        private readonly Dictionary<string, HashSet<string>> _streamedToZone = new Dictionary<string, HashSet<string>>(); // zoneId -> ids streamed last tick
+        private readonly Dictionary<string, HashSet<string>> _streamedToZone = new Dictionary<string, HashSet<string>>();     // zoneId -> ids streamed last tick
+        private readonly Dictionary<string, HashSet<string>> _streamedPrevToZone = new Dictionary<string, HashSet<string>>(); // zoneId -> the spare set swapped in each tick
         private readonly List<string> _tmpIds = new List<string>();
-        private readonly List<BaseCharacterEntity> _ownedCandidates = new List<BaseCharacterEntity>();
+        private readonly OwnedTable<BaseCharacterEntity> _ownedCharacters = new OwnedTable<BaseCharacterEntity>(); // players + server-owned monsters
+        private readonly OwnedTable<ItemDropEntity> _ownedDrops = new OwnedTable<ItemDropEntity>();
+        private readonly OwnedTable<DamageableEntity> _ownedStatics = new OwnedTable<DamageableEntity>();         // harvestables + buildings
         private float _nextSnapshotTime;
         private float _nextLinkCheck;
 
@@ -121,8 +124,10 @@ namespace MultiplayerARPG.MMO.Mesh
             foreach (IPlayerCharacterData _ in ServerUserHandlers.GetPlayerCharacters()) players++;
             int ghostPlayers = 0, ghostMonsters = 0;
             foreach (MeshGhost g in _ghosts.Values) { if (g.kind == GhostKind.Player) ghostPlayers++; else ghostMonsters++; }
+            int ghostDrops = 0, ghostStatics = 0;
+            foreach (GhostStatic g in _ghostStatics.Values) { if (g.kind == GhostKind.ItemDrop) ghostDrops++; else ghostStatics++; }
             string handoffs = _statsHandoffs > 0 ? $"{_statsHandoffs} (mean {_statsHandoffSumMs / _statsHandoffs:0} ms, max {_statsHandoffMaxMs:0} ms)" : "0";
-            Logging.Log("Mesh", $"Mesh stats: players={players} owned={_ownedCandidates.Count} drops={_ownedDrops.Count} ghosts={ghostPlayers}p/{ghostMonsters}m/{_ghostDrops.Count}d pendingAcks={_pendingHandoffAcks.Count} reserved={_reservedArrivals.Count} | link out {dOut:0.0} kB/s {pOut:0} pkt/s, in {dIn:0.0} kB/s {pIn:0} pkt/s | handoffs {handoffs} | fps {1f / Mathf.Max(0.0001f, Time.smoothDeltaTime):0}");
+            Logging.Log("Mesh", $"Mesh stats: players={players} owned={_ownedCharacters.Count} drops={_ownedDrops.Count} statics={_ownedStatics.Count} ({_ownedDrops.Banded.Count}+{_ownedStatics.Banded.Count} in a band) ghosts={ghostPlayers}p/{ghostMonsters}m/{ghostDrops}d/{ghostStatics}s pendingAcks={_pendingHandoffAcks.Count} reserved={_reservedArrivals.Count} | link out {dOut:0.0} kB/s {pOut:0} pkt/s, in {dIn:0.0} kB/s {pIn:0} pkt/s | handoffs {handoffs} | fps {1f / Mathf.Max(0.0001f, Time.smoothDeltaTime):0}");
             _statsHandoffs = 0; _statsHandoffSumMs = 0f; _statsHandoffMaxMs = 0f;
         }
 
@@ -183,29 +188,23 @@ namespace MultiplayerARPG.MMO.Mesh
             _tmpIds.Clear(); _tmpIds.AddRange(_ghosts.Keys);
             for (int i = 0; i < _tmpIds.Count; ++i)
                 DestroyGhost(_tmpIds[i], "server stopping");
-            _tmpIds.Clear(); _tmpIds.AddRange(_ghostDrops.Keys);
+            _tmpIds.Clear(); _tmpIds.AddRange(_ghostStatics.Keys);
             for (int i = 0; i < _tmpIds.Count; ++i)
-                DestroyGhostDrop(_tmpIds[i], "server stopping");
+                DestroyGhostStatic(_tmpIds[i], "server stopping");
             foreach (KeyValuePair<BaseMonsterCharacterEntity, CharacterEntityKilledDelegate> kv in _killHooks)
             {
                 if (kv.Key != null)
                     kv.Key.onKilled -= kv.Value;
             }
             _ghosts.Clear();
-            _ghostDrops.Clear();
             _playerGhosts.Clear();
             _recentlyRemoved.Clear();
             _streamedToZone.Clear();
+            _streamedPrevToZone.Clear();
             _neighbourZoneByConnection.Clear();
-            _ownedCandidates.Clear();
-            _ownedSet.Clear();
-            _ownedByMeshId.Clear();
+            _ownedCharacters.Clear();
             _ownedDrops.Clear();
-            _ownedDropSet.Clear();
-            _ownedDropsByMeshId.Clear();
             _ownedStatics.Clear();
-            _ownedStaticSet.Clear();
-            _ownedStaticsByMeshId.Clear();
             _ghostStatics.Clear();
             _petGhostsBySummoner.Clear();
             _lentMonsters.Clear();
@@ -278,8 +277,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 TickHandoffAcks();
                 SendBandSnapshots();
                 ExpireGhosts();
-                ExpireGhostDrops();
-                ExpireGhostStatics();
+                ExpireGhostStatics(); // drops too
                 ExpireReservedArrivals();
             }
         }
@@ -352,10 +350,128 @@ namespace MultiplayerARPG.MMO.Mesh
         // the asset manager's spawn/destroy, player registration, and the handoff/promotion/demotion paths that change
         // what an entity is. No per-second FindObjectsByType; a rare prune drops references the events could not
         // (a pooled instance destroyed outside the network path).
-        private readonly Dictionary<string, BaseCharacterEntity> _ownedByMeshId = new Dictionary<string, BaseCharacterEntity>();
-        private readonly HashSet<BaseCharacterEntity> _ownedSet = new HashSet<BaseCharacterEntity>();   // O(1) membership for _ownedCandidates
-        private readonly HashSet<ItemDropEntity> _ownedDropSet = new HashSet<ItemDropEntity>();         // O(1) membership for _ownedDrops
         private bool _spawningPuppet; // set around the ghosting code's own NetworkSpawn calls: those are never ours
+
+        /// <summary>
+        /// One owned entity with what the band scan needs cached: its mesh id (no component lookup per tick) and, for
+        /// entities that never move, which neighbours' bands it stands in (bit i = s_neighbourOffsets[i]; 0 = interior).
+        /// </summary>
+        private sealed class OwnedEntry<T> where T : BaseGameEntity
+        {
+            public T entity;
+            public string meshId;
+            public int bandMask;
+        }
+
+        /// <summary>
+        /// A registry of entities this cell owns: the list the scan walks, O(1) membership by entity, a lookup by mesh
+        /// id (players by character id), and the subset standing in some neighbour's band. Band membership is fixed
+        /// at tracking time for statics and drops (they never move), so the per-tick scan touches only the ring near
+        /// the lines and never the cell's interior; characters keep a mask of 0 and are measured every tick.
+        /// </summary>
+        private sealed class OwnedTable<T> where T : BaseGameEntity
+        {
+            public readonly List<OwnedEntry<T>> Entries = new List<OwnedEntry<T>>();
+            public readonly List<OwnedEntry<T>> Banded = new List<OwnedEntry<T>>();
+            private readonly Dictionary<T, OwnedEntry<T>> _byEntity = new Dictionary<T, OwnedEntry<T>>();
+            private readonly Dictionary<string, OwnedEntry<T>> _byMeshId = new Dictionary<string, OwnedEntry<T>>();
+
+            public int Count => Entries.Count;
+
+            public bool TryGet(string meshId, out T entity)
+            {
+                if (meshId != null && _byMeshId.TryGetValue(meshId, out OwnedEntry<T> entry) && Alive(entry.entity))
+                {
+                    entity = entry.entity;
+                    return true;
+                }
+                entity = null;
+                return false;
+            }
+
+            /// <summary>Register an entity, or re-key one already here (a handoff can change a mesh id).</summary>
+            public OwnedEntry<T> Add(T entity, string meshId, int bandMask)
+            {
+                if (!_byEntity.TryGetValue(entity, out OwnedEntry<T> entry))
+                {
+                    entry = new OwnedEntry<T> { entity = entity };
+                    _byEntity[entity] = entry;
+                    Entries.Add(entry);
+                }
+                else if (entry.meshId != null && _byMeshId.TryGetValue(entry.meshId, out OwnedEntry<T> under) && ReferenceEquals(under, entry))
+                    _byMeshId.Remove(entry.meshId);
+                entry.meshId = meshId;
+                if (meshId != null)
+                    _byMeshId[meshId] = entry;
+                if (entry.bandMask != bandMask)
+                {
+                    if (entry.bandMask != 0) Banded.Remove(entry);
+                    entry.bandMask = bandMask;
+                    if (bandMask != 0) Banded.Add(entry);
+                }
+                return entry;
+            }
+
+            public bool Remove(T entity)
+            {
+                if (ReferenceEquals(entity, null) || !_byEntity.TryGetValue(entity, out OwnedEntry<T> entry))
+                    return false;
+                RemoveEntry(entry, Entries.IndexOf(entry));
+                return true;
+            }
+
+            private void RemoveEntry(OwnedEntry<T> entry, int index)
+            {
+                if (!ReferenceEquals(entry.entity, null))
+                    _byEntity.Remove(entry.entity);
+                if (index >= 0)
+                    Entries.RemoveAt(index);
+                if (entry.bandMask != 0)
+                    Banded.Remove(entry);
+                if (entry.meshId != null && _byMeshId.TryGetValue(entry.meshId, out OwnedEntry<T> under) && ReferenceEquals(under, entry))
+                    _byMeshId.Remove(entry.meshId);
+            }
+
+            /// <summary>Safety net: drop what is destroyed or no longer ours (events do the real work; this runs rarely).</summary>
+            public void Prune(System.Action<T> onRemove)
+            {
+                for (int i = Entries.Count - 1; i >= 0; --i)
+                {
+                    OwnedEntry<T> entry = Entries[i];
+                    T entity = entry.entity;
+                    bool alive = Alive(entity);
+                    if (alive && !OwnedEntityGone(entity))
+                        continue;
+                    if (alive && onRemove != null)
+                        onRemove(entity);
+                    RemoveEntry(entry, i);
+                }
+            }
+
+            public void Clear() { Entries.Clear(); Banded.Clear(); _byEntity.Clear(); _byMeshId.Clear(); }
+
+            /// <summary>Unity's destroyed-object check, bound explicitly (a type parameter's == may not pick the overload).</summary>
+            private static bool Alive(T entity) { BaseGameEntity asObject = entity; return asObject != null; }
+        }
+
+        private static bool OwnedEntityGone(BaseGameEntity entity)
+        {
+            return entity.Identity == null || entity.Identity.IsDestroyed || MeshIdentity.IsGhostEntity(entity);
+        }
+
+        /// <summary>Which neighbours' bands a position lies in (bit i = s_neighbourOffsets[i]); cached for entities that never move.</summary>
+        private int BandMaskOf(Vector3 pos)
+        {
+            if (meshConfig == null)
+                return 0;
+            int mask = 0;
+            for (int i = 0; i < s_neighbourOffsets.Length; ++i)
+            {
+                if (DistanceToSharedEdge(pos, i) <= ghostBandWidth)
+                    mask |= 1 << i;
+            }
+            return mask;
+        }
 
         /// <summary>The key an owned entity is registered under: players by character id, everything else by mesh id.</summary>
         private static string OwnedKeyOf(Component entity)
@@ -408,9 +524,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 return;
             if (!(entity is BasePlayerCharacterEntity))
                 EnsureBirthMeshId(entity, entity.ObjectId);
-            _ownedByMeshId[OwnedKeyOf(entity)] = entity;
-            if (_ownedSet.Add(entity))
-                _ownedCandidates.Add(entity);
+            _ownedCharacters.Add(entity, OwnedKeyOf(entity), 0); // characters move: measured against the bands every tick
             if (entity is BaseMonsterCharacterEntity monster && !_killHooks.ContainsKey(monster))
             {
                 BaseMonsterCharacterEntity captured = monster;
@@ -425,9 +539,7 @@ namespace MultiplayerARPG.MMO.Mesh
             if (drop == null || !drop.IsServer || drop.Identity == null || drop.Identity.IsDestroyed || MeshIdentity.IsGhostEntity(drop))
                 return;
             MeshIdentity id = EnsureBirthMeshId(drop, drop.ObjectId);
-            _ownedDropsByMeshId[id.MeshEntityId] = drop;
-            if (_ownedDropSet.Add(drop))
-                _ownedDrops.Add(drop);
+            _ownedDrops.Add(drop, id.MeshEntityId, BandMaskOf(drop.EntityTransform.position));
         }
 
         /// <summary>Forget an entity: destroyed, demoted to a puppet, or unregistered.</summary>
@@ -435,29 +547,16 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (entity == null)
                 return;
-            string key = OwnedKeyOf(entity);
             if (entity is BaseCharacterEntity character)
             {
-                if (_ownedSet.Remove(character))
-                    _ownedCandidates.Remove(character);
-                if (key != null && _ownedByMeshId.TryGetValue(key, out BaseCharacterEntity under) && ReferenceEquals(under, character))
-                    _ownedByMeshId.Remove(key);
+                _ownedCharacters.Remove(character);
                 if (character is BaseMonsterCharacterEntity monster)
                     UnhookKill(monster);
             }
             else if (entity is ItemDropEntity drop)
-            {
-                if (_ownedDropSet.Remove(drop))
-                    _ownedDrops.Remove(drop);
-                if (key != null && _ownedDropsByMeshId.TryGetValue(key, out ItemDropEntity dropUnder) && ReferenceEquals(dropUnder, drop))
-                    _ownedDropsByMeshId.Remove(key);
-            }
-            else if (entity is DamageableEntity stat && _ownedStaticSet.Remove(stat))
-            {
+                _ownedDrops.Remove(drop);
+            else if (entity is DamageableEntity stat)
                 _ownedStatics.Remove(stat);
-                if (key != null && _ownedStaticsByMeshId.TryGetValue(key, out DamageableEntity statUnder) && ReferenceEquals(statUnder, stat))
-                    _ownedStaticsByMeshId.Remove(key);
-            }
         }
 
         /// <summary>What is already in the scene when the server starts (spawn areas spawn before the listeners exist).</summary>
@@ -482,52 +581,16 @@ namespace MultiplayerARPG.MMO.Mesh
                 TrackOwnedStatic(harvestable);
             foreach (BuildingEntity building in FindObjectsByType<BuildingEntity>(FindObjectsSortMode.None))
                 TrackOwnedStatic(building);
-            Logging.Log("Mesh", $"Owned registry: {_ownedCandidates.Count} entities, {_ownedDrops.Count} drops, {_ownedStatics.Count} statics at start");
+            Logging.Log("Mesh", $"Owned registry: {_ownedCharacters.Count} entities, {_ownedDrops.Count} drops, {_ownedStatics.Count} statics ({_ownedStatics.Banded.Count} in a band) at start");
         }
 
         /// <summary>Safety net for references no event released (rare). Runs every few seconds, touches only our own lists.</summary>
         private void PruneOwned()
         {
             PruneKillHooks();
-            for (int i = _ownedCandidates.Count - 1; i >= 0; --i)
-            {
-                BaseCharacterEntity e = _ownedCandidates[i];
-                if (e == null) { _ownedCandidates.RemoveAt(i); continue; }
-                if (e.Identity == null || e.Identity.IsDestroyed || MeshIdentity.IsGhostEntity(e))
-                    UntrackOwned(e);
-            }
-            _ownedSet.RemoveWhere(e => e == null);
-            for (int i = _ownedDrops.Count - 1; i >= 0; --i)
-            {
-                ItemDropEntity d = _ownedDrops[i];
-                if (d == null) { _ownedDrops.RemoveAt(i); continue; }
-                if (d.Identity == null || d.Identity.IsDestroyed || MeshIdentity.IsGhostEntity(d))
-                    UntrackOwned(d);
-            }
-            _ownedDropSet.RemoveWhere(d => d == null);
-            for (int i = _ownedStatics.Count - 1; i >= 0; --i)
-            {
-                DamageableEntity st = _ownedStatics[i];
-                if (st == null) { _ownedStatics.RemoveAt(i); continue; }
-                if (st.Identity == null || st.Identity.IsDestroyed || MeshIdentity.IsGhostEntity(st))
-                    UntrackOwned(st);
-            }
-            _ownedStaticSet.RemoveWhere(st => st == null);
-            _tmpIds.Clear();
-            foreach (KeyValuePair<string, BaseCharacterEntity> kv in _ownedByMeshId)
-                if (kv.Value == null) _tmpIds.Add(kv.Key);
-            for (int i = 0; i < _tmpIds.Count; ++i)
-                _ownedByMeshId.Remove(_tmpIds[i]);
-            _tmpIds.Clear();
-            foreach (KeyValuePair<string, ItemDropEntity> kv in _ownedDropsByMeshId)
-                if (kv.Value == null) _tmpIds.Add(kv.Key);
-            for (int i = 0; i < _tmpIds.Count; ++i)
-                _ownedDropsByMeshId.Remove(_tmpIds[i]);
-            _tmpIds.Clear();
-            foreach (KeyValuePair<string, DamageableEntity> kv in _ownedStaticsByMeshId)
-                if (kv.Value == null) _tmpIds.Add(kv.Key);
-            for (int i = 0; i < _tmpIds.Count; ++i)
-                _ownedStaticsByMeshId.Remove(_tmpIds[i]);
+            _ownedCharacters.Prune(e => { if (e is BaseMonsterCharacterEntity monster) UnhookKill(monster); });
+            _ownedDrops.Prune(null);
+            _ownedStatics.Prune(null);
         }
 
         private string MeshEntityIdOf(BaseCharacterEntity entity)
@@ -565,140 +628,195 @@ namespace MultiplayerARPG.MMO.Mesh
             }
         }
 
+        // Per-tick view of the neighbours a snapshot can go to (index = s_neighbourOffsets index).
+        private readonly MeshLinkClient[] _bandClients = new MeshLinkClient[8];
+        private readonly HashSet<string>[] _bandStreamed = new HashSet<string>[8];
+        private readonly HashSet<string>[] _bandPrevious = new HashSet<string>[8];
+
         private void SendBandSnapshots()
         {
             bool staticTick = Time.unscaledTime >= _nextStaticSnapshot;
             if (staticTick)
                 _nextStaticSnapshot = Time.unscaledTime + Mathf.Max(ghostSnapshotInterval, staticSnapshotInterval);
+
+            // Resolve the live neighbours once. Each keeps two id sets swapped every tick: what it was sent last tick
+            // and what it gets now; a neighbour whose link is down keeps its last set until the link is back.
+            int liveMask = 0;
             for (int i = 0; i < s_neighbourOffsets.Length; ++i)
             {
+                _bandClients[i] = null;
                 ServerMeshTestConfig.ZoneDefinition zone = meshConfig.GetZone(NeighbourCoord(i));
                 if (zone == null || !_linkClients.TryGetValue(zone.zoneId, out MeshLinkClient client) || !client.IsConnected)
                     continue;
-                if (!_streamedToZone.TryGetValue(zone.zoneId, out HashSet<string> streamed))
-                {
+                if (!_streamedToZone.TryGetValue(zone.zoneId, out HashSet<string> previous) || previous == null)
+                    previous = new HashSet<string>();
+                if (!_streamedPrevToZone.TryGetValue(zone.zoneId, out HashSet<string> streamed) || streamed == null)
                     streamed = new HashSet<string>();
-                    _streamedToZone[zone.zoneId] = streamed;
-                }
-                _tmpIds.Clear();
-                _tmpIds.AddRange(streamed);
                 streamed.Clear();
+                _streamedToZone[zone.zoneId] = streamed;
+                _streamedPrevToZone[zone.zoneId] = previous;
+                _bandClients[i] = client;
+                _bandStreamed[i] = streamed;
+                _bandPrevious[i] = previous;
+                liveMask |= 1 << i;
+            }
+            if (liveMask == 0)
+                return;
 
-                for (int c = 0; c < _ownedCandidates.Count; ++c)
+            // Characters: they move, so their band membership is measured every tick; one message serves every
+            // neighbour whose band they stand in.
+            GhostSnapshotMessage msg = default;
+            List<OwnedEntry<BaseCharacterEntity>> characters = _ownedCharacters.Entries;
+            for (int c = 0; c < characters.Count; ++c)
+            {
+                OwnedEntry<BaseCharacterEntity> entry = characters[c];
+                BaseCharacterEntity entity = entry.entity;
+                if (entity == null || entity.IsDead() || MeshIdentity.IsGhostEntity(entity))
+                    continue; // a demoted entity is someone else's now
+                BasePlayerCharacterEntity asPlayer = entity as BasePlayerCharacterEntity;
+                if (asPlayer != null && asPlayer.IsWarping)
+                    continue;
+                Vector3 pos = entity.EntityTransform.position;
+                int mask = 0;
+                for (int i = 0; i < s_neighbourOffsets.Length; ++i)
                 {
-                    BaseCharacterEntity entity = _ownedCandidates[c];
-                    if (entity == null || entity.IsDead() || MeshIdentity.IsGhostEntity(entity))
-                        continue; // a demoted entity is someone else's now
-                    if (entity is BasePlayerCharacterEntity player && player.IsWarping)
-                        continue;
-                    Vector3 pos = entity.EntityTransform.position;
-                    if (DistanceToSharedEdge(pos, i) > ghostBandWidth)
-                        continue;
-                    string meshId = MeshEntityIdOf(entity);
-                    VehicleEntity mount = entity.PassengingVehicleEntity as VehicleEntity;
-                    SummonInfoOf(entity, out string summonerMeshId, out string summonId, out SummonType summonType);
-                    EquipWeapons weapons = entity is BasePlayerCharacterEntity ? entity.EquipWeapons : default;
-                    BasePlayerCharacterEntity asPlayer = entity as BasePlayerCharacterEntity;
-                    client.SendGhostSnapshot(new GhostSnapshotMessage
-                    {
-                        partyId = asPlayer != null ? asPlayer.PartyId : 0,
-                        guildId = asPlayer != null ? asPlayer.GuildId : 0,
-                        factionId = asPlayer != null ? asPlayer.FactionId : 0,
-                        isPkOn = asPlayer != null && asPlayer.IsPkOn,
-                        rightWeaponDataId = weapons.rightHand.dataId,
-                        rightWeaponLevel = weapons.rightHand.level,
-                        leftWeaponDataId = weapons.leftHand.dataId,
-                        leftWeaponLevel = weapons.leftHand.level,
-                        summonerMeshId = summonerMeshId,
-                        summonId = summonId,
-                        summonType = (byte)summonType,
-                        mountEntityId = mount != null ? mount.EntityId : 0,
-                        mountLevel = mount != null ? mount.Level : 0,
-                        kind = entity is BasePlayerCharacterEntity ? GhostKind.Player : GhostKind.Monster,
-                        characterId = meshId,
-                        entityId = entity.EntityId,
-                        dataId = entity.DataId,
-                        characterName = entity.CharacterName,
-                        level = entity.Level,
-                        position = pos,
-                        yaw = entity.EntityTransform.eulerAngles.y,
-                        movementState = (byte)entity.MovementState,
-                        extraMovementState = (byte)entity.ExtraMovementState,
-                        currentHp = entity.CurrentHp,
-                        maxHp = entity.MaxHp,
-                    });
-                    streamed.Add(meshId);
+                    if ((liveMask & (1 << i)) != 0 && DistanceToSharedEdge(pos, i) <= ghostBandWidth)
+                        mask |= 1 << i;
                 }
-
-                // Item drops in the band (loot from a kill near the line must be visible, and lootable, from next door).
-                for (int d = 0; d < _ownedDrops.Count; ++d)
+                if (mask == 0)
+                    continue;
+                string meshId = entry.meshId;
+                VehicleEntity mount = entity.PassengingVehicleEntity as VehicleEntity;
+                SummonInfoOf(entity, out string summonerMeshId, out string summonId, out SummonType summonType);
+                EquipWeapons weapons = asPlayer != null ? entity.EquipWeapons : default;
+                msg = new GhostSnapshotMessage
                 {
-                    ItemDropEntity drop = _ownedDrops[d];
-                    if (drop == null || drop.Identity == null || drop.Identity.IsDestroyed || drop.DropItems.Count == 0)
+                    partyId = asPlayer != null ? asPlayer.PartyId : 0,
+                    guildId = asPlayer != null ? asPlayer.GuildId : 0,
+                    factionId = asPlayer != null ? asPlayer.FactionId : 0,
+                    isPkOn = asPlayer != null && asPlayer.IsPkOn,
+                    rightWeaponDataId = weapons.rightHand.dataId,
+                    rightWeaponLevel = weapons.rightHand.level,
+                    leftWeaponDataId = weapons.leftHand.dataId,
+                    leftWeaponLevel = weapons.leftHand.level,
+                    summonerMeshId = summonerMeshId,
+                    summonId = summonId,
+                    summonType = (byte)summonType,
+                    mountEntityId = mount != null ? mount.EntityId : 0,
+                    mountLevel = mount != null ? mount.Level : 0,
+                    kind = asPlayer != null ? GhostKind.Player : GhostKind.Monster,
+                    characterId = meshId,
+                    entityId = entity.EntityId,
+                    dataId = entity.DataId,
+                    characterName = entity.CharacterName,
+                    level = entity.Level,
+                    position = pos,
+                    yaw = entity.EntityTransform.eulerAngles.y,
+                    movementState = (byte)entity.MovementState,
+                    extraMovementState = (byte)entity.ExtraMovementState,
+                    currentHp = entity.CurrentHp,
+                    maxHp = entity.MaxHp,
+                };
+                for (int i = 0; i < s_neighbourOffsets.Length; ++i)
+                {
+                    if ((mask & (1 << i)) == 0)
                         continue;
-                    Vector3 dpos = drop.EntityTransform.position;
-                    if (DistanceToSharedEdge(dpos, i) > ghostBandWidth)
-                        continue;
-                    MeshIdentity did = MeshIdentity.Get(drop);
-                    if (did == null || string.IsNullOrEmpty(did.MeshEntityId))
-                        continue;
-                    CharacterItem item = drop.DropItems[0];
-                    client.SendGhostSnapshot(new GhostSnapshotMessage
-                    {
-                        kind = GhostKind.ItemDrop,
-                        characterId = did.MeshEntityId,
-                        entityId = drop.EntityId,
-                        dataId = item.dataId,
-                        characterName = string.Empty,
-                        level = item.level,
-                        position = dpos,
-                        yaw = drop.EntityTransform.eulerAngles.y,
-                        currentHp = item.amount,
-                        maxHp = item.amount,
-                    });
-                    streamed.Add(did.MeshEntityId);
+                    _bandClients[i].SendGhostSnapshot(msg);
+                    _bandStreamed[i].Add(meshId);
                 }
+            }
 
-                // Static entities (harvestables) in the band: they never move, so a snapshot every staticSnapshotInterval
-                // carries their hp; they stay in the streamed set every tick so no GhostRemove follows a quiet tick.
-                for (int st = 0; st < _ownedStatics.Count; ++st)
+            // Item drops in a band (loot from a kill near the line must be visible, and lootable, from next door).
+            // Band membership was fixed when the drop was tracked: only the ring near the lines is walked.
+            List<OwnedEntry<ItemDropEntity>> drops = _ownedDrops.Banded;
+            for (int d = 0; d < drops.Count; ++d)
+            {
+                OwnedEntry<ItemDropEntity> entry = drops[d];
+                int mask = entry.bandMask & liveMask;
+                if (mask == 0)
+                    continue;
+                ItemDropEntity drop = entry.entity;
+                if (drop == null || drop.Identity == null || drop.Identity.IsDestroyed || drop.DropItems.Count == 0)
+                    continue;
+                CharacterItem item = drop.DropItems[0];
+                msg = new GhostSnapshotMessage
                 {
-                    DamageableEntity stat = _ownedStatics[st];
-                    if (stat == null || stat.Identity == null || stat.Identity.IsDestroyed || stat.CurrentHp <= 0)
+                    kind = GhostKind.ItemDrop,
+                    characterId = entry.meshId,
+                    entityId = drop.EntityId,
+                    dataId = item.dataId,
+                    characterName = string.Empty,
+                    level = item.level,
+                    position = drop.EntityTransform.position,
+                    yaw = drop.EntityTransform.eulerAngles.y,
+                    currentHp = item.amount,
+                    maxHp = item.amount,
+                };
+                for (int i = 0; i < s_neighbourOffsets.Length; ++i)
+                {
+                    if ((mask & (1 << i)) == 0)
                         continue;
-                    Vector3 spos = stat.EntityTransform.position;
-                    if (DistanceToSharedEdge(spos, i) > ghostBandWidth)
+                    _bandClients[i].SendGhostSnapshot(msg);
+                    _bandStreamed[i].Add(entry.meshId);
+                }
+            }
+
+            // Static entities (harvestables, buildings) in a band: a snapshot every staticSnapshotInterval carries
+            // their hp; they stay in the streamed set every tick so no GhostRemove follows a quiet tick.
+            List<OwnedEntry<DamageableEntity>> statics = _ownedStatics.Banded;
+            for (int st = 0; st < statics.Count; ++st)
+            {
+                OwnedEntry<DamageableEntity> entry = statics[st];
+                int mask = entry.bandMask & liveMask;
+                if (mask == 0)
+                    continue;
+                DamageableEntity stat = entry.entity;
+                if (stat == null || stat.Identity == null || stat.Identity.IsDestroyed || stat.CurrentHp <= 0)
+                    continue;
+                bool built = false;
+                for (int i = 0; i < s_neighbourOffsets.Length; ++i)
+                {
+                    if ((mask & (1 << i)) == 0)
                         continue;
-                    MeshIdentity sid = MeshIdentity.Get(stat);
-                    if (sid == null || string.IsNullOrEmpty(sid.MeshEntityId))
-                        continue;
-                    streamed.Add(sid.MeshEntityId);
-                    if (!staticTick && _tmpIds.Contains(sid.MeshEntityId))
+                    _bandStreamed[i].Add(entry.meshId);
+                    if (!staticTick && _bandPrevious[i].Contains(entry.meshId))
                         continue; // already known over there; the next slow tick refreshes it
-                    BuildingEntity asBuilding = stat as BuildingEntity;
-                    client.SendGhostSnapshot(new GhostSnapshotMessage
+                    if (!built)
                     {
-                        kind = asBuilding != null ? GhostKind.Building : GhostKind.Harvestable,
-                        characterId = sid.MeshEntityId,
-                        entityId = stat.EntityId,
-                        dataId = 0,
-                        characterName = asBuilding != null ? asBuilding.CreatorName : string.Empty,
-                        level = stat is HarvestableEntity h ? h.SpawnLevel : 1,
-                        position = spos,
-                        yaw = stat.EntityTransform.eulerAngles.y,
-                        fullRotation = stat.EntityTransform.eulerAngles,
-                        movementState = (byte)((asBuilding != null && asBuilding.IsLocked ? 1 : 0) | (asBuilding is DoorEntity door && door.IsOpen ? 2 : 0)),
-                        currentHp = stat.CurrentHp,
-                        maxHp = stat.MaxHp,
-                    });
+                        BuildingEntity asBuilding = stat as BuildingEntity;
+                        msg = new GhostSnapshotMessage
+                        {
+                            kind = asBuilding != null ? GhostKind.Building : GhostKind.Harvestable,
+                            characterId = entry.meshId,
+                            entityId = stat.EntityId,
+                            dataId = 0,
+                            characterName = asBuilding != null ? asBuilding.CreatorName : string.Empty,
+                            level = stat is HarvestableEntity h ? h.SpawnLevel : 1,
+                            position = stat.EntityTransform.position,
+                            yaw = stat.EntityTransform.eulerAngles.y,
+                            fullRotation = stat.EntityTransform.eulerAngles,
+                            movementState = (byte)((asBuilding != null && asBuilding.IsLocked ? 1 : 0) | (asBuilding is DoorEntity door && door.IsOpen ? 2 : 0)),
+                            currentHp = stat.CurrentHp,
+                            maxHp = stat.MaxHp,
+                        };
+                        built = true;
+                    }
+                    _bandClients[i].SendGhostSnapshot(msg);
                 }
+            }
 
-                // Anything streamed last tick but not now has left the band (or this cell, or died): tell the neighbour.
-                for (int k = 0; k < _tmpIds.Count; ++k)
+            // Anything streamed last tick but not now has left the band (or this cell, or died): tell the neighbour.
+            for (int i = 0; i < s_neighbourOffsets.Length; ++i)
+            {
+                if ((liveMask & (1 << i)) == 0)
+                    continue;
+                HashSet<string> streamed = _bandStreamed[i];
+                foreach (string id in _bandPrevious[i])
                 {
-                    if (!streamed.Contains(_tmpIds[k]))
-                        client.SendGhostRemove(_tmpIds[k]);
+                    if (!streamed.Contains(id))
+                        _bandClients[i].SendGhostRemove(id);
                 }
+                _bandClients[i] = null; _bandStreamed[i] = null; _bandPrevious[i] = null;
             }
         }
 
@@ -1103,15 +1221,16 @@ namespace MultiplayerARPG.MMO.Mesh
         private void ReleaseBorrowedMonsters(string homeZone, string reason)
         {
             _tmpIds.Clear();
-            foreach (KeyValuePair<string, BaseCharacterEntity> kv in _ownedByMeshId)
+            List<OwnedEntry<BaseCharacterEntity>> owned = _ownedCharacters.Entries;
+            for (int i = 0; i < owned.Count; ++i)
             {
-                MeshIdentity id = kv.Value != null ? MeshIdentity.Get(kv.Value) : null;
-                if (id != null && string.Equals(id.HomeZoneId, homeZone) && kv.Value is BaseMonsterCharacterEntity)
-                    _tmpIds.Add(kv.Key);
+                MeshIdentity id = owned[i].entity != null ? MeshIdentity.Get(owned[i].entity) : null;
+                if (id != null && string.Equals(id.HomeZoneId, homeZone) && owned[i].entity is BaseMonsterCharacterEntity)
+                    _tmpIds.Add(owned[i].meshId);
             }
             for (int i = 0; i < _tmpIds.Count; ++i)
             {
-                if (!_ownedByMeshId.TryGetValue(_tmpIds[i], out BaseCharacterEntity monster) || monster == null)
+                if (!_ownedCharacters.TryGet(_tmpIds[i], out BaseCharacterEntity monster))
                     continue;
                 if (_borrowedKillHooks.TryGetValue(_tmpIds[i], out CharacterEntityKilledDelegate hook))
                 {
@@ -1589,9 +1708,7 @@ namespace MultiplayerARPG.MMO.Mesh
 
         internal void OnGhostRemove(string meshId)
         {
-            if (_ghostDrops.ContainsKey(meshId))
-                DestroyGhostDrop(meshId, "neighbour removed");
-            else if (_ghostStatics.ContainsKey(meshId))
+            if (_ghostStatics.ContainsKey(meshId))
                 DestroyGhostStatic(meshId, "neighbour removed");
             else
                 DestroyGhost(meshId, "neighbour removed");
@@ -1668,11 +1785,9 @@ namespace MultiplayerARPG.MMO.Mesh
         public float staticSnapshotInterval = 1f;
         private float _nextStaticSnapshot;
 
-        private sealed class GhostStatic { public DamageableEntity entity; public float lastSeen; public ReceiveDamageDelegate hitHook; }
+        /// <summary>A puppet of a neighbour's entity that never moves: harvestable, building or item drop (kind tells which).</summary>
+        private sealed class GhostStatic { public BaseGameEntity entity; public GhostKind kind; public float lastSeen; public ReceiveDamageDelegate hitHook; }
         private readonly Dictionary<string, GhostStatic> _ghostStatics = new Dictionary<string, GhostStatic>();
-        private readonly List<DamageableEntity> _ownedStatics = new List<DamageableEntity>();
-        private readonly HashSet<DamageableEntity> _ownedStaticSet = new HashSet<DamageableEntity>();
-        private readonly Dictionary<string, DamageableEntity> _ownedStaticsByMeshId = new Dictionary<string, DamageableEntity>();
 
         /// <summary>
         /// Harvestable prefabs of every spawn area in the map scene, including the areas outside our zone that the mesh
@@ -1724,17 +1839,15 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             else
                 id = EnsureBirthMeshId(entity, entity.ObjectId);
-            _ownedStaticsByMeshId[id.MeshEntityId] = entity;
-            if (_ownedStaticSet.Add(entity))
-                _ownedStatics.Add(entity);
+            _ownedStatics.Add(entity, id.MeshEntityId, BandMaskOf(entity.EntityTransform.position));
         }
 
         private void OnGhostStaticSnapshot(long connectionId, GhostSnapshotMessage msg)
         {
-            if (!_ghostStatics.TryGetValue(msg.characterId, out GhostStatic ghost) || ghost.entity == null || ghost.entity.Identity == null || ghost.entity.Identity.IsDestroyed)
+            if (!_ghostStatics.TryGetValue(msg.characterId, out GhostStatic ghost) || ghost.kind == GhostKind.ItemDrop || ghost.entity == null || ghost.entity.Identity == null || ghost.entity.Identity.IsDestroyed)
             {
                 if (ghost != null)
-                    DestroyGhostStatic(msg.characterId, "instance gone"); // its hook and table entry must not outlive it
+                    DestroyGhostStatic(msg.characterId, ghost.kind == GhostKind.ItemDrop ? "id reused" : "instance gone"); // its hook and table entry must not outlive it
                 if (_recentlyRemoved.ContainsKey(msg.characterId))
                     return;
                 DamageableEntity entity = msg.kind == GhostKind.Building ? SpawnBuildingPuppet(msg) : SpawnHarvestablePuppet(msg);
@@ -1750,7 +1863,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 ReceiveDamageDelegate hitHook = (target, position, fromPosition, instigator, damageAmounts, weapon, skill, skillLevel) =>
                     ForwardGhostStaticHit(capturedMeshId, position, fromPosition, instigator, damageAmounts, weapon, skill, skillLevel);
                 entity.onReceiveDamage += hitHook;
-                ghost = new GhostStatic { entity = entity, hitHook = hitHook };
+                ghost = new GhostStatic { entity = entity, kind = msg.kind, hitHook = hitHook };
                 _ghostStatics[msg.characterId] = ghost;
                 if (traceHandoffTiming)
                     Logging.Log("Mesh", $"{msg.kind} ghost spawned ({msg.characterId}) from zone {id.OwnerZoneId} at {msg.position} hp={msg.currentHp}/{msg.maxHp}");
@@ -1763,8 +1876,9 @@ namespace MultiplayerARPG.MMO.Mesh
                     gid.OwnerZoneId = ownerZone;
             }
             int hp = Mathf.Max(1, msg.currentHp); // never 0 on a puppet: the owner's removal follows, not a local death
-            if (ghost.entity.CurrentHp != hp)
-                ghost.entity.CurrentHp = hp;
+            DamageableEntity puppet = ghost.entity as DamageableEntity;
+            if (puppet != null && puppet.CurrentHp != hp)
+                puppet.CurrentHp = hp;
             if (ghost.entity is BuildingEntity puppetBuilding && puppetBuilding.IsLocked != ((msg.movementState & 1) != 0))
                 puppetBuilding.IsLocked = (msg.movementState & 1) != 0;
             // A door puppet mirrors the owner's door; the kit's open/close command still runs locally on a puppet
@@ -1844,24 +1958,25 @@ namespace MultiplayerARPG.MMO.Mesh
                 _recentlyRemoved[meshId] = Time.unscaledTime; // a snapshot that overtook the removal must not resurrect it
             if (ghost.entity != null)
             {
-                if (ghost.hitHook != null)
-                    ghost.entity.onReceiveDamage -= ghost.hitHook;
+                if (ghost.hitHook != null && ghost.entity is DamageableEntity damageable)
+                    damageable.onReceiveDamage -= ghost.hitHook;
                 ResetMeshIdentity(ghost.entity);
                 if (ghost.entity.Identity != null && !ghost.entity.Identity.IsDestroyed)
                     ghost.entity.NetworkDestroy();
             }
             if (traceHandoffTiming)
-                Logging.Log("Mesh", $"Harvestable ghost destroyed ({meshId}) reason={reason}");
+                Logging.Log("Mesh", $"{ghost.kind} ghost destroyed ({meshId}) reason={reason}");
         }
 
         private void ExpireGhostStatics()
         {
             if (_ghostStatics.Count == 0)
                 return;
-            float stale = Mathf.Max(ghostStaleSeconds, staticSnapshotInterval * 3f + 1f);
+            float slowStale = Mathf.Max(ghostStaleSeconds, staticSnapshotInterval * 3f + 1f); // statics are refreshed on the slow tick
             _tmpIds.Clear();
             foreach (KeyValuePair<string, GhostStatic> kv in _ghostStatics)
             {
+                float stale = kv.Value.kind == GhostKind.ItemDrop ? ghostStaleSeconds : slowStale;
                 if (kv.Value.entity == null || kv.Value.entity.Identity == null || kv.Value.entity.Identity.IsDestroyed || Time.unscaledTime - kv.Value.lastSeen > stale)
                     _tmpIds.Add(kv.Key);
             }
@@ -1871,7 +1986,7 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private void ForwardGhostStaticHit(string targetMeshId, HitBoxPosition position, Vector3 fromPosition, EntityInfo instigator, Dictionary<DamageElement, MinMaxFloat> damageAmounts, CharacterItem weapon, BaseSkill skill, int skillLevel)
         {
-            if (!forwardGhostHits || !_ghostStatics.TryGetValue(targetMeshId, out GhostStatic ghost) || ghost.entity == null)
+            if (!forwardGhostHits || !_ghostStatics.TryGetValue(targetMeshId, out GhostStatic ghost) || ghost.entity == null || ghost.kind == GhostKind.ItemDrop)
                 return;
             MeshIdentity id = MeshIdentity.Get(ghost.entity);
             if (id == null || string.IsNullOrEmpty(id.OwnerZoneId) || !_linkClients.TryGetValue(id.OwnerZoneId, out MeshLinkClient link))
@@ -1886,18 +2001,15 @@ namespace MultiplayerARPG.MMO.Mesh
         // A pickup on the puppet is forwarded to the owner, which validates against the requester's ghost, takes the
         // items off the real drop and sends them to the requester's cell, where they enter the real character's bag.
 
-        private sealed class GhostDrop { public ItemDropEntity entity; public float lastSeen; }
-        private readonly Dictionary<string, GhostDrop> _ghostDrops = new Dictionary<string, GhostDrop>();
-        private readonly List<ItemDropEntity> _ownedDrops = new List<ItemDropEntity>();
-        private readonly Dictionary<string, ItemDropEntity> _ownedDropsByMeshId = new Dictionary<string, ItemDropEntity>();
+        // Drop puppets share the statics table (_ghostStatics, kind ItemDrop): same lifetime rules, one expiry pass.
         private static readonly string[] s_ghostLooters = { "mesh-ghost-drop" }; // a looter id nobody has: the kit path never loots a puppet
 
         private void OnGhostDropSnapshot(long connectionId, GhostSnapshotMessage msg)
         {
-            if (!_ghostDrops.TryGetValue(msg.characterId, out GhostDrop ghost) || ghost.entity == null || ghost.entity.Identity.IsDestroyed)
+            if (!_ghostStatics.TryGetValue(msg.characterId, out GhostStatic ghost) || ghost.kind != GhostKind.ItemDrop || ghost.entity == null || ghost.entity.Identity == null || ghost.entity.Identity.IsDestroyed)
             {
                 if (ghost != null)
-                    DestroyGhostDrop(msg.characterId, "instance gone");
+                    DestroyGhostStatic(msg.characterId, ghost.kind != GhostKind.ItemDrop ? "id reused" : "instance gone");
                 if (_recentlyRemoved.ContainsKey(msg.characterId))
                     return;
                 if (!GameInstance.ItemDropEntities.TryGetValue(msg.entityId, out ItemDropEntity prefab) || prefab == null)
@@ -1918,8 +2030,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 id.MeshEntityId = msg.characterId;
                 id.IsGhost = true;
                 id.OwnerZoneId = _neighbourZoneByConnection.TryGetValue(connectionId, out string z) ? z : "?";
-                ghost = new GhostDrop { entity = entity };
-                _ghostDrops[msg.characterId] = ghost;
+                ghost = new GhostStatic { entity = entity, kind = GhostKind.ItemDrop };
+                _ghostStatics[msg.characterId] = ghost;
                 if (traceHandoffTiming)
                     Logging.Log("Mesh", $"Drop ghost spawned ({msg.characterId}) from zone {id.OwnerZoneId} at {msg.position}: item {msg.dataId} x{msg.currentHp}");
             }
@@ -1930,35 +2042,6 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (gid != null && gid.OwnerZoneId != ownerZone)
                     gid.OwnerZoneId = ownerZone;
             }
-        }
-
-        private void DestroyGhostDrop(string meshId, string reason)
-        {
-            if (!_ghostDrops.TryGetValue(meshId, out GhostDrop ghost))
-                return;
-            _ghostDrops.Remove(meshId);
-            _recentlyRemoved[meshId] = Time.unscaledTime;
-            if (ghost.entity != null && ghost.entity.Identity != null && !ghost.entity.Identity.IsDestroyed)
-            {
-                if (traceHandoffTiming)
-                    Logging.Log("Mesh", $"Drop ghost destroyed ({meshId}) reason={reason}");
-                ResetMeshIdentity(ghost.entity);
-                ghost.entity.NetworkDestroy();
-            }
-        }
-
-        private void ExpireGhostDrops()
-        {
-            if (_ghostDrops.Count == 0)
-                return;
-            _tmpIds.Clear();
-            foreach (KeyValuePair<string, GhostDrop> kv in _ghostDrops)
-            {
-                if (kv.Value.entity == null || Time.unscaledTime - kv.Value.lastSeen > ghostStaleSeconds)
-                    _tmpIds.Add(kv.Key);
-            }
-            for (int i = 0; i < _tmpIds.Count; ++i)
-                DestroyGhostDrop(_tmpIds[i], "stale");
         }
 
         /// <summary>A player here tried to loot a puppet drop: ask the owner.</summary>
@@ -1987,7 +2070,7 @@ namespace MultiplayerARPG.MMO.Mesh
             ushort messageKey = (ushort)UITextKeys.NONE;
             CharacterItem[] items = null;
             RewardGivenType givenType = RewardGivenType.None;
-            if (!_ownedDropsByMeshId.TryGetValue(msg.dropMeshId, out ItemDropEntity drop) || drop == null || drop.Identity == null || drop.Identity.IsDestroyed || drop.DropItems.Count == 0)
+            if (!_ownedDrops.TryGet(msg.dropMeshId, out ItemDropEntity drop) || drop == null || drop.Identity == null || drop.Identity.IsDestroyed || drop.DropItems.Count == 0)
             {
                 messageKey = (ushort)UITextKeys.UI_ERROR_INVALID_DATA;
             }
@@ -2071,9 +2154,9 @@ namespace MultiplayerARPG.MMO.Mesh
             if (!handoffMonsters || !enableServerBoundaryHandoff || !ghostMonsters)
                 return;
             _monsterHandoffCandidates.Clear();
-            for (int i = 0; i < _ownedCandidates.Count; ++i)
+            for (int i = 0; i < _ownedCharacters.Count; ++i)
             {
-                BaseMonsterCharacterEntity monster = _ownedCandidates[i] as BaseMonsterCharacterEntity;
+                BaseMonsterCharacterEntity monster = _ownedCharacters.Entries[i].entity as BaseMonsterCharacterEntity;
                 if (monster == null || monster.IsDead() || monster.IsSummoned)
                     continue;
                 Vector3 pos = monster.EntityTransform.position;
@@ -2288,7 +2371,7 @@ namespace MultiplayerARPG.MMO.Mesh
         private void OnBorrowedMonsterKilled(string meshId, string homeZone)
         {
             _borrowedKillHooks.Remove(meshId);
-            if (_ownedByMeshId.TryGetValue(meshId, out BaseCharacterEntity dead))
+            if (_ownedCharacters.TryGet(meshId, out BaseCharacterEntity dead))
                 UntrackOwned(dead);
             if (!_linkClients.TryGetValue(homeZone, out MeshLinkClient link) || !link.IsConnected)
             {
@@ -2381,13 +2464,13 @@ namespace MultiplayerARPG.MMO.Mesh
             if (!IsServer)
                 return;
             BaseCharacterEntity target = null;
-            if (_ownedByMeshId.TryGetValue(msg.targetMeshId, out BaseCharacterEntity owned) && owned != null)
+            if (_ownedCharacters.TryGet(msg.targetMeshId, out BaseCharacterEntity owned) && owned != null)
                 target = owned;
             else if (ServerUserHandlers.TryGetPlayerCharacterById(msg.targetMeshId, out IPlayerCharacterData data) && data is BaseCharacterEntity ce)
                 target = ce;
             if (target == null)
             {
-                if (_ownedStaticsByMeshId.TryGetValue(msg.targetMeshId, out DamageableEntity stat) && stat != null && stat.CurrentHp > 0)
+                if (_ownedStatics.TryGet(msg.targetMeshId, out DamageableEntity stat) && stat != null && stat.CurrentHp > 0)
                     ApplyGhostHitToStatic(stat, msg);
                 return;
             }

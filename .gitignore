@@ -42,3 +42,6 @@ sysinfo.txt
 
 # Unity performance-testing package artefacts written at build time
 Assets/Resources/PerformanceTestRun*
+
+# python bytecode from the regression harness
+__pycache__/

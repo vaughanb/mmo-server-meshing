@@ -113,7 +113,7 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (string.IsNullOrEmpty(meshId))
                 return null;
-            if (_ownedByMeshId.TryGetValue(meshId, out BaseCharacterEntity owned) && owned != null)
+            if (_ownedCharacters.TryGet(meshId, out BaseCharacterEntity owned) && owned != null)
                 return owned;
             if (ServerUserHandlers.TryGetPlayerCharacterById(meshId, out IPlayerCharacterData data) && data is BasePlayerCharacterEntity player)
                 return player;
