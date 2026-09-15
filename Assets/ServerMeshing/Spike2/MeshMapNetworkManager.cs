@@ -53,8 +53,8 @@ namespace MultiplayerARPG.MMO.Mesh
         public float entityDataWaitSeconds = 1f;
 
         [Header("Server Meshing — zone handoff (server side)")]
-        [Tooltip("Zone grid definition. Each zone is served by a map server whose channelId == zoneId.")]
-        public ServerMeshTestConfig meshConfig;
+        [Tooltip("World registry: every meshed map's cut into cells and their placement in the world. A cell is served by the map server whose channelId is the cell id.")]
+        public MeshWorldRegistry world;
 
         [Tooltip("Run the per-tick boundary check on the server and hand players off to the neighbouring zone's map server.")]
         public bool enableServerBoundaryHandoff = true;
@@ -70,10 +70,24 @@ namespace MultiplayerARPG.MMO.Mesh
 
         public bool IsMigrating { get; private set; }
 
-        /// <summary>Zone grid coordinate this map server owns (resolved from -zoneX/-zoneY args or from ChannelId == zoneId).</summary>
-        public Vector2Int OwnZoneCoord { get; private set; } = new Vector2Int(-1, -1);
+        /// <summary>The cell this map server serves (from -zoneId/-zoneX/-zoneY args or from ChannelId == cell id, resolved against the world registry).</summary>
+        public MeshCell OwnCell { get; private set; }
         public string OwnZoneId { get; private set; } = string.Empty;
-        public bool HasOwnZone => OwnZoneCoord.x >= 0 && OwnZoneCoord.y >= 0;
+        public bool HasOwnZone => OwnCell != null;
+
+        private string _mapIdFromArgs;
+        /// <summary>The kit map this server serves: the loaded map info, or the -mapName argument before the scene is up.</summary>
+        public string OwnMapId
+        {
+            get
+            {
+                if (CurrentMapInfo != null && !string.IsNullOrEmpty(CurrentMapInfo.Id))
+                    return CurrentMapInfo.Id;
+                if (_mapIdFromArgs == null)
+                    _mapIdFromArgs = ConfigReader.ReadArgs(System.Environment.GetCommandLineArgs(), ProcessArguments.ARG_MAP_NAME, out string fromArgs, string.Empty) ? fromArgs : string.Empty;
+                return _mapIdFromArgs;
+            }
+        }
 
         private bool _prevLoadOfflineScene;
         private ClientMigrationController _migration;
@@ -372,7 +386,7 @@ namespace MultiplayerARPG.MMO.Mesh
             base.OnStartServer();
             _meshPeers.Clear();
             _handoffsInProgress.Clear();
-            OwnZoneCoord = new Vector2Int(-1, -1);
+            OwnCell = null;
             OwnZoneId = string.Empty;
             TryResolveOwnZone();
             // Test rig toggle: MESH_NO_MONSTER_HANDOFF=1 in the environment keeps monsters with their spawn cell even
@@ -431,38 +445,41 @@ namespace MultiplayerARPG.MMO.Mesh
         }
 
         /// <summary>
-        /// Resolve which zone this server owns: explicit -zoneX/-zoneY args (ServerMeshZoneBootstrap) win,
-        /// otherwise the zone whose zoneId equals this server's ChannelId (the launch convention).
+        /// Resolve which cell this server serves: an explicit -zoneId (or -zoneX/-zoneY) argument wins, otherwise the
+        /// cell of this server's map whose id equals its ChannelId (the map-spawner convention). Needs the map name,
+        /// which is known from the -mapName argument before the scene loads.
         /// </summary>
         private bool TryResolveOwnZone()
         {
             if (HasOwnZone)
                 return true;
-            if (meshConfig == null)
+            if (world == null)
+                return false;
+            string mapId = OwnMapId;
+            if (string.IsNullOrEmpty(mapId) || !world.HasLayout(mapId))
                 return false;
 
+            MeshCell cell = null;
+            string how = string.Empty;
             ServerMeshZoneBootstrap bootstrap = ServerMeshZoneBootstrap.Instance;
             if (bootstrap != null && bootstrap.HasZoneAssignment)
             {
-                OwnZoneCoord = bootstrap.AssignedZoneCoord;
-                ServerMeshTestConfig.ZoneDefinition z = meshConfig.GetZone(OwnZoneCoord);
-                OwnZoneId = z != null ? z.zoneId : bootstrap.AssignedZoneId;
-                Logging.Log("Mesh", $"Own zone from args: {OwnZoneId} {OwnZoneCoord}");
-                return true;
+                cell = !string.IsNullOrEmpty(bootstrap.AssignedZoneId) ? world.GetCell(mapId, bootstrap.AssignedZoneId) : null;
+                if (cell == null)
+                    cell = world.CellAtGrid(mapId, bootstrap.AssignedZoneCoord.x, bootstrap.AssignedZoneCoord.y);
+                how = "args";
             }
-
-            if (!string.IsNullOrEmpty(ChannelId))
+            if (cell == null && !string.IsNullOrEmpty(ChannelId))
             {
-                ServerMeshTestConfig.ZoneDefinition z = meshConfig.GetZoneById(ChannelId);
-                if (z != null)
-                {
-                    OwnZoneCoord = new Vector2Int(z.gridX, z.gridY);
-                    OwnZoneId = z.zoneId;
-                    Logging.Log("Mesh", $"Own zone from channel id: {OwnZoneId} {OwnZoneCoord}");
-                    return true;
-                }
+                cell = world.GetCell(mapId, ChannelId);
+                how = "channel id";
             }
-            return false;
+            if (cell == null)
+                return false;
+            OwnCell = cell;
+            OwnZoneId = cell.id;
+            Logging.Log("Mesh", $"Own cell from {how}: {cell.id} of map {mapId}, grid ({cell.gridX},{cell.gridY}), world x [{cell.worldMinX:0}, {cell.worldMaxX:0}) z [{cell.worldMinZ:0}, {cell.worldMaxZ:0}), {cell.neighbours.Count} neighbours");
+            return true;
         }
 
         protected override void Update()
@@ -529,7 +546,7 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>DESIGN.md §11 trigger #1 — walked crossings are just movement, so we poll.</summary>
         private void MeshBoundaryTick()
         {
-            if (!enableServerBoundaryHandoff || meshConfig == null)
+            if (!enableServerBoundaryHandoff || world == null)
                 return;
             if (Time.unscaledTime < _nextBoundaryCheck)
                 return;
@@ -554,11 +571,10 @@ namespace MultiplayerARPG.MMO.Mesh
                 }
                 Vector3 pos = entity.EntityTransform.position;
                 TrackVelocity(entity.Id, pos, now);
-                Vector2Int coord = meshConfig.WorldToZoneCoord(pos);
-                if (coord == OwnZoneCoord)
+                if (world.OwnerOf(OwnCell, pos) == OwnCell)
                     continue;
                 // Hysteresis: only flip once clearly past the edge, so loitering on the line doesn't thrash.
-                if (meshConfig.IsNearBoundary(pos, handoffHysteresis))
+                if (-OwnCell.DistanceToEdge(pos) < handoffHysteresis)
                     continue;
                 _handoffCandidates.Add(entity);
             }
@@ -566,7 +582,7 @@ namespace MultiplayerARPG.MMO.Mesh
             for (int i = 0; i < _handoffCandidates.Count; ++i)
             {
                 BasePlayerCharacterEntity entity = _handoffCandidates[i];
-                MeshHandoff(entity, meshConfig.WorldToZoneCoord(entity.EntityTransform.position)).Forget();
+                MeshHandoff(entity, world.OwnerOf(OwnCell, entity.EntityTransform.position)).Forget();
             }
             _handoffCandidates.Clear();
         }
@@ -577,17 +593,13 @@ namespace MultiplayerARPG.MMO.Mesh
         /// reconnect. The neighbour loads the character from the DB at the saved position (same logical
         /// map, same world frame in this rig), so the player continues where it crossed.
         /// </summary>
-        private async UniTaskVoid MeshHandoff(BasePlayerCharacterEntity entity, Vector2Int toZone)
+        private async UniTaskVoid MeshHandoff(BasePlayerCharacterEntity entity, MeshCell zone)
         {
-            ServerMeshTestConfig.ZoneDefinition zone = meshConfig.GetZone(toZone);
-            if (zone == null)
-            {
-                WarnThrottled($"No zone definition for {toZone}; player {entity.CharacterName} stays on {OwnZoneId}.");
+            if (zone == null || zone == OwnCell)
                 return;
-            }
 
-            string mapName = CurrentMapInfo != null ? CurrentMapInfo.Id : string.Empty;
-            string key = PeerInfoExtensions.GetPeerInfoKey(zone.zoneId, mapName);
+            string mapName = zone.mapId; // the destination's map: this logical map today, a neighbouring one once continents touch
+            string key = PeerInfoExtensions.GetPeerInfoKey(zone.id, mapName);
             if (!_meshPeers.TryGetValue(key, out CentralServerPeerInfo peer))
             {
                 WarnThrottled($"No map server registered for zone peer key '{key}' ({_meshPeers.Count} known); player {entity.CharacterName} stays on {OwnZoneId}.");
@@ -597,11 +609,11 @@ namespace MultiplayerARPG.MMO.Mesh
             long connectionId = entity.ConnectionId;
             if (!ServerUserHandlers.TryGetPlayerCharacter(connectionId, out _))
                 return;
-            if (!IsNeighbourLinked(zone.zoneId))
+            if (!IsNeighbourLinked(zone.id))
             {
                 // The cluster still lists the peer but our link to it is down: the notice and the ack could not be
                 // delivered and the client might be warped to a dead cell. Stay, retry after the backoff.
-                WarnThrottled($"Mesh link to zone {zone.zoneId} is down; player {entity.CharacterName} stays on {OwnZoneId} (retry in {handoffRetrySeconds:0.#} s).");
+                WarnThrottled($"Mesh link to zone {zone.id} is down; player {entity.CharacterName} stays on {OwnZoneId} (retry in {handoffRetrySeconds:0.#} s).");
                 _handoffRetryAfter[entity.Id] = Time.unscaledTime + handoffRetrySeconds;
                 return;
             }
@@ -618,7 +630,7 @@ namespace MultiplayerARPG.MMO.Mesh
             velocity.y = 0f;
             Vector3 savePosition = position + velocity * Mathf.Max(0f, handoffLeadSeconds);
             _velocities.Remove(characterId);
-            Logging.Log("Mesh", $"Handoff START {entity.CharacterName} ({characterId}) zone {OwnZoneId}->{zone.zoneId} pos={position} vel={velocity} save={savePosition} -> {peer.networkAddress}:{peer.networkPort}");
+            Logging.Log("Mesh", $"Handoff START {entity.CharacterName} ({characterId}) zone {OwnZoneId}->{zone.id} pos={position} vel={velocity} save={savePosition} -> {peer.networkAddress}:{peer.networkPort}");
 
             try
             {
@@ -627,7 +639,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 // is unregistered and destroyed within milliseconds anyway.
                 // The destination keeps its ghost of this character until the real one registers there (no blink for
                 // its observers): make sure neither the unregister nor the next snapshot tick sends it a GhostRemove.
-                GhostingOnPlayerHandoffStart(characterId, zone.zoneId);
+                GhostingOnPlayerHandoffStart(characterId, zone.id);
                 UnregisterPlayerCharacter(connectionId);
                 DataUpdater.PlayerCharacterDataSaved(characterId);
                 bool saved = false;
@@ -643,7 +655,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 {
                     // The destination would load a stale row (or the client is gone): abort, keep the character here,
                     // re-register it so the kit keeps saving it, and let the boundary tick retry after a short backoff.
-                    Logging.LogWarning("Mesh", $"Handoff ABORTED {entity?.CharacterName} -> zone {zone.zoneId}: saved={saved}; character stays on {OwnZoneId}");
+                    Logging.LogWarning("Mesh", $"Handoff ABORTED {entity?.CharacterName} -> zone {zone.id}: saved={saved}; character stays on {OwnZoneId}");
                     if (entity != null && entity.Identity != null && !entity.Identity.IsDestroyed && ContainsConnectionId(connectionId))
                         RegisterPlayerCharacter(connectionId, entity);
                     _handoffRetryAfter[characterId] = Time.unscaledTime + handoffRetrySeconds;
@@ -658,9 +670,9 @@ namespace MultiplayerARPG.MMO.Mesh
 
                 // Tell the neighbour who is coming so it can spawn without re-awaiting relates data.
                 if (ServerUserHandlers.TryGetUserId(connectionId, out string userId))
-                    SendHandoffNotice(zone.zoneId, characterId, userId);
+                    SendHandoffNotice(zone.id, characterId, userId);
                 else
-                    SendHandoffNotice(zone.zoneId, characterId, entity.UserId);
+                    SendHandoffNotice(zone.id, characterId, entity.UserId);
 
                 MMOWarpMessage message = new MMOWarpMessage
                 {
@@ -671,9 +683,9 @@ namespace MultiplayerARPG.MMO.Mesh
                 // After the warp packet (ordered): the entity becomes a server-owned puppet that survives the client's
                 // disconnect; observers on this cell keep seeing it, now steered by the neighbour's snapshots.
                 if (demotePlayerOnHandoff && entity != null)
-                    DemotePlayerToGhost(entity, zone.zoneId);
-                RegisterPendingHandoffAck(characterId, entity.CharacterName, zone.zoneId, startTime);
-                Logging.Log("Mesh", $"Handoff SENT {entity.CharacterName} -> zone {zone.zoneId} saved={saved} serverSide={sw.ElapsedMilliseconds}ms demoted={demotePlayerOnHandoff}");
+                    DemotePlayerToGhost(entity, zone.id);
+                RegisterPendingHandoffAck(characterId, entity.CharacterName, zone.id, startTime);
+                Logging.Log("Mesh", $"Handoff SENT {entity.CharacterName} -> zone {zone.id} saved={saved} serverSide={sw.ElapsedMilliseconds}ms demoted={demotePlayerOnHandoff}");
             }
             catch (System.Exception ex)
             {

@@ -22,7 +22,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         private const int DefaultBaseMapPort = 7770;
         private const string DefaultMapName = "ServerMeshTestMap";
 
-        [SerializeField] private ServerMeshTestConfig meshConfig;
+        [SerializeField] private MeshWorldRegistry world;
         [SerializeField] private string executablePath = "";
         [SerializeField] private string centralAddress = "127.0.0.1";
         [SerializeField] private int centralPort = DefaultCentralPort;
@@ -55,13 +55,13 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 if (File.Exists(candidate))
                     executablePath = candidate;
             }
-            if (meshConfig == null)
+            if (world == null)
             {
-                string[] guids = AssetDatabase.FindAssets("t:ServerMeshTestConfig");
+                string[] guids = AssetDatabase.FindAssets("t:MeshWorldRegistry");
                 if (guids.Length > 0)
                 {
                     string path = AssetDatabase.GUIDToAssetPath(guids[0]);
-                    meshConfig = AssetDatabase.LoadAssetAtPath<ServerMeshTestConfig>(path);
+                    world = AssetDatabase.LoadAssetAtPath<MeshWorldRegistry>(path);
                 }
             }
         }
@@ -72,8 +72,8 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             EditorGUILayout.LabelField("Server Mesh Test Cluster", EditorStyles.boldLabel);
             EditorGUILayout.Space(4);
 
-            meshConfig = (ServerMeshTestConfig)EditorGUILayout.ObjectField(
-                "Mesh Config", meshConfig, typeof(ServerMeshTestConfig), false);
+            world = (MeshWorldRegistry)EditorGUILayout.ObjectField(
+                "World Registry", world, typeof(MeshWorldRegistry), false);
 
             EditorGUILayout.Space(8);
             EditorGUILayout.LabelField("Executable", EditorStyles.boldLabel);
@@ -112,15 +112,15 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             EditorGUILayout.Space(12);
 
             // Zone summary
-            if (meshConfig != null && meshConfig.zones != null)
+            if (world != null && world.CellsOf(mapName).Count > 0)
             {
-                EditorGUILayout.LabelField($"Zones: {meshConfig.zones.Length}", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField($"Cells of {mapName}: {world.CellsOf(mapName).Count}", EditorStyles.miniLabel);
                 EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-                for (int i = 0; i < meshConfig.zones.Length; i++)
+                for (int i = 0; i < world.CellsOf(mapName).Count; i++)
                 {
-                    var zone = meshConfig.zones[i];
+                    MeshCell zone = world.CellsOf(mapName)[i];
                     EditorGUILayout.LabelField(
-                        $"  [{zone.gridX},{zone.gridY}] {zone.zoneId} → port {zone.serverPort}",
+                        $"  [{zone.gridX},{zone.gridY}] {zone.id} → port {(DefaultBaseMapPort + i)}",
                         EditorStyles.miniLabel);
                 }
                 EditorGUILayout.EndVertical();
@@ -176,9 +176,9 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 return;
             }
 
-            if (meshConfig == null || meshConfig.zones == null || meshConfig.zones.Length == 0)
+            if (world == null || world.CellsOf(mapName).Count == 0)
             {
-                EditorUtility.DisplayDialog("Error", "ServerMeshTestConfig is missing or has no zones defined.", "OK");
+                EditorUtility.DisplayDialog("Error", "The world registry is missing or has no cells for this map.", "OK");
                 return;
             }
 
@@ -211,10 +211,10 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             // Launch map servers (filtered by zonesToLaunchCsv; empty = all)
             HashSet<string> zoneFilter = ParseZonesToLaunch();
             int launchedZones = 0;
-            for (int i = 0; i < meshConfig.zones.Length; i++)
+            for (int i = 0; i < world.CellsOf(mapName).Count; i++)
             {
-                var zone = meshConfig.zones[i];
-                if (zoneFilter.Count > 0 && !zoneFilter.Contains(zone.zoneId))
+                MeshCell zone = world.CellsOf(mapName)[i];
+                if (zoneFilter.Count > 0 && !zoneFilter.Contains(zone.id))
                     continue;
 
                 string zoneArgs = $"{batchArg} -startMapServer";
@@ -224,18 +224,18 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 // Each zone needs a UNIQUE cluster key. The cluster registers map servers by
                 // {channelId}_{mapName} and rejects duplicates (UI_ERROR_MAP_EXISTED), so we give
                 // each zone a distinct channelId (the zoneId). Without this, only one zone registers.
-                zoneArgs += $" -channelId {zone.zoneId}";
-                zoneArgs += $" -mapPort {zone.serverPort}";
-                zoneArgs += $" -publicAddress {zone.serverAddress}";
+                zoneArgs += $" -channelId {zone.id}";
+                zoneArgs += $" -mapPort {(DefaultBaseMapPort + i)}";
+                zoneArgs += $" -publicAddress 127.0.0.1";
                 // Map servers talk to the database server directly; without these they fall back to
                 // serverConfig.json's databaseManagerPort and fail to connect when it differs.
                 zoneArgs += $" -databaseManagerAddress {centralAddress}";
                 zoneArgs += $" -databaseManagerPort {databasePort}";
                 zoneArgs += $" -zoneX {zone.gridX}";
                 zoneArgs += $" -zoneY {zone.gridY}";
-                zoneArgs += $" -zoneId {zone.zoneId}";
+                zoneArgs += $" -zoneId {zone.id}";
 
-                LaunchProcess($"Zone_{zone.zoneId}", zoneArgs.Trim());
+                LaunchProcess($"Zone_{zone.id}", zoneArgs.Trim());
                 launchedZones++;
             }
 
@@ -318,14 +318,14 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         /// </summary>
         private void GenerateConfigJson()
         {
-            if (meshConfig == null || meshConfig.zones == null)
+            if (world == null || world.CellsOf(mapName).Count == 0)
             {
-                EditorUtility.DisplayDialog("Error", "ServerMeshTestConfig is not assigned.", "OK");
+                EditorUtility.DisplayDialog("Error", "The world registry is not assigned (or has no layout for this map).", "OK");
                 return;
             }
 
             var spawnMaps = new List<string>();
-            for (int i = 0; i < meshConfig.zones.Length; i++)
+            for (int i = 0; i < world.CellsOf(mapName).Count; i++)
             {
                 spawnMaps.Add(mapName);
             }
@@ -348,11 +348,11 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
 
             // Also generate the per-zone launch commands as comments
             string fullContent = json + "\n\n// Per-zone launch commands:\n";
-            for (int i = 0; i < meshConfig.zones.Length; i++)
+            for (int i = 0; i < world.CellsOf(mapName).Count; i++)
             {
-                var zone = meshConfig.zones[i];
-                fullContent += $"// Zone {zone.zoneId}: -startMapServer -mapName {mapName} " +
-                               $"-mapPort {zone.serverPort} -zoneX {zone.gridX} -zoneY {zone.gridY} -zoneId {zone.zoneId}\n";
+                MeshCell zone = world.CellsOf(mapName)[i];
+                fullContent += $"// Zone {zone.id}: -startMapServer -mapName {mapName} " +
+                               $"-mapPort {(DefaultBaseMapPort + i)} -zoneX {zone.gridX} -zoneY {zone.gridY} -zoneId {zone.id}\n";
             }
 
             string outputPath = Path.Combine(Application.dataPath, "ServerMeshing", "TestMap", "Config", "serverConfig_meshtest.json");
@@ -372,9 +372,9 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         /// </summary>
         private void CopyLaunchCommands()
         {
-            if (meshConfig == null || meshConfig.zones == null)
+            if (world == null || world.CellsOf(mapName).Count == 0)
             {
-                EditorUtility.DisplayDialog("Error", "ServerMeshTestConfig is not assigned.", "OK");
+                EditorUtility.DisplayDialog("Error", "The world registry is not assigned (or has no layout for this map).", "OK");
                 return;
             }
 
@@ -398,19 +398,19 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             HashSet<string> zoneFilter = ParseZonesToLaunch();
             int launchedZones = 0;
             lines.Add("REM Map Servers");
-            for (int i = 0; i < meshConfig.zones.Length; i++)
+            for (int i = 0; i < world.CellsOf(mapName).Count; i++)
             {
-                var zone = meshConfig.zones[i];
-                if (zoneFilter.Count > 0 && !zoneFilter.Contains(zone.zoneId))
+                MeshCell zone = world.CellsOf(mapName)[i];
+                if (zoneFilter.Count > 0 && !zoneFilter.Contains(zone.id))
                     continue;
 
                 // -channelId gives each zone a unique cluster key ({channelId}_{mapName}).
-                lines.Add($"start \"Zone_{zone.zoneId}\" \"{exe}\" {batchArg}-startMapServer " +
+                lines.Add($"start \"Zone_{zone.id}\" \"{exe}\" {batchArg}-startMapServer " +
                           $"-centralAddress {centralAddress} -clusterPort {clusterPort} " +
-                          $"-mapName {mapName} -channelId {zone.zoneId} -mapPort {zone.serverPort} " +
-                          $"-publicAddress {zone.serverAddress} " +
+                          $"-mapName {mapName} -channelId {zone.id} -mapPort {(DefaultBaseMapPort + i)} " +
+                          $"-publicAddress 127.0.0.1 " +
                           $"-databaseManagerAddress {centralAddress} -databaseManagerPort {databasePort} " +
-                          $"-zoneX {zone.gridX} -zoneY {zone.gridY} -zoneId {zone.zoneId}");
+                          $"-zoneX {zone.gridX} -zoneY {zone.gridY} -zoneId {zone.id}");
                 launchedZones++;
             }
 

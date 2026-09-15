@@ -191,7 +191,7 @@ MonoBehaviour:
   useMaskedMigration: 1
   migrationReadyTimeoutSeconds: 10
   migrationMaskFadeSeconds: 0.25
-  meshConfig: {fileID: 11400000, guid: 3ba02accc70083f4caa93655b2ecfd10, type: 2}
+  world: {fileID: 11400000, guid: 7a2b3c4d5e6f47a8b9c0d1e2f3a4b5c6, type: 2}
   enableServerBoundaryHandoff: 1
   boundaryCheckInterval: 0.1
   handoffHysteresis: 1

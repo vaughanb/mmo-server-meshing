@@ -115,18 +115,25 @@ def db_reset(tester_pos, bot_pos, tester_party=1, bot_party=1, building_items=No
     if drop_yield:
         c.execute("delete from characteritem where characterId=? and inventoryType=0 and dataId=?", (TESTER, ITEM_YIELD))
     if building_items:
-        c.execute("delete from characteritem where characterId=? and inventoryType=0 and dataId=?", (TESTER, ITEM_BUILDING))
-        cols = [r[1] for r in c.execute("pragma table_info(characteritem)")]
-        row = c.execute("select * from characteritem where characterId=? and inventoryType=0 and dataId=?", (TESTER, ITEM_SKILL)).fetchone()
+        # The kit stores the bag as one row per slot (empty slots have dataId 0). Reuse the building item's own row,
+        # else an empty slot, else clone any occupied row (the skill item used to be the template; the fighter consumes it).
+        row = c.execute("select idx from characteritem where characterId=? and inventoryType=0 and dataId=?", (TESTER, ITEM_BUILDING)).fetchone()
         if row is None:
-            raise RuntimeError("the skill item row used as a template is missing from MeshTester2's bag")
-        d = dict(zip(cols, row))
-        d.update(dataId=ITEM_BUILDING, amount=building_items, level=1)
-        if "id" in d:
-            d["id"] = uuid.uuid4().hex
-        used = {r[0] for r in c.execute("select idx from characteritem where characterId=? and inventoryType=0", (TESTER,))}
-        d["idx"] = next(i for i in range(1, 60) if i not in used)
-        c.execute("insert into characteritem (%s) values (%s)" % (",".join(d.keys()), ",".join("?" * len(d))), list(d.values()))
+            row = c.execute("select idx from characteritem where characterId=? and inventoryType=0 and dataId=0 order by idx", (TESTER,)).fetchone()
+        if row is not None:
+            c.execute("update characteritem set dataId=?, amount=?, level=1, equipSlotIndex=0, durability=0, exp=0, ammo=0 where characterId=? and inventoryType=0 and idx=?", (ITEM_BUILDING, building_items, TESTER, row[0]))
+        else:
+            cols = [r[1] for r in c.execute("pragma table_info(characteritem)")]
+            template = c.execute("select * from characteritem where characterId=? and inventoryType=0 and dataId<>0", (TESTER,)).fetchone()
+            if template is None:
+                raise RuntimeError("no bag row to use as a template for the building item")
+            d = dict(zip(cols, template))
+            d.update(dataId=ITEM_BUILDING, amount=building_items, level=1)
+            if "id" in d:
+                d["id"] = uuid.uuid4().hex
+            used = {r[0] for r in c.execute("select idx from characteritem where characterId=? and inventoryType=0", (TESTER,))}
+            d["idx"] = next(i for i in range(1, 200) if i not in used)
+            c.execute("insert into characteritem (%s) values (%s)" % (",".join(d.keys()), ",".join("?" * len(d))), list(d.values()))
     if clear_buildings:
         c.execute("delete from buildings where channel='E'")
     c.commit()

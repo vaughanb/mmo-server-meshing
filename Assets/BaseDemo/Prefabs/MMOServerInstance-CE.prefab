@@ -294,7 +294,7 @@ MonoBehaviour:
   m_GameObject: {fileID: 1773992668051484}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 711495ce9cd78fc4a8d39358f3e0d2ab, type: 3}
+  m_Script: {fileID: 11500000, guid: 8b3c4d5e6f7a48b9c0d1e2f3a4b5c6d7, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
   currentLogLevel: 2
@@ -324,6 +324,7 @@ MonoBehaviour:
   spawningAllocateMaps: []
   isOverrideExePath: 1
   overrideExePath: D:/Game Development/mmo-server-meshing/Build/Server/kit-ce-project.exe
+  world: {fileID: 11400000, guid: 7a2b3c4d5e6f47a8b9c0d1e2f3a4b5c6, type: 2}
   editorNotSpawnInBatchMode: 0
 --- !u!1 &1834896065226248
 GameObject:
@@ -454,8 +455,7 @@ MonoBehaviour:
   maxCharacterNameLength: 16
   requireEmail: 0
   requireEmailVerification: 0
-  meshConfig: {fileID: 11400000, guid: 3ba02accc70083f4caa93655b2ecfd10, type: 2}
-  meshMapName: ServerMeshTestMap
+  world: {fileID: 11400000, guid: 7a2b3c4d5e6f47a8b9c0d1e2f3a4b5c6, type: 2}
   routeByPosition: 1
 --- !u!1 &9006753358993515565
 GameObject:

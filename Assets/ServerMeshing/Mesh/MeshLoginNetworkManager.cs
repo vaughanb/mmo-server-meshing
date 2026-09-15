@@ -16,10 +16,8 @@ namespace MultiplayerARPG.MMO.Mesh
     public class MeshLoginNetworkManager : LoginNetworkManager
     {
         [Header("Server Meshing — routing by position")]
-        [Tooltip("Zone grid of the meshed map (zoneId == channelId). Characters on this map are routed to the cell that owns their saved position.")]
-        public ServerMeshTestConfig meshConfig;
-        [Tooltip("The logical map the grid covers; characters on any other map keep the kit's channel routing.")]
-        public string meshMapName = "ServerMeshTestMap";
+        [Tooltip("World registry: characters on a map that has a layout are routed to the cell that owns their saved position; other maps keep the kit's channel routing.")]
+        public MeshWorldRegistry world;
         [Tooltip("Route selected characters by their saved position instead of the client's chosen channel.")]
         public bool routeByPosition = true;
 
@@ -33,7 +31,7 @@ namespace MultiplayerARPG.MMO.Mesh
 
         protected async UniTaskVoid HandleRequestSelectCharacterByPosition(RequestHandlerData requestHandler, RequestSelectCharacterMessage request, RequestProceedResultDelegate<ResponseSelectCharacterMessage> result)
         {
-            if (routeByPosition && meshConfig != null && !string.IsNullOrEmpty(request.characterId) && _userPeers.TryGetValue(requestHandler.ConnectionId, out CentralUserPeerInfo userPeerInfo))
+            if (routeByPosition && world != null && !string.IsNullOrEmpty(request.characterId) && _userPeers.TryGetValue(requestHandler.ConnectionId, out CentralUserPeerInfo userPeerInfo))
             {
                 DatabaseApiResult<CharacterResp> characterResp = await DatabaseClient.GetCharacterAsync(new GetCharacterReq()
                 {
@@ -42,7 +40,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     ForceClearCache = true,
                 });
                 PlayerCharacterData character = characterResp.IsSuccess ? characterResp.Response.CharacterData : null;
-                if (character != null && string.Equals(character.CurrentMapName, meshMapName))
+                if (character != null && world.HasLayout(character.CurrentMapName))
                 {
                     string routed = RouteByPosition(character);
                     if (!string.IsNullOrEmpty(routed) && !string.Equals(routed, request.channelId))
@@ -55,33 +53,33 @@ namespace MultiplayerARPG.MMO.Mesh
             HandleRequestSelectCharacter(requestHandler, request, result).Forget();
         }
 
-        /// <summary>The cell whose zone owns the position when it is up, else the nearest live cell of the map, else null (the kit's routing decides).</summary>
+        /// <summary>The cell owning the position when its server is up, else the nearest live cell of the map, else null (the kit's routing decides).</summary>
         private string RouteByPosition(PlayerCharacterData character)
         {
-            Vector2Int coord = meshConfig.WorldToZoneCoord(character.CurrentPosition);
-            ServerMeshTestConfig.ZoneDefinition zone = meshConfig.GetZone(coord);
-            if (zone != null && ClusterServer.MapServerPeersByKey.ContainsKey(PeerInfoExtensions.GetPeerInfoKey(zone.zoneId, meshMapName)))
-                return zone.zoneId;
-            // That cell is down (or the position lies outside the grid): the nearest live cell serves the character where
-            // it stands and hands it off by position as soon as the right cell is back.
+            string mapId = character.CurrentMapName;
+            MeshCell cell = world.CellAt(mapId, character.CurrentPosition);
+            if (cell != null && ClusterServer.MapServerPeersByKey.ContainsKey(PeerInfoExtensions.GetPeerInfoKey(cell.id, mapId)))
+                return cell.id;
+            // That cell is down: the nearest live cell of the map serves the character where it stands and hands it off
+            // by position as soon as the right cell is back.
             string best = null;
             int bestDistance = int.MaxValue;
             foreach (CentralServerPeerInfo peer in ClusterServer.MapServerPeersByKey.Values)
             {
-                if (peer.peerType != CentralServerPeerType.MapServer || !string.Equals(peer.refId, meshMapName))
+                if (peer.peerType != CentralServerPeerType.MapServer || !string.Equals(peer.refId, mapId))
                     continue;
-                ServerMeshTestConfig.ZoneDefinition candidate = meshConfig.GetZoneById(peer.channelId);
+                MeshCell candidate = world.GetCell(mapId, peer.channelId);
                 if (candidate == null)
                     continue;
-                int distance = Mathf.Max(Mathf.Abs(candidate.gridX - coord.x), Mathf.Abs(candidate.gridY - coord.y));
+                int distance = cell != null ? Mathf.Max(Mathf.Abs(candidate.gridX - cell.gridX), Mathf.Abs(candidate.gridY - cell.gridY)) : 0;
                 if (distance < bestDistance)
                 {
                     bestDistance = distance;
-                    best = candidate.zoneId;
+                    best = candidate.id;
                 }
             }
             if (best != null)
-                Logging.LogWarning("Mesh", $"Login routing: no server for zone {(zone != null ? zone.zoneId : coord.ToString())} ({character.CharacterName} at {(Vector3)character.CurrentPosition}); the nearest live cell {best} serves it");
+                Logging.LogWarning("Mesh", $"Login routing: no server for cell {(cell != null ? cell.id : "?")} of {mapId} ({character.CharacterName} at {(Vector3)character.CurrentPosition}); the nearest live cell {best} serves it");
             return best;
         }
 #endif

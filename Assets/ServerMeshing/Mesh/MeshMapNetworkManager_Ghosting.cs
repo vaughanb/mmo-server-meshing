@@ -223,22 +223,22 @@ namespace MultiplayerARPG.MMO.Mesh
         /// </summary>
         public override void OnServerOnlineSceneLoaded()
         {
-            if (ownSpawnAreasByZone && meshConfig != null && TryResolveOwnZone())
+            if (ownSpawnAreasByZone && world != null && TryResolveOwnZone())
             {
                 int kept = 0, disabled = 0;
                 foreach (MonsterSpawnArea area in FindObjectsByType<MonsterSpawnArea>(FindObjectsSortMode.None))
                 {
-                    if (meshConfig.WorldToZoneCoord(area.transform.position) == OwnZoneCoord) { kept++; continue; }
+                    if (world.OwnerOf(OwnCell, area.transform.position) == OwnCell) { kept++; continue; }
                     area.gameObject.SetActive(false); disabled++;
                 }
                 foreach (HarvestableSpawnArea area in FindObjectsByType<HarvestableSpawnArea>(FindObjectsSortMode.None))
                 {
-                    if (meshConfig.WorldToZoneCoord(area.transform.position) == OwnZoneCoord) { kept++; continue; }
+                    if (world.OwnerOf(OwnCell, area.transform.position) == OwnCell) { kept++; continue; }
                     area.gameObject.SetActive(false); disabled++;
                 }
                 foreach (ItemDropSpawnArea area in FindObjectsByType<ItemDropSpawnArea>(FindObjectsSortMode.None))
                 {
-                    if (meshConfig.WorldToZoneCoord(area.transform.position) == OwnZoneCoord) { kept++; continue; }
+                    if (world.OwnerOf(OwnCell, area.transform.position) == OwnCell) { kept++; continue; }
                     area.gameObject.SetActive(false); disabled++;
                 }
                 Logging.Log("Mesh", $"Spawn areas owned by zone {OwnZoneId}: {kept} kept, {disabled} disabled (outside zone)");
@@ -252,7 +252,7 @@ namespace MultiplayerARPG.MMO.Mesh
             foreach (MeshLinkClient client in _linkClients.Values)
                 client.Update();
 
-            if (!enableBorderGhosting || meshConfig == null || !HasOwnZone)
+            if (!enableBorderGhosting || world == null || !HasOwnZone)
                 return;
 
             if (Time.unscaledTime >= _nextLinkCheck)
@@ -288,62 +288,42 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private void EnsureNeighbourLinks()
         {
-            string mapName = CurrentMapInfo != null ? CurrentMapInfo.Id : string.Empty;
-            if (linkAllZones && meshConfig.zones != null)
+            if (linkAllZones)
             {
-                for (int i = 0; i < meshConfig.zones.Length; ++i)
-                    EnsureLink(meshConfig.zones[i], mapName);
-                return;
+                IReadOnlyList<MeshCell> cells = world.CellsOf(OwnCell.mapId);
+                for (int i = 0; i < cells.Count; ++i)
+                    EnsureLink(cells[i]);
             }
-            for (int i = 0; i < s_neighbourOffsets.Length; ++i)
-                EnsureLink(meshConfig.GetZone(NeighbourCoord(i)), mapName);
+            List<MeshCell> neighbours = OwnCell.neighbours; // includes cells of another map placed next to ours
+            for (int i = 0; i < neighbours.Count; ++i)
+                EnsureLink(neighbours[i]);
         }
 
-        private void EnsureLink(ServerMeshTestConfig.ZoneDefinition zone, string mapName)
+        private void EnsureLink(MeshCell cell)
         {
-            if (zone == null || string.Equals(zone.zoneId, OwnZoneId))
+            if (cell == null || cell == OwnCell)
                 return;
-            if (!_meshPeers.TryGetValue(PeerInfoExtensions.GetPeerInfoKey(zone.zoneId, mapName), out CentralServerPeerInfo peer))
+            if (!_meshPeers.TryGetValue(PeerInfoExtensions.GetPeerInfoKey(cell.id, cell.mapId), out CentralServerPeerInfo peer))
                 return;
-            if (!_linkClients.TryGetValue(zone.zoneId, out MeshLinkClient client))
+            if (!_linkClients.TryGetValue(cell.id, out MeshLinkClient client))
             {
-                client = new MeshLinkClient(this, zone.zoneId);
-                _linkClients[zone.zoneId] = client;
+                client = new MeshLinkClient(this, cell.id);
+                _linkClients[cell.id] = client;
             }
             if (!client.IsConnected && Time.unscaledTime - client.LastConnectAttempt > 5f)
                 client.Connect(peer.networkAddress, peer.networkPort + meshLinkPortOffset);
         }
 
-        // 8-neighbourhood: the four edge neighbours plus the diagonals. Near a corner an entity is within the band of a
-        // diagonal cell too (whose players can be a few metres away across the corner), so it is streamed there as well.
-        private static readonly Vector2Int[] s_neighbourOffsets =
-        {
-            Vector2Int.right, Vector2Int.left, Vector2Int.up, Vector2Int.down,
-            new Vector2Int(1, 1), new Vector2Int(-1, 1), new Vector2Int(1, -1), new Vector2Int(-1, -1),
-        };
-        private Vector2Int NeighbourCoord(int i) => OwnZoneCoord + s_neighbourOffsets[i];
+        // Neighbours: every cell whose rectangle touches ours (edge or corner) in the world registry, from this map or
+        // from another map placed next to it. Near a corner an entity is within the band of a diagonal cell too (whose
+        // players can be a few metres away across the corner), so it is streamed there as well.
+        private int NeighbourCount => OwnCell != null ? OwnCell.neighbours.Count : 0;
 
-        /// <summary>Distance from a world position to the edge shared with the neighbour at offset index i.</summary>
         /// <summary>
-        /// Distance from a position to the boundary shared with neighbour i: the edge line for an edge neighbour, and
+        /// Distance from a position (our frame) to neighbour i's rectangle: the shared line for an edge neighbour, and
         /// for a diagonal neighbour the Chebyshev distance to the shared corner (within the band of both edges).
         /// </summary>
-        private float DistanceToSharedEdge(Vector3 pos, int i)
-        {
-            Vector2Int off = s_neighbourOffsets[i];
-            float dx = 0f, dz = 0f;
-            if (off.x != 0)
-            {
-                float lineX = meshConfig.gridOrigin.x + Mathf.Max(OwnZoneCoord.x, OwnZoneCoord.x + off.x) * meshConfig.zoneSize;
-                dx = Mathf.Abs(pos.x - lineX);
-            }
-            if (off.y != 0)
-            {
-                float lineZ = meshConfig.gridOrigin.z + Mathf.Max(OwnZoneCoord.y, OwnZoneCoord.y + off.y) * meshConfig.zoneSize;
-                dz = Mathf.Abs(pos.z - lineZ);
-            }
-            return Mathf.Max(dx, dz);
-        }
+        private float DistanceToSharedEdge(Vector3 pos, int i) => OwnCell.DistanceTo(OwnCell.neighbours[i], pos);
 
         // ---- Owned registry ----
         // Owned = registered players + server-owned monsters (and item drops) that are not ghosts. Kept by events:
@@ -354,7 +334,7 @@ namespace MultiplayerARPG.MMO.Mesh
 
         /// <summary>
         /// One owned entity with what the band scan needs cached: its mesh id (no component lookup per tick) and, for
-        /// entities that never move, which neighbours' bands it stands in (bit i = s_neighbourOffsets[i]; 0 = interior).
+        /// entities that never move, which neighbours' bands it stands in (bit i = OwnCell.neighbours[i]; 0 = interior).
         /// </summary>
         private sealed class OwnedEntry<T> where T : BaseGameEntity
         {
@@ -459,13 +439,13 @@ namespace MultiplayerARPG.MMO.Mesh
             return entity.Identity == null || entity.Identity.IsDestroyed || MeshIdentity.IsGhostEntity(entity);
         }
 
-        /// <summary>Which neighbours' bands a position lies in (bit i = s_neighbourOffsets[i]); cached for entities that never move.</summary>
+        /// <summary>Which neighbours' bands a position lies in (bit i = OwnCell.neighbours[i]); cached for entities that never move.</summary>
         private int BandMaskOf(Vector3 pos)
         {
-            if (meshConfig == null)
+            if (world == null || OwnCell == null)
                 return 0;
             int mask = 0;
-            for (int i = 0; i < s_neighbourOffsets.Length; ++i)
+            for (int i = 0; i < NeighbourCount; ++i)
             {
                 if (DistanceToSharedEdge(pos, i) <= ghostBandWidth)
                     mask |= 1 << i;
@@ -628,10 +608,10 @@ namespace MultiplayerARPG.MMO.Mesh
             }
         }
 
-        // Per-tick view of the neighbours a snapshot can go to (index = s_neighbourOffsets index).
-        private readonly MeshLinkClient[] _bandClients = new MeshLinkClient[8];
-        private readonly HashSet<string>[] _bandStreamed = new HashSet<string>[8];
-        private readonly HashSet<string>[] _bandPrevious = new HashSet<string>[8];
+        // Per-tick view of the neighbours a snapshot can go to (index = OwnCell.neighbours index).
+        private readonly MeshLinkClient[] _bandClients = new MeshLinkClient[MeshWorldRegistry.MaxNeighbours];
+        private readonly HashSet<string>[] _bandStreamed = new HashSet<string>[MeshWorldRegistry.MaxNeighbours];
+        private readonly HashSet<string>[] _bandPrevious = new HashSet<string>[MeshWorldRegistry.MaxNeighbours];
 
         private void SendBandSnapshots()
         {
@@ -642,19 +622,19 @@ namespace MultiplayerARPG.MMO.Mesh
             // Resolve the live neighbours once. Each keeps two id sets swapped every tick: what it was sent last tick
             // and what it gets now; a neighbour whose link is down keeps its last set until the link is back.
             int liveMask = 0;
-            for (int i = 0; i < s_neighbourOffsets.Length; ++i)
+            for (int i = 0; i < NeighbourCount; ++i)
             {
                 _bandClients[i] = null;
-                ServerMeshTestConfig.ZoneDefinition zone = meshConfig.GetZone(NeighbourCoord(i));
-                if (zone == null || !_linkClients.TryGetValue(zone.zoneId, out MeshLinkClient client) || !client.IsConnected)
+                MeshCell zone = OwnCell.neighbours[i];
+                if (!_linkClients.TryGetValue(zone.id, out MeshLinkClient client) || !client.IsConnected)
                     continue;
-                if (!_streamedToZone.TryGetValue(zone.zoneId, out HashSet<string> previous) || previous == null)
+                if (!_streamedToZone.TryGetValue(zone.id, out HashSet<string> previous) || previous == null)
                     previous = new HashSet<string>();
-                if (!_streamedPrevToZone.TryGetValue(zone.zoneId, out HashSet<string> streamed) || streamed == null)
+                if (!_streamedPrevToZone.TryGetValue(zone.id, out HashSet<string> streamed) || streamed == null)
                     streamed = new HashSet<string>();
                 streamed.Clear();
-                _streamedToZone[zone.zoneId] = streamed;
-                _streamedPrevToZone[zone.zoneId] = previous;
+                _streamedToZone[zone.id] = streamed;
+                _streamedPrevToZone[zone.id] = previous;
                 _bandClients[i] = client;
                 _bandStreamed[i] = streamed;
                 _bandPrevious[i] = previous;
@@ -678,7 +658,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     continue;
                 Vector3 pos = entity.EntityTransform.position;
                 int mask = 0;
-                for (int i = 0; i < s_neighbourOffsets.Length; ++i)
+                for (int i = 0; i < NeighbourCount; ++i)
                 {
                     if ((liveMask & (1 << i)) != 0 && DistanceToSharedEdge(pos, i) <= ghostBandWidth)
                         mask |= 1 << i;
@@ -717,7 +697,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     currentHp = entity.CurrentHp,
                     maxHp = entity.MaxHp,
                 };
-                for (int i = 0; i < s_neighbourOffsets.Length; ++i)
+                for (int i = 0; i < NeighbourCount; ++i)
                 {
                     if ((mask & (1 << i)) == 0)
                         continue;
@@ -752,7 +732,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     currentHp = item.amount,
                     maxHp = item.amount,
                 };
-                for (int i = 0; i < s_neighbourOffsets.Length; ++i)
+                for (int i = 0; i < NeighbourCount; ++i)
                 {
                     if ((mask & (1 << i)) == 0)
                         continue;
@@ -774,7 +754,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (stat == null || stat.Identity == null || stat.Identity.IsDestroyed || stat.CurrentHp <= 0)
                     continue;
                 bool built = false;
-                for (int i = 0; i < s_neighbourOffsets.Length; ++i)
+                for (int i = 0; i < NeighbourCount; ++i)
                 {
                     if ((mask & (1 << i)) == 0)
                         continue;
@@ -806,7 +786,7 @@ namespace MultiplayerARPG.MMO.Mesh
             }
 
             // Anything streamed last tick but not now has left the band (or this cell, or died): tell the neighbour.
-            for (int i = 0; i < s_neighbourOffsets.Length; ++i)
+            for (int i = 0; i < NeighbourCount; ++i)
             {
                 if ((liveMask & (1 << i)) == 0)
                     continue;
@@ -1736,7 +1716,7 @@ namespace MultiplayerARPG.MMO.Mesh
 
         public override async UniTask<BuildingEntity> CreateBuildingEntity(BuildingSaveData saveData, bool initialize)
         {
-            if (!initialize && ghostBuildings && meshConfig != null && TryResolveOwnZone())
+            if (!initialize && ghostBuildings && world != null && TryResolveOwnZone())
             {
                 // A child (snapped onto a parent) belongs to its PARENT's cell whatever its position: the kit links
                 // children to parents through the owning cell's building table, and chain-destroys through it.
@@ -1752,12 +1732,9 @@ namespace MultiplayerARPG.MMO.Mesh
                 }
                 else
                 {
-                    Vector2Int coord = meshConfig.WorldToZoneCoord(saveData.Position);
-                    if (coord != OwnZoneCoord)
-                    {
-                        ServerMeshTestConfig.ZoneDefinition zone = meshConfig.GetZone(coord);
-                        targetZone = zone != null ? zone.zoneId : coord.ToString();
-                    }
+                    MeshCell owner = world.OwnerOf(OwnCell, saveData.Position);
+                    if (owner != null && owner != OwnCell)
+                        targetZone = owner.id;
                 }
                 if (!string.IsNullOrEmpty(targetZone) && !string.Equals(targetZone, OwnZoneId))
                 {
@@ -2160,9 +2137,9 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (monster == null || monster.IsDead() || monster.IsSummoned)
                     continue;
                 Vector3 pos = monster.EntityTransform.position;
-                if (meshConfig.WorldToZoneCoord(pos) == OwnZoneCoord)
+                if (world.OwnerOf(OwnCell, pos) == OwnCell)
                     continue;
-                if (meshConfig.IsNearBoundary(pos, handoffHysteresis))
+                if (-OwnCell.DistanceToEdge(pos) < handoffHysteresis)
                     continue; // same hysteresis as players: only once clearly past the line
                 _monsterHandoffCandidates.Add(monster);
             }
@@ -2174,10 +2151,10 @@ namespace MultiplayerARPG.MMO.Mesh
         private void HandoffMonster(BaseMonsterCharacterEntity monster)
         {
             Vector3 pos = monster.EntityTransform.position;
-            ServerMeshTestConfig.ZoneDefinition zone = meshConfig.GetZoneAt(pos);
-            if (zone == null || string.Equals(zone.zoneId, OwnZoneId))
+            MeshCell zone = world.OwnerOf(OwnCell, pos);
+            if (zone == null || zone == OwnCell)
                 return;
-            if (!_linkClients.TryGetValue(zone.zoneId, out MeshLinkClient link) || !link.IsConnected)
+            if (!_linkClients.TryGetValue(zone.id, out MeshLinkClient link) || !link.IsConnected)
                 return; // stays ours until the link is up
             MeshIdentity id = MeshIdentity.GetOrAdd(monster);
             if (string.IsNullOrEmpty(id.MeshEntityId))
@@ -2190,7 +2167,7 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 _lentMonsters[meshId] = new LentMonster
                 {
-                    ownerZone = zone.zoneId,
+                    ownerZone = zone.id,
                     area = monster.SpawnArea, prefab = monster.SpawnPrefab, level = monster.SpawnLevel,
                     respawnDelay = monster.DestroyRespawnDelay, spawnPosition = monster.SpawnPosition,
                 };
@@ -2198,16 +2175,16 @@ namespace MultiplayerARPG.MMO.Mesh
             string targetMeshId = string.Empty;
             if (monster.TryGetTargetEntity(out BaseCharacterEntity target) && target != null)
                 targetMeshId = MeshEntityIdOf(target);
-            if (!string.Equals(homeZone, OwnZoneId) && !string.Equals(homeZone, zone.zoneId) && _linkClients.TryGetValue(homeZone, out MeshLinkClient homeLink) && homeLink.IsConnected)
-                homeLink.SendLentMonsterOwner(meshId, zone.zoneId); // the home's respawn accounting follows the monster
+            if (!string.Equals(homeZone, OwnZoneId) && !string.Equals(homeZone, zone.id) && _linkClients.TryGetValue(homeZone, out MeshLinkClient homeLink) && homeLink.IsConnected)
+                homeLink.SendLentMonsterOwner(meshId, zone.id); // the home's respawn accounting follows the monster
             link.SendMonsterHandoff(new MonsterHandoffMessage
             {
                 meshId = meshId, entityId = monster.EntityId, dataId = monster.DataId, level = monster.Level, currentHp = monster.CurrentHp,
                 position = pos, yaw = monster.EntityTransform.eulerAngles.y, spawnPosition = monster.SpawnPosition,
                 homeZoneId = homeZone, targetMeshId = targetMeshId,
             });
-            Logging.Log("Mesh", $"Monster handoff {meshId} {OwnZoneId}->{zone.zoneId} at {pos} hp={monster.CurrentHp}/{monster.MaxHp} home={homeZone} target={targetMeshId}");
-            DemoteToGhost(monster, id, zone.zoneId);
+            Logging.Log("Mesh", $"Monster handoff {meshId} {OwnZoneId}->{zone.id} at {pos} hp={monster.CurrentHp}/{monster.MaxHp} home={homeZone} target={targetMeshId}");
+            DemoteToGhost(monster, id, zone.id);
         }
 
         /// <summary>The neighbour owns it now: keep the entity (no pop for our clients) but run it as a puppet.</summary>

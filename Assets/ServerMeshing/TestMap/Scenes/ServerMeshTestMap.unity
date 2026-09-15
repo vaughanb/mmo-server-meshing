@@ -9005,7 +9005,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a2117383ab97f4f46acbbc0ab7d4bcd0, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.MMO.Mesh.ZoneBoundaryDetector
-  config: {fileID: 11400000, guid: 3ba02accc70083f4caa93655b2ecfd10, type: 2}
+  world: {fileID: 11400000, guid: 7a2b3c4d5e6f47a8b9c0d1e2f3a4b5c6, type: 2}
   checkInterval: 0.1
   boundaryThreshold: 2
   migrationCooldown: 3
@@ -9022,7 +9022,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a2624e0edcb4e6946acf8c791f052d01, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.MMO.Mesh.ZoneDebugVisualizer
-  config: {fileID: 11400000, guid: 3ba02accc70083f4caa93655b2ecfd10, type: 2}
+  world: {fileID: 11400000, guid: 7a2b3c4d5e6f47a8b9c0d1e2f3a4b5c6, type: 2}
   lineHeight: 50
   showAtRuntime: 1
   showZoneLabels: 1
@@ -9040,7 +9040,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 220289b6e6b4b8b4db82bc3a04780b7d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.MMO.Mesh.ServerMeshZoneBootstrap
-  config: {fileID: 11400000, guid: 3ba02accc70083f4caa93655b2ecfd10, type: 2}
+  world: {fileID: 11400000, guid: 7a2b3c4d5e6f47a8b9c0d1e2f3a4b5c6, type: 2}
 --- !u!1 &1905847048
 GameObject:
   m_ObjectHideFlags: 0

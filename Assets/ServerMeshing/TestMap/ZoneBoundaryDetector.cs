@@ -4,143 +4,71 @@ using UnityEngine;
 namespace MultiplayerARPG.MMO.Mesh
 {
     /// <summary>
-    /// Monitors the local player's position and reports zone boundary crossings.
-    /// Optionally (clientDrivenMigration) triggers a client-driven masked migration to the zone's
-    /// fixed server address — a debug path only. The production trigger is the SERVER-side boundary
-    /// tick in <see cref="MeshMapNetworkManager"/>, which resolves the destination through the cluster.
+    /// Client-side observer: watches the local player's position against the world registry and reports cell
+    /// crossings (an event for debug UI and tests). The production trigger is the SERVER-side boundary tick in
+    /// <see cref="MeshMapNetworkManager"/>, which resolves the destination through the cluster.
     /// </summary>
     public class ZoneBoundaryDetector : MonoBehaviour
     {
         [Header("Configuration")]
-        [Tooltip("Reference to the grid configuration asset.")]
-        public ServerMeshTestConfig config;
+        [Tooltip("World registry (every meshed map's cells).")]
+        public MeshWorldRegistry world;
 
-        [Tooltip("How often to check boundary crossing (seconds).")]
+        [Tooltip("How often to check for a crossing (seconds).")]
         public float checkInterval = 0.1f;
 
-        [Tooltip("Hysteresis deadband (metres): a crossing only commits once the player is clear of the boundary line by this much. Prevents thrashing while straddling a boundary.")]
+        [Tooltip("Hysteresis deadband (metres): a crossing only counts once the player is clear of the line by this much.")]
         public float boundaryThreshold = 2f;
 
-        [Tooltip("Minimum seconds between migrations (anti-thrash cooldown).")]
-        public float migrationCooldown = 3f;
+        /// <summary>Fired when the local player's cell changes: (from, to).</summary>
+        public event Action<MeshCell, MeshCell> OnZoneCrossing;
 
-        [Tooltip("DEBUG ONLY: let the client itself trigger a migration to the zone's fixed serverAddress:serverPort. Leave off when the server-side handoff is enabled, or both will fire.")]
-        public bool clientDrivenMigration = false;
+        /// <summary>The cell the local player was last seen in.</summary>
+        public MeshCell CurrentCell => _currentCell;
 
-        /// <summary>
-        /// Fired when a zone crossing is detected with (fromZone, toZone) coordinates.
-        /// </summary>
-        public event Action<Vector2Int, Vector2Int> OnZoneCrossing;
-
-        /// <summary>Zone coordinate the local player is currently in (as last observed).</summary>
-        public Vector2Int CurrentZoneCoord => _currentZoneCoord;
-
-        private Vector2Int _currentZoneCoord;
+        private MeshCell _currentCell;
         private float _nextCheckTime;
-        private bool _initialized;
-        private float _lastMigrationTime = -999f;
 
         private void Start()
         {
-            if (config == null)
+            if (world == null)
             {
-                Debug.LogError($"[ZoneBoundaryDetector] No ServerMeshTestConfig assigned.", this);
+                Debug.LogError("[ZoneBoundaryDetector] No world registry assigned.", this);
                 enabled = false;
-                return;
             }
-
-            // Attempt initial zone coord from player position
-            TryInitialize();
         }
 
         private void Update()
         {
             if (Time.time < _nextCheckTime)
                 return;
-
             _nextCheckTime = Time.time + checkInterval;
 
             BasePlayerCharacterEntity player = GameInstance.PlayingCharacterEntity;
             if (player == null)
             {
-                // Player despawns during a migration; re-initialise from the re-spawned entity.
-                _initialized = false;
+                _currentCell = null; // despawns during a hop; re-initialised from the new entity
                 return;
             }
-
-            if (!_initialized)
+            string mapId = BaseGameNetworkManager.CurrentMapInfo != null ? BaseGameNetworkManager.CurrentMapInfo.Id : null;
+            Vector3 pos = player.EntityTransform.position;
+            if (_currentCell == null || !string.Equals(_currentCell.mapId, mapId))
             {
-                TryInitialize();
+                _currentCell = world.CellAt(mapId, pos);
+                if (_currentCell != null)
+                    Debug.Log($"[ZoneBoundaryDetector] Initialized in cell {_currentCell.id}");
                 return;
             }
-
-            Vector3 playerPos = player.EntityTransform.position;
-            Vector2Int newZoneCoord = config.WorldToZoneCoord(playerPos);
-
-            if (newZoneCoord == _currentZoneCoord)
+            MeshCell owner = world.OwnerOf(_currentCell, pos);
+            if (owner == null || owner == _currentCell)
                 return;
-
-            // Hysteresis: don't commit while the player is still within the boundary deadband
-            // (straddling the line) — wait until they are clearly inside the new zone.
-            if (config.IsNearBoundary(playerPos, boundaryThreshold))
+            // Hysteresis: don't commit while the player is still within the deadband of the line.
+            if (-_currentCell.DistanceToEdge(pos) < boundaryThreshold)
                 return;
-
-            // Cooldown: avoid rapid re-migration right after a crossing.
-            if (Time.time - _lastMigrationTime < migrationCooldown)
-                return;
-
-            _lastMigrationTime = Time.time;
-            HandleZoneCrossing(_currentZoneCoord, newZoneCoord);
-        }
-
-        /// <summary>
-        /// Handles zone crossing by invoking the event and (optionally) triggering masked migration.
-        /// </summary>
-        private void HandleZoneCrossing(Vector2Int fromCoord, Vector2Int toCoord)
-        {
-            Debug.Log($"[ZoneBoundaryDetector] Zone crossing detected: ({fromCoord.x},{fromCoord.y}) -> ({toCoord.x},{toCoord.y})");
-
-            Vector2Int previousCoord = _currentZoneCoord;
-            _currentZoneCoord = toCoord;
-
-            OnZoneCrossing?.Invoke(previousCoord, toCoord);
-
-            if (!clientDrivenMigration)
-                return;
-
-            // Look up destination zone's server info
-            ServerMeshTestConfig.ZoneDefinition destZone = config.GetZone(toCoord);
-            if (destZone == null)
-            {
-                Debug.LogWarning($"[ZoneBoundaryDetector] No zone definition found for coord ({toCoord.x},{toCoord.y})");
-                return;
-            }
-
-            // Trigger migration through MeshMapNetworkManager
-            MeshMapNetworkManager meshManager = FindAnyObjectByType<MeshMapNetworkManager>();
-            if (meshManager != null)
-            {
-                Debug.Log($"[ZoneBoundaryDetector] Initiating migration to {destZone.serverAddress}:{destZone.serverPort} (zone: {destZone.zoneId})");
-                meshManager.DebugMigrate(destZone.serverAddress, destZone.serverPort);
-            }
-            else
-            {
-                Debug.LogWarning("[ZoneBoundaryDetector] MeshMapNetworkManager not found. Cannot trigger migration.");
-            }
-        }
-
-        /// <summary>
-        /// Attempts to initialize the current zone from the player's position.
-        /// </summary>
-        private void TryInitialize()
-        {
-            BasePlayerCharacterEntity player = GameInstance.PlayingCharacterEntity;
-            if (player == null)
-                return;
-
-            _currentZoneCoord = config.WorldToZoneCoord(player.EntityTransform.position);
-            _initialized = true;
-            Debug.Log($"[ZoneBoundaryDetector] Initialized in zone ({_currentZoneCoord.x},{_currentZoneCoord.y})");
+            MeshCell previous = _currentCell;
+            _currentCell = owner;
+            Debug.Log($"[ZoneBoundaryDetector] Cell crossing: {previous.id} -> {owner.id}");
+            OnZoneCrossing?.Invoke(previous, owner);
         }
     }
 }
