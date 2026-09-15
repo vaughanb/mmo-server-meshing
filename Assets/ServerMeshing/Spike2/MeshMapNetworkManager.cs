@@ -391,6 +391,8 @@ namespace MultiplayerARPG.MMO.Mesh
             OwnCell = null;
             OwnZoneId = string.Empty;
             TryResolveOwnZone();
+            if (ServerTransport is LiteNetLibManager.LiteNetLibTransport statsTransport && statsTransport.Server != null)
+                statsTransport.Server.EnableStatistics = true; // client traffic in the Mesh stats line
             // Test rig toggle: MESH_NO_MONSTER_HANDOFF=1 in the environment keeps monsters with their spawn cell even
             // when they chase across the line (forces cross-edge kills so loot ghosting can be exercised).
             if (System.Environment.GetEnvironmentVariable("MESH_NO_MONSTER_HANDOFF") == "1")
@@ -496,6 +498,7 @@ namespace MultiplayerARPG.MMO.Mesh
             base.Update();
             if (IsServer)
             {
+                SampleFrame();
                 MeshBoundaryTick();
                 GhostingUpdate();
             }

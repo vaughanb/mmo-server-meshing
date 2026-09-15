@@ -97,6 +97,20 @@ namespace MultiplayerARPG.MMO.Mesh
         // Steering error: distance between a moving ghost and the owner's freshly reported position, sampled at every snapshot.
         private int _steerSamples; private float _steerErrorSum, _steerErrorMax;
         private float _nextSteerLagLog;
+        // Process cost, for the capacity test: frame time (the server targets a fixed rate; the mean rising above the
+        // budget is saturation), CPU time of the process and its working set, and the game transport's client traffic.
+        private int _frameSamples; private float _frameSum, _frameMax;
+        private System.TimeSpan _lastCpuTime; private float _lastCpuWall;
+        private long _statsClientBytesOut, _statsClientPacketsOut;
+
+        /// <summary>Test rig: an entity spawned by the load generator is owned like a registered player (streamed, banded).</summary>
+        internal void TrackSyntheticEntity(BaseCharacterEntity entity) => TrackOwned(entity);
+
+        private void SampleFrame()
+        {
+            float dt = Time.unscaledDeltaTime;
+            _frameSamples++; _frameSum += dt; if (dt > _frameMax) _frameMax = dt;
+        }
         private struct SnapshotPose { public Vector3 position; public float time; }
         private readonly Dictionary<string, SnapshotPose> _lastSnapshotPose = new Dictionary<string, SnapshotPose>();
         private readonly Dictionary<string, long> _statsLinkPrevOut = new Dictionary<string, long>();
@@ -136,9 +150,24 @@ namespace MultiplayerARPG.MMO.Mesh
             foreach (GhostStatic g in _ghostStatics.Values) { if (g.kind == GhostKind.ItemDrop) ghostDrops++; else ghostStatics++; }
             string handoffs = _statsHandoffs > 0 ? $"{_statsHandoffs} (mean {_statsHandoffSumMs / _statsHandoffs:0} ms, max {_statsHandoffMaxMs:0} ms)" : "0";
             string steer = _steerSamples > 0 ? $"{_steerSamples} samples, mean {_steerErrorSum / _steerSamples:0.00} m, max {_steerErrorMax:0.00} m" : "none";
-            Logging.Log("Mesh", $"Mesh stats: players={players} owned={_ownedCharacters.Count} drops={_ownedDrops.Count} statics={_ownedStatics.Count} ({_ownedDrops.Banded.Count}+{_ownedStatics.Banded.Count} in a band) ghosts={ghostPlayers}p/{ghostMonsters}m/{ghostDrops}d/{ghostStatics}s pendingAcks={_pendingHandoffAcks.Count} reserved={_reservedArrivals.Count} | link out {dOut:0.0} kB/s {pOut:0} pkt/s, in {dIn:0.0} kB/s {pIn:0} pkt/s | handoffs {handoffs} | fps {1f / Mathf.Max(0.0001f, Time.smoothDeltaTime):0} ghostSteer={steer}");
+            System.Diagnostics.Process process = System.Diagnostics.Process.GetCurrentProcess();
+            float wall = Time.realtimeSinceStartup;
+            float cpuPercent = _lastCpuWall > 0f && wall > _lastCpuWall ? (float)(process.TotalProcessorTime - _lastCpuTime).TotalSeconds / (wall - _lastCpuWall) * 100f : 0f;
+            _lastCpuTime = process.TotalProcessorTime; _lastCpuWall = wall;
+            string frame = _frameSamples > 0 ? $"mean {_frameSum / _frameSamples * 1000f:0.0} ms max {_frameMax * 1000f:0.0} ms" : "none";
+            long clientBytesOut = 0, clientPacketsOut = 0; int clients = 0;
+            if (ServerTransport is LiteNetLibManager.LiteNetLibTransport transport && transport.Server != null && transport.Server.Statistics != null)
+            {
+                clientBytesOut = transport.Server.Statistics.BytesSent; clientPacketsOut = transport.Server.Statistics.PacketsSent; clients = transport.Server.ConnectedPeersCount;
+            }
+            float cOut = (clientBytesOut - _statsClientBytesOut) / 1024f / meshStatsIntervalSeconds;
+            float cPkt = (clientPacketsOut - _statsClientPacketsOut) / meshStatsIntervalSeconds;
+            _statsClientBytesOut = clientBytesOut; _statsClientPacketsOut = clientPacketsOut;
+            string cost = $"frame {frame} cpu {cpuPercent:0}% mem {UnityEngine.Profiling.Profiler.GetTotalReservedMemoryLong() / (1024 * 1024)} MB clients={clients} clientOut={cOut:0.0} kB/s ({cPkt:0} pkt/s)";
+            Logging.Log("Mesh", $"Mesh stats: players={players} owned={_ownedCharacters.Count} drops={_ownedDrops.Count} statics={_ownedStatics.Count} ({_ownedDrops.Banded.Count}+{_ownedStatics.Banded.Count} in a band) ghosts={ghostPlayers}p/{ghostMonsters}m/{ghostDrops}d/{ghostStatics}s pendingAcks={_pendingHandoffAcks.Count} reserved={_reservedArrivals.Count} | link out {dOut:0.0} kB/s {pOut:0} pkt/s, in {dIn:0.0} kB/s {pIn:0} pkt/s | handoffs {handoffs} | fps {1f / Mathf.Max(0.0001f, Time.smoothDeltaTime):0} ghostSteer={steer} | {cost}");
             _statsHandoffs = 0; _statsHandoffSumMs = 0f; _statsHandoffMaxMs = 0f;
             _steerSamples = 0; _steerErrorSum = 0f; _steerErrorMax = 0f;
+            _frameSamples = 0; _frameSum = 0f; _frameMax = 0f;
         }
 
         /// <summary>

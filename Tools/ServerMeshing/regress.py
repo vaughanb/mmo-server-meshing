@@ -36,7 +36,7 @@ TESTER = "493cd2454f4949ebbf2f09748fe78af8"   # MeshTester2 (the editor client)
 BOT = "8cb502da59bf43b4a654875dc2934c11"      # meshbotChar (the headless bot)
 ITEM_BUILDING, ITEM_YIELD, ITEM_SKILL = 1802134084, 970799895, 357861288
 ITEM_BOW = -137752354      # TestBowItem-CE, equipped in both test characters' right hand since 0.30
-ENV_KEYS = ["MESH_NO_MONSTER_HANDOFF", "MESH_FAULT_DIE_ON_NOTICE", "MESH_GHOST_LEAD"]
+ENV_KEYS = ["MESH_NO_MONSTER_HANDOFF", "MESH_FAULT_DIE_ON_NOTICE", "MESH_GHOST_LEAD", "MESH_LOAD_PLAYERS", "MESH_LOAD_CELL", "MESH_LOAD_UNCAPPED"]
 EXTRA_ENV = {}   # --env KEY=VALUE from the command line, applied to every Play request of the run
 
 
