@@ -25,4 +25,13 @@ MonoBehaviour:
     - E
     - N
     - NE
+  - mapId: ServerMeshTestMap2
+    worldOrigin: {x: 400, y: 0, z: 0}
+    gridOrigin: {x: -100, y: 0, z: -100}
+    cellSize: 200
+    columns: 1
+    rows: 1
+    cellIdFormat: '{map}-{x}-{y}'
+    cellIds:
+    - C2
   touchTolerance: 0.5

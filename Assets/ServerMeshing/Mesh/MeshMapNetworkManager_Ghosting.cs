@@ -73,6 +73,7 @@ namespace MultiplayerARPG.MMO.Mesh
         private MeshLinkServer _linkServer;
         private readonly Dictionary<string, MeshLinkClient> _linkClients = new Dictionary<string, MeshLinkClient>();   // zoneId -> link
         private readonly Dictionary<long, string> _neighbourZoneByConnection = new Dictionary<long, string>();
+        private readonly Dictionary<long, Vector3> _frameOffsetByConnection = new Dictionary<long, Vector3>(); // add to a position from that neighbour to express it in our frame (zero inside a map)
         private readonly Dictionary<string, MeshGhost> _ghosts = new Dictionary<string, MeshGhost>();                  // meshEntityId -> ghost
         private readonly Dictionary<string, HashSet<string>> _streamedToZone = new Dictionary<string, HashSet<string>>();     // zoneId -> ids streamed last tick
         private readonly Dictionary<string, HashSet<string>> _streamedPrevToZone = new Dictionary<string, HashSet<string>>(); // zoneId -> the spare set swapped in each tick
@@ -202,6 +203,7 @@ namespace MultiplayerARPG.MMO.Mesh
             _streamedToZone.Clear();
             _streamedPrevToZone.Clear();
             _neighbourZoneByConnection.Clear();
+            _frameOffsetByConnection.Clear();
             _ownedCharacters.Clear();
             _ownedDrops.Clear();
             _ownedStatics.Clear();
@@ -1171,11 +1173,15 @@ namespace MultiplayerARPG.MMO.Mesh
             for (int i = 0; i < _tmpIds.Count; ++i)
             {
                 long stale = long.Parse(_tmpIds[i]);
-                _neighbourZoneByConnection.Remove(stale);
+                _neighbourZoneByConnection.Remove(stale); _frameOffsetByConnection.Remove(stale);
                 Logging.Log("Mesh", $"Neighbour zone {zoneId}: connection {stale} superseded by {connectionId}");
             }
             _neighbourZoneByConnection[connectionId] = zoneId;
-            Logging.Log("Mesh", $"Neighbour zone {zoneId} linked (conn {connectionId})");
+            // Positions on this link are in the sender's frame; a neighbour of another map has a different one.
+            MeshCell sender = world != null ? world.GetCellById(zoneId) : null;
+            Vector3 frameOffset = sender != null && OwnCell != null ? sender.OffsetTo(OwnCell) : Vector3.zero;
+            _frameOffsetByConnection[connectionId] = frameOffset;
+            Logging.Log("Mesh", $"Neighbour zone {zoneId} linked (conn {connectionId}){(frameOffset != Vector3.zero ? $", frame offset {frameOffset}" : string.Empty)}");
         }
 
         /// <summary>
@@ -1189,7 +1195,7 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (_neighbourZoneByConnection.TryGetValue(connectionId, out string zoneId))
             {
-                _neighbourZoneByConnection.Remove(connectionId);
+                _neighbourZoneByConnection.Remove(connectionId); _frameOffsetByConnection.Remove(connectionId);
                 Logging.LogWarning("Mesh", $"Neighbour zone {zoneId} link lost (conn {connectionId})");
                 ReleaseLentMonsters(zoneId, "neighbour link lost");
                 ReleaseBorrowedMonsters(zoneId, "home zone link lost");
@@ -1241,10 +1247,14 @@ namespace MultiplayerARPG.MMO.Mesh
             }
         }
 
+        /// <summary>Add to a position received on that link to express it in our frame (zero for a cell of our own map).</summary>
+        private Vector3 OffsetFrom(long connectionId) => _frameOffsetByConnection.TryGetValue(connectionId, out Vector3 offset) ? offset : Vector3.zero;
+
         internal void OnGhostSnapshot(long connectionId, GhostSnapshotMessage msg)
         {
             if (!IsServer || !enableBorderGhosting)
                 return;
+            msg.position += OffsetFrom(connectionId);
             if (msg.kind == GhostKind.ItemDrop)
             {
                 OnGhostDropSnapshot(connectionId, msg);
@@ -1754,6 +1764,7 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (!IsServer || msg.building == null)
                 return;
+            msg.building.Position = (Vector3)msg.building.Position + OffsetFrom(connectionId);
             string from = _neighbourZoneByConnection.TryGetValue(connectionId, out string z) ? z : "?";
             Logging.Log("Mesh", $"Building {msg.building.Id} placed from zone {from} by {msg.building.CreatorName} at {(Vector3)msg.building.Position}: creating here");
             CreateBuildingEntity(msg.building, false).Forget();
@@ -2258,6 +2269,9 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (!IsServer)
                 return;
+            Vector3 frameOffset = OffsetFrom(connectionId);
+            msg.position += frameOffset;
+            msg.spawnPosition += frameOffset;
             string fromZone = _neighbourZoneByConnection.TryGetValue(connectionId, out string z) ? z : "?";
             Quaternion rot = Quaternion.Euler(0f, msg.yaw, 0f);
             BaseMonsterCharacterEntity monster = null;
@@ -2440,6 +2454,7 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (!IsServer)
                 return;
+            msg.fromPosition += OffsetFrom(connectionId);
             BaseCharacterEntity target = null;
             if (_ownedCharacters.TryGet(msg.targetMeshId, out BaseCharacterEntity owned) && owned != null)
                 target = owned;

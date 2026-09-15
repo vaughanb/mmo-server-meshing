@@ -109,6 +109,7 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private List<MeshCell> _cells;
         private Dictionary<string, MeshCell> _byKey;
+        private Dictionary<string, MeshCell> _byId;
         private Dictionary<string, MeshMapLayout> _layouts;
         private Dictionary<string, List<MeshCell>> _cellsByMap;
         private static readonly List<MeshCell> s_none = new List<MeshCell>();
@@ -133,6 +134,13 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             Ensure();
             return !string.IsNullOrEmpty(mapId) && !string.IsNullOrEmpty(cellId) && _byKey.TryGetValue(Key(mapId, cellId), out MeshCell cell) ? cell : null;
+        }
+
+        /// <summary>A cell by its id alone (ids are unique across the world: they are the map servers' channel ids).</summary>
+        public MeshCell GetCellById(string cellId)
+        {
+            Ensure();
+            return !string.IsNullOrEmpty(cellId) && _byId.TryGetValue(cellId, out MeshCell cell) ? cell : null;
         }
 
         public MeshCell CellAtGrid(string mapId, int x, int y)
@@ -201,6 +209,7 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             _cells = new List<MeshCell>();
             _byKey = new Dictionary<string, MeshCell>(StringComparer.OrdinalIgnoreCase);
+            _byId = new Dictionary<string, MeshCell>(StringComparer.OrdinalIgnoreCase);
             _layouts = new Dictionary<string, MeshMapLayout>();
             _cellsByMap = new Dictionary<string, List<MeshCell>>();
             HashSet<string> ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -232,6 +241,7 @@ namespace MultiplayerARPG.MMO.Mesh
                         if (!ids.Add(cell.id))
                             Debug.LogError($"[Mesh] World registry: cell id '{cell.id}' (map {layout.mapId}) is not unique across the world; the map servers' cluster keys collide.");
                         _byKey[Key(layout.mapId, cell.id)] = cell;
+                        if (!_byId.ContainsKey(cell.id)) _byId[cell.id] = cell;
                         _cells.Add(cell);
                         cells.Add(cell);
                     }

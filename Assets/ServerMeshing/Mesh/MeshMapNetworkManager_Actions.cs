@@ -146,10 +146,26 @@ namespace MultiplayerARPG.MMO.Mesh
             });
         }
 
-        internal void OnGhostReplay(GhostReplayMessage msg)
+        private Vector3 _replayFrameOffset; // the sender's frame relative to ours, for the replay being handled
+
+        private AimPosition TranslateAim(AimPosition aim)
+        {
+            if (aim.type == AimPositionType.Position)
+                aim.position += _replayFrameOffset;
+            return aim;
+        }
+
+        private SimulateActionTriggerData TranslateTrigger(SimulateActionTriggerData data)
+        {
+            data.aimPosition = TranslateAim(data.aimPosition);
+            return data;
+        }
+
+        internal void OnGhostReplay(long connectionId, GhostReplayMessage msg)
         {
             if (!IsServer)
                 return;
+            _replayFrameOffset = OffsetFrom(connectionId);
             // Not on a puppet that is mid-promotion or dead: the kit would reject the RPC on the client anyway.
             if (!_ghosts.TryGetValue(msg.actorMeshId, out MeshGhost ghost) || ghost.entity == null || ghost.reserved || ghost.entity.IsDead())
                 return;
@@ -173,7 +189,7 @@ namespace MultiplayerARPG.MMO.Mesh
         private void HandleAttackTriggerReplay(BaseCharacterEntity puppet, uint targetObjectId, NetDataReader payload)
         {
             if (puppet.TryGetComponent(out MeshCharacterAttackComponent attack))
-                attack.ReplayTrigger(payload.Get<SimulateActionTriggerData>());
+                attack.ReplayTrigger(TranslateTrigger(payload.Get<SimulateActionTriggerData>()));
         }
 
         private void HandleSkillReplay(BaseCharacterEntity puppet, uint targetObjectId, NetDataReader payload)
@@ -185,7 +201,7 @@ namespace MultiplayerARPG.MMO.Mesh
             int dataId = payload.GetInt();
             int skillLevel = payload.GetInt();
             WeaponHandlingState weaponHandlingState = (WeaponHandlingState)payload.GetByte();
-            AimPosition aimPosition = payload.Get<AimPosition>();
+            AimPosition aimPosition = TranslateAim(payload.Get<AimPosition>());
             if (isItem)
                 skill.ReplayUseSkillItem(peerTimestamp, dataId, weaponHandlingState, targetObjectId, aimPosition);
             else
@@ -198,7 +214,7 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (!puppet.TryGetComponent(out MeshCharacterUseSkillComponent skill))
                 return;
-            SimulateActionTriggerData data = payload.Get<SimulateActionTriggerData>();
+            SimulateActionTriggerData data = TranslateTrigger(payload.Get<SimulateActionTriggerData>());
             data.targetObjectId = targetObjectId;
             skill.ReplayTrigger(data);
         }
@@ -258,7 +274,7 @@ namespace MultiplayerARPG.MMO.Mesh
         internal bool ForwardGhostAction(BaseCharacterEntity ghost, GhostActionKind kind, EntityInfo instigator, System.Action<NetDataWriter> writePayload) { return false; }
         internal void OnGhostAction(long connectionId, GhostActionMessage msg) { }
         internal void ForwardGhostReplay(BaseCharacterEntity actor, GhostReplayKind kind, uint targetObjectId, System.Action<NetDataWriter> writePayload) { }
-        internal void OnGhostReplay(GhostReplayMessage msg) { }
+        internal void OnGhostReplay(long connectionId, GhostReplayMessage msg) { }
         internal static void WriteApplyBuffPayload(NetDataWriter writer, int dataId, BuffType type, int level, CharacterItem weapon) { }
         internal static void WriteGiveItemsPayload(NetDataWriter writer, int dataId, int amount, int exp) { }
 #endif

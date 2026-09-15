@@ -521,7 +521,7 @@ namespace MultiplayerARPG.MMO.Mesh
         private void HandleGhostReplay(MessageHandlerData messageHandler)
         {
             GhostReplayMessage msg = messageHandler.ReadMessage<GhostReplayMessage>();
-            _manager.OnGhostReplay(msg);
+            _manager.OnGhostReplay(messageHandler.ConnectionId, msg);
         }
 
         private void HandleBuildingPlace(MessageHandlerData messageHandler)

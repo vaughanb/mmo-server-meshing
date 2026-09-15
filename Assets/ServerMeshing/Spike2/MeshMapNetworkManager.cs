@@ -629,8 +629,12 @@ namespace MultiplayerARPG.MMO.Mesh
             Vector3 velocity = _velocities.TryGetValue(characterId, out VelocitySample vs) ? vs.vel : Vector3.zero;
             velocity.y = 0f;
             Vector3 savePosition = position + velocity * Mathf.Max(0f, handoffLeadSeconds);
+            // The row is read by the destination, in ITS frame (the same frame inside a map; a neighbouring map's frame
+            // sits at a fixed offset, so a seam crossing is a frame change and a map change in one hop).
+            Vector3 frameOffset = OwnCell.OffsetTo(zone);
+            savePosition += frameOffset;
             _velocities.Remove(characterId);
-            Logging.Log("Mesh", $"Handoff START {entity.CharacterName} ({characterId}) zone {OwnZoneId}->{zone.id} pos={position} vel={velocity} save={savePosition} -> {peer.networkAddress}:{peer.networkPort}");
+            Logging.Log("Mesh", $"Handoff START {entity.CharacterName} ({characterId}) zone {OwnZoneId}->{zone.id} pos={position} vel={velocity} save={savePosition}{(frameOffset != Vector3.zero ? $" (frame offset {frameOffset}, map {mapName})" : string.Empty)} -> {peer.networkAddress}:{peer.networkPort}");
 
             try
             {

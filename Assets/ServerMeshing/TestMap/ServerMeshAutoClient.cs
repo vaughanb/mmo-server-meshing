@@ -40,6 +40,8 @@ namespace MultiplayerARPG.MMO.Mesh
         public const string ARG_WALK_Z = "-meshWalkZ";
         public const string ARG_MOUNT = "-meshMount";
         public const string ARG_PET = "-meshPet";
+        public const string ARG_RETURN_X = "-meshReturnX";
+        public const string ARG_STOP_ON_MIGRATION = "-meshStopOnMigration"; // a walk leg ends when a migration completes (seam tests: the frame changes with the hop)
 
 #if UNITY_EDITOR
         public const string PREF_ENABLE = "ServerMesh.AutoClient.Enabled";
@@ -75,6 +77,8 @@ namespace MultiplayerARPG.MMO.Mesh
         public bool summonPet = false;
         [Tooltip("World X to walk back to after reaching walkTargetX (zone C).")]
         public float walkReturnX = 0f;
+        [Tooltip("A walk leg ends as soon as a migration completes (for seam crossings, where the position's frame changes with the hop).")]
+        public bool stopWalkOnMigration = false;
         [Tooltip("Seconds to wait after entering the map before starting the test.")]
         public float settleSeconds = 3f;
         [Tooltip("observe mode: seconds to watch for other player entities after arriving.")]
@@ -106,6 +110,8 @@ namespace MultiplayerARPG.MMO.Mesh
             string walkZ = ReadArg(args, ARG_WALK_Z, null);
             bool mount = args.Contains(ARG_MOUNT);
             bool pet = args.Contains(ARG_PET);
+            string returnX = ReadArg(args, ARG_RETURN_X, null);
+            bool stopOnMigration = args.Contains(ARG_STOP_ON_MIGRATION);
 #if UNITY_EDITOR
             if (!enabled && EditorPrefs.GetBool(PREF_ENABLE, false))
             {
@@ -132,6 +138,8 @@ namespace MultiplayerARPG.MMO.Mesh
             if (!string.IsNullOrEmpty(walkZ) && float.TryParse(walkZ, out float wz)) c.walkTargetZ = wz;
             c.mountUp = mount;
             c.summonPet = pet;
+            c.stopWalkOnMigration = stopOnMigration;
+            if (!string.IsNullOrEmpty(returnX) && float.TryParse(returnX, out float rx)) c.walkReturnX = rx;
         }
 
         private static string ReadArg(string[] args, string key, string fallback)
@@ -1153,6 +1161,12 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (p != null)
                 {
                     Vector3 pos = p.EntityTransform.position;
+                    if (stopWalkOnMigration && ClientMigrationController.CompletedCount > seen)
+                    {
+                        Log($"Leg ended by the migration at {pos} (target x={targetX} was in the previous frame)");
+                        onDone(true);
+                        yield break;
+                    }
                     // A freshly spawned entity reports hp=0 until its sync fields arrive; only a sustained death counts.
                     if (p.IsDead())
                     {

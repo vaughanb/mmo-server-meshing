@@ -51,6 +51,7 @@ MonoBehaviour:
   mapInfos:
   - {fileID: 11400000, guid: d8d947f013595cd41a2c4322c2ffa4e7, type: 2}
   - {fileID: 11400000, guid: 6a78fa04e8d5fdc4498b7a16e552ca0d, type: 2}
+  - {fileID: 11400000, guid: 9c4d5e6f7a8b49c0d1e2f3a4b5c6d7e8, type: 2}
   quests:
   - {fileID: 11400000, guid: 7abf98861e111c2429fa016d89e760b8, type: 2}
   factions: []

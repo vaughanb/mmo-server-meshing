@@ -29,7 +29,9 @@ REQUEST = os.path.join(TEMP, "ServerMesh.PlayRequest.txt")
 STOP = os.path.join(TEMP, "ServerMesh.StopRequest.txt")
 STATUS = os.path.join(TEMP, "ServerMesh.PlayStatus.txt")
 LOGS = os.path.join(ROOT, "Logs")
-ZONES = ["C", "E", "N", "NE"]
+MAP = "ServerMeshTestMap"
+MAP2 = "ServerMeshTestMap2"   # placed 400 m east of MAP in the world registry; its only cell C2 touches E
+ZONES = [("C", MAP), ("E", MAP), ("N", MAP), ("NE", MAP), ("C2", MAP2)]
 TESTER = "493cd2454f4949ebbf2f09748fe78af8"   # MeshTester2 (the editor client)
 BOT = "8cb502da59bf43b4a654875dc2934c11"      # meshbotChar (the headless bot)
 ITEM_BUILDING, ITEM_YIELD, ITEM_SKILL = 1802134084, 970799895, 357861288
@@ -37,8 +39,8 @@ ENV_KEYS = ["MESH_NO_MONSTER_HANDOFF", "MESH_FAULT_DIE_ON_NOTICE"]
 
 
 # ------------------------------------------------------------------ rig plumbing
-def zone_log(zone, suffix, day):
-    return os.path.join(LOGS, f"Log_Map(ServerMeshTestMap)-Ch({zone})-Alloc(False)-Instance()_{day}.{suffix}.log")
+def zone_log(zone, suffix, day, map_id=MAP):
+    return os.path.join(LOGS, f"Log_Map({map_id})-Ch({zone})-Alloc(False)-Instance()_{day}.{suffix}.log")
 
 
 def read_status():
@@ -110,8 +112,8 @@ def stop_play():
 # ------------------------------------------------------------------ database
 def db_reset(tester_pos, bot_pos, tester_party=1, bot_party=1, building_items=None, drop_yield=False, clear_buildings=False):
     c = sqlite3.connect(DB)
-    c.execute("update characters set currentHp=500,currentMp=100,currentChannel='C',currentPositionX=?,currentPositionY=0,currentPositionZ=?,partyId=? where id=?", (tester_pos[0], tester_pos[1], tester_party, TESTER))
-    c.execute("update characters set currentHp=500,currentMp=100,currentChannel='C',currentPositionX=?,currentPositionY=0,currentPositionZ=?,partyId=? where id=?", (bot_pos[0], bot_pos[1], bot_party, BOT))
+    c.execute("update characters set currentHp=500,currentMp=100,currentChannel='C',currentMapName='ServerMeshTestMap',currentPositionX=?,currentPositionY=0,currentPositionZ=?,partyId=? where id=?", (tester_pos[0], tester_pos[1], tester_party, TESTER))
+    c.execute("update characters set currentHp=500,currentMp=100,currentChannel='C',currentMapName='ServerMeshTestMap',currentPositionX=?,currentPositionY=0,currentPositionZ=?,partyId=? where id=?", (bot_pos[0], bot_pos[1], bot_party, BOT))
     if drop_yield:
         c.execute("delete from characteritem where characterId=? and inventoryType=0 and dataId=?", (TESTER, ITEM_YIELD))
     if building_items:
@@ -144,11 +146,11 @@ def db_reset(tester_pos, bot_pos, tester_party=1, bot_party=1, building_items=No
 STAMP = re.compile(r"\[(\d{4}-\d\d-\d\d) (\d\d:\d\d:\d\d)\]")
 
 
-def zone_lines(zone, start, day):
+def zone_lines(zone, start, day, map_id=MAP):
     """Every line of the zone's info/warn/error logs stamped at or after `start` (HH:MM:SS)."""
     out = []
     for suffix in ("info", "warn", "error"):
-        path = zone_log(zone, suffix, day)
+        path = zone_log(zone, suffix, day, map_id)
         if not os.path.exists(path):
             continue
         for line in open(path, encoding="utf-8", errors="replace"):
@@ -177,8 +179,8 @@ class Report:
 
 
 def grade_common(rep, start, day):
-    for z in ZONES:
-        lines = zone_lines(z, start, day)
+    for z, map_id in ZONES:
+        lines = zone_lines(z, start, day, map_id)
         ex = [l for l in lines if "Exception" in l]
         rep.check(len(ex) == 0, f"zone {z}: {len(ex)} exception lines")
         for l in ex[:3]:
@@ -238,6 +240,25 @@ def run_scenario(name, rep):
         # back on E forward to the fighter on C (the grading used to read only the E-to-C direction).
         both = c_lines + e_lines
         rep.check(count(both, r"Party share for .* forwarded to zone") >= 1 and count(both, r"Party share applied to") >= 1, "a share crossed the line")
+
+    elif name == "seam":
+        # Across the seam between two maps: the bot walks from E into C2 (map ServerMeshTestMap2, whose frame sits 400 m
+        # east, so x=301 on E is x=-99 there) and back; the tester stands on E 8 m from the seam, so C2 must see it as a
+        # ghost at the translated position (-108) and the bot's row is saved in C2's frame on the way over.
+        db_reset((292, 0), (280, 0))
+        request_play("stand", 292, 0)
+        wait_status(lambda st: st.get("isPlaying") == "True", 60, "Play")
+        time.sleep(20)
+        bots.append(("walk", launch_bot(name, "meshbot", ["-meshAutoMode", "walk", "-meshWalkX", "310", "-meshReturnX", "-110", "-meshStopOnMigration"])))
+        walk = wait_for_bot(bots[0][1], "walk", 240)
+        rep.check("-> PASS" in walk and "migrations=2" in walk, f"bot: {walk[:120]}")
+        e_lines, c2_lines = zone_lines("E", start, day), zone_lines("C2", start, day, MAP2)
+        rep.check(count(e_lines, r"Handoff SENT meshbotChar -> zone C2") >= 1, "E handed the bot to C2 (another map)")
+        rep.check(count(e_lines, r"frame offset \(-400") >= 1, "the save went into C2's frame (offset -400)")
+        rep.check(count(e_lines, r"Handoff ACK .*promoted=True") >= 1, "C2 acked the arrival on its promoted ghost")
+        rep.check(count(c2_lines, r"Handoff SENT meshbotChar -> zone E") >= 1, "C2 handed the bot back to E")
+        rep.check(count(c2_lines, r"Ghost spawned Player MeshTester2 .* at \(-108") >= 1, "C2 sees the standing tester at the translated position (-108)")
+        rep.check(count(c2_lines, r"Neighbour zone E linked .*frame offset \(-400") >= 1, "C2's link from E carries the frame offset")
 
     elif name == "crash":
         # The destination dies on the handoff notice: rollback, client fallback, MapSpawn restart, re-registration.
@@ -316,7 +337,7 @@ def wait_for_bot(log, kind, timeout):
     return ""
 
 
-DEFAULT = ["pet", "party", "crash", "harvest", "build"]
+DEFAULT = ["pet", "party", "crash", "harvest", "build", "seam"]
 ALL = DEFAULT + ["pvp"]
 
 
