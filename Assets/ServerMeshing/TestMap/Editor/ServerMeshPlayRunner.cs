@@ -1,7 +1,9 @@
 // Server Meshing add-on — unattended Play-mode runner for the editor test rig.
 //
 // Lets a script outside the editor start/stop the auto-client run without the MCP bridge:
-//   Temp/ServerMesh.PlayRequest.txt   key=value lines (mode, channel, user, walkX, walkZ, mount, pet, scene)
+//   Temp/ServerMesh.PlayRequest.txt   key=value lines (mode, channel, user, walkX, walkZ, mount, pet, scene,
+//                                     env.NAME=value sets an environment variable in the editor process before Play —
+//                                     zone servers inherit it; an empty value clears it)
 //                                     -> sets the "Server Meshing/Auto Client" EditorPrefs, opens the scene
 //                                        (default BaseInit-CE) and enters Play. Deleted once consumed.
 //   Temp/ServerMesh.StopRequest.txt   -> exits Play. Deleted once consumed.
@@ -96,6 +98,12 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             if (req.TryGetValue("walkZ", out v)) EditorPrefs.SetString(ServerMeshAutoClient.PREF_WALK_Z, v);
             if (req.TryGetValue("mount", out v)) EditorPrefs.SetBool(ServerMeshAutoClient.PREF_MOUNT, v == "1");
             if (req.TryGetValue("pet", out v)) EditorPrefs.SetBool(ServerMeshAutoClient.PREF_PET, v == "1");
+            foreach (KeyValuePair<string, string> kv in req)
+            {
+                if (!kv.Key.StartsWith("env.", StringComparison.OrdinalIgnoreCase) || kv.Key.Length <= 4)
+                    continue;
+                Environment.SetEnvironmentVariable(kv.Key.Substring(4), kv.Value.Length > 0 ? kv.Value : null);
+            }
 
             Debug.Log($"[MeshRunner] Entering Play in {scene} (auto client: {EditorPrefs.GetString(ServerMeshAutoClient.PREF_MODE, "walk")})");
             EditorApplication.EnterPlaymode();
@@ -114,6 +122,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 $"phase={(c != null ? c.Phase : "")}\n" +
                 $"finished={(c != null && c.Finished)}\n" +
                 $"passed={(c != null && c.Passed)}\n" +
+                $"result={(c != null ? c.LastResult : "")}\n" +
                 $"error={_lastError}\n";
             Directory.CreateDirectory(Path.GetDirectoryName(StatusPath));
             File.WriteAllText(StatusPath, text);

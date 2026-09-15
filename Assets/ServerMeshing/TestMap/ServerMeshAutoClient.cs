@@ -88,6 +88,8 @@ namespace MultiplayerARPG.MMO.Mesh
         public string Phase { get; private set; } = "idle";
         public bool Finished { get; private set; }
         public bool Passed { get; private set; }
+        /// <summary>The last "RESULT ..." line this run logged (the play runner writes it into the status file).</summary>
+        public string LastResult { get; private set; } = "";
 
         private string _mapAddress;
         private int _mapPort;
@@ -173,7 +175,12 @@ namespace MultiplayerARPG.MMO.Mesh
             }
         }
 
-        private void Log(string msg) => Debug.Log($"[MeshAuto] {msg}");
+        private void Log(string msg)
+        {
+            if (msg.StartsWith("RESULT "))
+                LastResult = msg;
+            Debug.Log($"[MeshAuto] {msg}");
+        }
         private void Fail(string msg)
         {
             Debug.LogError($"[MeshAuto] FAIL ({Phase}): {msg}");

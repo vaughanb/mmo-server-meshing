@@ -1,0 +1,352 @@
+#!/usr/bin/env python3
+"""Server Meshing regression harness (DESIGN.md §16 / changelog 0.43).
+
+Drives the 2x2 rig end to end and grades each scenario from the logs:
+
+    python Tools/ServerMeshing/regress.py                 # the default set: pet party crash harvest build
+    python Tools/ServerMeshing/regress.py crash build     # a subset
+    python Tools/ServerMeshing/regress.py --list
+
+Requirements (all already true on the rig machine):
+  * the Unity editor is open on this project with BaseInit-CE (any scene that is not dirty) and the
+    ServerMeshPlayRunner watching Temp/ServerMesh.PlayRequest.txt (it does whenever the editor is up);
+  * a fresh player build at Build/Server/kit-ce-project.exe (the zone servers and the headless bots);
+  * the SQLite database mmorpgtemplate.sqlite3 with the two test characters (MeshTester2, meshbotChar).
+
+Each scenario: resets the test characters in the database, asks the editor to enter Play with the auto
+client in a given mode (plus environment variables the zone servers inherit), launches headless bots from
+the build, waits for the auto client's RESULT (and the bots'), stops Play, and grades: zero exceptions on
+the four zone logs since the scenario started, the expected RESULT lines, and scenario-specific log lines.
+Exit code 1 when any scenario fails. Bot logs land in Logs/regress_<scenario>_<user>.log.
+"""
+import argparse, datetime, os, re, sqlite3, subprocess, sys, time, uuid
+
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+DB = os.path.join(ROOT, "mmorpgtemplate.sqlite3")
+EXE = os.path.join(ROOT, "Build", "Server", "kit-ce-project.exe")
+TEMP = os.path.join(ROOT, "Temp")
+REQUEST = os.path.join(TEMP, "ServerMesh.PlayRequest.txt")
+STOP = os.path.join(TEMP, "ServerMesh.StopRequest.txt")
+STATUS = os.path.join(TEMP, "ServerMesh.PlayStatus.txt")
+LOGS = os.path.join(ROOT, "Logs")
+ZONES = ["C", "E", "N", "NE"]
+TESTER = "493cd2454f4949ebbf2f09748fe78af8"   # MeshTester2 (the editor client)
+BOT = "8cb502da59bf43b4a654875dc2934c11"      # meshbotChar (the headless bot)
+ITEM_BUILDING, ITEM_YIELD, ITEM_SKILL = 1802134084, 970799895, 357861288
+ENV_KEYS = ["MESH_NO_MONSTER_HANDOFF", "MESH_FAULT_DIE_ON_NOTICE"]
+
+
+# ------------------------------------------------------------------ rig plumbing
+def zone_log(zone, suffix, day):
+    return os.path.join(LOGS, f"Log_Map(ServerMeshTestMap)-Ch({zone})-Alloc(False)-Instance()_{day}.{suffix}.log")
+
+
+def read_status():
+    st = {}
+    try:
+        for line in open(STATUS, encoding="utf-8", errors="replace"):
+            if "=" in line:
+                k, v = line.rstrip("\n").split("=", 1)
+                st[k] = v
+    except FileNotFoundError:
+        pass
+    return st
+
+
+def wait_status(pred, timeout, what):
+    end = time.time() + timeout
+    while time.time() < end:
+        st = read_status()
+        if pred(st):
+            return st
+        time.sleep(2)
+    raise TimeoutError(f"timed out waiting for {what}")
+
+
+def ps(script):
+    return subprocess.run(["powershell", "-NoProfile", "-Command", script], capture_output=True, text=True).stdout.strip()
+
+
+def kill_bots():
+    ps("Get-Process kit-ce-project -ErrorAction SilentlyContinue | Where-Object { (Get-CimInstance Win32_Process -Filter \"ProcessId=$($_.Id)\").CommandLine -like '*-meshAutoClient*' } | Stop-Process -Force")
+
+
+def kit_process_count():
+    out = ps("(Get-Process kit-ce-project -ErrorAction SilentlyContinue | Measure-Object).Count")
+    return int(out or 0)
+
+
+def launch_bot(scenario, user, args):
+    log = os.path.join(LOGS, f"regress_{scenario}_{user}.log")
+    if os.path.exists(log):
+        os.remove(log)
+    cmd = [EXE, "-batchmode", "-nographics", "-meshAutoClient", "-meshUser", user, "-meshChannel", "C"] + args + ["-logFile", log]
+    subprocess.Popen(cmd, creationflags=getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return log
+
+
+def request_play(mode, walk_x, walk_z, pet=False, mount=False, env=None):
+    os.makedirs(TEMP, exist_ok=True)
+    lines = [f"mode={mode}", "channel=C", "user=meshtest", f"walkX={walk_x}", f"walkZ={walk_z}", f"pet={1 if pet else 0}", f"mount={1 if mount else 0}", "enabled=1"]
+    env = env or {}
+    for key in ENV_KEYS:
+        lines.append(f"env.{key}={env.get(key, '')}")   # every key set explicitly: an empty value clears it
+    with open(REQUEST, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+def stop_play():
+    open(STOP, "w").close()
+    try:
+        wait_status(lambda st: st.get("isPlaying") == "False", 60, "Play to stop")
+    except TimeoutError:
+        print("  ! Play did not stop in time")
+    kill_bots()
+    end = time.time() + 15
+    while time.time() < end and kit_process_count() > 0:
+        time.sleep(1)
+
+
+# ------------------------------------------------------------------ database
+def db_reset(tester_pos, bot_pos, tester_party=1, bot_party=1, building_items=None, drop_yield=False, clear_buildings=False):
+    c = sqlite3.connect(DB)
+    c.execute("update characters set currentHp=500,currentMp=100,currentChannel='C',currentPositionX=?,currentPositionY=0,currentPositionZ=?,partyId=? where id=?", (tester_pos[0], tester_pos[1], tester_party, TESTER))
+    c.execute("update characters set currentHp=500,currentMp=100,currentChannel='C',currentPositionX=?,currentPositionY=0,currentPositionZ=?,partyId=? where id=?", (bot_pos[0], bot_pos[1], bot_party, BOT))
+    if drop_yield:
+        c.execute("delete from characteritem where characterId=? and inventoryType=0 and dataId=?", (TESTER, ITEM_YIELD))
+    if building_items:
+        c.execute("delete from characteritem where characterId=? and inventoryType=0 and dataId=?", (TESTER, ITEM_BUILDING))
+        cols = [r[1] for r in c.execute("pragma table_info(characteritem)")]
+        row = c.execute("select * from characteritem where characterId=? and inventoryType=0 and dataId=?", (TESTER, ITEM_SKILL)).fetchone()
+        if row is None:
+            raise RuntimeError("the skill item row used as a template is missing from MeshTester2's bag")
+        d = dict(zip(cols, row))
+        d.update(dataId=ITEM_BUILDING, amount=building_items, level=1)
+        if "id" in d:
+            d["id"] = uuid.uuid4().hex
+        used = {r[0] for r in c.execute("select idx from characteritem where characterId=? and inventoryType=0", (TESTER,))}
+        d["idx"] = next(i for i in range(1, 60) if i not in used)
+        c.execute("insert into characteritem (%s) values (%s)" % (",".join(d.keys()), ",".join("?" * len(d))), list(d.values()))
+    if clear_buildings:
+        c.execute("delete from buildings where channel='E'")
+    c.commit()
+    c.close()
+
+
+# ------------------------------------------------------------------ grading
+STAMP = re.compile(r"\[(\d{4}-\d\d-\d\d) (\d\d:\d\d:\d\d)\]")
+
+
+def zone_lines(zone, start, day):
+    """Every line of the zone's info/warn/error logs stamped at or after `start` (HH:MM:SS)."""
+    out = []
+    for suffix in ("info", "warn", "error"):
+        path = zone_log(zone, suffix, day)
+        if not os.path.exists(path):
+            continue
+        for line in open(path, encoding="utf-8", errors="replace"):
+            m = STAMP.search(line[:60])
+            if m and m.group(2) >= start:
+                out.append(line.rstrip("\n"))
+    return out
+
+
+def count(lines, pattern):
+    rx = re.compile(pattern)
+    return sum(1 for l in lines if rx.search(l))
+
+
+class Report:
+    def __init__(self, name):
+        self.name, self.checks, self.notes = name, [], []
+
+    def check(self, ok, label):
+        self.checks.append((bool(ok), label))
+        return ok
+
+    @property
+    def passed(self):
+        return all(ok for ok, _ in self.checks)
+
+
+def grade_common(rep, start, day):
+    for z in ZONES:
+        lines = zone_lines(z, start, day)
+        ex = [l for l in lines if "Exception" in l]
+        rep.check(len(ex) == 0, f"zone {z}: {len(ex)} exception lines")
+        for l in ex[:3]:
+            rep.notes.append(f"   {z}: {l[:160]}")
+
+
+def bot_result(log, kind):
+    try:
+        for line in open(log, encoding="utf-8", errors="replace"):
+            if f"RESULT {kind}:" in line:
+                return line.strip()[line.find("RESULT"):]
+    except FileNotFoundError:
+        pass
+    return ""
+
+
+# ------------------------------------------------------------------ scenarios
+def run_scenario(name, rep):
+    day = datetime.date.today().isoformat()
+    start = datetime.datetime.now().strftime("%H:%M:%S")
+    for marker in os.listdir(TEMP) if os.path.isdir(TEMP) else []:
+        if marker.startswith("ServerMesh.FaultFired."):
+            os.remove(os.path.join(TEMP, marker))
+    bots = []
+
+    if name == "pet":
+        # The pet round trip: an observer 12 m from the line watches the bot cross with its pet and come back.
+        db_reset((86.5, 0), (0, 0))
+        request_play("observe", 88, 0)
+        wait_status(lambda st: st.get("isPlaying") == "True", 60, "Play")
+        time.sleep(20)
+        bots.append(("walk", launch_bot(name, "meshbot", ["-meshAutoMode", "walk", "-meshWalkX", "130", "-meshWalkZ", "0", "-meshPet"])))
+        st = wait_status(lambda st: st.get("finished") == "True", 240, "the observer")
+        walk = wait_for_bot(bots[0][1], "walk", 240)
+        rep.check("-> PASS" in st.get("result", ""), f"observer: {st.get('result', '')[:120]}")
+        rep.check("playerSwaps=0 absences=0" in st.get("result", ""), "observer saw no swap and no absence")
+        rep.check("-> PASS" in walk and "pet=seen" in walk, f"bot: {walk[:120]}")
+        c_lines, e_lines = zone_lines("C", start, day), zone_lines("E", start, day)
+        rep.check(count(e_lines, r"Summon .* promoted in place") >= 1, "E promoted the pet in place")
+        rep.check(count(c_lines, r"Summon .* promoted in place") >= 1, "C promoted the pet in place on the way back")
+        rep.check(count(c_lines, r"Handoff ACK .*promoted=True") >= 1 and count(e_lines, r"Handoff ACK .*promoted=True") >= 1, "both handoffs acked as promoted")
+
+    elif name == "party":
+        # Fight at the line with a party member standing inside E: shares cross the line both ways.
+        db_reset((86.5, 0), (0, 0))
+        request_play("fight", 99, 60, env={"MESH_NO_MONSTER_HANDOFF": "1"})
+        wait_status(lambda st: st.get("isPlaying") == "True", 60, "Play")
+        time.sleep(20)
+        bots.append(("stand", launch_bot(name, "meshbot", ["-meshAutoMode", "stand", "-meshWalkX", "104", "-meshWalkZ", "58"])))
+        st = wait_status(lambda st: st.get("finished") == "True", 300, "the fighter")
+        rep.check("-> PASS" in st.get("result", ""), f"fighter: {st.get('result', '')[:140]}")
+        c_lines, e_lines = zone_lines("C", start, day), zone_lines("E", start, day)
+        rep.check(count(c_lines, r"Party 1: shared") >= 1, "C split a kill with the ghost member")
+        rep.check(count(e_lines, r"Party share for") >= 1 or count(c_lines, r"Party share applied") >= 1, "a share crossed the line")
+
+    elif name == "crash":
+        # The destination dies on the handoff notice: rollback, client fallback, MapSpawn restart, re-registration.
+        db_reset((86.5, 0), (0, 0))
+        request_play("observe", 88, 0, env={"MESH_FAULT_DIE_ON_NOTICE": "E"})
+        wait_status(lambda st: st.get("isPlaying") == "True", 60, "Play")
+        time.sleep(20)
+        bots.append(("walk", launch_bot(name, "meshbot", ["-meshAutoMode", "walk", "-meshWalkX", "130", "-meshWalkZ", "0", "-meshPet"])))
+        st = wait_status(lambda st: st.get("finished") == "True", 240, "the observer")
+        walk = wait_for_bot(bots[0][1], "walk", 300)
+        rep.check("-> PASS" in walk, f"bot: {walk[:120]}")
+        rep.check("fellBack=True" in open(bots[0][1], encoding="utf-8", errors="replace").read(), "the client fell back to the origin")
+        rep.check("playerSwaps=0" in st.get("result", ""), f"observer: {st.get('result', '')[:120]}")
+        c_lines, e_lines = zone_lines("C", start, day), zone_lines("E", start, day)
+        rep.check(count(e_lines, r"FAULT: dying on handoff notice") == 1, "E died once on the notice")
+        rep.check(count(c_lines, r"Handoff ROLLBACK ") >= 1, "C rolled the handoff back")
+        rep.check(count(c_lines, r"ROLLBACK complete") >= 1, "the client's return promoted the held puppet")
+        rep.check(count(e_lines, r"Cluster registration accepted") >= 1, "the restarted E re-registered with the cluster")
+        rep.check(count(c_lines, r"Handoff ACK .*promoted=") >= 1, "a later handoff to the restarted E was acked")
+
+    elif name == "harvest":
+        db_reset((86.5, 62), (0, 0), drop_yield=True)
+        request_play("harvest", 99, 62, env={"MESH_NO_MONSTER_HANDOFF": "1"})
+        wait_status(lambda st: st.get("isPlaying") == "True", 60, "Play")
+        st = wait_status(lambda st: st.get("finished") == "True", 240, "the harvester")
+        rep.check("-> PASS" in st.get("result", "") and f"itemsGained=[{ITEM_YIELD}x" in st.get("result", ""), f"harvester: {st.get('result', '')[:140]}")
+        c_lines, e_lines = zone_lines("C", start, day), zone_lines("E", start, day)
+        rep.check(count(e_lines, r"Forwarded hit applied to static") >= 1, "E applied forwarded swings to its node")
+        rep.check(count(c_lines, r"GiveItems applied") >= 1, "the yield reached the real character on C")
+
+    elif name == "build":
+        db_reset((86.5, 66), (0, 0), building_items=3, clear_buildings=True)
+        request_play("build", 99, 66, env={"MESH_NO_MONSTER_HANDOFF": "1"})
+        wait_status(lambda st: st.get("isPlaying") == "True", 60, "Play")
+        st = wait_status(lambda st: st.get("finished") == "True", 240, "the builder")
+        rep.check("-> PASS" in st.get("result", "") and "appeared=True" in st.get("result", ""), f"builder: {st.get('result', '')[:140]}")
+        c_lines, e_lines = zone_lines("C", start, day), zone_lines("E", start, day)
+        rep.check(count(c_lines, r"belongs to zone E") >= 1, "C handed the placement to E")
+        rep.check(count(e_lines, r"creating here") >= 1, "E created the building")
+        rep.check(count(c_lines, r"Building ghost spawned") >= 1, "the building's ghost appeared on C")
+        rep.check(count(e_lines, r"Forwarded hit applied to static") >= 1, "E applied forwarded swings to the wall")
+
+    elif name == "pvp":
+        # A party member's ghost must not be attackable; the map's PvP mode must be Pvp for the stranger half,
+        # so this scenario only checks the ally refusal under the map's current rules.
+        db_reset((86.5, 60), (0, 0))
+        request_play("pvp", 99, 60, env={"MESH_NO_MONSTER_HANDOFF": "1"})
+        wait_status(lambda st: st.get("isPlaying") == "True", 60, "Play")
+        time.sleep(20)
+        bots.append(("stand", launch_bot(name, "meshbot", ["-meshAutoMode", "stand", "-meshWalkX", "103", "-meshWalkZ", "60"])))
+        st = wait_status(lambda st: st.get("finished") == "True", 300, "the attacker")
+        rep.check("targetHurt=False" in st.get("result", ""), f"attacker: {st.get('result', '')[:140]}")
+        c_lines = zone_lines("C", start, day)
+        rep.check(count(c_lines, r"Hit on ghost meshbotChar") == 0, "no hit on the party member's ghost was forwarded")
+
+    else:
+        raise ValueError(f"unknown scenario {name}")
+
+    grade_common(rep, start, day)
+    for kind, log in bots:
+        try:
+            txt = open(log, encoding="utf-8", errors="replace").read()
+            n = txt.count("Exception")
+            rep.check(n == 0, f"bot log {os.path.basename(log)}: {n} exception lines")
+        except FileNotFoundError:
+            rep.check(False, f"bot log {os.path.basename(log)} missing")
+
+
+def wait_for_bot(log, kind, timeout):
+    end = time.time() + timeout
+    while time.time() < end:
+        r = bot_result(log, kind)
+        if r:
+            return r
+        time.sleep(3)
+    return ""
+
+
+DEFAULT = ["pet", "party", "crash", "harvest", "build"]
+ALL = DEFAULT + ["pvp"]
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("scenarios", nargs="*", help=f"any of {', '.join(ALL)} (default: {' '.join(DEFAULT)})")
+    ap.add_argument("--list", action="store_true")
+    args = ap.parse_args()
+    if args.list:
+        print("\n".join(ALL)); return 0
+    names = args.scenarios or DEFAULT
+    for n in names:
+        if n not in ALL:
+            print(f"unknown scenario {n}; known: {', '.join(ALL)}"); return 2
+    if not os.path.exists(EXE):
+        print(f"no player build at {EXE}"); return 2
+    if read_status().get("isPlaying") == "True":
+        print("the editor is already in Play mode; stop it first"); return 2
+    kill_bots()
+    reports = []
+    for n in names:
+        rep = Report(n)
+        t0 = time.time()
+        print(f"=== {n}")
+        try:
+            run_scenario(n, rep)
+        except Exception as ex:  # a harness failure is a failed scenario, never a crash of the run
+            rep.check(False, f"harness: {ex}")
+        finally:
+            stop_play()
+        rep.notes.append(f"   {time.time() - t0:0.0f} s")
+        for ok, label in rep.checks:
+            print(f"  [{'ok' if ok else 'FAIL'}] {label}")
+        for note in rep.notes:
+            print(note)
+        reports.append(rep)
+        time.sleep(5)  # the zone processes exit with Play; give the ports a moment
+    print("\n=== summary")
+    for rep in reports:
+        print(f"  {rep.name:8s} {'PASS' if rep.passed else 'FAIL'}  ({sum(1 for ok, _ in rep.checks if ok)}/{len(rep.checks)} checks)")
+    return 0 if all(r.passed for r in reports) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
