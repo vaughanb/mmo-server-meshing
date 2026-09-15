@@ -219,8 +219,17 @@ namespace MultiplayerARPG.MMO.Mesh
             // 1) Login (register on first run).
             Phase = "login";
             bool done = false; AckResponseCode code = AckResponseCode.Unimplemented; UITextKeys msg = UITextKeys.NONE;
-            client.RequestUserLogin(username, password, (h, c, r) => { code = c; msg = r.message; done = true; });
-            while (!done && Time.realtimeSinceStartup < deadline) yield return null;
+            for (int attempt = 1; ; ++attempt)
+            {
+                done = false;
+                client.RequestUserLogin(username, password, (h, c, r) => { code = c; msg = r.message; done = true; });
+                while (!done && Time.realtimeSinceStartup < deadline) yield return null;
+                // Sixteen bots logging in at once queue behind the login server's database: a timeout is not "no such
+                // user" (registering then fails with USERNAME_EXISTED), so try again before falling back to register.
+                if (code == AckResponseCode.Success || code != AckResponseCode.Timeout || attempt >= 4) break;
+                Log($"Login timed out (attempt {attempt}); retrying");
+                yield return new WaitForSecondsRealtime(2f * attempt);
+            }
             if (code != AckResponseCode.Success)
             {
                 Log($"Login failed ({code}/{msg}); registering '{username}'");

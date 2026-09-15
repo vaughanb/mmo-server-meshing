@@ -193,6 +193,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public override void OnClientConnected()
         {
             Stamp("client connected");
+            _heldRpcs.Clear(); // anything held on the previous connection belongs to a cell we left
             if (!IsServer)
                 _ = Migration; // create early so the velocity tracker has history before the first hop
             if (!_assetEventsHooked && Assets != null)
@@ -472,7 +473,58 @@ namespace MultiplayerARPG.MMO.Mesh
                 MeshBoundaryTick();
                 GhostingUpdate();
             }
+            else
+                ReplayHeldRpcs();
         }
+
+        #region Server RPCs held until the playing character exists (client)
+        // The kit parks an RPC that arrives before its entity's spawn and replays it at that spawn; its combat-text
+        // handler then reads GameInstance.PlayingCharacterEntity, which is null from a hop's disconnect until the
+        // migration controller adopts the new entity (a frame after it spawns; the login has the same window). The
+        // exception aborts the rest of that game-state message, spawns included. So a pure client holds every server
+        // RPC that arrives while there is no playing character and replays them, in order, as soon as there is one.
+        private struct HeldRpc { public ushort messageType; public TransportHandler transportHandler; public long connectionId; public byte[] data; }
+        private readonly List<HeldRpc> _heldRpcs = new List<HeldRpc>();
+        private float _heldRpcsSince;
+        [Tooltip("Client: server RPCs that arrive while there is no playing character (during a hop, or at login) wait for one; after this many seconds they are delivered anyway.")]
+        public float heldRpcTimeoutSeconds = 15f;
+
+        private bool CanDeliverRpcs()
+        {
+            if (IsServer || GameInstance.PlayingCharacterEntity != null)
+                return true;
+            return _heldRpcs.Count > 0 && Time.unscaledTime - _heldRpcsSince >= heldRpcTimeoutSeconds;
+        }
+
+        protected override void HandleServerCallFunction(MessageHandlerData messageHandler)
+        {
+            if (!CanDeliverRpcs())
+            {
+                if (_heldRpcs.Count == 0)
+                    _heldRpcsSince = Time.unscaledTime;
+                NetDataReader reader = messageHandler.Reader;
+                byte[] data = new byte[reader.AvailableBytes];
+                System.Buffer.BlockCopy(reader.RawData, reader.Position, data, 0, data.Length);
+                _heldRpcs.Add(new HeldRpc { messageType = messageHandler.MessageType, transportHandler = messageHandler.TransportHandler, connectionId = messageHandler.ConnectionId, data = data });
+                return;
+            }
+            ReplayHeldRpcs();
+            base.HandleServerCallFunction(messageHandler);
+        }
+
+        private void ReplayHeldRpcs()
+        {
+            if (_heldRpcs.Count == 0 || !CanDeliverRpcs())
+                return;
+            Stamp($"replaying {_heldRpcs.Count} RPCs held while there was no playing character");
+            for (int i = 0; i < _heldRpcs.Count; ++i)
+            {
+                HeldRpc held = _heldRpcs[i];
+                base.HandleServerCallFunction(new MessageHandlerData(held.messageType, held.transportHandler, held.connectionId, new NetDataReader(held.data)));
+            }
+            _heldRpcs.Clear();
+        }
+        #endregion
 
         /// <summary>DESIGN.md §11 trigger #1 — walked crossings are just movement, so we poll.</summary>
         private void MeshBoundaryTick()

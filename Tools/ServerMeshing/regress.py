@@ -215,8 +215,10 @@ def run_scenario(name, rep):
         rep.check(count(c_lines, r"Handoff ACK .*promoted=True") >= 1 and count(e_lines, r"Handoff ACK .*promoted=True") >= 1, "both handoffs acked as promoted")
 
     elif name == "party":
-        # Fight at the line with a party member standing inside E: shares cross the line both ways.
-        db_reset((86.5, 0), (0, 0))
+        # Fight at the line with a party member standing inside E: shares cross the line both ways. The member
+        # starts a few metres from the line so it is inside E before the first kill (from the map origin its walk
+        # took longer than the fighter's first kills and the shares stayed on C).
+        db_reset((86.5, 0), (94, 58))
         request_play("fight", 99, 60, env={"MESH_NO_MONSTER_HANDOFF": "1"})
         wait_status(lambda st: st.get("isPlaying") == "True", 60, "Play")
         time.sleep(20)
@@ -225,7 +227,10 @@ def run_scenario(name, rep):
         rep.check("-> PASS" in st.get("result", ""), f"fighter: {st.get('result', '')[:140]}")
         c_lines, e_lines = zone_lines("C", start, day), zone_lines("E", start, day)
         rep.check(count(c_lines, r"Party 1: shared") >= 1, "C split a kill with the ghost member")
-        rep.check(count(e_lines, r"Party share for") >= 1 or count(c_lines, r"Party share applied") >= 1, "a share crossed the line")
+        # Either direction counts: the fighter's kills on C forward to the member on E, and monsters the member kills
+        # back on E forward to the fighter on C (the grading used to read only the E-to-C direction).
+        both = c_lines + e_lines
+        rep.check(count(both, r"Party share for .* forwarded to zone") >= 1 and count(both, r"Party share applied to") >= 1, "a share crossed the line")
 
     elif name == "crash":
         # The destination dies on the handoff notice: rollback, client fallback, MapSpawn restart, re-registration.
