@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 #if UNITY_EDITOR
 using UnityEditor;
@@ -6,8 +7,8 @@ using UnityEditor;
 namespace MultiplayerARPG.MMO.Mesh
 {
     /// <summary>
-    /// Draws one map's cell boundaries and ids from the world registry as Gizmos (editor) and Debug.DrawLine (runtime),
-    /// in that map's scene frame.
+    /// Draws one map's cells from the world registry — their rectangles and ids — as Gizmos in the editor and as debug
+    /// lines at runtime, in that map's scene frame. Works for grid and explicit (any-size) layouts alike.
     /// </summary>
     public class ZoneDebugVisualizer : MonoBehaviour
     {
@@ -15,7 +16,7 @@ namespace MultiplayerARPG.MMO.Mesh
         [Tooltip("World registry (every meshed map's cells).")]
         public MeshWorldRegistry world;
 
-        [Tooltip("The map whose layout to draw (this scene's map).")]
+        [Tooltip("The map whose cells to draw (this scene's map).")]
         public string mapId = "ServerMeshTestMap";
 
         [Header("Visualization Settings")]
@@ -34,57 +35,40 @@ namespace MultiplayerARPG.MMO.Mesh
         [Tooltip("Color to highlight the player's current cell.")]
         public Color currentZoneColor = Color.green;
 
-        private MeshMapLayout Layout => world != null ? world.GetLayout(mapId) : null;
+        private IReadOnlyList<MeshCell> Cells => world != null ? world.CellsOf(mapId) : null;
 
         private void Update()
         {
-            MeshMapLayout layout = Layout;
-            if (!showAtRuntime || layout == null)
+            IReadOnlyList<MeshCell> cells = Cells;
+            if (!showAtRuntime || cells == null)
                 return;
-            DrawLines(layout, (a, b) => Debug.DrawLine(a, b, boundaryColor));
+            DrawCells(cells, (a, b) => Debug.DrawLine(a, b, boundaryColor));
         }
 
-        /// <summary>Every interior grid line as a floor segment, a top segment and two uprights.</summary>
-        private void DrawLines(MeshMapLayout layout, System.Action<Vector3, Vector3> line)
+        /// <summary>Every cell's four edges as floor segments, top segments and corner uprights, in the scene frame.</summary>
+        private void DrawCells(IReadOnlyList<MeshCell> cells, System.Action<Vector3, Vector3> line)
         {
-            Vector3 origin = layout.gridOrigin;
-            float totalWidth = layout.columns * layout.cellSize;
-            float totalHeight = layout.rows * layout.cellSize;
-            for (int i = 1; i < layout.columns; i++)
+            for (int i = 0; i < cells.Count; ++i)
             {
-                float x = origin.x + i * layout.cellSize;
-                Vector3 start = new Vector3(x, 0f, origin.z), end = new Vector3(x, 0f, origin.z + totalHeight);
-                line(start, end); line(start + Vector3.up * lineHeight, end + Vector3.up * lineHeight);
-                line(start, start + Vector3.up * lineHeight); line(end, end + Vector3.up * lineHeight);
-            }
-            for (int j = 1; j < layout.rows; j++)
-            {
-                float z = origin.z + j * layout.cellSize;
-                Vector3 start = new Vector3(origin.x, 0f, z), end = new Vector3(origin.x + totalWidth, 0f, z);
-                line(start, end); line(start + Vector3.up * lineHeight, end + Vector3.up * lineHeight);
-                line(start, start + Vector3.up * lineHeight); line(end, end + Vector3.up * lineHeight);
+                MeshCell cell = cells[i];
+                Vector3 min = new Vector3(cell.worldMinX, 0f, cell.worldMinZ) - cell.frameOrigin;
+                Vector3 max = new Vector3(cell.worldMaxX, 0f, cell.worldMaxZ) - cell.frameOrigin;
+                Vector3 bl = new Vector3(min.x, 0f, min.z), br = new Vector3(max.x, 0f, min.z), tl = new Vector3(min.x, 0f, max.z), tr = new Vector3(max.x, 0f, max.z);
+                Vector3 up = Vector3.up * lineHeight;
+                line(bl, br); line(br, tr); line(tr, tl); line(tl, bl);
+                line(bl + up, br + up); line(br + up, tr + up); line(tr + up, tl + up); line(tl + up, bl + up);
+                line(bl, bl + up); line(br, br + up); line(tr, tr + up); line(tl, tl + up);
             }
         }
 
 #if UNITY_EDITOR
         private void OnDrawGizmos()
         {
-            MeshMapLayout layout = Layout;
-            if (layout == null)
+            IReadOnlyList<MeshCell> cells = Cells;
+            if (cells == null || cells.Count == 0)
                 return;
             Gizmos.color = boundaryColor;
-            DrawLines(layout, Gizmos.DrawLine);
-
-            // Outer boundary
-            Vector3 origin = layout.gridOrigin;
-            float totalWidth = layout.columns * layout.cellSize;
-            float totalHeight = layout.rows * layout.cellSize;
-            Gizmos.color = boundaryColor * 0.5f;
-            Vector3 bl = new Vector3(origin.x, 0f, origin.z);
-            Vector3 br = new Vector3(origin.x + totalWidth, 0f, origin.z);
-            Vector3 tl = new Vector3(origin.x, 0f, origin.z + totalHeight);
-            Vector3 tr = new Vector3(origin.x + totalWidth, 0f, origin.z + totalHeight);
-            Gizmos.DrawLine(bl, br); Gizmos.DrawLine(br, tr); Gizmos.DrawLine(tr, tl); Gizmos.DrawLine(tl, bl);
+            DrawCells(cells, Gizmos.DrawLine);
 
             if (showZoneLabels)
             {
@@ -93,13 +77,11 @@ namespace MultiplayerARPG.MMO.Mesh
                 labelStyle.fontSize = 14;
                 labelStyle.fontStyle = FontStyle.Bold;
                 labelStyle.alignment = TextAnchor.MiddleCenter;
-                for (int y = 0; y < layout.rows; ++y)
+                for (int i = 0; i < cells.Count; ++i)
                 {
-                    for (int x = 0; x < layout.columns; ++x)
-                    {
-                        Vector3 center = origin + new Vector3((x + 0.5f) * layout.cellSize, 1f, (y + 0.5f) * layout.cellSize);
-                        Handles.Label(center, layout.CellIdAt(x, y), labelStyle);
-                    }
+                    MeshCell cell = cells[i];
+                    Vector3 center = new Vector3((cell.worldMinX + cell.worldMaxX) * 0.5f, 1f, (cell.worldMinZ + cell.worldMaxZ) * 0.5f) - cell.frameOrigin;
+                    Handles.Label(center, $"{cell.id}  ({cell.worldMaxX - cell.worldMinX:0} x {cell.worldMaxZ - cell.worldMinZ:0} m, {cell.neighbours.Count} neighbours)", labelStyle);
                 }
             }
 
@@ -109,9 +91,10 @@ namespace MultiplayerARPG.MMO.Mesh
                 MeshCell cell = player != null ? world.CellAt(mapId, player.EntityTransform.position) : null;
                 if (cell != null)
                 {
-                    Vector3 min = new Vector3(cell.worldMinX, 0f, cell.worldMinZ) - layout.worldOrigin;
+                    Vector3 min = new Vector3(cell.worldMinX, 0f, cell.worldMinZ) - cell.frameOrigin;
+                    Vector3 size = new Vector3(cell.worldMaxX - cell.worldMinX, 1f, cell.worldMaxZ - cell.worldMinZ);
                     Gizmos.color = currentZoneColor * 0.3f;
-                    Gizmos.DrawCube(min + new Vector3(layout.cellSize * 0.5f, 0.5f, layout.cellSize * 0.5f), new Vector3(layout.cellSize, 1f, layout.cellSize));
+                    Gizmos.DrawCube(min + new Vector3(size.x * 0.5f, 0.5f, size.z * 0.5f), size);
                 }
             }
         }
