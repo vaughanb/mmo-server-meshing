@@ -189,33 +189,31 @@ the player's current cell over a server-to-server channel, keeping the single co
 
 ## 5. Target architecture
 
-**Uniform grid cells + server-side ghosting + fast in-memory handoff.**
+**Uniform grid cells + server-side ghosting + fast handoff.** *(Diagram and notes updated 2026-09-15,
+0.50: no coordinator role — the world registry is static configuration every process loads.)*
 
 ```
-                       ┌────────────────────────────┐
-                       │      Mesh Coordinator       │  ← NEW standalone server role
-                       │  adjacency + ownership +     │     (cell↔position lookup, handoff,
-                       │  MeshEntityId allocation     │      MeshEntityId / cellIncarnation)
-                       └───────────┬─────────────────┘
-                                   │   (cells also keep their existing ClusterClient link)
-        ┌──────────────┬───────────┴───────┬──────────────┐
+        world registry (asset)  ─ one layout per map placed in a shared frame → cells, neighbours
+        kit cluster (Central)   ─ cells are channels; addresses via the existing peer broadcast
+        ┌──────────────┬───────────────────┬──────────────┐
         ▼              ▼                   ▼              ▼
    ┌─────────┐    ┌─────────┐         ┌─────────┐    ┌─────────┐
-   │Cell(0,0)│≈≈≈≈│Cell(1,0)│         │Cell(0,1)│≈≈≈≈│Cell(1,1)│   each = local Unity frame
-   └────┬────┘    └─────────┘         └─────────┘    └─────────┘   (cell + border band)
-        │  ≈≈ = CellMeshLink (S2S ghost sync, border bands, coord-translated)
+   │ Cell C  │≈≈≈≈│ Cell E  │≈≈≈≈≈≈≈≈≈│ Cell C2 │    │ Cell N  │   cells of one map share its frame;
+   └────┬────┘    └─────────┘  seam   └─────────┘    └─────────┘   a seam between maps = a frame offset
+        │  ≈≈ = CellMeshLink (S2S ghost sync in the border bands; positions translated at a seam)
    ┌────┴─────┐
-   │  Client  │ ── masked handoff ──▶ (re-points to neighbor; mask hides re-stream)
-   └──────────┘
+   │  Client  │ ── seamless swap ──▶ (re-points to the neighbour behind stand-ins; at a seam the
+   └──────────┘                        neighbour map's scene is pre-loaded and swapped in)
 ```
 
-- Each cell = one map-server process running `MeshMapNetworkManager` + mesh ManagerComponents (which
-  run the **boundary tick**), keyed `{channelId}_{cellId}`, with a **local** Unity coordinate frame.
-- **Mesh Coordinator** (standalone role): cell adjacency, ownership directory, **position→cell**
-  routing, and `MeshEntityId`/`cellIncarnation` allocation. Cells connect via `MeshCoordinatorClient`
-  alongside the untouched cluster.
-- CellMeshLink streams border-band entity snapshots between adjacent cells (with coordinate
-  translation, §6).
+- Each cell = one map-server process running `MeshMapNetworkManager` (boundary tick, handoff, ghosting),
+  registered with the kit's cluster as `{cellId}_{mapId}`; cells of one map run the same scene in the
+  same frame (§6).
+- **No coordinator.** The registry gives every process the same cells, neighbours and frames; the kit's
+  cluster gives the addresses; the central subclass lists the cells as channels; the login subclass
+  routes by position. Ownership is by position (the owning cell of a rectangle) plus the handoff
+  protocol for entities in flight. A coordinator only appears with dynamic cells (Q13).
+- CellMeshLink streams border-band entity snapshots between neighbours (translated at a seam, §6).
 - Ghosts = read-only replicas with authoritative behaviours disabled, spawned as normal identities.
 - One simulator per entity; clients send input only to their authoritative cell.
 
@@ -277,8 +275,9 @@ frames and the movement-grid limit, both of which turned out not to apply.*
 - Inner region: fully simulated & owned here. Border band: overlap; ghosts exchanged both ways.
 - Handoff line + hysteresis (`H < B`): ownership flips only once an entity is `H` m past the edge, so
   loitering on the line doesn't thrash.
-- Invariant: **exactly one cell is authoritative for any entity.** The Coordinator's ownership
-  directory is the source of truth; ghosts are never authoritative.
+- Invariant: **exactly one cell is authoritative for any entity.** Ownership follows position (the
+  cell whose rectangle contains the entity, §6) and the handoff protocol for entities in flight; a
+  ghost is never authoritative.
 
 ---
 
@@ -290,10 +289,10 @@ changes on handoff, `ObjectId` is per-process and reset on restart. Replaced wit
 
 - **`MeshEntityId` — stable, owner-independent:**
   - **Players:** the persistent **character id** (already globally unique; survives everything).
-  - **Server-spawned entities** (monsters, drops, projectiles): a **Coordinator-allocated id** at
-    spawn, *or* a **birth-provenance** id `(spawnCellId, cellIncarnation, localCounter)` that encodes
-    *where it was born* (immutable) — never the *current* owner. `cellIncarnation` (issued by the
-    Coordinator at cell startup) prevents collisions after a restart resets the local counter.
+  - **Server-spawned entities** (monsters, drops, harvestables, buildings): a **birth-provenance** id
+    `{spawnCell}:{cellIncarnation}:{objectId}` that encodes *where it was born* (immutable) — never the
+    *current* owner. `cellIncarnation` is a per-process value taken at start-up, so a restarted cell's
+    ids never collide with the previous incarnation's (Q3; no allocator needed).
 - **Per-cell mapping table:** every cell maintains `MeshEntityId ↔ local uint ObjectId` for each
   entity it holds (real or ghost).
 - **ObjectId access (corrected):** the `ObjectId` getter is **public**, and
