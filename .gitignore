@@ -39,3 +39,6 @@ sysinfo.txt
 # Local tool state
 /.claude/settings.local.json
 /.claude/launch.json
+
+# Unity performance-testing package artefacts written at build time
+Assets/Resources/PerformanceTestRun*
