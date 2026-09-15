@@ -49,6 +49,8 @@ namespace MultiplayerARPG.MMO.Mesh
 
         [Tooltip("If a ghost is further than this from its snapshot it is teleported instead of steered.")]
         public float ghostTeleportDistance = 4f;
+        [Tooltip("A moving ghost is steered toward the owner's position led by its velocity times this many seconds (about one snapshot interval plus the link hop), so the puppet does not trail the real entity by a snapshot. 0 = no lead.")]
+        public float ghostLeadSeconds = 0.1f;
 
         [Tooltip("Mesh link listens on mapPort + this offset.")]
         public int meshLinkPortOffset = 10000;
@@ -92,6 +94,10 @@ namespace MultiplayerARPG.MMO.Mesh
         private float _nextStatsTime;
         private long _statsLinkBytesOut, _statsLinkBytesIn, _statsLinkPacketsOut, _statsLinkPacketsIn;
         private int _statsHandoffs; private float _statsHandoffSumMs, _statsHandoffMaxMs;
+        // Steering error: distance between a moving ghost and the owner's freshly reported position, sampled at every snapshot.
+        private int _steerSamples; private float _steerErrorSum, _steerErrorMax;
+        private struct SnapshotPose { public Vector3 position; public float time; }
+        private readonly Dictionary<string, SnapshotPose> _lastSnapshotPose = new Dictionary<string, SnapshotPose>();
         private readonly Dictionary<string, long> _statsLinkPrevOut = new Dictionary<string, long>();
 
         private void NoteHandoffCompleted(float ms)
@@ -128,8 +134,10 @@ namespace MultiplayerARPG.MMO.Mesh
             int ghostDrops = 0, ghostStatics = 0;
             foreach (GhostStatic g in _ghostStatics.Values) { if (g.kind == GhostKind.ItemDrop) ghostDrops++; else ghostStatics++; }
             string handoffs = _statsHandoffs > 0 ? $"{_statsHandoffs} (mean {_statsHandoffSumMs / _statsHandoffs:0} ms, max {_statsHandoffMaxMs:0} ms)" : "0";
-            Logging.Log("Mesh", $"Mesh stats: players={players} owned={_ownedCharacters.Count} drops={_ownedDrops.Count} statics={_ownedStatics.Count} ({_ownedDrops.Banded.Count}+{_ownedStatics.Banded.Count} in a band) ghosts={ghostPlayers}p/{ghostMonsters}m/{ghostDrops}d/{ghostStatics}s pendingAcks={_pendingHandoffAcks.Count} reserved={_reservedArrivals.Count} | link out {dOut:0.0} kB/s {pOut:0} pkt/s, in {dIn:0.0} kB/s {pIn:0} pkt/s | handoffs {handoffs} | fps {1f / Mathf.Max(0.0001f, Time.smoothDeltaTime):0}");
+            string steer = _steerSamples > 0 ? $"{_steerSamples} samples, mean {_steerErrorSum / _steerSamples:0.00} m, max {_steerErrorMax:0.00} m" : "none";
+            Logging.Log("Mesh", $"Mesh stats: players={players} owned={_ownedCharacters.Count} drops={_ownedDrops.Count} statics={_ownedStatics.Count} ({_ownedDrops.Banded.Count}+{_ownedStatics.Banded.Count} in a band) ghosts={ghostPlayers}p/{ghostMonsters}m/{ghostDrops}d/{ghostStatics}s pendingAcks={_pendingHandoffAcks.Count} reserved={_reservedArrivals.Count} | link out {dOut:0.0} kB/s {pOut:0} pkt/s, in {dIn:0.0} kB/s {pIn:0} pkt/s | handoffs {handoffs} | fps {1f / Mathf.Max(0.0001f, Time.smoothDeltaTime):0} ghostSteer={steer}");
             _statsHandoffs = 0; _statsHandoffSumMs = 0f; _statsHandoffMaxMs = 0f;
+            _steerSamples = 0; _steerErrorSum = 0f; _steerErrorMax = 0f;
         }
 
         /// <summary>
@@ -665,9 +673,20 @@ namespace MultiplayerARPG.MMO.Mesh
                     if ((liveMask & (1 << i)) != 0 && DistanceToSharedEdge(pos, i) <= ghostBandWidth)
                         mask |= 1 << i;
                 }
+                string meshId = entry.meshId;
+                // Velocity over the last snapshot: what the neighbour leads the puppet by. Not after a gap or a teleport.
+                Vector3 velocity = Vector3.zero;
+                float now = Time.unscaledTime;
+                if (_lastSnapshotPose.TryGetValue(meshId, out SnapshotPose last))
+                {
+                    float dt = now - last.time;
+                    Vector3 delta = pos - last.position;
+                    if (dt > 0.01f && dt < 1f && delta.sqrMagnitude < 400f)
+                        velocity = delta / dt;
+                }
+                _lastSnapshotPose[meshId] = new SnapshotPose { position = pos, time = now };
                 if (mask == 0)
                     continue;
-                string meshId = entry.meshId;
                 VehicleEntity mount = entity.PassengingVehicleEntity as VehicleEntity;
                 SummonInfoOf(entity, out string summonerMeshId, out string summonId, out SummonType summonType);
                 EquipWeapons weapons = asPlayer != null ? entity.EquipWeapons : default;
@@ -693,6 +712,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     characterName = entity.CharacterName,
                     level = entity.Level,
                     position = pos,
+                    velocity = velocity,
                     yaw = entity.EntityTransform.eulerAngles.y,
                     movementState = (byte)entity.MovementState,
                     extraMovementState = (byte)entity.ExtraMovementState,
@@ -1675,14 +1695,22 @@ namespace MultiplayerARPG.MMO.Mesh
             BaseCharacterEntity entity = ghost.entity;
             Vector3 current = entity.EntityTransform.position;
             float dist = Vector3.Distance(current, msg.position);
+            bool moving = msg.velocity.sqrMagnitude > 0.04f;
+            if (moving)
+            {
+                // How far the puppet trails the real entity at the moment the owner sampled it.
+                _steerSamples++; _steerErrorSum += dist; if (dist > _steerErrorMax) _steerErrorMax = dist;
+            }
+            Vector3 target = moving ? msg.position + msg.velocity * ghostLeadSeconds : msg.position;
             if (dist > ghostTeleportDistance)
             {
                 entity.Teleport(msg.position, Quaternion.Euler(0f, msg.yaw, 0f), false);
             }
-            else if (dist > 0.25f)
+            else if (dist > 0.25f || (moving && Vector3.Distance(current, target) > 0.25f))
             {
-                // Puppet: let the kit's movement component walk it there (animates + syncs like any entity).
-                entity.PointClickMovement(msg.position);
+                // Puppet: let the kit's movement component walk it there (animates + syncs like any entity), led by the
+                // owner's velocity so it does not trail the real entity by a snapshot.
+                entity.PointClickMovement(target);
             }
             else
             {

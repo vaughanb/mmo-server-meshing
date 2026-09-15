@@ -35,7 +35,8 @@ ZONES = [("C", MAP), ("E", MAP), ("N", MAP), ("NE", MAP), ("C2", MAP2)]
 TESTER = "493cd2454f4949ebbf2f09748fe78af8"   # MeshTester2 (the editor client)
 BOT = "8cb502da59bf43b4a654875dc2934c11"      # meshbotChar (the headless bot)
 ITEM_BUILDING, ITEM_YIELD, ITEM_SKILL = 1802134084, 970799895, 357861288
-ENV_KEYS = ["MESH_NO_MONSTER_HANDOFF", "MESH_FAULT_DIE_ON_NOTICE"]
+ENV_KEYS = ["MESH_NO_MONSTER_HANDOFF", "MESH_FAULT_DIE_ON_NOTICE", "MESH_GHOST_LEAD"]
+EXTRA_ENV = {}   # --env KEY=VALUE from the command line, applied to every Play request of the run
 
 
 # ------------------------------------------------------------------ rig plumbing
@@ -90,7 +91,7 @@ def launch_bot(scenario, user, args):
 def request_play(mode, walk_x, walk_z, pet=False, mount=False, env=None):
     os.makedirs(TEMP, exist_ok=True)
     lines = [f"mode={mode}", "channel=C", "user=meshtest", f"walkX={walk_x}", f"walkZ={walk_z}", f"pet={1 if pet else 0}", f"mount={1 if mount else 0}", "enabled=1"]
-    env = env or {}
+    env = dict(EXTRA_ENV, **(env or {}))
     for key in ENV_KEYS:
         lines.append(f"env.{key}={env.get(key, '')}")   # every key set explicitly: an empty value clears it
     with open(REQUEST, "w", encoding="utf-8") as f:
@@ -234,6 +235,8 @@ def run_scenario(name, rep):
         bots.append(("stand", launch_bot(name, "meshbot", ["-meshAutoMode", "stand", "-meshWalkX", "104", "-meshWalkZ", "58"])))
         st = wait_status(lambda st: st.get("finished") == "True", 300, "the fighter")
         rep.check("-> PASS" in st.get("result", ""), f"fighter: {st.get('result', '')[:140]}")
+        m = re.search(r"questKills\+(\d+)", st.get("result", ""))
+        rep.check(m is not None and int(m.group(1)) >= 1, "the fighter's quest kill counter advanced for kills on the neighbour's monsters (kill credit forwarded)")
         c_lines, e_lines = zone_lines("C", start, day), zone_lines("E", start, day)
         rep.check(count(c_lines, r"Party 1: shared") >= 1, "C split a kill with the ghost member")
         # Either direction counts: the fighter's kills on C forward to the member on E, and monsters the member kills
@@ -369,7 +372,13 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("scenarios", nargs="*", help=f"any of {', '.join(ALL)} (default: {' '.join(DEFAULT)})")
     ap.add_argument("--list", action="store_true")
+    ap.add_argument("--env", action="append", default=[], metavar="KEY=VALUE", help=f"environment for the zones, any of {', '.join(ENV_KEYS)}")
     args = ap.parse_args()
+    for kv in args.env:
+        k, _, v = kv.partition("=")
+        if k not in ENV_KEYS:
+            print(f"unknown env key {k}; known: {', '.join(ENV_KEYS)}"); return 2
+        EXTRA_ENV[k] = v
     if args.list:
         print("\n".join(ALL)); return 0
     names = args.scenarios or DEFAULT

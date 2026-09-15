@@ -356,6 +356,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public int level;
         public Vector3 position;     // full precision, sender's world frame (identity translation in the shared-frame rig)
         public float yaw;
+        public Vector3 velocity;     // m/s, the owner's estimate over the last snapshot interval (zero when standing or just teleported)
         public byte movementState;
         public byte extraMovementState;
         public int currentHp;
@@ -385,6 +386,7 @@ namespace MultiplayerARPG.MMO.Mesh
             writer.Put(level);
             writer.Put(position.x); writer.Put(position.y); writer.Put(position.z);
             writer.Put(yaw);
+            writer.Put(velocity.x); writer.Put(velocity.y); writer.Put(velocity.z);
             writer.Put(movementState);
             writer.Put(extraMovementState);
             writer.Put(currentHp);
@@ -407,6 +409,7 @@ namespace MultiplayerARPG.MMO.Mesh
             level = reader.GetInt();
             position = new Vector3(reader.GetFloat(), reader.GetFloat(), reader.GetFloat());
             yaw = reader.GetFloat();
+            velocity = new Vector3(reader.GetFloat(), reader.GetFloat(), reader.GetFloat());
             movementState = reader.GetByte();
             extraMovementState = reader.GetByte();
             currentHp = reader.GetInt();
