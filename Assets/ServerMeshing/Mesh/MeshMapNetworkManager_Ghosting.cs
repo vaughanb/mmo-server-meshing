@@ -389,6 +389,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 TrackOwnedDrop(drop);
             else if (spawned is HarvestableEntity harvestable)
                 TrackOwnedStatic(harvestable);
+            else if (spawned is BuildingEntity building)
+                TrackOwnedStatic(building);
         }
 
         private void OnAssetObjectDestroy(LiteNetLibIdentity identity)
@@ -476,6 +478,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 TrackOwnedDrop(drop);
             foreach (HarvestableEntity harvestable in FindObjectsByType<HarvestableEntity>(FindObjectsSortMode.None))
                 TrackOwnedStatic(harvestable);
+            foreach (BuildingEntity building in FindObjectsByType<BuildingEntity>(FindObjectsSortMode.None))
+                TrackOwnedStatic(building);
             Logging.Log("Mesh", $"Owned registry: {_ownedCandidates.Count} entities, {_ownedDrops.Count} drops, {_ownedStatics.Count} statics at start");
         }
 
@@ -664,16 +668,19 @@ namespace MultiplayerARPG.MMO.Mesh
                     streamed.Add(sid.MeshEntityId);
                     if (!staticTick && _tmpIds.Contains(sid.MeshEntityId))
                         continue; // already known over there; the next slow tick refreshes it
+                    BuildingEntity asBuilding = stat as BuildingEntity;
                     client.SendGhostSnapshot(new GhostSnapshotMessage
                     {
-                        kind = GhostKind.Harvestable,
+                        kind = asBuilding != null ? GhostKind.Building : GhostKind.Harvestable,
                         characterId = sid.MeshEntityId,
                         entityId = stat.EntityId,
                         dataId = 0,
-                        characterName = string.Empty,
+                        characterName = asBuilding != null ? asBuilding.CreatorName : string.Empty,
                         level = stat is HarvestableEntity h ? h.SpawnLevel : 1,
                         position = spos,
                         yaw = stat.EntityTransform.eulerAngles.y,
+                        fullRotation = stat.EntityTransform.eulerAngles,
+                        movementState = (byte)(asBuilding != null && asBuilding.IsLocked ? 1 : 0),
                         currentHp = stat.CurrentHp,
                         maxHp = stat.MaxHp,
                     });
@@ -1090,7 +1097,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 OnGhostDropSnapshot(connectionId, msg);
                 return;
             }
-            if (msg.kind == GhostKind.Harvestable)
+            if (msg.kind == GhostKind.Harvestable || msg.kind == GhostKind.Building)
             {
                 OnGhostStaticSnapshot(connectionId, msg);
                 return;
@@ -1546,6 +1553,45 @@ namespace MultiplayerARPG.MMO.Mesh
 
         [Tooltip("Ghost harvestable entities (trees, ore) that stand within the band into the neighbour.")]
         public bool ghostHarvestables = true;
+        [Tooltip("Ghost player-placed buildings that stand within the band into the neighbour, and hand a building placed across the line to the cell that owns its position.")]
+        public bool ghostBuildings = true;
+
+        // ---- Buildings across the edge ----
+        // The kit loads and saves buildings per channel + map, so a building belongs to exactly one cell: the one whose
+        // channel holds its row. The mesh makes that the cell that owns its POSITION: a placement from next door (the
+        // player stands 1 m inside C and puts a wall 3 m into E) is forwarded to E, which creates it as its own — DB row
+        // under E's channel, streamed back to C as a ghost — instead of C keeping a building that stands on E's ground.
+        // Puppets are visible and can be hit (destroyed by the owner as the kit does); doors, storage and workbenches
+        // are RPCs on the entity that a puppet cannot serve: those stay same-cell, as dealing does.
+
+        public override async UniTask<BuildingEntity> CreateBuildingEntity(BuildingSaveData saveData, bool initialize)
+        {
+            if (!initialize && ghostBuildings && meshConfig != null && TryResolveOwnZone())
+            {
+                Vector2Int coord = meshConfig.WorldToZoneCoord(saveData.Position);
+                if (coord != OwnZoneCoord)
+                {
+                    ServerMeshTestConfig.ZoneDefinition zone = meshConfig.GetZone(coord);
+                    if (zone != null && _linkClients.TryGetValue(zone.zoneId, out MeshLinkClient link) && link.IsConnected)
+                    {
+                        link.SendBuildingPlace(saveData);
+                        Logging.Log("Mesh", $"Building {saveData.Id} placed by {saveData.CreatorName} at {(Vector3)saveData.Position} stands on zone {zone.zoneId}: handed over");
+                        return null;
+                    }
+                    Logging.LogWarning("Mesh", $"Building {saveData.Id} placed at {(Vector3)saveData.Position} stands on zone {(zone != null ? zone.zoneId : coord.ToString())}, which is not linked: kept here");
+                }
+            }
+            return await base.CreateBuildingEntity(saveData, initialize);
+        }
+
+        internal void OnBuildingPlace(long connectionId, BuildingPlaceMessage msg)
+        {
+            if (!IsServer || msg.building == null)
+                return;
+            string from = _neighbourZoneByConnection.TryGetValue(connectionId, out string z) ? z : "?";
+            Logging.Log("Mesh", $"Building {msg.building.Id} placed from zone {from} by {msg.building.CreatorName} at {(Vector3)msg.building.Position}: creating here");
+            CreateBuildingEntity(msg.building, false).Forget();
+        }
         [Tooltip("Seconds between snapshots of a static entity (position never changes; hp does).")]
         public float staticSnapshotInterval = 1f;
         private float _nextStaticSnapshot;
@@ -1581,9 +1627,18 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private void TrackOwnedStatic(DamageableEntity entity)
         {
-            if (!ghostHarvestables || entity == null || !entity.IsServer || entity.Identity == null || entity.Identity.IsDestroyed || MeshIdentity.IsGhostEntity(entity))
+            bool wanted = entity is BuildingEntity ? ghostBuildings : ghostHarvestables;
+            if (!wanted || entity == null || !entity.IsServer || entity.Identity == null || entity.Identity.IsDestroyed || MeshIdentity.IsGhostEntity(entity))
                 return;
-            MeshIdentity id = EnsureBirthMeshId(entity, entity.ObjectId);
+            MeshIdentity id;
+            if (entity is BuildingEntity building && !string.IsNullOrEmpty(building.Id))
+            {
+                // A building's own id is global (DB row, unique across the cluster): the natural mesh id.
+                id = MeshIdentity.GetOrAdd(entity);
+                if (string.IsNullOrEmpty(id.MeshEntityId)) { id.MeshEntityId = building.Id; id.OwnerZoneId = OwnZoneId; }
+            }
+            else
+                id = EnsureBirthMeshId(entity, entity.ObjectId);
             _ownedStaticsByMeshId[id.MeshEntityId] = entity;
             if (_ownedStaticSet.Add(entity))
                 _ownedStatics.Add(entity);
@@ -1595,28 +1650,9 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 if (_recentlyRemoved.ContainsKey(msg.characterId))
                     return;
-                HarvestableEntity prefab;
-                if ((!GameInstance.HarvestableEntities.TryGetValue(msg.entityId, out prefab) || prefab == null) && RegisterHarvestablePrefabs())
-                    GameInstance.HarvestableEntities.TryGetValue(msg.entityId, out prefab);
-                if (prefab == null)
-                {
-                    WarnThrottled($"Cannot spawn harvestable ghost: unknown entity id {msg.entityId} (no spawn area in this scene carries its prefab)");
-                    return;
-                }
-                // The spawn area that carries this prefab may sit outside our zone and be disabled here, so its prefab
-                // never reached the asset registry: register it now (idempotent).
-                Assets.RegisterPrefab(prefab.Identity);
-                Quaternion rot = Quaternion.Euler(0f, msg.yaw, 0f);
-                LiteNetLibIdentity identity;
-                _spawningPuppet = true;
-                try { identity = Assets.NetworkSpawn(prefab.Identity.HashAssetId, msg.position, rot); }
-                finally { _spawningPuppet = false; }
-                HarvestableEntity entity = identity != null ? identity.GetComponent<HarvestableEntity>() : null;
+                DamageableEntity entity = msg.kind == GhostKind.Building ? SpawnBuildingPuppet(msg) : SpawnHarvestablePuppet(msg);
                 if (entity == null)
-                {
-                    if (identity != null) identity.NetworkDestroy();
                     return;
-                }
                 MeshIdentity id = MeshIdentity.GetOrAdd(entity);
                 id.MeshEntityId = msg.characterId;
                 id.IsGhost = true;
@@ -1630,7 +1666,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 ghost = new GhostStatic { entity = entity, hitHook = hitHook };
                 _ghostStatics[msg.characterId] = ghost;
                 if (traceHandoffTiming)
-                    Logging.Log("Mesh", $"Harvestable ghost spawned ({msg.characterId}) from zone {id.OwnerZoneId} at {msg.position} hp={msg.currentHp}/{msg.maxHp}");
+                    Logging.Log("Mesh", $"{msg.kind} ghost spawned ({msg.characterId}) from zone {id.OwnerZoneId} at {msg.position} hp={msg.currentHp}/{msg.maxHp}");
             }
             ghost.lastSeen = Time.unscaledTime;
             if (_neighbourZoneByConnection.TryGetValue(connectionId, out string ownerZone))
@@ -1642,6 +1678,70 @@ namespace MultiplayerARPG.MMO.Mesh
             int hp = Mathf.Max(1, msg.currentHp); // never 0 on a puppet: the owner's removal follows, not a local death
             if (ghost.entity.CurrentHp != hp)
                 ghost.entity.CurrentHp = hp;
+            if (ghost.entity is BuildingEntity puppetBuilding && puppetBuilding.IsLocked != ((msg.movementState & 1) != 0))
+                puppetBuilding.IsLocked = (msg.movementState & 1) != 0;
+        }
+
+        private HarvestableEntity SpawnHarvestablePuppet(GhostSnapshotMessage msg)
+        {
+            HarvestableEntity prefab;
+            if ((!GameInstance.HarvestableEntities.TryGetValue(msg.entityId, out prefab) || prefab == null) && RegisterHarvestablePrefabs())
+                GameInstance.HarvestableEntities.TryGetValue(msg.entityId, out prefab);
+            if (prefab == null)
+            {
+                WarnThrottled($"Cannot spawn harvestable ghost: unknown entity id {msg.entityId} (no spawn area in this scene carries its prefab)");
+                return null;
+            }
+            // The spawn area that carries this prefab may sit outside our zone and be disabled here, so its prefab
+            // never reached the asset registry: register it now (idempotent).
+            Assets.RegisterPrefab(prefab.Identity);
+            LiteNetLibIdentity identity;
+            _spawningPuppet = true;
+            try { identity = Assets.NetworkSpawn(prefab.Identity.HashAssetId, msg.position, Quaternion.Euler(0f, msg.yaw, 0f)); }
+            finally { _spawningPuppet = false; }
+            HarvestableEntity entity = identity != null ? identity.GetComponent<HarvestableEntity>() : null;
+            if (entity == null && identity != null)
+                identity.NetworkDestroy();
+            return entity;
+        }
+
+        /// <summary>
+        /// The same instantiate-then-spawn the kit's CreateBuildingEntity does, minus everything that makes it OURS: no
+        /// DB row, no building handler entry, no data updater. The puppet carries the id, creator and lock state the
+        /// kit's UI reads, and its hp; a lifetime never runs down on a puppet (the owner's removal ends it).
+        /// </summary>
+        private BuildingEntity SpawnBuildingPuppet(GhostSnapshotMessage msg)
+        {
+            if (!GameInstance.BuildingEntities.TryGetValue(msg.entityId, out BuildingEntity prefab) || prefab == null)
+            {
+                WarnThrottled($"Cannot spawn building ghost: unknown building entity id {msg.entityId} (not in this database's building items)");
+                return null;
+            }
+            Assets.RegisterPrefab(prefab.Identity);
+            LiteNetLibIdentity spawnObj;
+            _spawningPuppet = true;
+            try
+            {
+                spawnObj = Assets.GetObjectInstance(prefab.Identity.HashAssetId, msg.position, Quaternion.Euler(msg.fullRotation));
+                if (spawnObj == null)
+                    return null;
+                BuildingEntity building = spawnObj.GetComponent<BuildingEntity>();
+                if (building == null)
+                {
+                    spawnObj.NetworkDestroy();
+                    return null;
+                }
+                building.Id = msg.characterId;
+                building.ParentId = string.Empty;
+                building.CurrentHp = Mathf.Max(1, msg.currentHp);
+                building.RemainsLifeTime = float.MaxValue;
+                building.IsLocked = (msg.movementState & 1) != 0;
+                building.CreatorId = string.Empty;
+                building.CreatorName = msg.characterName;
+                Assets.NetworkSpawn(spawnObj);
+                return building;
+            }
+            finally { _spawningPuppet = false; }
         }
 
         private void DestroyGhostStatic(string meshId, string reason)
@@ -1686,7 +1786,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 return;
             link.SendGhostHit(BuildGhostHit(targetMeshId, position, fromPosition, instigator, damageAmounts, weapon, skill, skillLevel));
             if (traceHandoffTiming)
-                Logging.Log("Mesh", $"Hit on harvestable ghost ({targetMeshId}) forwarded to zone {id.OwnerZoneId}");
+                Logging.Log("Mesh", $"Hit on static ghost ({targetMeshId}) forwarded to zone {id.OwnerZoneId}");
         }
 
         // ---- Loot across the edge (DESIGN §12) ----
@@ -2815,7 +2915,7 @@ namespace MultiplayerARPG.MMO.Mesh
             int hpBefore = stat.CurrentHp;
             stat.ApplyDamage((HitBoxPosition)msg.hitBoxPosition, msg.fromPosition, instigator, damageAmounts, msg.hasWeapon ? msg.weapon : CharacterItem.Empty, skill, msg.skillLevel, msg.randomSeed);
             if (traceHandoffTiming)
-                Logging.Log("Mesh", $"Forwarded hit applied to harvestable ({msg.targetMeshId}) by {msg.instigatorMeshId}: {hpBefore} -> {stat.CurrentHp}");
+                Logging.Log("Mesh", $"Forwarded hit applied to static ({msg.targetMeshId}) by {msg.instigatorMeshId}: {hpBefore} -> {stat.CurrentHp}");
         }
 
         /// <summary>Destination side: tell the origin its character registered here.</summary>
@@ -2957,6 +3057,7 @@ namespace MultiplayerARPG.MMO.Mesh
         internal void OnMeshNeighbourDisconnected(long connectionId) { }
         internal void OnGhostSnapshot(long connectionId, GhostSnapshotMessage msg) { }
         internal void OnGhostRemove(string characterId) { }
+        internal void OnBuildingPlace(long connectionId, BuildingPlaceMessage msg) { }
         internal void OnHandoffNotice(long connectionId, HandoffNoticeMessage msg) { }
         internal void OnHandoffAck(long connectionId, HandoffAckMessage msg) { }
         internal void OnGhostPartyShare(long connectionId, GhostPartyShareMessage msg) { }

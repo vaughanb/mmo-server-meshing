@@ -52,7 +52,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public const string PREF_PET = "ServerMesh.AutoClient.Pet";
 #endif
 
-        public enum Mode { none, walk, self, stand, pace, observe, fight, pvp, harvest }
+        public enum Mode { none, walk, self, stand, pace, observe, fight, pvp, harvest, build }
 
         [Header("Session")]
         public string username = "meshtest";
@@ -353,6 +353,9 @@ namespace MultiplayerARPG.MMO.Mesh
                     break;
                 case Mode.harvest:
                     yield return RunHarvest(deadline);
+                    break;
+                case Mode.build:
+                    yield return RunBuild(deadline);
                     break;
                 case Mode.fight:
                     yield return RunFight(deadline);
@@ -833,6 +836,86 @@ namespace MultiplayerARPG.MMO.Mesh
             bool hurt = nodeHpStart > 0 && minNodeHp < nodeHpStart;
             Log($"RESULT harvest: nodesSeen={nodesSeen} attacks={attacks} nodeHurt={hurt} nodeHp {nodeHpStart}->{minNodeHp} itemsGained=[{string.Join(",", gained)}] exp+{expGain} -> {(nodesSeen > 0 && attacks > 0 ? "PASS" : "FAIL")}");
             Finished = true; Passed = nodesSeen > 0 && attacks > 0;
+        }
+
+        /// <summary>
+        /// Place the building item from the bag 3 m past the line while standing on our side, then report whether a
+        /// building appeared beyond the line (the neighbour's ghost of a building it now owns) and hit it a few times.
+        /// </summary>
+        private IEnumerator RunBuild(float deadline)
+        {
+            Phase = "build";
+            _walkZOverride = walkTargetZ;
+            bool reached = false;
+            yield return WalkTo(walkTargetX, deadline, ClientMigrationController.CompletedCount, r => reached = r);
+            _walkZOverride = null;
+            if (!reached) { Fail("never reached the build position"); yield break; }
+            BasePlayerCharacterEntity self = GameInstance.PlayingCharacterEntity;
+            int index = -1;
+            for (int i = 0; i < self.NonEquipItems.Count; ++i)
+            {
+                BaseItem bagItem = self.NonEquipItems[i].GetItem();
+                if (bagItem != null && bagItem.IsBuilding()) { index = i; break; }
+            }
+            if (index < 0) { Fail("no building item in the bag"); yield break; }
+            Vector3 place = new Vector3(observeGhostBeyondX + 3f, 0f, walkTargetZ);
+            int countBefore = 0;
+            foreach (BuildingEntity be in FindObjectsByType<BuildingEntity>(FindObjectsSortMode.None)) if (be.EntityTransform.position.x >= observeGhostBeyondX) countBefore++;
+            bool sent = self.BuildingComponent.CallCmdConstructBuilding(index, place, Vector3.zero, 0);
+            Log($"build: item slot {index} at {place} sent={sent} (buildings beyond the line before: {countBefore})");
+            float end = Time.realtimeSinceStartup + 30f;
+            BuildingEntity built = null;
+            while (Time.realtimeSinceStartup < end && built == null)
+            {
+                foreach (BuildingEntity be in FindObjectsByType<BuildingEntity>(FindObjectsSortMode.None))
+                    if (be.EntityTransform.position.x >= observeGhostBeyondX && Vector3.Distance(be.EntityTransform.position, place) < 2f) { built = be; break; }
+                yield return null;
+            }
+            if (built == null)
+            {
+                Log($"RESULT build: sent={sent} appeared=False -> FAIL");
+                Finished = true; Passed = false; yield break;
+            }
+            float appearMs = (Time.realtimeSinceStartup - (end - 30f)) * 1000f;
+            Log($"build: building '{built.name}' appeared at {built.EntityTransform.position} after {appearMs:0} ms, hp={built.CurrentHp}/{built.MaxHp} creator='{built.CreatorName}'");
+            // Hit it from our side for a while.
+            float holdX = observeGhostBeyondX + 0.9f, swingEnd = Time.realtimeSinceStartup + 25f, nextAttack = 0f, nextSwingLog = 0f;
+            int attacks = 0, hpStart = built.CurrentHp, minHp = built.CurrentHp;
+            while (Time.realtimeSinceStartup < swingEnd && built != null)
+            {
+                self = GameInstance.PlayingCharacterEntity;
+                if (self == null) break;
+                float d = Vector3.Distance(self.EntityTransform.position, built.EntityTransform.position);
+                float range = Mathf.Max(1f, self.GetAttackDistance(false) - 0.3f) + 1.2f; // the wall is two metres wide
+                minHp = Mathf.Min(minHp, built.CurrentHp);
+                if (Time.realtimeSinceStartup >= nextSwingLog)
+                {
+                    nextSwingLog = Time.realtimeSinceStartup + 4f;
+                    Log($"build: swinging dist={d:0.#} range={range:0.#} self={self.EntityTransform.position} wall={built.EntityTransform.position} attacks={attacks} hp={built.CurrentHp}");
+                }
+                if (d > range + 0.6f) // the walk stops a little short of the hold line; the wall face is nearer than its centre
+                {
+                    if (self.EntityTransform.position.x < holdX) { Vector3 dest = built.EntityTransform.position; dest.x = Mathf.Min(dest.x, holdX); self.PointClickMovement(dest); }
+                    else self.StopMove();
+                }
+                else if (Time.realtimeSinceStartup >= nextAttack)
+                {
+                    nextAttack = Time.realtimeSinceStartup + 0.6f;
+                    self.StopMove();
+                    Vector3 toTarget = built.EntityTransform.position - self.EntityTransform.position; toTarget.y = 0f;
+                    if (toTarget.sqrMagnitude > 0.001f) self.SetLookRotation(Quaternion.LookRotation(toTarget.normalized), true);
+                    self.SetTargetEntity(built);
+                    bool isLeftHand = false;
+                    self.AimPosition = self.GetAttackAimPosition(ref isLeftHand, built.EntityTransform.position + Vector3.up);
+                    WeaponHandlingState whs = WeaponHandlingState.None;
+                    self.Attack(ref whs);
+                    attacks++;
+                }
+                yield return null;
+            }
+            bool gone = built == null;
+            Log($"RESULT build: sent={sent} appeared=True appearMs={appearMs:0} attacks={attacks} hp {hpStart}->{minHp} destroyed={gone} -> PASS");
+            Finished = true; Passed = true;
         }
 
         private IEnumerator RunFight(float deadline)

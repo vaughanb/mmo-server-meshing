@@ -34,6 +34,18 @@ namespace MultiplayerARPG.MMO.Mesh
         public const ushort HandoffAck = 113;
         public const ushort GhostPartyShare = 114;
         public const ushort GhostReplay = 115;   // 116-118 were the per-verb attack/skill messages, folded into GhostReplay
+        public const ushort BuildingPlace = 119; // a building placed from next door lands on the cell that owns its position
+    }
+
+    /// <summary>
+    /// A building a player placed while standing on another cell at a position this cell owns: the full save data,
+    /// created here as if the player had placed it here (DB row under this channel, streamed back as a ghost).
+    /// </summary>
+    public struct BuildingPlaceMessage : INetSerializable
+    {
+        public BuildingSaveData building;
+        public void Serialize(NetDataWriter writer) { (building ?? new BuildingSaveData()).Serialize(writer); }
+        public void Deserialize(NetDataReader reader) { building = new BuildingSaveData(); building.Deserialize(reader); }
     }
 
     /// <summary>
@@ -322,7 +334,7 @@ namespace MultiplayerARPG.MMO.Mesh
     }
 
     /// <summary>One authoritative snapshot of an entity that lives in the sender's border band.</summary>
-    public enum GhostKind : byte { Player = 0, Monster = 1, ItemDrop = 2, Harvestable = 3 }
+    public enum GhostKind : byte { Player = 0, Monster = 1, ItemDrop = 2, Harvestable = 3, Building = 4 }
 
     public struct GhostSnapshotMessage : INetSerializable
     {
@@ -347,6 +359,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public int rightWeaponLevel;
         public int leftWeaponDataId;
         public int leftWeaponLevel;
+        public Vector3 fullRotation;  // buildings only (written after the common fields when kind == Building): a wall leans, a character does not
         public int partyId;           // players: what the kit's ally/enemy rules read off the target (party, guild, faction, PK flag)
         public int guildId;
         public int factionId;
@@ -371,7 +384,7 @@ namespace MultiplayerARPG.MMO.Mesh
             writer.Put(summonerMeshId ?? string.Empty);
             writer.Put(summonId ?? string.Empty);
             writer.Put(summonType);
-            writer.Put(rightWeaponDataId); writer.Put(rightWeaponLevel); writer.Put(leftWeaponDataId); writer.Put(leftWeaponLevel); writer.Put(partyId); writer.Put(guildId); writer.Put(factionId); writer.Put(isPkOn);
+            writer.Put(rightWeaponDataId); writer.Put(rightWeaponLevel); writer.Put(leftWeaponDataId); writer.Put(leftWeaponLevel); writer.Put(partyId); writer.Put(guildId); writer.Put(factionId); writer.Put(isPkOn); if (kind == GhostKind.Building) { writer.Put(fullRotation.x); writer.Put(fullRotation.y); writer.Put(fullRotation.z); }
         }
 
         public void Deserialize(NetDataReader reader)
@@ -393,7 +406,7 @@ namespace MultiplayerARPG.MMO.Mesh
             summonerMeshId = reader.GetString();
             summonId = reader.GetString();
             summonType = reader.GetByte();
-            rightWeaponDataId = reader.GetInt(); rightWeaponLevel = reader.GetInt(); leftWeaponDataId = reader.GetInt(); leftWeaponLevel = reader.GetInt(); partyId = reader.GetInt(); guildId = reader.GetInt(); factionId = reader.GetInt(); isPkOn = reader.GetBool();
+            rightWeaponDataId = reader.GetInt(); rightWeaponLevel = reader.GetInt(); leftWeaponDataId = reader.GetInt(); leftWeaponLevel = reader.GetInt(); partyId = reader.GetInt(); guildId = reader.GetInt(); factionId = reader.GetInt(); isPkOn = reader.GetBool(); if (kind == GhostKind.Building) fullRotation = new Vector3(reader.GetFloat(), reader.GetFloat(), reader.GetFloat());
         }
     }
 
@@ -424,6 +437,7 @@ namespace MultiplayerARPG.MMO.Mesh
             RegisterMessageHandler(MeshLinkMessageTypes.HandoffAck, HandleHandoffAck);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostPartyShare, HandleGhostPartyShare);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostReplay, HandleGhostReplay);
+            RegisterMessageHandler(MeshLinkMessageTypes.BuildingPlace, HandleBuildingPlace);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostHit, HandleGhostHit);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostHitResult, HandleGhostHitResult);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostReward, HandleGhostReward);
@@ -497,6 +511,12 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             GhostReplayMessage msg = messageHandler.ReadMessage<GhostReplayMessage>();
             _manager.OnGhostReplay(msg);
+        }
+
+        private void HandleBuildingPlace(MessageHandlerData messageHandler)
+        {
+            BuildingPlaceMessage msg = messageHandler.ReadMessage<BuildingPlaceMessage>();
+            _manager.OnBuildingPlace(messageHandler.ConnectionId, msg);
         }
 
         private void HandleGhostHit(MessageHandlerData messageHandler)
@@ -634,6 +654,11 @@ namespace MultiplayerARPG.MMO.Mesh
         public void SendGhostPartyShare(GhostPartyShareMessage msg)
         {
             Send(MeshLinkMessageTypes.GhostPartyShare, msg);
+        }
+
+        public void SendBuildingPlace(BuildingSaveData building)
+        {
+            Send(MeshLinkMessageTypes.BuildingPlace, new BuildingPlaceMessage { building = building });
         }
 
         public void SendHandoffNotice(string characterId, string userId)
