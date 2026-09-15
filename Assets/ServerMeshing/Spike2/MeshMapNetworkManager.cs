@@ -136,6 +136,7 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             loadOfflineSceneWhenClientStopped = _prevLoadOfflineScene;
             IsMigrating = false;
+            MigrationDisconnected = false; // never carried into the next hop
         }
 
         /// <summary>Set while migrating when the new cell refused us or never answered; the controller reads and clears it.</summary>
@@ -405,6 +406,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 UnregisterPlayerCharacter(connectionId);
             }
 #endif
+            if (IsServer)
+                GhostingOnPeerDisconnected(connectionId);
             base.OnPeerDisconnected(connectionId, reason, socketError);
         }
 

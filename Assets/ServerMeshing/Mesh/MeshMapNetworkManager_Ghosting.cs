@@ -61,7 +61,6 @@ namespace MultiplayerARPG.MMO.Mesh
             public BaseCharacterEntity entity;
             public GhostKind kind;
             public float lastSeen;
-            public Vector3 lastTarget;
             public ReceiveDamageDelegate hitHook; // so a promoted puppet can drop its hit forwarding
             public VehicleEntity vehicle;         // the mount this ghost rides (spawned here for a puppet, kept for a demoted player)
             public bool mountPending;             // an async mount/dismount is in flight
@@ -89,6 +88,7 @@ namespace MultiplayerARPG.MMO.Mesh
         private float _nextStatsTime;
         private long _statsLinkBytesOut, _statsLinkBytesIn, _statsLinkPacketsOut, _statsLinkPacketsIn;
         private int _statsHandoffs; private float _statsHandoffSumMs, _statsHandoffMaxMs;
+        private readonly Dictionary<string, long> _statsLinkPrevOut = new Dictionary<string, long>();
 
         private void NoteHandoffCompleted(float ms)
         {
@@ -106,7 +106,9 @@ namespace MultiplayerARPG.MMO.Mesh
                 NetStatistics st = kv.Value.Statistics;
                 if (st == null) continue;
                 bytesOut += st.BytesSent; packetsOut += st.PacketsSent;
-                links.Append(kv.Key).Append(kv.Value.IsConnected ? "=" : "(down)=").Append(st.BytesSent / 1024f / meshStatsIntervalSeconds).Append("kB/s ");
+                long prev = _statsLinkPrevOut.TryGetValue(kv.Key, out long pv) ? pv : 0;
+                _statsLinkPrevOut[kv.Key] = st.BytesSent;
+                links.Append(kv.Key).Append(kv.Value.IsConnected ? "=" : "(down)=").Append(((st.BytesSent - prev) / 1024f / meshStatsIntervalSeconds).ToString("0.0")).Append("kB/s ");
             }
             NetStatistics sst = _linkServer != null ? _linkServer.Statistics : null;
             if (sst != null) { bytesIn = sst.BytesReceived; packetsIn = sst.PacketsReceived; }
@@ -521,6 +523,11 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (kv.Value == null) _tmpIds.Add(kv.Key);
             for (int i = 0; i < _tmpIds.Count; ++i)
                 _ownedDropsByMeshId.Remove(_tmpIds[i]);
+            _tmpIds.Clear();
+            foreach (KeyValuePair<string, DamageableEntity> kv in _ownedStaticsByMeshId)
+                if (kv.Value == null) _tmpIds.Add(kv.Key);
+            for (int i = 0; i < _tmpIds.Count; ++i)
+                _ownedStaticsByMeshId.Remove(_tmpIds[i]);
         }
 
         private string MeshEntityIdOf(BaseCharacterEntity entity)
@@ -680,7 +687,7 @@ namespace MultiplayerARPG.MMO.Mesh
                         position = spos,
                         yaw = stat.EntityTransform.eulerAngles.y,
                         fullRotation = stat.EntityTransform.eulerAngles,
-                        movementState = (byte)(asBuilding != null && asBuilding.IsLocked ? 1 : 0),
+                        movementState = (byte)((asBuilding != null && asBuilding.IsLocked ? 1 : 0) | (asBuilding is DoorEntity door && door.IsOpen ? 2 : 0)),
                         currentHp = stat.CurrentHp,
                         maxHp = stat.MaxHp,
                     });
@@ -734,6 +741,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 return;
             _ghosts.Remove(meshId);
             _recentlyRemoved[meshId] = Time.unscaledTime;
+            _rolledBackHandoffs.Remove(meshId);
             SetGhostSummoner(meshId, ghost, null, null);
             VehicleEntity mount = ghost.vehicle;
             if (ghost.entity != null)
@@ -756,9 +764,16 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>Remove the runtime identity so a pooled instance never comes back flagged as someone's ghost.</summary>
         private static void ResetMeshIdentity(Component entity)
         {
+            // Cleared, not destroyed: a pooled instance can be re-spawned in the same frame, and GetOrAdd would hand
+            // back a component that Unity is about to destroy at the end of it.
             MeshIdentity id = MeshIdentity.Get(entity);
-            if (id != null)
-                Destroy(id);
+            if (id == null)
+                return;
+            id.MeshEntityId = null;
+            id.IsGhost = false;
+            id.OwnerZoneId = null;
+            id.HomeZoneId = null;
+            id.LastHandoffTime = -999f;
         }
 
         // Ghosts by kind for cheap proximity queries (IsPlayerGhostNear), and ids removed a moment ago so a snapshot
@@ -877,7 +892,7 @@ namespace MultiplayerARPG.MMO.Mesh
         // Register, respawn RPC). Handing it the ghost entity means the arriving character IS the entity observers
         // here were already looking at: no swap, no pop.
 
-        private sealed class ReservedArrival { public BasePlayerCharacterEntity entity; public string userId; public float time; public VehicleEntity mount; public bool keepMount; }
+        private sealed class ReservedArrival { public BasePlayerCharacterEntity entity; public string userId; public float time; public float noticeTime; public VehicleEntity mount; public bool keepMount; }
         private readonly Dictionary<string, ReservedArrival> _reservedArrivals = new Dictionary<string, ReservedArrival>();
         [Tooltip("If an arriving client never becomes ready, its promoted ghost is destroyed after this many seconds.")]
         public float reservedArrivalTimeout = 15f;
@@ -933,10 +948,37 @@ namespace MultiplayerARPG.MMO.Mesh
             player.ForceMakeCaches();
             player.FillEmptySlots();
             player.Identity.DoNotDestroyWhenDisconnect = true;
-            _reservedArrivals[data.Id] = new ReservedArrival { entity = player, userId = userId, time = Time.unscaledTime, mount = ridden, keepMount = keepMount };
+            _reservedArrivals[data.Id] = new ReservedArrival { entity = player, userId = userId, time = Time.unscaledTime, noticeTime = _incomingHandoffFrom.TryGetValue(data.Id, out IncomingHandoff notice) ? notice.time : -1f, mount = ridden, keepMount = keepMount };
             Logging.Log("Mesh", $"Arrival {data.CharacterName} ({data.Id}) conn={connectionId}: ghost promoted in place at {player.EntityTransform.position} mount={(keepMount ? "kept" : data.Mount.type != MountType.None ? "re-summon" : "none")}");
             entity = player;
             return true;
+        }
+
+        /// <summary>The client of a reserved arrival disconnected before its ready step: release the reservation now, not 15 s later.</summary>
+        private void GhostingOnPeerDisconnected(long connectionId)
+        {
+            if (_reservedArrivals.Count == 0 || !ServerUserHandlers.TryGetUserId(connectionId, out string userId) || string.IsNullOrEmpty(userId))
+                return;
+            string characterId = null;
+            foreach (KeyValuePair<string, ReservedArrival> kv in _reservedArrivals)
+                if (string.Equals(kv.Value.userId, userId)) { characterId = kv.Key; break; }
+            if (characterId == null || ServerUserHandlers.TryGetPlayerCharacterById(characterId, out _))
+                return;
+            ReservedArrival r = _reservedArrivals[characterId];
+            _reservedArrivals.Remove(characterId);
+            _pendingSpawnPlayerCharactersByUserId.TryRemove(userId, out _);
+            // The puppet goes back to being a plain ghost: the origin's stream (or the stale pass) decides its fate.
+            if (_ghosts.TryGetValue(characterId, out MeshGhost g) && ReferenceEquals(g.entity, r.entity))
+            {
+                g.reserved = false;
+                g.lastSeen = Time.unscaledTime;
+            }
+            foreach (string petId in PetGhostsOf(characterId))
+            {
+                if (_ghosts.TryGetValue(petId, out MeshGhost pet)) { pet.reserved = false; pet.lastSeen = Time.unscaledTime; }
+            }
+            Logging.LogWarning("Mesh", $"Arrival {characterId}: its client dropped before the ready step; reservation released");
+            AckHandoffFailed(characterId, "client dropped before ready", r.noticeTime);
         }
 
         private void ExpireReservedArrivals()
@@ -959,7 +1001,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (!string.IsNullOrEmpty(r.userId) && _pendingSpawnPlayerCharactersByUserId.TryGetValue(r.userId, out IPlayerCharacterData pending) && ReferenceEquals(pending, r.entity))
                     _pendingSpawnPlayerCharactersByUserId.TryRemove(r.userId, out _);
                 Logging.LogWarning("Mesh", $"Arrival {_tmpIds[i]} was never claimed by its client; the reserved puppet is destroyed");
-                AckHandoffFailed(_tmpIds[i], "arrival never claimed by its client");
+                AckHandoffFailed(_tmpIds[i], "arrival never claimed by its client", r.noticeTime);
                 DestroySummonPuppets(_tmpIds[i], null, "arrival never claimed");
                 if (_ghosts.TryGetValue(_tmpIds[i], out MeshGhost g) && ReferenceEquals(g.entity, r.entity))
                     DestroyGhost(_tmpIds[i], "arrival never claimed");
@@ -1022,6 +1064,18 @@ namespace MultiplayerARPG.MMO.Mesh
 
         internal void OnMeshNeighbourHello(long connectionId, string zoneId)
         {
+            // A neighbour that reconnected (its link client timed out on a one-way loss, or the process restarted) says
+            // hello on a new connection while the old one has not timed out here yet: forget the old one now, so its
+            // late timeout is not taken for the live neighbour leaving.
+            _tmpIds.Clear();
+            foreach (KeyValuePair<long, string> kv in _neighbourZoneByConnection)
+                if (kv.Key != connectionId && string.Equals(kv.Value, zoneId)) _tmpIds.Add(kv.Key.ToString());
+            for (int i = 0; i < _tmpIds.Count; ++i)
+            {
+                long stale = long.Parse(_tmpIds[i]);
+                _neighbourZoneByConnection.Remove(stale);
+                Logging.Log("Mesh", $"Neighbour zone {zoneId}: connection {stale} superseded by {connectionId}");
+            }
             _neighbourZoneByConnection[connectionId] = zoneId;
             Logging.Log("Mesh", $"Neighbour zone {zoneId} linked (conn {connectionId})");
         }
@@ -1128,7 +1182,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 entity.onReceiveDamage += hitHook;
                 // Kill credit: rewards the kit gives this ghost (it was in a monster's damage records here) are intercepted
                 // by MeshGameplayRule and forwarded to the owner — see ForwardGhostReward.
-                ghost = new MeshGhost { entity = entity, kind = msg.kind, lastTarget = msg.position, hitHook = hitHook };
+                ghost = new MeshGhost { entity = entity, kind = msg.kind, hitHook = hitHook };
                 _ghosts[msg.characterId] = ghost;
                 if (msg.kind == GhostKind.Player)
                     _playerGhosts.Add(entity);
@@ -1525,7 +1579,6 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 entity.StopMove();
             }
-            ghost.lastTarget = msg.position;
             if (entity.CurrentHp != msg.currentHp && msg.maxHp > 0)
             {
                 entity.CurrentHp = msg.currentHp;
@@ -1568,17 +1621,36 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (!initialize && ghostBuildings && meshConfig != null && TryResolveOwnZone())
             {
-                Vector2Int coord = meshConfig.WorldToZoneCoord(saveData.Position);
-                if (coord != OwnZoneCoord)
+                // A child (snapped onto a parent) belongs to its PARENT's cell whatever its position: the kit links
+                // children to parents through the owning cell's building table, and chain-destroys through it.
+                string targetZone = null;
+                if (!string.IsNullOrEmpty(saveData.ParentId))
                 {
-                    ServerMeshTestConfig.ZoneDefinition zone = meshConfig.GetZone(coord);
-                    if (zone != null && _linkClients.TryGetValue(zone.zoneId, out MeshLinkClient link) && link.IsConnected)
+                    if (_ghostStatics.TryGetValue(saveData.ParentId, out GhostStatic parentPuppet) && parentPuppet.entity != null)
+                    {
+                        MeshIdentity pid = MeshIdentity.Get(parentPuppet.entity);
+                        targetZone = pid != null ? pid.OwnerZoneId : null; // the parent is a puppet: its real owner takes the child
+                    }
+                    // else: the parent is ours (real here) — the child stays here even if it leans over the line
+                }
+                else
+                {
+                    Vector2Int coord = meshConfig.WorldToZoneCoord(saveData.Position);
+                    if (coord != OwnZoneCoord)
+                    {
+                        ServerMeshTestConfig.ZoneDefinition zone = meshConfig.GetZone(coord);
+                        targetZone = zone != null ? zone.zoneId : coord.ToString();
+                    }
+                }
+                if (!string.IsNullOrEmpty(targetZone) && !string.Equals(targetZone, OwnZoneId))
+                {
+                    if (_linkClients.TryGetValue(targetZone, out MeshLinkClient link) && link.IsConnected)
                     {
                         link.SendBuildingPlace(saveData);
-                        Logging.Log("Mesh", $"Building {saveData.Id} placed by {saveData.CreatorName} at {(Vector3)saveData.Position} stands on zone {zone.zoneId}: handed over");
+                        Logging.Log("Mesh", $"Building {saveData.Id} placed by {saveData.CreatorName} at {(Vector3)saveData.Position} belongs to zone {targetZone}{(string.IsNullOrEmpty(saveData.ParentId) ? "" : " (its parent's)")}: handed over");
                         return null;
                     }
-                    Logging.LogWarning("Mesh", $"Building {saveData.Id} placed at {(Vector3)saveData.Position} stands on zone {(zone != null ? zone.zoneId : coord.ToString())}, which is not linked: kept here");
+                    Logging.LogWarning("Mesh", $"Building {saveData.Id} placed at {(Vector3)saveData.Position} belongs to zone {targetZone}, which is not linked: kept here");
                 }
             }
             return await base.CreateBuildingEntity(saveData, initialize);
@@ -1616,10 +1688,21 @@ namespace MultiplayerARPG.MMO.Mesh
             int registered = 0;
             foreach (HarvestableSpawnArea area in FindObjectsByType<HarvestableSpawnArea>(FindObjectsInactive.Include, FindObjectsSortMode.None))
             {
-                if (area.prefab == null) continue;
-                GameInstance.AddHarvestableEntities(area.prefab);
-                Assets.RegisterPrefab(area.prefab.Identity);
-                registered++;
+                if (area.prefab != null)
+                {
+                    GameInstance.AddHarvestableEntities(area.prefab);
+                    Assets.RegisterPrefab(area.prefab.Identity);
+                    registered++;
+                }
+                if (area.spawningPrefabs == null) continue;
+                for (int i = 0; i < area.spawningPrefabs.Count; ++i)
+                {
+                    HarvestableEntity extra = area.spawningPrefabs[i].prefab;
+                    if (extra == null) continue;
+                    GameInstance.AddHarvestableEntities(extra);
+                    Assets.RegisterPrefab(extra.Identity);
+                    registered++;
+                }
             }
             Logging.Log("Mesh", $"Harvestable prefabs registered for ghosting: {registered}");
             return registered > 0;
@@ -1630,6 +1713,8 @@ namespace MultiplayerARPG.MMO.Mesh
             bool wanted = entity is BuildingEntity ? ghostBuildings : ghostHarvestables;
             if (!wanted || entity == null || !entity.IsServer || entity.Identity == null || entity.Identity.IsDestroyed || MeshIdentity.IsGhostEntity(entity))
                 return;
+            if (entity.Identity.IsSceneObject)
+                return; // a scene-placed node or building exists in every cell's copy of the scene: nothing to stream
             MeshIdentity id;
             if (entity is BuildingEntity building && !string.IsNullOrEmpty(building.Id))
             {
@@ -1648,6 +1733,8 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (!_ghostStatics.TryGetValue(msg.characterId, out GhostStatic ghost) || ghost.entity == null || ghost.entity.Identity == null || ghost.entity.Identity.IsDestroyed)
             {
+                if (ghost != null)
+                    DestroyGhostStatic(msg.characterId, "instance gone"); // its hook and table entry must not outlive it
                 if (_recentlyRemoved.ContainsKey(msg.characterId))
                     return;
                 DamageableEntity entity = msg.kind == GhostKind.Building ? SpawnBuildingPuppet(msg) : SpawnHarvestablePuppet(msg);
@@ -1680,6 +1767,10 @@ namespace MultiplayerARPG.MMO.Mesh
                 ghost.entity.CurrentHp = hp;
             if (ghost.entity is BuildingEntity puppetBuilding && puppetBuilding.IsLocked != ((msg.movementState & 1) != 0))
                 puppetBuilding.IsLocked = (msg.movementState & 1) != 0;
+            // A door puppet mirrors the owner's door; the kit's open/close command still runs locally on a puppet
+            // (interaction stays same-cell), but the next snapshot puts it back the way the real door is.
+            if (ghost.entity is DoorEntity puppetDoor && puppetDoor.IsOpen != ((msg.movementState & 2) != 0))
+                puppetDoor.IsOpen = (msg.movementState & 2) != 0;
         }
 
         private HarvestableEntity SpawnHarvestablePuppet(GhostSnapshotMessage msg)
@@ -1749,7 +1840,8 @@ namespace MultiplayerARPG.MMO.Mesh
             if (!_ghostStatics.TryGetValue(meshId, out GhostStatic ghost))
                 return;
             _ghostStatics.Remove(meshId);
-            _recentlyRemoved[meshId] = Time.unscaledTime;
+            if (ghost.entity != null && ghost.entity.Identity != null && !ghost.entity.Identity.IsDestroyed)
+                _recentlyRemoved[meshId] = Time.unscaledTime; // a snapshot that overtook the removal must not resurrect it
             if (ghost.entity != null)
             {
                 if (ghost.hitHook != null)
@@ -1804,6 +1896,8 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (!_ghostDrops.TryGetValue(msg.characterId, out GhostDrop ghost) || ghost.entity == null || ghost.entity.Identity.IsDestroyed)
             {
+                if (ghost != null)
+                    DestroyGhostDrop(msg.characterId, "instance gone");
                 if (_recentlyRemoved.ContainsKey(msg.characterId))
                     return;
                 if (!GameInstance.ItemDropEntities.TryGetValue(msg.entityId, out ItemDropEntity prefab) || prefab == null)
@@ -2021,6 +2115,8 @@ namespace MultiplayerARPG.MMO.Mesh
             string targetMeshId = string.Empty;
             if (monster.TryGetTargetEntity(out BaseCharacterEntity target) && target != null)
                 targetMeshId = MeshEntityIdOf(target);
+            if (!string.Equals(homeZone, OwnZoneId) && !string.Equals(homeZone, zone.zoneId) && _linkClients.TryGetValue(homeZone, out MeshLinkClient homeLink) && homeLink.IsConnected)
+                homeLink.SendLentMonsterOwner(meshId, zone.zoneId); // the home's respawn accounting follows the monster
             link.SendMonsterHandoff(new MonsterHandoffMessage
             {
                 meshId = meshId, entityId = monster.EntityId, dataId = monster.DataId, level = monster.Level, currentHp = monster.CurrentHp,
@@ -2082,13 +2178,15 @@ namespace MultiplayerARPG.MMO.Mesh
             id.LastHandoffTime = Time.unscaledTime;
             GhostSuppression.Ghostify(entity, this, null, false, false, disableMovement: false);
             entity.IsInvincible = true;
+            if (entity is BasePlayerCharacterEntity demotedPlayer && demotedPlayer.DealingComponent != null && demotedPlayer.DealingComponent.DealingCharacter != null)
+                demotedPlayer.DealingComponent.StopDealing(); // a trade in progress ends for both sides, as the kit does on a warp
             SetDealingGuard(entity as BasePlayerCharacterEntity, true);
             ReceiveDamageDelegate hitHook = (target, position, fromPosition, instigator, damageAmounts, weapon, skill, skillLevel) =>
                 ForwardGhostHit(meshId, position, fromPosition, instigator, damageAmounts, weapon, skill, skillLevel);
             entity.onReceiveDamage += hitHook;
             if (_ghosts.TryGetValue(meshId, out MeshGhost stale) && stale.entity != null && stale.entity != entity)
                 DestroyGhost(meshId, "replaced by demotion"); // should not happen (a ghost and the real one on the same cell), be safe
-            _ghosts[meshId] = new MeshGhost { entity = entity, kind = kind, lastSeen = Time.unscaledTime, lastTarget = entity.EntityTransform.position, hitHook = hitHook, vehicle = mount };
+            _ghosts[meshId] = new MeshGhost { entity = entity, kind = kind, lastSeen = Time.unscaledTime, hitHook = hitHook, vehicle = mount };
             if (kind == GhostKind.Player)
                 _playerGhosts.Add(entity);
             UntrackOwned(entity);
@@ -2201,6 +2299,12 @@ namespace MultiplayerARPG.MMO.Mesh
             Logging.Log("Mesh", $"Borrowed monster {meshId} died here; told home zone {homeZone}");
         }
 
+        internal void OnLentMonsterOwner(string meshId, string ownerZone)
+        {
+            if (IsServer && _lentMonsters.TryGetValue(meshId, out LentMonster lent))
+                lent.ownerZone = ownerZone;
+        }
+
         internal void OnMonsterGone(string meshId)
         {
             if (!IsServer)
@@ -2290,18 +2394,7 @@ namespace MultiplayerARPG.MMO.Mesh
             if (target.IsDead())
                 return;
 
-            Dictionary<DamageElement, MinMaxFloat> damageAmounts = new Dictionary<DamageElement, MinMaxFloat>();
-            for (int i = 0; i < msg.elementDataIds.Length; ++i)
-            {
-                DamageElement element = null;
-                if (msg.elementDataIds[i] == 0 || !GameInstance.DamageElements.TryGetValue(msg.elementDataIds[i], out element) || element == null)
-                    element = GameInstance.Singleton.DefaultDamageElement;
-                if (element == null) continue;
-                damageAmounts[element] = new MinMaxFloat { min = msg.mins[i], max = msg.maxs[i] };
-            }
-            BaseSkill skill = null;
-            if (msg.skillDataId != 0)
-                GameInstance.Skills.TryGetValue(msg.skillDataId, out skill);
+            DecodeGhostHit(msg, out Dictionary<DamageElement, MinMaxFloat> damageAmounts, out BaseSkill skill);
             // The attacker as this cell knows it (its ghost here, or a real entity of ours), so the hit rules see an
             // entity with party, guild, faction and PK state. The owner is the authority: the attacking cell judged
             // the hit against its puppet of us, so the kit's rule is applied again here before any damage lands.
@@ -2776,7 +2869,7 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private sealed class IncomingHandoff { public string fromZone; public float time; public bool fastSpawned; }
         private static readonly string s_faultDieOnNoticeZone = System.Environment.GetEnvironmentVariable("MESH_FAULT_DIE_ON_NOTICE"); // a zone id: that cell dies on its next handoff notice
-        private sealed class PendingHandoffAck { public string zone; public string name; public float startTime; public float sentTime; }
+        private sealed class PendingHandoffAck { public string zone; public string name; public float startTime; public float sentTime; public float linkDownSince = -1f; }
         private readonly Dictionary<string, IncomingHandoff> _incomingHandoffFrom = new Dictionary<string, IncomingHandoff>(); // characterId -> who announced it
         private readonly Dictionary<string, PendingHandoffAck> _pendingHandoffAcks = new Dictionary<string, PendingHandoffAck>(); // characterId -> our handoff awaiting the destination's ack
 
@@ -2785,6 +2878,9 @@ namespace MultiplayerARPG.MMO.Mesh
 
         [Tooltip("After a rollback, how long the demoted puppet is kept for its client to come back to this cell (the client falls back to the cell it left when the destination refuses or times out).")]
         public float handoffRollbackHoldSeconds = 20f;
+
+        [Tooltip("A handoff rolls back only after its destination link has been down this long (a reconnect handshake or a one-tick blip must not throw away a handoff that is completing).")]
+        public float handoffLinkDownGraceSeconds = 3f;
 
         // Handoffs rolled back and still holding their puppet for the client's return (characterId).
         private readonly HashSet<string> _rolledBackHandoffs = new HashSet<string>();
@@ -2865,10 +2961,25 @@ namespace MultiplayerARPG.MMO.Mesh
 
         internal void OnHandoffAck(long connectionId, HandoffAckMessage msg)
         {
-            if (!IsServer || !_pendingHandoffAcks.TryGetValue(msg.characterId, out PendingHandoffAck pending))
+            if (!IsServer)
                 return;
-            _pendingHandoffAcks.Remove(msg.characterId);
             string fromZone = _neighbourZoneByConnection.TryGetValue(connectionId, out string z) ? z : "?";
+            if (!_pendingHandoffAcks.TryGetValue(msg.characterId, out PendingHandoffAck pending))
+            {
+                // A destination that answered after all (its link was only down for a while): the handoff did complete,
+                // so the rollback is void — stop holding the puppet and settle the pets as a normal ack would.
+                if (msg.ok && _rolledBackHandoffs.Remove(msg.characterId))
+                {
+                    Logging.LogWarning("Mesh", $"Handoff ACK for {msg.characterId} by zone {fromZone} after a rollback (promoted={msg.promoted}): committed after all");
+                    if (_ghosts.TryGetValue(msg.characterId, out MeshGhost heldPuppet)) { heldPuppet.holdUntil = 0f; heldPuppet.lastSeen = Time.unscaledTime; }
+                    foreach (string petId in PetGhostsOf(msg.characterId))
+                        if (_ghosts.TryGetValue(petId, out MeshGhost heldPet)) { heldPet.holdUntil = 0f; heldPet.lastSeen = Time.unscaledTime; }
+                    if (!msg.promoted)
+                        ReleaseDemotedPets(msg.characterId, "destination re-summoned");
+                }
+                return;
+            }
+            _pendingHandoffAcks.Remove(msg.characterId);
             if (msg.ok)
             {
                 float totalMs = (Time.unscaledTime - pending.startTime) * 1000f;
@@ -2896,21 +3007,30 @@ namespace MultiplayerARPG.MMO.Mesh
             ReleaseDemotedHandoff(msg.characterId, "handoff failed: " + msg.reason);
         }
 
-        /// <summary>A forwarded swing at one of our harvestables: the entity takes it as the kit would, with the attacker as we know it.</summary>
-        private void ApplyGhostHitToStatic(DamageableEntity stat, GhostHitMessage msg)
+        private readonly Dictionary<DamageElement, MinMaxFloat> _hitDamage = new Dictionary<DamageElement, MinMaxFloat>();
+
+        /// <summary>The damage table and skill of a forwarded hit (one reusable dictionary: the kit consumes it synchronously).</summary>
+        private void DecodeGhostHit(GhostHitMessage msg, out Dictionary<DamageElement, MinMaxFloat> damageAmounts, out BaseSkill skill)
         {
-            Dictionary<DamageElement, MinMaxFloat> damageAmounts = new Dictionary<DamageElement, MinMaxFloat>();
+            _hitDamage.Clear();
             for (int i = 0; i < msg.elementDataIds.Length; ++i)
             {
                 DamageElement element = null;
                 if (msg.elementDataIds[i] == 0 || !GameInstance.DamageElements.TryGetValue(msg.elementDataIds[i], out element) || element == null)
                     element = GameInstance.Singleton.DefaultDamageElement;
                 if (element == null) continue;
-                damageAmounts[element] = new MinMaxFloat { min = msg.mins[i], max = msg.maxs[i] };
+                _hitDamage[element] = new MinMaxFloat { min = msg.mins[i], max = msg.maxs[i] };
             }
-            BaseSkill skill = null;
+            damageAmounts = _hitDamage;
+            skill = null;
             if (msg.skillDataId != 0)
                 GameInstance.Skills.TryGetValue(msg.skillDataId, out skill);
+        }
+
+        /// <summary>A forwarded swing at one of our harvestables or buildings: the entity takes it as the kit would, with the attacker as we know it.</summary>
+        private void ApplyGhostHitToStatic(DamageableEntity stat, GhostHitMessage msg)
+        {
+            DecodeGhostHit(msg, out Dictionary<DamageElement, MinMaxFloat> damageAmounts, out BaseSkill skill);
             EntityInfo instigator = ResolveInstigator(msg.instigatorMeshId);
             int hpBefore = stat.CurrentHp;
             stat.ApplyDamage((HitBoxPosition)msg.hitBoxPosition, msg.fromPosition, instigator, damageAmounts, msg.hasWeapon ? msg.weapon : CharacterItem.Empty, skill, msg.skillLevel, msg.randomSeed);
@@ -2935,9 +3055,13 @@ namespace MultiplayerARPG.MMO.Mesh
         }
 
         /// <summary>Destination side: the announced character will not register here.</summary>
-        private void AckHandoffFailed(string characterId, string reason)
+        private void AckHandoffFailed(string characterId, string reason, float noticeTime = -1f)
         {
             if (!_incomingHandoffFrom.TryGetValue(characterId, out IncomingHandoff incoming))
+                return;
+            // A newer notice for the same character (the client came back to the origin and crossed again) must not
+            // be failed by the leftovers of the older attempt.
+            if (noticeTime >= 0f && incoming.time != noticeTime)
                 return;
             _incomingHandoffFrom.Remove(characterId);
             SendHandoffAck(incoming.fromZone, new HandoffAckMessage { characterId = characterId, ok = false, reason = reason, arrivalMs = 0 });
@@ -2982,8 +3106,14 @@ namespace MultiplayerARPG.MMO.Mesh
                 foreach (KeyValuePair<string, PendingHandoffAck> kv in _pendingHandoffAcks)
                 {
                     // A linked destination always answers: promoted, or failed once its reservation timed out. Silence
-                    // past that is a wedged destination; a dead link is a dead destination. Both roll back.
-                    if (!IsNeighbourLinked(kv.Value.zone) || Time.unscaledTime - kv.Value.sentTime > handoffAckGuardSeconds)
+                    // past that is a wedged destination; a link down for longer than a reconnect takes is a dead
+                    // destination. Both roll back.
+                    if (IsNeighbourLinked(kv.Value.zone))
+                        kv.Value.linkDownSince = -1f;
+                    else if (kv.Value.linkDownSince < 0f)
+                        kv.Value.linkDownSince = Time.unscaledTime;
+                    bool linkDead = kv.Value.linkDownSince >= 0f && Time.unscaledTime - kv.Value.linkDownSince > handoffLinkDownGraceSeconds;
+                    if (linkDead || Time.unscaledTime - kv.Value.sentTime > handoffAckGuardSeconds)
                         (expired ??= new List<string>()).Add(kv.Key);
                 }
                 if (expired != null)
@@ -3078,6 +3208,8 @@ namespace MultiplayerARPG.MMO.Mesh
         internal void OnGhostReward(GhostRewardMessage msg) { }
         internal void OnMonsterHandoff(long connectionId, MonsterHandoffMessage msg) { }
         internal void OnMonsterGone(string meshId) { }
+        internal void OnLentMonsterOwner(string meshId, string ownerZone) { }
+        private void GhostingOnPeerDisconnected(long connectionId) { }
         internal void OnGhostPickup(long connectionId, GhostPickupMessage msg) { }
         internal void OnGhostLoot(GhostLootMessage msg) { }
         internal void OnGhostKill(GhostKillMessage msg) { }

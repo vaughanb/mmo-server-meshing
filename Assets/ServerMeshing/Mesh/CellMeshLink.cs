@@ -35,6 +35,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public const ushort GhostPartyShare = 114;
         public const ushort GhostReplay = 115;   // 116-118 were the per-verb attack/skill messages, folded into GhostReplay
         public const ushort BuildingPlace = 119; // a building placed from next door lands on the cell that owns its position
+        public const ushort LentMonsterOwner = 120; // a borrowed monster changed hands again: its home learns the new owner
     }
 
     /// <summary>
@@ -223,6 +224,15 @@ namespace MultiplayerARPG.MMO.Mesh
         public string meshId;
         public void Serialize(NetDataWriter writer) { writer.Put(meshId); }
         public void Deserialize(NetDataReader reader) { meshId = reader.GetString(); }
+    }
+
+    /// <summary>A monster this cell lent out was handed on to a third cell: the respawn accounting must know who holds it now.</summary>
+    public struct LentMonsterOwnerMessage : INetSerializable
+    {
+        public string meshId;
+        public string ownerZone;
+        public void Serialize(NetDataWriter writer) { writer.Put(meshId); writer.Put(ownerZone); }
+        public void Deserialize(NetDataReader reader) { meshId = reader.GetString(); ownerZone = reader.GetString(); }
     }
 
     /// <summary>
@@ -443,6 +453,7 @@ namespace MultiplayerARPG.MMO.Mesh
             RegisterMessageHandler(MeshLinkMessageTypes.GhostReward, HandleGhostReward);
             RegisterMessageHandler(MeshLinkMessageTypes.MonsterHandoff, HandleMonsterHandoff);
             RegisterMessageHandler(MeshLinkMessageTypes.MonsterGone, HandleMonsterGone);
+            RegisterMessageHandler(MeshLinkMessageTypes.LentMonsterOwner, HandleLentMonsterOwner);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostPickup, HandleGhostPickup);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostLoot, HandleGhostLoot);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostKill, HandleGhostKill);
@@ -547,6 +558,12 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             MonsterGoneMessage msg = messageHandler.ReadMessage<MonsterGoneMessage>();
             _manager.OnMonsterGone(msg.meshId);
+        }
+
+        private void HandleLentMonsterOwner(MessageHandlerData messageHandler)
+        {
+            LentMonsterOwnerMessage msg = messageHandler.ReadMessage<LentMonsterOwnerMessage>();
+            _manager.OnLentMonsterOwner(msg.meshId, msg.ownerZone);
         }
 
         private void HandleGhostPickup(MessageHandlerData messageHandler)
@@ -709,6 +726,11 @@ namespace MultiplayerARPG.MMO.Mesh
         public void SendMonsterGone(string meshId)
         {
             Send(MeshLinkMessageTypes.MonsterGone, new MonsterGoneMessage { meshId = meshId });
+        }
+
+        public void SendLentMonsterOwner(string meshId, string ownerZone)
+        {
+            Send(MeshLinkMessageTypes.LentMonsterOwner, new LentMonsterOwnerMessage { meshId = meshId, ownerZone = ownerZone });
         }
 
         public void SendGhostRemove(string characterId)

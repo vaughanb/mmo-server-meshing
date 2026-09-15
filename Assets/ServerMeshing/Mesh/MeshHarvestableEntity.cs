@@ -54,9 +54,12 @@ namespace MultiplayerARPG.MMO.Mesh
                 int itemDataId = receivingItem.item.DataId;
                 int itemAmount = (int)(receivingItem.amountPerDamage * calculatingTotalDamage);
                 int exp = (int)(harvestable.expPerDamage * calculatingTotalDamage);
-                if (collectType == HarvestableCollectType.DropToGround)
+                MeshIdentity attackerId = MeshIdentity.Get(attackerCharacter);
+                bool ownerReachable = attackerId != null && !string.IsNullOrEmpty(attackerId.OwnerZoneId) && mesh.IsNeighbourLinked(attackerId.OwnerZoneId);
+                if (collectType == HarvestableCollectType.DropToGround || !ownerReachable)
                 {
-                    // The node drops on the ground here; the drop is ghosted to the attacker's cell like any drop.
+                    // The node drops on the ground here (also when the attacker's cell cannot be reached right now: the kit
+                    // never loses a harvest); the drop is ghosted to the attacker's cell like any drop.
                     ItemDropEntity.Drop(this, RewardGivenType.Harvestable, CharacterItem.Create(itemDataId, 1, itemAmount), System.Array.Empty<string>()).Forget();
                     if (exp > 0)
                         attackerCharacter.RewardExp(exp, 1, RewardGivenType.Harvestable, 1, 1); // MeshGameplayRule forwards exp given to a ghost

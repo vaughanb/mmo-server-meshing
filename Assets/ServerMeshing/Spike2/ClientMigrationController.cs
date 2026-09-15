@@ -327,7 +327,10 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             long tPlayerReady = sw.ElapsedMilliseconds;
             if (newEntity == null)
+            {
+                _queuedAddress = null;
                 _manager.FailMigration(); // both cells refused us: the kit's disconnect handling takes over
+            }
             if (newEntity != null && newEntity.PassengingVehicleEntity != null)
                 mountedAfterMs = tPlayerReady;
             if (newEntity != null && keptController && controller != null)
@@ -412,6 +415,14 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (standIns[i].go != null) Destroy(standIns[i].go);
             long tFaded = sw.ElapsedMilliseconds;
 
+            if (_manager.MigrationDisconnected)
+            {
+                // The new cell dropped us after we had arrived (between the entity and the end of the swap): that is
+                // the end of the session, not a hop — the kit's handling runs now, and nothing queued can follow.
+                playerReady = false;
+                _queuedAddress = null;
+                _manager.FailMigration();
+            }
             _manager.EndMigration();
             sw.Stop();
             _running = false;
@@ -610,7 +621,10 @@ namespace MultiplayerARPG.MMO.Mesh
             long tPlayerReady = sw.ElapsedMilliseconds;
             bool playerReady = GameInstance.PlayingCharacterEntity != null && !ReferenceEquals(GameInstance.PlayingCharacterEntity, prevEntity);
             if (!playerReady)
+            {
+                _queuedAddress = null;
                 _manager.FailMigration();
+            }
             Vector3 posAfter = playerReady ? GameInstance.PlayingCharacterEntity.EntityTransform.position : Vector3.zero;
 
             yield return null;
