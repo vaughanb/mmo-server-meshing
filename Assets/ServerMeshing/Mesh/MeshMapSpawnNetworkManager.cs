@@ -18,6 +18,8 @@ namespace MultiplayerARPG.MMO.Mesh
         [Header("Server Meshing")]
         [Tooltip("World registry: a map with a layout is started once per cell (channel id = cell id).")]
         public MeshWorldRegistry world;
+        [Tooltip("Sleeping cells: do not start the cells at boot; the central starts them on demand. (Rig: MESH_SLEEP=1.)")]
+        public bool sleepCells = false;
 
         private static readonly MethodInfo s_spawnMap = FindSpawnMap();
         private ClusterClient.OnResponseAppServerRegister _kitOnRegister;
@@ -79,6 +81,11 @@ namespace MultiplayerARPG.MMO.Mesh
                 // the non-meshed ones only (a placeholder keeps it from falling back to all maps).
                 spawningMaps = plain.Count > 0 ? plain : new List<BaseMapInfo> { null };
                 _kitOnRegister?.Invoke(responseCode);
+            }
+            if (MeshSleepConfig.EnvEnabled || sleepCells)
+            {
+                Logging.Log("Mesh", $"Sleeping cells: {cells.Count} cell(s) start on demand (the central wakes them)");
+                return;
             }
             SpawnCells(cells).Forget();
         }

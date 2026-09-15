@@ -293,6 +293,10 @@ namespace MultiplayerARPG.MMO.Mesh
             bool ok = await base.DeserializeEnterGameData(requestId, connectionId, request, reader);
             Stamp($"enter-game validated+loaded ok={ok} in {sw.ElapsedMilliseconds}ms");
 #if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
+            if (ok && ServerUserHandlers.TryGetUserId(connectionId, out string traceUserId) && _pendingSpawnPlayerCharactersByUserId.TryGetValue(traceUserId, out IPlayerCharacterData tracePending))
+                Stamp($"enter-game data for {tracePending.CharacterName}: position {(Vector3)tracePending.CurrentPosition} map {tracePending.CurrentMapName}");
+#endif
+#if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
             // Arrival by handoff with a ghost already standing here: hand the kit the ghost as the "already spawned"
             // entity (CE-8 makes the pending map reachable), so its ready path re-owns and registers it in place.
             if (ok && IsServer && promoteGhostOnArrival
@@ -316,7 +320,7 @@ namespace MultiplayerARPG.MMO.Mesh
 
         public override void RegisterPlayerCharacter(long connectionId, BasePlayerCharacterEntity playerCharacter)
         {
-            Stamp($"player registered {playerCharacter.CharacterName} conn={connectionId}");
+            Stamp($"player registered {playerCharacter.CharacterName} conn={connectionId} at {playerCharacter.EntityTransform.position} (data {(Vector3)playerCharacter.CurrentPosition})");
 #if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
             if (IsServer)
                 GhostingOnRealPlayerRegistered(playerCharacter, connectionId);
@@ -391,6 +395,8 @@ namespace MultiplayerARPG.MMO.Mesh
             OwnCell = null;
             OwnZoneId = string.Empty;
             TryResolveOwnZone();
+            if (ClusterClient != null)
+                ClusterClient.RegisterMessageHandler(MeshClusterMsg.Sleep, HandleSleepMessage);
             if (ServerTransport is LiteNetLibManager.LiteNetLibTransport statsTransport && statsTransport.Server != null)
                 statsTransport.Server.EnableStatistics = true; // client traffic in the Mesh stats line
             // Test rig toggle: MESH_NO_MONSTER_HANDOFF=1 in the environment keeps monsters with their spawn cell even
@@ -618,6 +624,7 @@ namespace MultiplayerARPG.MMO.Mesh
             if (!_meshPeers.TryGetValue(key, out CentralServerPeerInfo peer))
             {
                 WarnThrottled($"No map server registered for zone peer key '{key}' ({_meshPeers.Count} known); player {entity.CharacterName} stays on {OwnZoneId}.");
+                RequestWake(zone); // sleeping cells: the ring should have woken it already; this is the safety net
                 return;
             }
 
@@ -751,5 +758,33 @@ namespace MultiplayerARPG.MMO.Mesh
 
         #endregion
 #endif
+
+        // ---- sleeping cells (DESIGN.md Q13): the central tells an unwanted cell to exit; a cell asks it to wake a neighbour ----
+        private float _nextWakeRequest;
+
+        private void HandleSleepMessage(MessageHandlerData messageHandler)
+        {
+            MeshSleepMessage message = messageHandler.ReadMessage<MeshSleepMessage>();
+            int players = 0;
+            foreach (IPlayerCharacterData _ in ServerUserHandlers.GetPlayerCharacters()) players++;
+            if (players > 0 || Players.Count > 0)
+            {
+                Logging.Log("Mesh", $"Sleep asked for cell {message.cellId} but {players} player(s) / {Players.Count} connection(s) are here: staying up");
+                return;
+            }
+            Logging.Log("Mesh", $"Sleeping: cell {OwnZoneId} has nobody near it; saving and exiting");
+            Application.Quit(); // the kit's quit routine saves buildings, then quits for real
+        }
+
+        /// <summary>Ask the central to wake a cell (throttled). The awake ring normally makes this unnecessary.</summary>
+        private void RequestWake(MeshCell cell)
+        {
+            if (cell == null || ClusterClient == null || !ClusterClient.IsAppRegistered || Time.unscaledTime < _nextWakeRequest)
+                return;
+            _nextWakeRequest = Time.unscaledTime + 5f;
+            ClusterClient.SendRequest(MeshClusterMsg.Wake, new MeshWakeRequest { cellId = cell.id, mapId = cell.mapId });
+            Logging.Log("Mesh", $"Wake requested for sleeping cell {cell.id} ({cell.mapId})");
+        }
+
     }
 }

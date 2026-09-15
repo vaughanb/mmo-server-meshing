@@ -42,6 +42,17 @@ namespace MultiplayerARPG.MMO.Mesh
                 PlayerCharacterData character = characterResp.IsSuccess ? characterResp.Response.CharacterData : null;
                 if (character != null && world.HasLayout(character.CurrentMapName))
                 {
+                    if (CentralNetworkManager is MeshCentralNetworkManager central && central.sleepCells)
+                    {
+                        // Sleeping cells: the owning cell serves the character; wake it first if it is asleep.
+                        MeshCell owner = world.CellAt(character.CurrentMapName, character.CurrentPosition);
+                        if (owner != null && !central.IsCellUp(owner))
+                        {
+                            Logging.Log("Mesh", $"Login into sleeping cell {owner.id}: waking it for {character.CharacterName}");
+                            bool up = await central.WakeAndWait(owner, 20f);
+                            Logging.Log("Mesh", $"Cell {owner.id} {(up ? "is up" : "did not come up in time")} for {character.CharacterName}");
+                        }
+                    }
                     string routed = RouteByPosition(character);
                     if (!string.IsNullOrEmpty(routed) && !string.Equals(routed, request.channelId))
                     {

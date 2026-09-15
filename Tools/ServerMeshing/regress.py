@@ -36,7 +36,7 @@ TESTER = "493cd2454f4949ebbf2f09748fe78af8"   # MeshTester2 (the editor client)
 BOT = "8cb502da59bf43b4a654875dc2934c11"      # meshbotChar (the headless bot)
 ITEM_BUILDING, ITEM_YIELD, ITEM_SKILL = 1802134084, 970799895, 357861288
 ITEM_BOW = -137752354      # TestBowItem-CE, equipped in both test characters' right hand since 0.30
-ENV_KEYS = ["MESH_NO_MONSTER_HANDOFF", "MESH_FAULT_DIE_ON_NOTICE", "MESH_GHOST_LEAD", "MESH_LOAD_PLAYERS", "MESH_LOAD_CELL", "MESH_LOAD_UNCAPPED"]
+ENV_KEYS = ["MESH_NO_MONSTER_HANDOFF", "MESH_FAULT_DIE_ON_NOTICE", "MESH_GHOST_LEAD", "MESH_LOAD_PLAYERS", "MESH_LOAD_CELL", "MESH_LOAD_UNCAPPED", "MESH_SLEEP", "MESH_SLEEP_RINGS", "MESH_SLEEP_AFTER"]
 EXTRA_ENV = {}   # --env KEY=VALUE from the command line, applied to every Play request of the run
 
 
@@ -189,6 +189,11 @@ def grade_common(rep, start, day):
             rep.notes.append(f"   {z}: {l[:160]}")
 
 
+def hms(t):
+    h, m, s2 = t.split(":")
+    return int(h) * 3600 + int(m) * 60 + int(s2)
+
+
 def bot_result(log, kind):
     try:
         for line in open(log, encoding="utf-8", errors="replace"):
@@ -297,6 +302,37 @@ def run_scenario(name, rep):
         walk_start = next((i for i, l in enumerate(bot_lines) if "Walking from" in l), 0)
         rep.check(count(bot_lines[walk_start:], r"Unloading \d+ unused Assets") >= 2, "the kit reloaded the scene at each crossing")
 
+    elif name == "sleep":
+        # Sleeping cells: nothing starts at boot. The tester's login into C wakes C, whose ring (1 on the rig) wakes E, N
+        # and NE; C2 stays asleep. The bot logs in on E's west half (which wakes C2, 100 m ahead of the seam), walks across the
+        # seam into C2 and back — seamless. Then the bot leaves; with only the tester on C, C2 is unwanted and exits after the
+        # grace period.
+        # The bot logs in on E's west half: its login wakes C2 (E's ring), 90 m ahead of the seam. Not at (200, 0): a login
+        # exactly on a scene spawn point trips an unexplained teleport to another spawn point (open bug, DESIGN 0.55).
+        db_reset((20, 0), (210, 0))
+        request_play("stand", 20, 0, env={"MESH_SLEEP": "1", "MESH_SLEEP_RINGS": "1", "MESH_SLEEP_AFTER": "30"})
+        wait_status(lambda st: st.get("isPlaying") == "True", 60, "Play")
+        time.sleep(25)
+        c2_before = zone_lines("C2", start, day, MAP2)
+        rep.check(count(c2_before, r"Own cell from channel id: C2") == 0, "C2 was not started at boot (asleep)")
+        rep.check(count(zone_lines("C", start, day), r"Own cell from channel id: C") >= 1, "C woke for the tester's login")
+        bots.append(("walk", launch_bot(name, "meshbot", ["-meshAutoMode", "walk", "-meshWalkX", "310", "-meshReturnX", "-110", "-meshStopOnMigration"])))
+        walk = wait_for_bot(bots[0][1], "walk", 300)
+        rep.check("-> PASS" in walk and "migrations=2" in walk, f"bot: {walk[:120]}")
+        e_lines, c2_lines = zone_lines("E", start, day), zone_lines("C2", start, day, MAP2)
+        rep.check(count(c2_lines, r"Own cell from channel id: C2") >= 1, "C2 woke once the bot was on E")
+        woke = next((STAMP.search(l[:60]).group(2) for l in c2_lines if "Own cell from channel id: C2" in l), None)
+        entered_e = next((STAMP.search(l[:60]).group(2) for l in e_lines if "player registered meshbotChar" in l), None)
+        hop = next((STAMP.search(l[:60]).group(2) for l in e_lines if "Handoff START meshbotChar" in l), None)
+        rep.check(woke is not None and entered_e is not None and entered_e <= woke, f"C2 woke after the bot arrived on E (arrived {entered_e}, serving {woke})")
+        rep.check(woke is not None and hop is not None and hms(hop) - hms(woke) >= 5, f"C2 was serving at least 5 s before the bot's crossing (serving {woke}, crossing {hop})")
+        rep.check(count(e_lines, r"Handoff ACK meshbotChar by zone C2:.*promoted=") >= 1, "the crossing into the woken cell was acked")
+        kill_bots()
+        time.sleep(75)
+        c2_lines = zone_lines("C2", start, day, MAP2)
+        rep.check(count(c2_lines, r"Sleeping: cell C2 has nobody near it") >= 1, "C2 went to sleep once nobody was near")
+        rep.check(count(zone_lines("E", start, day), r"Sleeping: cell E") == 0, "E stayed up (in the tester's ring)")
+
     elif name == "crash":
         # The destination dies on the handoff notice: rollback, client fallback, MapSpawn restart, re-registration.
         db_reset((86.5, 0), (0, 0))
@@ -374,7 +410,7 @@ def wait_for_bot(log, kind, timeout):
     return ""
 
 
-DEFAULT = ["pet", "party", "crash", "harvest", "build", "seam", "seamcold"]
+DEFAULT = ["pet", "party", "crash", "harvest", "build", "seam", "seamcold", "sleep"]
 ALL = DEFAULT + ["pvp"]
 
 
