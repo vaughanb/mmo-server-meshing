@@ -151,7 +151,7 @@ Confirmed 2026-06-12 — re-confirm line numbers before relying on them.
 | Per-entity data | Entities are `LiteNetLibBehaviour` stacks on prefabs | entity prefabs |
 
 The bulk of the add-on lives in ManagerComponents, a `MeshInterestManager`, a `MeshMapNetworkManager`
-subclass, a `MeshIdentity` behaviour, and standalone networking classes (CellMeshLink, MeshCoordinator).
+subclass, a `MeshIdentity` behaviour, and standalone networking classes (CellMeshLink).
 
 ---
 
@@ -373,7 +373,7 @@ is needed by any of them; the registry of the few core touches stays in §17.*
 2. **State transfer (S2S)** — owner serializes live state (not a DB save) over CellMeshLink; neighbor
    instantiates the real entity (via `NetworkSpawn`) in a "received, not active" state at the
    translated transform, under the same `MeshEntityId`.
-3. **Ownership flip** at the line — Coordinator records the new owner; old cell demotes its real entity
+3. **Ownership flip** at the line — the destination becomes the owner once it acks the notice; old cell demotes its real entity
    to a ghost; new cell promotes its received entity.
 4. **Client transport migration** — re-point the client to the new cell. The kit's warp path already
    re-authenticates, resumes the character, sets ready, registers handlers, and binds ownership on the
@@ -557,7 +557,7 @@ Marked in-code `// MESH-EDIT: CE-<n> — <reason>. See Docs/ServerMeshing/DESIGN
 |---|---|---|---|---|---|
 | CE-1 | **Not needed (2026-09-12)** | `LiteNetLibGameManager.OnStopClient` (`:516-524`) | `protected virtual bool ShouldClearAssetsOnStopClient()` | Subclass can't skip just the clear (no `base.base`); B re-spawns with own ids | Masking measured adequate ([SPIKE2.md §0](SPIKE2.md#0-results-2026-09-12)): gap 450–650 ms, no visual break |
 | CE-2 | **Avoided** | `CentralNetworkManager.cs:51,112` | (would be) subclass `ClusterServer` | n/a | MeshCoordinator is a separate role |
-| CE-3 | **Investigating** | `MMOServerInstance` / `ProcessArguments` launch | Register + launch the MeshCoordinator role | "Launch like Login/MapSpawn" goes through the kit launcher | Run as an **independent process** (zero-edit) if feasible; else a small documented launcher edit |
+| CE-3 | **Not needed** (2026-09-15) | `MMOServerInstance` / `ProcessArguments` launch | — | Static cells need no coordinator role (Q8); the central and spawner subclasses live on the existing server-instance prefab. Revisit only with dynamic cells (Q13). |
 | CE-4 | **Investigating** | Login / enter-game routing | Resolve `(worldMap, position) → cell server` | Existing path routes by `currentMapName` only | Prefer a handler/`ManagerComponent` seam; core edit only if none reaches the routing decision. *Observed 2026-09-12:* a character saved inside zone E but logging into channel C is handed off to E by C's boundary tick right after spawn — a working (if roundabout) fallback |
 | CE-6 | **Applied 2026-09-12 (2 lines, upstreamable)** | `ThirdParty/LiteNetLibManager/Scripts/LiteNetLibClient.cs` + `LiteNetLibServer.cs`, `SendRequestAsync` | `do { await UniTask.Delay(100); } while (!done);` → `await UniTask.WaitUntil(() => done);` | The 100 ms poll put a hard floor under **every** request/response in the kit (all DB calls, cluster calls); the receiving cell issues ~7 sequential DB requests per hop, so the floor alone was ≈0.7 s of the measured gap. No extension seam reaches the wait loop (would need a custom `IDatabaseClient` wrapping ~100 methods) | Marked `MESH-EDIT: CE-6`; a one-line PR to OpenMMORPG/LiteNetLibManager ("scalability") retires it |
 | CE-7 | **Applied 2026-09-12 (1 virtual + 1 call site, upstreamable)** | `Core/Scripts/Gameplay/CharacterSystems/MonsterCharacterSystems/MonsterActivityComponent.cs`, `ManagedUpdate` | Inline `Entity.Identity.CountSubscribers() == 0` gate → `protected virtual bool IsWatched()` (same default) | The kit puts a monster AI to sleep while it has no network subscribers. On a meshed cell the player standing just across the edge is a ghost here, not a subscriber, so edge monsters froze exactly when a neighbour-cell player looked at or hit them (fight test: 12 forwarded hits, no retaliation). The check is the first line of a public virtual with no seam around it | Marked `MESH-EDIT: CE-7`; add-on `MeshMonsterActivityComponent` overrides `IsWatched()` to also count a player ghost within visual range + margin; a one-line PR ("make the watcher check virtual") retires it |
@@ -600,11 +600,11 @@ Marked in-code `// MESH-EDIT: CE-<n> — <reason>. See Docs/ServerMeshing/DESIGN
 | **Border band (`B`)** / **Hysteresis (`H`)** | Overlap zone for ghosts / distance past edge before ownership flips (`H < B`) |
 | **Boundary tick** | Per-tick check in `MeshServerComponent` detecting walked crossings — the **primary** handoff trigger |
 | **Ghost** | Read-only replica; authoritative behaviours suppressed; never simulated locally |
-| **MeshEntityId** | Stable, owner-independent cross-cell id (character id for players; Coordinator/birth-provenance id otherwise) |
-| **cellIncarnation** | Coordinator-issued per-cell-startup number; keeps `MeshEntityId` unique across restarts |
+| **MeshEntityId** | Stable, owner-independent cross-cell id (character id for players; birth-provenance id otherwise) |
+| **cellIncarnation** | Per-process value taken at a cell's start-up; keeps `MeshEntityId` unique across restarts |
 | **Owner / owner-of-record** | The single cell that simulates an entity / may persist it |
 | **Handoff** | Transfer of authority + client connection to a neighbor |
 | **CellMeshLink** | Server-to-server channel between adjacent cells |
-| **Mesh Coordinator** | Standalone role: adjacency + ownership + routing + id allocation + handoff broker |
+| **Mesh Coordinator** | *Dropped (0.50):* the planned standalone role; static cells need none (registry + kit cluster + login routing). Would return only with dynamic cells (Q13) |
 | **ManagerComponent** | `BaseGameNetworkManagerComponent` — the kit's lifecycle-hook extension seam |
 | **MESH-EDIT** | In-code marker for an unavoidable core edit, logged in [§17](#17-core-edit-registry) |
