@@ -12,7 +12,19 @@ using UnityEngine;
 
 namespace MultiplayerARPG.MMO.Mesh
 {
-    /// <summary>One kit map's cut into cells: a uniform grid, placed in the shared world frame.</summary>
+    /// <summary>An explicit cell: a rectangle in the map's scene frame. Cells of one map may differ in size (a town small, wilderness large) but must not overlap.</summary>
+    [Serializable]
+    public class MeshCellRect
+    {
+        [Tooltip("Cell id: the channel id of the map server serving it; unique across the whole world.")]
+        public string id;
+        [Tooltip("Scene-frame minimum corner (x, z).")]
+        public Vector2 min;
+        [Tooltip("Edge lengths (x, z) in metres.")]
+        public Vector2 size = new Vector2(200f, 200f);
+    }
+
+    /// <summary>One kit map's cut into cells — a uniform grid, or explicit rectangles of any size — placed in the shared world frame.</summary>
     [Serializable]
     public class MeshMapLayout
     {
@@ -32,6 +44,10 @@ namespace MultiplayerARPG.MMO.Mesh
         public string cellIdFormat = "{map}-{x}-{y}";
         [Tooltip("Optional explicit ids, row-major (index = y * columns + x); overrides the pattern.")]
         public string[] cellIds;
+        [Tooltip("Optional explicit cells (scene-frame rectangles of any size, non-overlapping). When set, these ARE the map's cells and the grid fields above are ignored: small cells where players gather, large ones over empty land.")]
+        public MeshCellRect[] cellRects;
+
+        public bool IsExplicit => cellRects != null && cellRects.Length > 0;
 
         public string CellIdAt(int x, int y)
         {
@@ -157,8 +173,25 @@ namespace MultiplayerARPG.MMO.Mesh
             MeshMapLayout layout = GetLayout(mapId);
             if (layout == null)
                 return null;
-            Vector2Int coord = layout.GridCoordOf(scenePos);
-            return CellAtGrid(mapId, coord.x, coord.y);
+            if (!layout.IsExplicit)
+            {
+                Vector2Int coord = layout.GridCoordOf(scenePos);
+                return CellAtGrid(mapId, coord.x, coord.y);
+            }
+            // Explicit rectangles: the one containing the position, else the nearest one of the map.
+            IReadOnlyList<MeshCell> cells = CellsOf(mapId);
+            float wx = scenePos.x + layout.worldOrigin.x, wz = scenePos.z + layout.worldOrigin.z;
+            MeshCell nearest = null;
+            float nearestGap = float.MaxValue;
+            for (int i = 0; i < cells.Count; ++i)
+            {
+                MeshCell cell = cells[i];
+                if (cell.ContainsWorld(wx, wz))
+                    return cell;
+                float gap = Mathf.Max(Mathf.Max(cell.worldMinX - wx, 0f, wx - cell.worldMaxX), Mathf.Max(cell.worldMinZ - wz, 0f, wz - cell.worldMaxZ));
+                if (gap < nearestGap) { nearestGap = gap; nearest = cell; }
+            }
+            return nearest;
         }
 
         /// <summary>The cell of any map whose rectangle contains a world position, or null.</summary>
@@ -215,7 +248,9 @@ namespace MultiplayerARPG.MMO.Mesh
             HashSet<string> ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (MeshMapLayout layout in maps)
             {
-                if (layout == null || string.IsNullOrEmpty(layout.mapId) || layout.columns <= 0 || layout.rows <= 0 || layout.cellSize <= 0f)
+                if (layout == null || string.IsNullOrEmpty(layout.mapId))
+                    continue;
+                if (!layout.IsExplicit && (layout.columns <= 0 || layout.rows <= 0 || layout.cellSize <= 0f))
                     continue;
                 if (_layouts.ContainsKey(layout.mapId))
                 {
@@ -223,8 +258,40 @@ namespace MultiplayerARPG.MMO.Mesh
                     continue;
                 }
                 _layouts[layout.mapId] = layout;
-                List<MeshCell> cells = new List<MeshCell>(layout.columns * layout.rows);
+                List<MeshCell> cells = new List<MeshCell>(layout.IsExplicit ? layout.cellRects.Length : layout.columns * layout.rows);
                 _cellsByMap[layout.mapId] = cells;
+                if (layout.IsExplicit)
+                {
+                    for (int i = 0; i < layout.cellRects.Length; ++i)
+                    {
+                        MeshCellRect rect = layout.cellRects[i];
+                        if (rect == null || string.IsNullOrEmpty(rect.id) || rect.size.x <= 0f || rect.size.y <= 0f)
+                        {
+                            Debug.LogError($"[Mesh] World registry: map '{layout.mapId}' explicit cell #{i} needs an id and a positive size; skipped.");
+                            continue;
+                        }
+                        MeshCell cell = new MeshCell { id = rect.id, mapId = layout.mapId, layout = layout, gridX = i, gridY = -1, frameOrigin = layout.worldOrigin };
+                        cell.worldMinX = layout.worldOrigin.x + rect.min.x;
+                        cell.worldMinZ = layout.worldOrigin.z + rect.min.y;
+                        cell.worldMaxX = cell.worldMinX + rect.size.x;
+                        cell.worldMaxZ = cell.worldMinZ + rect.size.y;
+                        for (int j = 0; j < cells.Count; ++j)
+                        {
+                            MeshCell other = cells[j];
+                            float overlapX = Mathf.Min(cell.worldMaxX, other.worldMaxX) - Mathf.Max(cell.worldMinX, other.worldMinX);
+                            float overlapZ = Mathf.Min(cell.worldMaxZ, other.worldMaxZ) - Mathf.Max(cell.worldMinZ, other.worldMinZ);
+                            if (overlapX > touchTolerance && overlapZ > touchTolerance)
+                                Debug.LogError($"[Mesh] World registry: cells {cell.id} and {other.id} of map {layout.mapId} overlap by {overlapX:0.#} x {overlapZ:0.#} m; ownership there is ambiguous.");
+                        }
+                        if (!ids.Add(cell.id))
+                            Debug.LogError($"[Mesh] World registry: cell id '{cell.id}' (map {layout.mapId}) is not unique across the world; the map servers' cluster keys would collide.");
+                        _byKey[Key(layout.mapId, cell.id)] = cell;
+                        if (!_byId.ContainsKey(cell.id)) _byId[cell.id] = cell;
+                        _cells.Add(cell);
+                        cells.Add(cell);
+                    }
+                    continue;
+                }
                 for (int y = 0; y < layout.rows; ++y)
                 {
                     for (int x = 0; x < layout.columns; ++x)

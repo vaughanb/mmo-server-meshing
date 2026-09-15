@@ -34,4 +34,8 @@ MonoBehaviour:
     cellIdFormat: '{map}-{x}-{y}'
     cellIds:
     - C2
+    cellRects:
+    - id: C2
+      min: {x: -100, y: -100}
+      size: {x: 200, y: 200}
   touchTolerance: 0.5

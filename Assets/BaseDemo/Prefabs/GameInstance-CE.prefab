@@ -227,7 +227,7 @@ MonoBehaviour:
   minCharacterNameLength: 2
   maxCharacterNameLength: 16
   maxCharacterSaves: 5
-  serverTargetFrameRate: 120
+  serverTargetFrameRate: 60
   testInEditorMode: 0
   exportSocialSystemSettingAsJson: 0
   exportMinimalItemsAsJson: 0
