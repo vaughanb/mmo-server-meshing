@@ -198,9 +198,13 @@ namespace MultiplayerARPG.MMO.Mesh
 
         #region Seamless strategy (visual stand-ins)
 
+        private Vector3 _frameShift; // a seam crossing re-bases the world during the hop: old-frame samples are compared in the new frame
+        internal void NoteFrameShift(Vector3 shift) { _frameShift += shift; }
+
         private IEnumerator MigrateSeamlessRoutine(string address, int port)
         {
             _running = true;
+            _frameShift = Vector3.zero;
             _inputUsedDuringGap = false;
             System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
             BasePlayerCharacterEntity prevEntity = GameInstance.PlayingCharacterEntity;
@@ -433,7 +437,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 address = address, port = port, connected = connected, playerReady = playerReady, seamless = true, fellBack = fellBack,
                 captureMs = tCapture, stopMs = tStop, connectedMs = tConnected, playerReadyMs = tPlayerReady, fadedMs = tFaded,
                 positionBefore = posBefore, positionAfter = posAfter,
-                positionJump = playerReady ? Vector3.Distance(posBefore, posAfter) : -1f,
+                positionJump = playerReady ? Vector3.Distance(posBefore + _frameShift, posAfter) : -1f,
                 resyncJump = resyncJump, framesWithoutCamera = framesWithoutCamera, standIns = standIns.Count,
             };
             LastResult.mountedBefore = mountedBefore;
@@ -650,7 +654,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 address = address, port = port, connected = connected, playerReady = playerReady, seamless = false, fellBack = fellBack,
                 captureMs = tCapture, stopMs = tStop, connectedMs = tConnected, playerReadyMs = tPlayerReady, fadedMs = tFaded,
                 positionBefore = posBefore, positionAfter = posAfter,
-                positionJump = playerReady ? Vector3.Distance(posBefore, posAfter) : -1f, resyncJump = -1f,
+                positionJump = playerReady ? Vector3.Distance(posBefore + _frameShift, posAfter) : -1f, resyncJump = -1f,
             };
             CompletedCount++;
             RunQueuedHop();

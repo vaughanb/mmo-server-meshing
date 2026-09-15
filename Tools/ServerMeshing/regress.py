@@ -259,6 +259,10 @@ def run_scenario(name, rep):
         rep.check(count(c2_lines, r"Handoff SENT meshbotChar -> zone E") >= 1, "C2 handed the bot back to E")
         rep.check(count(c2_lines, r"Ghost spawned Player MeshTester2 .* at \(-108") >= 1, "C2 sees the standing tester at the translated position (-108)")
         rep.check(count(c2_lines, r"Neighbour zone E linked .*frame offset \(-400") >= 1, "C2's link from E carries the frame offset")
+        bot_lines = open(bots[0][1], encoding="utf-8", errors="replace").read().splitlines()
+        rep.check(count(bot_lines, r"Seam: pre-loaded scene ServerMeshTestMap2 ") >= 1, "the bot pre-loaded map 2's scene in the band")
+        rep.check(count(bot_lines, r"Seam: swapped to scene ServerMeshTestMap2 ") >= 1, "the bot swapped frames into map 2's scene at the hop")
+        rep.check(count(bot_lines, r"Seam: swapped to scene ServerMeshTestMap ") >= 1, "the bot swapped back into map 1's scene on the return")
 
     elif name == "crash":
         # The destination dies on the handoff notice: rollback, client fallback, MapSpawn restart, re-registration.

@@ -21,8 +21,8 @@ MonoBehaviour:
   category: 
   icon: {fileID: 0}
   scene:
-    sceneAsset: {fileID: 102900000, guid: 23ccbe772bf38344b998002c9a3ed132, type: 3}
-    sceneName: ServerMeshTestMap
+    sceneAsset: {fileID: 102900000, guid: 2c3d4e5f6a7b48c9d0e1f2a3b4c5d6e7, type: 3}
+    sceneName: ServerMeshTestMap2
   startPosition: {x: 0, y: 1, z: 0}
   startRotation: {x: 0, y: 0, z: 0}
   enablePkRules: 0

@@ -227,6 +227,8 @@ namespace MultiplayerARPG.MMO.Mesh
         public override void OnClientOnlineSceneLoaded()
         {
             Stamp("online scene loaded: begin (pools inited)");
+            if (!IsServer)
+                SnapshotSceneContent();
             if (IsMigrating && fastClientReadyOnMigration && !IsServer)
             {
                 // Same as BaseGameNetworkManager.OnClientOnlineSceneLoaded minus (a) the INSTANTIATES_OBJECTS_DELAY
@@ -491,7 +493,10 @@ namespace MultiplayerARPG.MMO.Mesh
                 GhostingUpdate();
             }
             else
+            {
                 ReplayHeldRpcs();
+                SeamClientUpdate();
+            }
         }
 
         #region Server RPCs held until the playing character exists (client)
