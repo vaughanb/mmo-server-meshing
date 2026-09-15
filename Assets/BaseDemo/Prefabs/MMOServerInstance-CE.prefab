@@ -219,8 +219,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b5e08d8ccbfded44bb2400909f8f4376, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  logFolder: log
-  logExtension: log
   logAreaHeight: 100
   showLogSize: 20
 --- !u!114 &114946005600446132
@@ -432,7 +430,7 @@ MonoBehaviour:
   m_GameObject: {fileID: 3476521299117261828}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fd7c47af9d7555a4eaa82a4d5a71a1a1, type: 3}
+  m_Script: {fileID: 11500000, guid: 6e72e4e47f166754fb6e64af7df33ca5, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
   currentLogLevel: 2
@@ -456,6 +454,9 @@ MonoBehaviour:
   maxCharacterNameLength: 16
   requireEmail: 0
   requireEmailVerification: 0
+  meshConfig: {fileID: 11400000, guid: 3ba02accc70083f4caa93655b2ecfd10, type: 2}
+  meshMapName: ServerMeshTestMap
+  routeByPosition: 1
 --- !u!1 &9006753358993515565
 GameObject:
   m_ObjectHideFlags: 0
