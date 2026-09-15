@@ -264,6 +264,26 @@ def run_scenario(name, rep):
         rep.check(count(bot_lines, r"Seam: swapped to scene ServerMeshTestMap2 ") >= 1, "the bot swapped frames into map 2's scene at the hop")
         rep.check(count(bot_lines, r"Seam: swapped to scene ServerMeshTestMap ") >= 1, "the bot swapped back into map 1's scene on the return")
 
+    elif name == "seamcold":
+        # The same crossing without the client pre-load: the kit reloads the scene at the seam (loading screen). The
+        # hop must still complete both ways without exceptions; no frame swap may be logged.
+        db_reset((292, 0), (280, 0))
+        request_play("stand", 292, 0)
+        wait_status(lambda st: st.get("isPlaying") == "True", 60, "Play")
+        time.sleep(20)
+        bots.append(("walk", launch_bot(name, "meshbot", ["-meshAutoMode", "walk", "-meshWalkX", "310", "-meshReturnX", "-110", "-meshStopOnMigration", "-meshSeamPreload", "0"])))
+        walk = wait_for_bot(bots[0][1], "walk", 240)
+        rep.check("migrations=2" in walk, f"bot: {walk[:120]}")
+        e_lines, c2_lines = zone_lines("E", start, day), zone_lines("C2", start, day, MAP2)
+        rep.check(count(e_lines, r"Handoff SENT meshbotChar -> zone C2") >= 1, "E handed the bot to C2 (another map)")
+        rep.check(count(c2_lines, r"Handoff SENT meshbotChar -> zone E") >= 1, "C2 handed the bot back to E")
+        bot_lines = open(bots[0][1], encoding="utf-8", errors="replace").read().splitlines()
+        rep.check(count(bot_lines, r"Seam pre-load distance set to 0") >= 1, "the bot ran without the seam pre-load")
+        rep.check(count(bot_lines, r"Seam: (pre-loaded|swapped)") == 0, "no pre-load or frame swap happened")
+        # The kit's scene load ends with Resources.UnloadUnusedAssets(), which Unity logs; one per hop after the walk began.
+        walk_start = next((i for i, l in enumerate(bot_lines) if "Walking from" in l), 0)
+        rep.check(count(bot_lines[walk_start:], r"Unloading \d+ unused Assets") >= 2, "the kit reloaded the scene at each crossing")
+
     elif name == "crash":
         # The destination dies on the handoff notice: rollback, client fallback, MapSpawn restart, re-registration.
         db_reset((86.5, 0), (0, 0))
@@ -341,7 +361,7 @@ def wait_for_bot(log, kind, timeout):
     return ""
 
 
-DEFAULT = ["pet", "party", "crash", "harvest", "build", "seam"]
+DEFAULT = ["pet", "party", "crash", "harvest", "build", "seam", "seamcold"]
 ALL = DEFAULT + ["pvp"]
 
 

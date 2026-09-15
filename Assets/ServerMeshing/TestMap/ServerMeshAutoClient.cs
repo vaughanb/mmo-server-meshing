@@ -41,6 +41,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public const string ARG_MOUNT = "-meshMount";
         public const string ARG_PET = "-meshPet";
         public const string ARG_RETURN_X = "-meshReturnX";
+        public const string ARG_SEAM_PRELOAD = "-meshSeamPreload"; // metres; 0 disables the seam pre-load (the kit reloads the scene at a seam crossing)
         public const string ARG_STOP_ON_MIGRATION = "-meshStopOnMigration"; // a walk leg ends when a migration completes (seam tests: the frame changes with the hop)
 
 #if UNITY_EDITOR
@@ -79,6 +80,8 @@ namespace MultiplayerARPG.MMO.Mesh
         public float walkReturnX = 0f;
         [Tooltip("A walk leg ends as soon as a migration completes (for seam crossings, where the position's frame changes with the hop).")]
         public bool stopWalkOnMigration = false;
+        [Tooltip("If >= 0, overrides the map manager's seam pre-load distance on this client (0 = the kit reloads the scene at a seam).")]
+        public float seamPreloadOverride = -1f;
         [Tooltip("Seconds to wait after entering the map before starting the test.")]
         public float settleSeconds = 3f;
         [Tooltip("observe mode: seconds to watch for other player entities after arriving.")]
@@ -111,6 +114,7 @@ namespace MultiplayerARPG.MMO.Mesh
             bool mount = args.Contains(ARG_MOUNT);
             bool pet = args.Contains(ARG_PET);
             string returnX = ReadArg(args, ARG_RETURN_X, null);
+            string seamPreload = ReadArg(args, ARG_SEAM_PRELOAD, null);
             bool stopOnMigration = args.Contains(ARG_STOP_ON_MIGRATION);
 #if UNITY_EDITOR
             if (!enabled && EditorPrefs.GetBool(PREF_ENABLE, false))
@@ -140,6 +144,7 @@ namespace MultiplayerARPG.MMO.Mesh
             c.summonPet = pet;
             c.stopWalkOnMigration = stopOnMigration;
             if (!string.IsNullOrEmpty(returnX) && float.TryParse(returnX, out float rx)) c.walkReturnX = rx;
+            if (!string.IsNullOrEmpty(seamPreload) && float.TryParse(seamPreload, out float sp)) c.seamPreloadOverride = sp;
         }
 
         private static string ReadArg(string[] args, string key, string fallback)
@@ -202,6 +207,11 @@ namespace MultiplayerARPG.MMO.Mesh
 
             // 0) Wait for the client instance and connect to the login server.
             Phase = "wait-client-instance";
+            if (seamPreloadOverride >= 0f && BaseGameNetworkManager.Singleton is MeshMapNetworkManager meshManager)
+            {
+                meshManager.seamPreloadDistance = seamPreloadOverride;
+                Log($"Seam pre-load distance set to {seamPreloadOverride}");
+            }
             while (MMOClientInstance.Singleton == null && Time.realtimeSinceStartup < deadline)
                 yield return null;
             if (MMOClientInstance.Singleton == null) { Fail("No MMOClientInstance"); yield break; }
