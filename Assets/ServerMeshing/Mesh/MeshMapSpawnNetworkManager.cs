@@ -20,6 +20,12 @@ namespace MultiplayerARPG.MMO.Mesh
         public MeshWorldRegistry world;
         [Tooltip("Sleeping cells: do not start the cells at boot; the central starts them on demand. (Rig: MESH_SLEEP=1.)")]
         public bool sleepCells = false;
+        [Tooltip("Cell ids this spawner is responsible for. Empty = every cell of every meshed map, which is right for a single host. " +
+                 "With several machines sharing one world, give each host its own list so two of them never serve the same cell " +
+                 "(the cluster keys a map server by cell id and rejects the second). Rig override: MESH_SPAWN_CELLS=C,N.")]
+        public string[] servedCells = new string[0];
+
+        public const string ENV_SERVED_CELLS = "MESH_SPAWN_CELLS";
 
         private static readonly MethodInfo s_spawnMap = FindSpawnMap();
         private ClusterClient.OnResponseAppServerRegister _kitOnRegister;
@@ -47,6 +53,14 @@ namespace MultiplayerARPG.MMO.Mesh
                 Logging.LogError("Mesh", "MapSpawnNetworkManager.SpawnMap not found (kit changed): meshed maps are started by the kit's loop, on every channel");
                 return;
             }
+            string env = System.Environment.GetEnvironmentVariable(ENV_SERVED_CELLS);
+            if (!string.IsNullOrEmpty(env))
+            {
+                servedCells = env.Split(',');
+                for (int i = 0; i < servedCells.Length; ++i)
+                    servedCells[i] = servedCells[i].Trim();
+                Logging.Log("Mesh", $"{ENV_SERVED_CELLS}={env}: this spawner serves {servedCells.Length} cell(s)");
+            }
             _kitOnRegister = ClusterClient.onResponseAppServerRegister;
             ClusterClient.onResponseAppServerRegister = OnRegisteredWithMesh;
         }
@@ -72,9 +86,13 @@ namespace MultiplayerARPG.MMO.Mesh
                 }
                 IReadOnlyList<MeshCell> mapCells = world.CellsOf(map.Id);
                 for (int i = 0; i < mapCells.Count; ++i)
+                {
+                    if (!Serves(mapCells[i].id))
+                        continue;   // another host runs this cell
                     cells.Add(new KeyValuePair<string, string>(mapCells[i].id, map.Id));
+                }
             }
-            Logging.Log("Mesh", $"Map spawner: {cells.Count} cell server(s) for {maps.Count - plain.Count} meshed map(s), {plain.Count} map(s) on the kit's channels");
+            Logging.Log("Mesh", $"Map spawner: {cells.Count} cell server(s) for {maps.Count - plain.Count} meshed map(s), {plain.Count} map(s) on the kit's channels" + (servedCells != null && servedCells.Length > 0 ? $" (this host serves {string.Join(",", servedCells)})" : string.Empty));
             if (plain.Count > 0 || (spawningAllocateMaps != null && spawningAllocateMaps.Count > 0))
             {
                 // The kit's handler spawns `spawningMaps` × channels; an empty list would mean every map, so it gets
@@ -88,6 +106,19 @@ namespace MultiplayerARPG.MMO.Mesh
                 return;
             }
             SpawnCells(cells).Forget();
+        }
+
+        /// <summary>Whether this spawner is responsible for a cell (an empty list means all of them).</summary>
+        public bool Serves(string cellId)
+        {
+            if (servedCells == null || servedCells.Length == 0)
+                return true;
+            for (int i = 0; i < servedCells.Length; ++i)
+            {
+                if (string.Equals(servedCells[i], cellId, System.StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
         }
 
         private async UniTaskVoid SpawnCells(List<KeyValuePair<string, string>> cells)

@@ -103,6 +103,8 @@ neighbour count; at runtime the lines are drawn as debug lines and the player's 
 
 - **Editor rig:** **Server Meshing ▸ Launch Test Cluster** starts one map-server process per cell of the registry
   (plus the central, login and database servers) with the right arguments, or copies the commands to the clipboard.
+- **Several hosts:** give each host's `MeshMapSpawnNetworkManager` a `servedCells` list (or `MESH_SPAWN_CELLS=C,N`) so two
+  machines never start the same cell; see [MULTIHOST.md](MULTIHOST.md).
 - **Production:** the kit's `MMOServerInstance` runs unchanged. Its map spawner (`MeshMapSpawnNetworkManager`) starts
   one process per cell for every map that has a layout (maps without a layout keep the kit's single-server behaviour);
   the central (`MeshCentralNetworkManager`) lists every cell as a channel, so no channel has to be typed into
