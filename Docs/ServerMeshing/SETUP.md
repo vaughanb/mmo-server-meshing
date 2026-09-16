@@ -4,7 +4,7 @@ How to split a map into cells served by separate map servers, join maps into one
 The design and its measurements are in [DESIGN.md](DESIGN.md); this document is the operator's and developer's path.
 
 **Status:** everything below is exercised by the regression harness on the test rig (five cells over two maps, one
-shared machine). Version 0.58.
+shared machine). Version 0.59.
 
 ---
 
@@ -170,7 +170,22 @@ All on `MeshMapNetworkManager` (the map-manager prefab). Defaults are the values
 line every 10 s reports players, owned and ghost counts, link traffic per neighbour, handoffs (mean/max ms), ghost
 steering error, frame time, CPU, memory and client send rate.
 
-## 6. Verifying
+## 6. The database
+
+The add-on stores nothing of its own: characters, buildings and items go through the kit's database manager as usual, so
+any backend the kit supports works. The rig runs **MySQL**, which matters for two reasons: several map-server processes
+and, later, several hosts all reach one database, and SQLite is a single file on one machine.
+
+- **Choosing the backend.** `MMOServerInstance` reads `Config/serverConfig.json` only when it is *not* running in the
+  editor, so for a rig driven from the editor the backend is the server prefab's `databaseOptionIndex` field. On the demo
+  prefab 0 is `MySQLDatabase` and 1 is `SQLiteDatabase`. Built servers read the config file, so keep the two in step.
+- **Credentials** live in `Config/mySqlConfig.json`, which every backend reads directly regardless of the editor. That
+  file is gitignored; copy `Config/mySqlConfig.example.json` over it and fill in your own.
+- **Schema.** Load the kit's `Assets/OpenMMORPG/MMO/SQLs/mysql_main.sql` into an empty database; the server applies its
+  own migrations at start-up from there.
+- **The harness** reads the same config file and talks to the database with `pymysql`, so `pip install pymysql` once.
+
+## 7. Verifying
 
 - **Harness:** `python Tools/ServerMeshing/regress.py` runs the eight scenarios (pet, party, crash, harvest, build,
   seam, seamcold, sleep) on the rig and grades the logs; `--env KEY=VALUE` passes rig toggles.
@@ -179,7 +194,7 @@ steering error, frame time, CPU, memory and client send rate.
 - **In the logs:** `Own cell from channel id: …` (the cell resolved its rectangle), `Neighbour zone X linked`,
   `Handoff START / SENT / ACK`, `Ghost spawned …`, `Waking cell … / … told to sleep`, and `Mesh stats`.
 
-## 7. Known behaviours and limits
+## 8. Known behaviours and limits
 
 - **Frames are per map.** A 10 km map keeps one scene at its own origin (the kit's quantized movement grid is off by
   default; float precision at 5 km is 0.5 mm). Only a seam between maps changes frames.
@@ -193,7 +208,7 @@ steering error, frame time, CPU, memory and client send rate.
 - **One shared world frame per registry**: two maps meant to touch must be placed by their world origins; the
   registry does not derive placement from content.
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 | Symptom | Look at |
 |---|---|
@@ -204,7 +219,7 @@ steering error, frame time, CPU, memory and client send rate.
 | Two servers both spawn a monster area | `ownSpawnAreasByZone` off, or the layout does not match the scene. |
 | Puppets lag or jitter | `Mesh stats … ghostSteer` — mean above ~0.3 m: check `ghostLeadSeconds` and the link traffic. |
 
-## 9. Packaging
+## 10. Packaging
 
 **Server Meshing ▸ Build Packages** writes two Unity packages to `Build/Packages/`:
 

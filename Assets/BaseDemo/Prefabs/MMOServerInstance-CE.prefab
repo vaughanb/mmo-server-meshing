@@ -106,7 +106,6 @@ MonoBehaviour:
   transportFactory: {fileID: 0}
   clusterServerPort: 6010
   defaultChannelMaxConnections: 500
-  world: {fileID: 11400000, guid: 7a2b3c4d5e6f47a8b9c0d1e2f3a4b5c6, type: 2}
   channels:
   - id: C
     title: Zone C
@@ -122,6 +121,13 @@ MonoBehaviour:
     maxConnections: 200
   mapSpawnMillisecondsTimeout: 0
   updateUserCountInterval: 5
+  world: {fileID: 11400000, guid: 7a2b3c4d5e6f47a8b9c0d1e2f3a4b5c6, type: 2}
+  sleepCells: 0
+  awakeRings: 2
+  sleepAfterSeconds: 300
+  awakeTickSeconds: 2
+  wakeHoldSeconds: 60
+  spawnRequestTimeoutSeconds: 20
 --- !u!1 &1454126604845530
 GameObject:
   m_ObjectHideFlags: 0
@@ -252,7 +258,7 @@ MonoBehaviour:
   startMapOnAwake: 0
   startingChannelId: 
   startingMap: {fileID: 11400000, guid: d8d947f013595cd41a2c4322c2ffa4e7, type: 2}
-  databaseOptionIndex: 1
+  databaseOptionIndex: 0
   disableDatabaseCaching: 0
 --- !u!1 &1773992668051484
 GameObject:
@@ -326,8 +332,9 @@ MonoBehaviour:
   spawningAllocateMaps: []
   isOverrideExePath: 1
   overrideExePath: D:/Game Development/mmo-server-meshing/Build/Server/kit-ce-project.exe
-  world: {fileID: 11400000, guid: 7a2b3c4d5e6f47a8b9c0d1e2f3a4b5c6, type: 2}
   editorNotSpawnInBatchMode: 0
+  world: {fileID: 11400000, guid: 7a2b3c4d5e6f47a8b9c0d1e2f3a4b5c6, type: 2}
+  sleepCells: 0
 --- !u!1 &1834896065226248
 GameObject:
   m_ObjectHideFlags: 0

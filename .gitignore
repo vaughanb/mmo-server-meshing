@@ -45,3 +45,6 @@ Assets/Resources/PerformanceTestRun*
 
 # python bytecode from the regression harness
 __pycache__/
+
+# Local database credentials (see Config/mySqlConfig.example.json)
+/Config/mySqlConfig.json

@@ -11,7 +11,7 @@ Requirements (all already true on the rig machine):
   * the Unity editor is open on this project with BaseInit-CE (any scene that is not dirty) and the
     ServerMeshPlayRunner watching Temp/ServerMesh.PlayRequest.txt (it does whenever the editor is up);
   * a fresh player build at Build/Server/kit-ce-project.exe (the zone servers and the headless bots);
-  * the SQLite database mmorpgtemplate.sqlite3 with the two test characters (MeshTester2, meshbotChar).
+  * the MySQL database named in Config/mySqlConfig.json, with the two test characters (MeshTester2, meshbotChar).
 
 Each scenario: resets the test characters in the database, asks the editor to enter Play with the auto
 client in a given mode (plus environment variables the zone servers inherit), launches headless bots from
@@ -19,10 +19,12 @@ the build, waits for the auto client's RESULT (and the bots'), stops Play, and g
 the four zone logs since the scenario started, the expected RESULT lines, and scenario-specific log lines.
 Exit code 1 when any scenario fails. Bot logs land in Logs/regress_<scenario>_<user>.log.
 """
-import argparse, datetime, os, re, sqlite3, subprocess, sys, time, uuid
+import argparse, datetime, json, os, re, subprocess, sys, time, uuid
+
+import pymysql   # pip install pymysql
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-DB = os.path.join(ROOT, "mmorpgtemplate.sqlite3")
+DB_CONFIG = os.path.join(ROOT, "Config", "mySqlConfig.json")
 EXE = os.path.join(ROOT, "Build", "Server", "kit-ce-project.exe")
 TEMP = os.path.join(ROOT, "Temp")
 REQUEST = os.path.join(TEMP, "ServerMesh.PlayRequest.txt")
@@ -112,36 +114,55 @@ def stop_play():
 
 
 # ------------------------------------------------------------------ database
+def db_connect():
+    """The game database the editor's database manager uses (backend chosen by the server prefab's databaseOptionIndex)."""
+    with open(DB_CONFIG, encoding="utf-8-sig") as f:
+        c = json.load(f)
+    return pymysql.connect(
+        host=c.get("mySqlAddress") or "127.0.0.1", port=int(c.get("mySqlPort") or 3306),
+        user=c.get("mySqlUsername") or "root", password=c.get("mySqlPassword") or "",
+        database=c.get("mySqlDbName") or "mmorpg_kit", charset="utf8mb4", autocommit=True)
+
+
 def db_reset(tester_pos, bot_pos, tester_party=1, bot_party=1, building_items=None, drop_yield=False, clear_buildings=False):
-    c = sqlite3.connect(DB)
-    c.execute("update characters set currentHp=500,currentMp=100,currentChannel='C',currentMapName='ServerMeshTestMap',currentPositionX=?,currentPositionY=0,currentPositionZ=?,partyId=? where id=?", (tester_pos[0], tester_pos[1], tester_party, TESTER))
-    c.execute("update characters set currentHp=500,currentMp=100,currentChannel='C',currentMapName='ServerMeshTestMap',currentPositionX=?,currentPositionY=0,currentPositionZ=?,partyId=? where id=?", (bot_pos[0], bot_pos[1], bot_party, BOT))
+    conn = db_connect()
+    cur = conn.cursor()
+    move = ("update characters set currentHp=500,currentMp=100,currentChannel='C',currentMapName='ServerMeshTestMap',"
+            "currentPositionX=%s,currentPositionY=0,currentPositionZ=%s,partyId=%s where characterName=%s")
+    cur.execute(move, (tester_pos[0], tester_pos[1], tester_party, "MeshTester2"))
+    cur.execute(move, (bot_pos[0], bot_pos[1], bot_party, "meshbotChar"))
     if drop_yield:
-        c.execute("delete from characteritem where characterId=? and inventoryType=0 and dataId=?", (TESTER, ITEM_YIELD))
+        cur.execute("delete from characteritem where characterId=%s and inventoryType=0 and dataId=%s", (TESTER, ITEM_YIELD))
     if building_items:
         # The kit stores the bag as one row per slot (empty slots have dataId 0). Reuse the building item's own row,
         # else an empty slot, else clone any occupied row (the skill item used to be the template; the fighter consumes it).
-        row = c.execute("select idx from characteritem where characterId=? and inventoryType=0 and dataId=?", (TESTER, ITEM_BUILDING)).fetchone()
+        cur.execute("select idx from characteritem where characterId=%s and inventoryType=0 and dataId=%s", (TESTER, ITEM_BUILDING))
+        row = cur.fetchone()
         if row is None:
-            row = c.execute("select idx from characteritem where characterId=? and inventoryType=0 and dataId=0 order by idx", (TESTER,)).fetchone()
+            cur.execute("select idx from characteritem where characterId=%s and inventoryType=0 and dataId=0 order by idx", (TESTER,))
+            row = cur.fetchone()
         if row is not None:
-            c.execute("update characteritem set dataId=?, amount=?, level=1, equipSlotIndex=0, durability=0, exp=0, ammo=0 where characterId=? and inventoryType=0 and idx=?", (ITEM_BUILDING, building_items, TESTER, row[0]))
+            cur.execute("update characteritem set dataId=%s, amount=%s, level=1, equipSlotIndex=0, durability=0, exp=0, ammo=0"
+                        " where characterId=%s and inventoryType=0 and idx=%s", (ITEM_BUILDING, building_items, TESTER, row[0]))
         else:
-            cols = [r[1] for r in c.execute("pragma table_info(characteritem)")]
-            template = c.execute("select * from characteritem where characterId=? and inventoryType=0 and dataId<>0", (TESTER,)).fetchone()
+            cur.execute("show columns from characteritem")
+            cols = [r[0] for r in cur.fetchall()]
+            cur.execute("select * from characteritem where characterId=%s and inventoryType=0 and dataId<>0", (TESTER,))
+            template = cur.fetchone()
             if template is None:
                 raise RuntimeError("no bag row to use as a template for the building item")
             d = dict(zip(cols, template))
             d.update(dataId=ITEM_BUILDING, amount=building_items, level=1)
             if "id" in d:
                 d["id"] = uuid.uuid4().hex
-            used = {r[0] for r in c.execute("select idx from characteritem where characterId=? and inventoryType=0", (TESTER,))}
+            cur.execute("select idx from characteritem where characterId=%s and inventoryType=0", (TESTER,))
+            used = {r[0] for r in cur.fetchall()}
             d["idx"] = next(i for i in range(1, 200) if i not in used)
-            c.execute("insert into characteritem (%s) values (%s)" % (",".join(d.keys()), ",".join("?" * len(d))), list(d.values()))
+            cur.execute("insert into characteritem (%s) values (%s)" % (",".join("`%s`" % k for k in d), ",".join(["%s"] * len(d))), list(d.values()))
     if clear_buildings:
-        c.execute("delete from buildings where channel='E'")
-    c.commit()
-    c.close()
+        cur.execute("delete from buildings where channel='E'")
+    cur.close()
+    conn.close()
 
 
 # ------------------------------------------------------------------ grading
@@ -245,9 +266,12 @@ def run_scenario(name, rep):
         rep.check(m is not None and int(m.group(1)) >= 1, "the fighter's quest kill counter advanced for kills on the neighbour's monsters (kill credit forwarded)")
         # Projectiles: the tester fights with the test bow (right hand), so its hits on E's monsters are arrows that struck
         # puppets on C and were forwarded; E replays the shots on the tester's puppet so its players see them.
-        c = sqlite3.connect(DB)
-        weapon = c.execute("select dataId from characteritem where characterId=? and inventoryType=2", (TESTER,)).fetchone()
-        c.close()
+        conn = db_connect()
+        cur = conn.cursor()
+        cur.execute("select dataId from characteritem where characterId=%s and inventoryType=2", (TESTER,))
+        weapon = cur.fetchone()
+        cur.close()
+        conn.close()
         rep.check(weapon is not None and weapon[0] == ITEM_BOW, "the fighter's right hand holds the test bow (projectile weapon)")
         c_lines = zone_lines("C", start, day)
         rep.check(count(c_lines, r"Hit on ghost .* forwarded to zone E") >= 1, "arrow hits on the neighbour's monster puppets were forwarded to E")
