@@ -202,3 +202,16 @@ steering error, frame time, CPU, memory and client send rate.
 | Character selection fails for a cell | The central must list the cell as a channel: use `MeshCentralNetworkManager`. |
 | Two servers both spawn a monster area | `ownSpawnAreasByZone` off, or the layout does not match the scene. |
 | Puppets lag or jitter | `Mesh stats … ghostSteer` — mean above ~0.3 m: check `ghostLeadSeconds` and the link traffic. |
+
+## 9. Packaging
+
+**Server Meshing ▸ Build Packages** writes two Unity packages to `Build/Packages/`:
+
+- `ServerMeshing-<version>.unitypackage` — the add-on (`Assets/ServerMeshing/Mesh`, runtime and Editor) with a
+  `Documentation/` snapshot of this folder (guide, design, upstream patches) and the top-level README. Import it into any
+  project that has OpenMMORPG installed (master at or after the four core changes of 2026-09-15), then follow §4.
+- `ServerMeshing-TestRig-<version>.unitypackage` — `Assets/ServerMeshing/TestMap` (the two test maps, test items,
+  auto client, launcher, play runner, load generator) plus `TestMap/Tools/` (the regression and capacity harnesses).
+  It references the kit's demo (the enemy prefab, default weapon item and type), so it needs `BaseDemo` present.
+
+Dependencies are not followed on export, so neither package carries any kit or demo asset.

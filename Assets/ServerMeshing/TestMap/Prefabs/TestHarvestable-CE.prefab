@@ -49,7 +49,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: LiteNetLibManager::LiteNetLibManager.LiteNetLibIdentity
   autoAssignAssetIdIfEmpty: 1
   forceUseAssetGUIDAsAssetId: 0
-  assetId: 
+  assetId: 145cddff05c984c40be2cbd7f37494ab
   autoAssignSceneObjectIdIfEmpty: 1
   sceneObjectId: TestHarvestable-CE_1
   forceNotSceneObject: 0
