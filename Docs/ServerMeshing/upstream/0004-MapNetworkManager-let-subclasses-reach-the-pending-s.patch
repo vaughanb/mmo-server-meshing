@@ -1,0 +1,31 @@
+From 98a2d186ad70ffd3509d1365fdad7ab391e50e93 Mon Sep 17 00:00:00 2001
+From: vaughanb <brenden.vaughan@gmail.com>
+Date: Tue, 15 Sep 2026 18:25:02 -0600
+Subject: [PATCH 4/4] MapNetworkManager: let subclasses reach the pending spawn
+ data
+
+SetPlayerReadyRoutine already handles an entry that is an already-spawned
+entity (relates data reload, SetOwnerClient, register) instead of raw
+character data. With the dictionary protected, a subclass can substitute a
+standing entity for an arriving character and have that path taken. No
+behaviour change.
+---
+ MMO/Scripts/MMOGame/Networking/Map/MapNetworkManager.cs | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/MMO/Scripts/MMOGame/Networking/Map/MapNetworkManager.cs b/MMO/Scripts/MMOGame/Networking/Map/MapNetworkManager.cs
+index 723002c..0439f37 100644
+--- a/MMO/Scripts/MMOGame/Networking/Map/MapNetworkManager.cs
++++ b/MMO/Scripts/MMOGame/Networking/Map/MapNetworkManager.cs
+@@ -98,7 +98,7 @@ namespace MultiplayerARPG.MMO
+         private readonly ConcurrentDictionary<string, CentralServerPeerInfo> _mapServerConnectionIdsBySceneName = new ConcurrentDictionary<string, CentralServerPeerInfo>();
+         private readonly ConcurrentDictionary<string, CentralServerPeerInfo> _instanceMapServerConnectionIdsByInstanceId = new ConcurrentDictionary<string, CentralServerPeerInfo>();
+         private readonly ConcurrentDictionary<string, SocialCharacterData> _socialCharactersByUserId = new ConcurrentDictionary<string, SocialCharacterData>();
+-        private readonly ConcurrentDictionary<string, IPlayerCharacterData> _pendingSpawnPlayerCharactersByUserId = new ConcurrentDictionary<string, IPlayerCharacterData>();
++        protected readonly ConcurrentDictionary<string, IPlayerCharacterData> _pendingSpawnPlayerCharactersByUserId = new ConcurrentDictionary<string, IPlayerCharacterData>();
+         // Database operations
+         private readonly ConcurrentHashSet<StorageId> _loadingStorageIds = new ConcurrentHashSet<StorageId>();
+         private readonly ConcurrentHashSet<int> _loadingPartyIds = new ConcurrentHashSet<int>();
+-- 
+2.55.0.windows.3
+

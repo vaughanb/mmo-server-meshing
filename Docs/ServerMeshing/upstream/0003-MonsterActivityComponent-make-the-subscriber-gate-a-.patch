@@ -1,0 +1,42 @@
+From 7e54f5c68845265c30a994fd93dd68dae51e5244 Mon Sep 17 00:00:00 2001
+From: vaughanb <brenden.vaughan@gmail.com>
+Date: Tue, 15 Sep 2026 18:25:02 -0600
+Subject: [PATCH 3/4] MonsterActivityComponent: make the subscriber gate a
+ virtual IsWatched()
+
+ManagedUpdate skipped a monster's activity while its identity had no
+subscribers, inline. The same check as a protected virtual lets a subclass
+keep a monster active for observers the server does not count as subscribers
+(for example players watching it from a neighbouring server). The default
+behaviour is unchanged.
+---
+ .../MonsterActivityComponent.cs                       | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/Core/Scripts/Gameplay/CharacterSystems/MonsterCharacterSystems/MonsterActivityComponent.cs b/Core/Scripts/Gameplay/CharacterSystems/MonsterCharacterSystems/MonsterActivityComponent.cs
+index f263f5f..e4308dc 100644
+--- a/Core/Scripts/Gameplay/CharacterSystems/MonsterCharacterSystems/MonsterActivityComponent.cs
++++ b/Core/Scripts/Gameplay/CharacterSystems/MonsterCharacterSystems/MonsterActivityComponent.cs
+@@ -143,9 +143,18 @@ namespace MultiplayerARPG
+             }
+         }
+ 
++        /// <summary>
++        /// Whether anyone is watching this monster; its activity is skipped while nobody is. Override to keep a monster
++        /// active for observers that are not network subscribers of this server.
++        /// </summary>
++        protected virtual bool IsWatched()
++        {
++            return Entity.Identity.CountSubscribers() > 0;
++        }
++
+         public virtual void ManagedUpdate()
+         {
+-            if (!Entity.IsServer || Entity.Identity.CountSubscribers() == 0 || CharacterDatabase == null)
++            if (!Entity.IsServer || !IsWatched() || CharacterDatabase == null)
+                 return;
+ 
+             if (Entity.IsDead())
+-- 
+2.55.0.windows.3
+

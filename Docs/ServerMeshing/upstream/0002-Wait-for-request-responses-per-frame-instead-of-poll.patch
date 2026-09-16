@@ -1,0 +1,48 @@
+From f495b657f63e6a391e048ad9f3058bfb9814686c Mon Sep 17 00:00:00 2001
+From: vaughanb <brenden.vaughan@gmail.com>
+Date: Tue, 15 Sep 2026 18:25:02 -0600
+Subject: [PATCH 2/4] Wait for request responses per frame instead of polling
+ every 100 ms
+
+SendRequestAsync (client and server) waited for the response with
+`do { await UniTask.Delay(100); } while (!done);`, which put a hard 100 ms
+floor under every awaited request: database calls, cluster requests, and
+anything built on them, on top of the actual round trip. UniTask.WaitUntil
+completes on the frame the response arrives.
+
+Measured on a map server's enter-game path (validate token + load character):
+about 220 ms per step became the network round trip alone.
+---
+ ThirdParty/LiteNetLibManager/Scripts/LiteNetLibClient.cs | 2 +-
+ ThirdParty/LiteNetLibManager/Scripts/LiteNetLibServer.cs | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/ThirdParty/LiteNetLibManager/Scripts/LiteNetLibClient.cs b/ThirdParty/LiteNetLibManager/Scripts/LiteNetLibClient.cs
+index 4ed9d82..5eb5873 100644
+--- a/ThirdParty/LiteNetLibManager/Scripts/LiteNetLibClient.cs
++++ b/ThirdParty/LiteNetLibManager/Scripts/LiteNetLibClient.cs
+@@ -155,7 +155,7 @@ namespace LiteNetLibManager
+             // Send request to server, so connection id will not being used
+             SendMessage(0, DeliveryMethod.ReliableUnordered, s_Writer);
+             // Wait for response
+-            do { await UniTask.Delay(100); } while (!done);
++            await UniTask.WaitUntil(() => done); // frame-granular: the 100 ms poll put a floor under every awaited request
+             // Return response data
+             return responseData;
+         }
+diff --git a/ThirdParty/LiteNetLibManager/Scripts/LiteNetLibServer.cs b/ThirdParty/LiteNetLibManager/Scripts/LiteNetLibServer.cs
+index 02c53e5..7a851bd 100644
+--- a/ThirdParty/LiteNetLibManager/Scripts/LiteNetLibServer.cs
++++ b/ThirdParty/LiteNetLibManager/Scripts/LiteNetLibServer.cs
+@@ -162,7 +162,7 @@ namespace LiteNetLibManager
+             // Send request to target client
+             SendMessage(connectionId, 0, DeliveryMethod.ReliableUnordered, s_Writer);
+             // Wait for response
+-            do { await UniTask.Delay(100); } while (!done);
++            await UniTask.WaitUntil(() => done); // frame-granular: the 100 ms poll put a floor under every awaited request
+             // Return response data
+             return responseData;
+         }
+-- 
+2.55.0.windows.3
+

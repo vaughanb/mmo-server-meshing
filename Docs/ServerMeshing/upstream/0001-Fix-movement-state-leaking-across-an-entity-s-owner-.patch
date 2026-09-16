@@ -1,0 +1,77 @@
+From 0e157d561efb730c647778aedea7cee586636625 Mon Sep 17 00:00:00 2001
+From: vaughanb <brenden.vaughan@gmail.com>
+Date: Tue, 15 Sep 2026 18:25:02 -0600
+Subject: [PATCH 1/4] Fix movement state leaking across an entity's owner
+ change
+
+When an entity gets a new owner client (SetOwnerClient / SetObjectOwner), the
+server-side movers kept the previous owner's _acceptedPositionTimestamp and
+_isServerWaitingTeleportConfirm. The entity was then snapped back to the old
+client's last accepted position, and the new client's first movement syncs
+were rejected as an invalid timestamp until its timestamps passed the old ones.
+
+Reset both in OnSetOwnerClient for the built-in 3D mover and the 2D rigidbody
+mover, and add the same OnSetOwnerClient override to the NavMesh mover, which
+had none.
+
+Seen when a player character is transferred between two map servers with the
+same object kept alive; it applies to any owner change of a live entity.
+---
+ .../Implements/BuiltInEntityMovementFunctions3D.cs       | 4 ++++
+ .../EntityMovementSystems/NavMeshEntityMovement.cs       | 9 +++++++++
+ .../EntityMovementSystems/RigidBodyEntityMovement2D.cs   | 4 ++++
+ 3 files changed, 17 insertions(+)
+
+diff --git a/Core/Scripts/Gameplay/EntityMovementSystems/Implements/BuiltInEntityMovementFunctions3D.cs b/Core/Scripts/Gameplay/EntityMovementSystems/Implements/BuiltInEntityMovementFunctions3D.cs
+index 9615a0b..ccc320a 100644
+--- a/Core/Scripts/Gameplay/EntityMovementSystems/Implements/BuiltInEntityMovementFunctions3D.cs
++++ b/Core/Scripts/Gameplay/EntityMovementSystems/Implements/BuiltInEntityMovementFunctions3D.cs
+@@ -234,6 +234,10 @@ namespace MultiplayerARPG
+         {
+             NavPaths = null;
+             _simulatingKeyMovement = false;
++            // A re-owned entity must not keep applying the previous owner's last accepted position: it snapped the
++            // entity back to where the old client left it and rejected the new client's first syncs as an invalid timestamp.
++            _acceptedPositionTimestamp = 0;
++            _isServerWaitingTeleportConfirm = false;
+         }
+ 
+         public bool CanSimulateMovement()
+diff --git a/Core/Scripts/Gameplay/EntityMovementSystems/NavMeshEntityMovement.cs b/Core/Scripts/Gameplay/EntityMovementSystems/NavMeshEntityMovement.cs
+index 69eb342..677eff8 100644
+--- a/Core/Scripts/Gameplay/EntityMovementSystems/NavMeshEntityMovement.cs
++++ b/Core/Scripts/Gameplay/EntityMovementSystems/NavMeshEntityMovement.cs
+@@ -84,6 +84,15 @@ namespace MultiplayerARPG
+         private float _accumulateDiffMoveDist = 0f;
+         protected bool _isServerWaitingTeleportConfirm;
+ 
++        // A re-owned entity must not keep applying the previous owner's last accepted position (same fix as
++        // BuiltInEntityMovementFunctions3D).
++        public override void OnSetOwnerClient(bool isOwnerClient)
++        {
++            base.OnSetOwnerClient(isOwnerClient);
++            _acceptedPositionTimestamp = 0;
++            _isServerWaitingTeleportConfirm = false;
++        }
++
+         // Client confirm codes
+         protected bool _isClientConfirmingTeleport;
+         protected bool _isStarted;
+diff --git a/Core/Scripts/Gameplay/EntityMovementSystems/RigidBodyEntityMovement2D.cs b/Core/Scripts/Gameplay/EntityMovementSystems/RigidBodyEntityMovement2D.cs
+index f3f580f..c2cd7a8 100644
+--- a/Core/Scripts/Gameplay/EntityMovementSystems/RigidBodyEntityMovement2D.cs
++++ b/Core/Scripts/Gameplay/EntityMovementSystems/RigidBodyEntityMovement2D.cs
+@@ -125,6 +125,10 @@ namespace MultiplayerARPG
+         public override void OnSetOwnerClient(bool isOwnerClient)
+         {
+             NavPaths = null;
++            // A re-owned entity must not keep applying the previous owner's last accepted position (same fix as
++            // BuiltInEntityMovementFunctions3D).
++            _acceptedPositionTimestamp = 0;
++            _isServerWaitingTeleportConfirm = false;
+         }
+ 
+         public virtual void StopMove()
+-- 
+2.55.0.windows.3
+
