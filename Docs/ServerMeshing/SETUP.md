@@ -4,7 +4,7 @@ How to split a map into cells served by separate map servers, join maps into one
 The design and its measurements are in [DESIGN.md](DESIGN.md); this document is the operator's and developer's path.
 
 **Status:** everything below is exercised by the regression harness on the test rig (five cells over two maps, one
-shared machine). Version 0.56.
+shared machine). Version 0.58.
 
 ---
 
@@ -43,8 +43,9 @@ right for a sandbox where towns can appear anywhere.
 ## 3. Prerequisites
 
 - The add-on folder `Assets/ServerMeshing/` (it compiles into the game assembly; no asmdef needed).
-- The kit version this project uses (see [kit-api-drift](DESIGN.md#17-core-edit-registry) for the two small core
-  touches that are already applied here).
+- OpenMMORPG at master from 2026-09-15 or later: it carries the four small core changes the add-on relies on (an
+  owner-change movement fix, frame-granular request waits, a virtual `IsWatched()` on the monster activity component and a
+  protected pending-spawn dictionary on the map manager; DESIGN.md §17).
 - Your map scenes in the build settings, your map infos in the game database.
 
 ## 4. Step by step
@@ -207,8 +208,9 @@ steering error, frame time, CPU, memory and client send rate.
 
 **Server Meshing ▸ Build Packages** writes two Unity packages to `Build/Packages/`:
 
-- `ServerMeshing-<version>.unitypackage` — the add-on (`Assets/ServerMeshing/Mesh`, runtime and Editor) with a
-  `Documentation/` snapshot of this folder (guide, design, upstream patches) and the top-level README. Import it into any
+- `ServerMeshing-<version>.unitypackage` — the add-on (`Assets/ServerMeshing/Mesh`, runtime and Editor) with this guide
+  and DESIGN.md under `Documentation/`, and the top-level README. The spike notes, the upstream patch series and the raw
+  capacity table stay in the repository. Import it into any
   project that has OpenMMORPG installed (master at or after the four core changes of 2026-09-15), then follow §4.
 - `ServerMeshing-TestRig-<version>.unitypackage` — `Assets/ServerMeshing/TestMap` (the two test maps, test items,
   auto client, launcher, play runner, load generator) plus `TestMap/Tools/` (the regression and capacity harnesses).

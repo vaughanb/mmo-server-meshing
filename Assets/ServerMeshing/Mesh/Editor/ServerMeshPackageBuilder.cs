@@ -1,8 +1,9 @@
 // Server Meshing add-on — package builder (Server Meshing ▸ Build Packages).
 //
 // Exports two Unity packages into Build/Packages/:
-//   ServerMeshing-<version>.unitypackage         the add-on: Assets/ServerMeshing/Mesh (runtime + Editor) and a snapshot of
-//                                                Docs/ServerMeshing (guide, design, upstream patches) under Documentation/
+//   ServerMeshing-<version>.unitypackage         the add-on: Assets/ServerMeshing/Mesh (runtime + Editor), the README and a
+//                                                Documentation/ snapshot of SETUP.md and DESIGN.md (the spike notes, the upstream
+//                                                patch series and the raw capacity table stay in the repository)
 //   ServerMeshing-TestRig-<version>.unitypackage the test rig: Assets/ServerMeshing/TestMap (scenes, prefabs, test data, auto
 //                                                client, launcher, play runner, load generator) and a snapshot of
 //                                                Tools/ServerMeshing (regress.py, loadtest.py) under TestMap/Tools/
@@ -18,7 +19,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
 {
     public static class ServerMeshPackageBuilder
     {
-        public const string Version = "0.57.0";
+        public const string Version = "0.58.0";
         private const string AddOnRoot = "Assets/ServerMeshing";
         private const string DocsSnapshot = AddOnRoot + "/Documentation";
         private const string ToolsSnapshot = AddOnRoot + "/TestMap/Tools";
@@ -37,7 +38,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         public static string BuildAddOn(string outDir)
         {
             string file = Path.Combine(outDir, $"ServerMeshing-{Version}.unitypackage");
-            CopyTree(Path.Combine(ProjectRoot(), "Docs", "ServerMeshing"), DocsSnapshot, ".md", ".patch", ".txt");
+            CopyFiles(Path.Combine(ProjectRoot(), "Docs", "ServerMeshing"), DocsSnapshot, "SETUP.md", "DESIGN.md");
             try
             {
                 AssetDatabase.Refresh();
@@ -73,6 +74,14 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             return Path.GetDirectoryName(Application.dataPath);
         }
 
+        private static void CopyFiles(string from, string toAssetPath, params string[] names)
+        {
+            string to = Path.Combine(ProjectRoot(), toAssetPath.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(to);
+            foreach (string name in names)
+                File.Copy(Path.Combine(from, name), Path.Combine(to, name), true);
+        }
+
         private static void CopyTree(string from, string toAssetPath, params string[] extensions)
         {
             string to = Path.Combine(ProjectRoot(), toAssetPath.Replace('/', Path.DirectorySeparatorChar));
@@ -80,6 +89,8 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             {
                 if (System.Array.IndexOf(extensions, Path.GetExtension(source).ToLowerInvariant()) < 0)
                     continue;
+                if (Path.GetFileName(source) == "buildpackages.py")
+                    continue; // the repository's own packaging script is not part of the rig
                 string relative = source.Substring(from.Length).TrimStart(Path.DirectorySeparatorChar, '/');
                 string target = Path.Combine(to, relative);
                 Directory.CreateDirectory(Path.GetDirectoryName(target));

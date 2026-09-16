@@ -9,7 +9,7 @@ upstream OpenMMORPG master since 2026-09-15.
 
 | Package | Contents | Needs |
 |---|---|---|
-| `ServerMeshing-<version>.unitypackage` | `Assets/ServerMeshing/Mesh` (runtime + Editor), `Assets/ServerMeshing/Documentation` (setup guide, design document, the upstream patches) | OpenMMORPG (master at or after the four core changes) |
+| `ServerMeshing-<version>.unitypackage` | `Assets/ServerMeshing/Mesh` (runtime + Editor), `Assets/ServerMeshing/Documentation` (the setup guide and the design record) | OpenMMORPG (master at or after 2026-09-15, which carries the four core changes the add-on relies on) |
 | `ServerMeshing-TestRig-<version>.unitypackage` | `Assets/ServerMeshing/TestMap`: the two test maps, test items, auto client, launcher, play runner, load generator, and `TestMap/Tools` (the regression and capacity harnesses, Python) | the add-on package and the kit's demo (`BaseDemo`: the enemy prefab, the default weapon item and type are referenced by the test data and scenes) |
 
 ## Start here
@@ -27,9 +27,8 @@ upstream OpenMMORPG master since 2026-09-15.
 ```
 Mesh/                       the add-on (all runtime code; Editor/ holds the Setup window and the package builder)
 Mesh/Editor/                Server Meshing ▸ Setup, Server Meshing ▸ Build Packages
-Documentation/              snapshot of the docs (in the package only; the source lives in Docs/ServerMeshing)
+Documentation/              SETUP.md and DESIGN.md (in the package only; the source lives in Docs/ServerMeshing)
 TestMap/                    the test rig (separate package)
-Spike0/, Spike1/, Spike2/   the original spikes' notes (repository only, not packaged)
 ```
 
 Build the packages with **Server Meshing ▸ Build Packages**; they land in `Build/Packages/`.
