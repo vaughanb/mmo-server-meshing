@@ -18,7 +18,7 @@ endings preserved).
 
 ## Status
 
-Pushed as branch `mesh-core-fixes`; pull request [open-mmorpg/OpenMMORPG#1](https://github.com/open-mmorpg/OpenMMORPG/pull/1) into `develop` (2026-09-15).
+**Merged.** Fast-forwarded onto upstream `master` and `develop` on 2026-09-15 (aa8ecf1 → 98a2d18); [PR #1](https://github.com/open-mmorpg/OpenMMORPG/pull/1) records it. The patches stay here as the record of what changed in the kit and why.
 
 ## Pushing (how it was done; for a re-run)
 
