@@ -16,7 +16,11 @@ Total: 7 files, 30 insertions, 4 deletions. Verified against upstream `develop` 
 anchor line is present and unchanged, and the diff contains nothing but these lines (byte-order marks and line
 endings preserved).
 
-## Pushing
+## Status
+
+Pushed as branch `mesh-core-fixes`; pull request [open-mmorpg/OpenMMORPG#1](https://github.com/open-mmorpg/OpenMMORPG/pull/1) into `develop` (2026-09-15).
+
+## Pushing (how it was done; for a re-run)
 
 Upstream's CONTRIBUTING: open an issue, branch off `develop`, pull-request into `develop`.
 
