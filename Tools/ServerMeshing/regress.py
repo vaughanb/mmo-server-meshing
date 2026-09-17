@@ -128,15 +128,19 @@ def request_play(mode, walk_x, walk_z, pet=False, mount=False, env=None):
     env = dict(EXTRA_ENV, **(env or {}))
     for key in ENV_KEYS:
         lines.append(f"env.{key}={env.get(key, '')}")   # every key set explicitly: an empty value clears it
+    mark = {}
     if REMOTE_CELLS:
         # The remote cells can only join once the cluster exists, and the cluster is this editor's: so hold the
-        # tester before its login, start them as soon as Play is up, and let it go when they are serving.
+        # tester before its login, start them as soon as Play is up, and let it go when they are serving. The mark
+        # is taken now, before Play, so the wait cannot be satisfied by the previous scenario's log lines.
+        mark = remote_log_mark()
+        remote("clearmarkers")      # the one-shot fault marker lives in B's own build folder, not in this Temp
         open(HOLD, "w").close()
     with open(REQUEST, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
     if REMOTE_CELLS:
         try:
-            start_remote_cells()
+            start_remote_cells(mark, env)
         finally:
             if os.path.exists(HOLD):
                 os.remove(HOLD)
@@ -146,41 +150,40 @@ def remote_running():
     return "process: running" in remote("status")
 
 
-def start_remote_cells():
+def start_remote_cells(mark, env=None):
     """Get the other machine's cells serving this scenario, and wait until they are.
 
     Restarted for each scenario by default, because each Play recreates this machine's cells. With --remote-persist
     the cell is left running instead and has to recover on its own: the kit reconnects its cluster client after a
-    disconnect, and the add-on's databaseReconnectSeconds re-opens the database connection, which the kit never does.
-    That is the two-machine test of those two paths, so the wait below looks for both to come back.
+    disconnect, and the add-on's databaseReconnectSeconds re-opens the database connection, which the kit never
+    does. That is the two-machine test of those two paths, so the wait below looks for all of it to come back --
+    registration first, because a cell that has relinked is still not somewhere a player can be sent.
     """
     wait_status(lambda st: st.get("isPlaying") == "True", 60, "Play")
-    # Taken before the launch: the remote log is one file per day, so only lines after this instant belong to this
-    # scenario, and the previous scenario's would otherwise pass this wait straight away. The stamps are written by
-    # the other machine's clock, hence a few seconds of slack; the previous scenario is minutes away.
     t0 = time.time()
-    since = time.strftime("%H:%M:%S", time.localtime(t0 - 5))
     cell = REMOTE_CELLS[0]
     if REMOTE_PERSIST and remote_running():
         # Nothing is restarted: the cell must notice the cluster and the database coming back by itself.
-        wanted = [(r"Neighbour zone \w+ linked", "relinked to this machine's cells"),
+        wanted = [(r"App Registered successfully", "registered with the cluster again"),
+                  (r"Neighbour zone \w+ linked", "relinked to this machine's cells"),
                   (r"Database connection to \S+ is open", "re-opened its database connection")]
     else:
         remote("stop")
-        out = remote("start", "--cell", cell, "--port", str(REMOTE_PORT), "--restart")
+        # The cell inherits this machine's environment through the spawner; the other machine's cannot, so the
+        # scenario's variables are handed to it explicitly. MESH_SPAWN_CELLS is this spawner's business only.
+        forwarded = []
+        for key, value in sorted((env or {}).items()):
+            if value and key != "MESH_SPAWN_CELLS":
+                forwarded += ["--env", f"{key}={value}"]
+        out = remote("start", "--cell", cell, "--port", str(REMOTE_PORT), "--restart", *forwarded)
         if "is running" not in out:
             raise RuntimeError("the remote cell did not start: " + " ".join(out.split())[:200])
         wanted = [(r"Own cell from channel id: " + cell + r"\b", "is serving")]
-    day = time.strftime("%Y-%m-%d")
     deadline = t0 + 150
     pending = list(wanted)
     while time.time() < deadline:
         time.sleep(3)
-        fetch_remote(force=True)
-        try:
-            lines = zone_lines(cell, since, day)
-        except RuntimeError:
-            continue        # the log for today appears a second or two after the process does
+        lines = remote_lines_after(mark)
         for want in list(pending):
             if count(lines, want[0]) >= 1:
                 print(f"   remote cell {cell} {want[1]} after {time.time() - t0:.0f}s")
@@ -257,6 +260,41 @@ def db_reset(tester_pos, bot_pos, tester_party=1, bot_party=1, building_items=No
 
 # ------------------------------------------------------------------ grading
 STAMP = re.compile(r"\[(\d{4}-\d\d-\d\d) (\d\d:\d\d:\d\d)\]")
+
+
+def remote_log_mark():
+    """How many lines the remote cell's logs hold right now, per severity.
+
+    Timestamps were the wrong tool for this: the wait used a window starting five seconds before Play was noticed,
+    which could match the PREVIOUS scenario's tail and declare the cell ready while it was still registering for
+    this one (seen 2026-09-17, seam). A line count taken before Play cannot do that, and does not care whether the
+    two machines' clocks agree.
+    """
+    if not REMOTE_CELLS:
+        return {}
+    fetch_remote(force=True)
+    day = time.strftime("%Y-%m-%d")
+    mark = {}
+    for suffix in ("info", "warn", "error"):
+        path = zone_log(REMOTE_CELLS[0], suffix, day)
+        mark[suffix] = sum(1 for _ in open(path, encoding="utf-8", errors="replace")) if os.path.exists(path) else 0
+    return mark
+
+
+def remote_lines_after(mark):
+    """Every line the remote cell has logged since the mark was taken."""
+    fetch_remote(force=True)
+    day = time.strftime("%Y-%m-%d")
+    out = []
+    for suffix in ("info", "warn", "error"):
+        path = zone_log(REMOTE_CELLS[0], suffix, day)
+        if not os.path.exists(path):
+            continue
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for i, line in enumerate(f):
+                if i >= mark.get(suffix, 0):
+                    out.append(line.rstrip("\n"))
+    return out
 
 
 def zone_lines(zone, start, day, map_id=MAP):
@@ -542,8 +580,6 @@ def wait_for_bot(log, kind, timeout):
 
 DEFAULT = ["pet", "party", "crash", "harvest", "build", "seam", "seamcold", "sleep"]
 TWO_HOST_SKIP = {
-    "crash": "injects a zone fault through the editor's environment and relies on the spawner restarting that zone; "
-             "neither reaches a cell on the other machine yet",
     "sleep": "needs cells started on demand by the central, which asks the first map-spawn server it knows; the other "
              "machine runs no spawner, so placement-aware waking has to come first",
 }

@@ -9,6 +9,7 @@ so B needs nothing but the OpenSSH server, the build unpacked somewhere, and thi
     python Tools/ServerMeshing/remoteb.py log [--lines 40] [--grep "Neighbour zone"] [--suffix error]
     python Tools/ServerMeshing/remoteb.py fetch      copy B's zone logs into Logs/remote/ for grading here
     python Tools/ServerMeshing/remoteb.py deploy     copy this machine's server build to B (after rebuilding it)
+    python Tools/ServerMeshing/remoteb.py clearmarkers   delete B's one-shot fault markers before a crash test
 
 Defaults match Docs/ServerMeshing/MULTIHOST.md; override with --host/--user/--key/--dir or the MESH_B_* environment
 variables. Nothing here changes B's configuration: it only starts, stops and reads.
@@ -97,6 +98,20 @@ def cmd_start(args):
             return 0
     print("the process did not stay up; try: remoteb.py log --suffix error")
     return 1
+
+
+def cmd_clearmarkers(args):
+    """Delete the fault markers in the remote build's Temp folder.
+
+    MESH_FAULT_DIE_ON_NOTICE fires once per marker file, and the marker is written relative to the WORKING
+    directory, which on the other machine is its own build folder. Clearing this machine's Temp does nothing for it.
+    """
+    out, err, _ = ssh(args, "$p = '" + args.dir + "\\Temp'; if (Test-Path $p) { "
+                            "$f = Get-ChildItem $p -Filter 'ServerMesh.FaultFired.*' -ErrorAction SilentlyContinue; "
+                            "$f | Remove-Item -Force -ErrorAction SilentlyContinue; 'cleared ' + $f.Count } "
+                            "else { 'cleared 0' }")
+    print(out.strip() or err[:160])
+    return 0
 
 
 def cmd_stop(args):
@@ -205,7 +220,7 @@ def cmd_deploy(args):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["start", "stop", "status", "log", "fetch", "deploy"])
+    ap.add_argument("command", choices=["start", "stop", "status", "log", "fetch", "deploy", "clearmarkers"])
     ap.add_argument("--cell", default="E")
     ap.add_argument("--port", type=int, default=8001)
     ap.add_argument("--lines", type=int, default=40)
@@ -219,7 +234,7 @@ def main():
         ap.add_argument("--" + k.replace("_", "-"), default=v)
     args = ap.parse_args()
     return {"start": cmd_start, "stop": cmd_stop, "status": cmd_status, "log": cmd_log, "fetch": cmd_fetch,
-            "deploy": cmd_deploy}[args.command](args)
+            "deploy": cmd_deploy, "clearmarkers": cmd_clearmarkers}[args.command](args)
 
 
 if __name__ == "__main__":

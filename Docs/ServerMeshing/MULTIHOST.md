@@ -226,8 +226,13 @@ Two scenarios are skipped in this mode and say so when they are:
 
 | Scenario | Why |
 |---|---|
-| `crash` | injects a zone fault through the editor's environment and relies on this machine's spawner restarting the zone; neither reaches the other machine yet |
 | `sleep` | needs the central to start a cell on demand, and it asks the first map-spawn server it knows; B runs no spawner, so placement-aware waking (§9) comes first |
+
+`crash` **does** run across both machines. Its fault variable is handed to the remote cell explicitly (A's cells
+inherit it from the editor through the spawner; B's cannot), `remoteb.py start --restart` stands in for the spawner,
+and `remoteb.py clearmarkers` clears B's one-shot marker — `MESH_FAULT_DIE_ON_NOTICE` fires once per
+`Temp/ServerMesh.FaultFired.<zone>`, written relative to the working directory, so clearing this machine's `Temp`
+does nothing for the other's.
 
 ## 8c. Result of the first full suite across two machines (2026-09-16)
 
@@ -246,8 +251,38 @@ no exception on either host:
 Nothing needed a different setting for the two-machine case, which is the result worth having: the same rig, the same
 band width and the same timings.
 
+## 8d. What the cross-machine crash costs (2026-09-17)
+
+The mesh behaviour all holds: the fault fires on B, A rolls the handoff back, the client falls back to the cell it
+left, B's cell restarts and re-registers, and a later handoff to the restarted cell is acked. 13 of the scenario's
+14 checks pass. The one that does not is worth more than the others:
+
+| | one machine | across two machines |
+|---|---|---|
+| client gap over the crash | 6.1 s | **10.5 s** |
+| does a watching client see the crossing player pop? | no | **yes** (`playerSwaps=1`) |
+
+The restart is not the cost — B's cell died at 11:29:00 and was serving again at 11:29:03. The cost is in the
+rollback:
+
+    11:29:03  C: Handoff START / SENT -> E      (to the incarnation that is about to die)
+    11:29:06  C: Disconnected from neighbour (PeerNotFound)
+    11:29:14  C: Handoff ROLLBACK complete
+
+C notices the peer is gone three seconds in, and completes the rollback eight seconds after that. Note the ordering:
+B's cell was already serving again *before* C detected the original link had gone, so the link came back and the
+rollback's link-down condition (`handoffLinkDownGraceSeconds`, 3 s) was cleared by the very restart it was waiting
+on, leaving a slower backstop to fire. A destination that dies and restarts quickly appears to delay its own
+rollback. Rolling back on a missing ack rather than on a down link is the thing to try.
+
 ## 9. What we already know is missing
 
+- **Surviving a central restart.** A cell that outlives a central restart re-registers, relinks and re-opens
+  its database connection, but a character logging in *directly* to that cell then never spawns: the client
+  connects and the cell answers `enter-game response Success`. Seen with `--remote-persist` on `seam` and
+  `seamcold` (2026-09-17); characters that enter on another cell and walk across are fine. The kit clears
+  player state through central-driven paths that never arrive when the central is what restarted, which is
+  the place to look first.
 - **Placement for sleeping cells.** The central wakes a cell on the first spawner it knows, not the one that owns the
   cell. `servedCells` fixes which cells a host starts at boot; teaching the central to match a cell to its host is the
   follow-up.
@@ -303,13 +338,19 @@ recover by themselves and one does not:
   for every scenario. `MeshMapNetworkManager.databaseReconnectSeconds` now re-opens it, and
   `regress.py --remote-persist` is the test: it leaves the cell running so it has to recover on its own.
 
-`--remote-persist` is **experimental**. It does what it is for — five unaided recoveries were observed in one suite
-run (5, 18, 5, 18 and 22 s) and the run fails if a cell does not reopen both connections — but `seam` fails about one
-run in one: the readiness check takes the cell's `Neighbour zone ... linked` and `Database connection ... is open`
-lines from a window starting five seconds before Play was noticed, so it can match the *previous* scenario's tail,
-release the tester early, and send it to a cell that is still mid-registration. The default (restart the cell for
-each scenario) does not have this problem and is what the six-scenario result above was measured with. Waiting for
-`App Registered successfully` after Play, rather than a time-sliced window, is the fix.
+`--remote-persist` is **experimental**, and useful for one thing: it is how the database reconnect is regression
+tested. The cell is never restarted, so before each later scenario it has to re-register with the cluster, relink and
+re-open its database connection unaided, and the run fails if any of that is missing. Observed recoveries: 5 s for
+all three signals, repeatedly.
+
+What it cannot yet do is run a scenario that logs a character **directly into** the persisted cell. `seam` and
+`seamcold` put the bot at x=280, inside E, so its login goes straight there; the client connects, the cell answers
+`enter-game response Success`, and the character then never spawns. The four scenarios whose characters enter on a
+local cell and walk across (`pet`, `party`, `harvest`, `build`) pass. The cause is not established — what is known is
+that the cell has been through a central restart, and that the kit clears player state through central-driven paths
+(`OnPlayerCharacterRemoved`, force-despawn) that never arrive when the central is the thing that restarted. Treat it
+as an open question about surviving a central restart, not as a harness quirk: in production a central restart is
+rare but not impossible, and every map server would be in exactly this state afterwards.
 
 Do not trust the kit's `IsClient` or `IsClientConnected` to mean "the other end is there". Both go true the moment a
 socket exists and `Connect()` returned a peer — seconds before that peer connects, and even when it never does.
