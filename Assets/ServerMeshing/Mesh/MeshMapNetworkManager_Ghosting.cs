@@ -989,6 +989,12 @@ namespace MultiplayerARPG.MMO.Mesh
                             summon.Summon(playerCharacter, summon.level, summon.summonRemainsDuration, summon.exp, summon.currentHp, summon.currentMp);
                         playerCharacter.Summons[i] = summon;
                     }
+                    // Whatever was re-summoned above rather than promoted has left its puppet standing: the match is
+                    // by summon id, and a character that comes back after a rolled-back handoff can carry a new one.
+                    // The fresh-spawn branch below has always swept these up; this branch did not, and the leftover
+                    // only showed once the client started returning in 3 s instead of 10 (2026-09-17: a pet standing
+                    // still beside its moving twin, seen 71 times by a watching client in one run).
+                    DestroyLeftoverSummonPuppets(playerCharacter, "superseded by the promoted character's summons");
                 }
             }
             else if (!playerCharacter.IsDead())

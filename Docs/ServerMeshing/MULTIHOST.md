@@ -297,10 +297,25 @@ destination's failure is still being noticed (its link was only declared lost 8 
 immediately hands off again, and the second attempt rolls back too. Backing off handoffs to the failed cell for 10 s
 stops the thrash and is too blunt — nobody crosses at all inside the scenario's window.
 
-So the client-side refusal handling and the origin's retry policy have to be designed together: something that
-resumes crossing as soon as the destination is genuinely healthy, rather than after a fixed delay, and that does not
-depend on a link flag which lags reality by seconds. Both experiments are reverted; the numbers above are the
-argument for doing it properly.
+A third attempt went further and is also reverted, but it narrowed the problem usefully. Two things were learned.
+
+**There is no handoff thrash.** Only two handoffs occur; the 65-71 "player swaps" are a **duplicate pet**, two
+instances alternating — one standing still, one moving with its owner. `TryPromoteSummonPuppet` matches a puppet to
+a summon by `summonId`, and a character returning from a rolled-back handoff can carry a new one, so the promotion
+fails, the kit re-summons, and the held puppet stays beside the new pet. The fresh-spawn branch has always swept
+those up; the promotion branch did not. That sweep is now in place (it took the swaps from 71 to 0) and is the one
+piece of these experiments that was kept — latent in current code, since a client that takes 10 s to come back lets
+the puppet expire first.
+
+**Acting on the refusal can abandon a crossing that succeeded.** With the sweep in, the run reached `playerSwaps=0`
+and a 3.5 s gap, and then failed differently: the restarted cell accepted the character (`Arrival ... player
+registered` on B at 14:23:08) and the client fell back to the origin anyway two seconds later, with no `Handoff ACK`
+logged at all. A refusal recorded earlier in a hop is evidently still set when a later attempt within that hop
+succeeds. Bouncing a character off a cell that accepted it is worse than the delay being fixed.
+
+So the work is in the migration state machine, not in a constant: when `MigrationRefused` may be honoured, and
+whether a refusal that precedes a success inside one hop should be forgotten. The numbers above are the argument for
+doing it properly rather than by patch.
 
 ## 9. What we already know is missing
 
