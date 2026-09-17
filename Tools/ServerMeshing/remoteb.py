@@ -65,7 +65,15 @@ def cmd_start(args):
         "-centralAddress", args.a_ip, "-centralPort", "6010",
         "-databaseManagerAddress", args.a_ip, "-databaseManagerPort", "6100",
     ])
-    script = CRLF.join(["@echo off", 'cd /d "' + args.dir + '"', "kit-ce-project.exe " + arguments, ""])
+    body = ["@echo off", 'cd /d "' + args.dir + '"']
+    for kv in getattr(args, "env", []) or []:
+        key, _, value = kv.partition("=")
+        body.append("set " + key.strip() + "=" + value.strip())
+    if getattr(args, "restart", False):
+        body += [":restart", "kit-ce-project.exe " + arguments, "timeout /t 2 /nobreak >nul", "goto restart"]
+    else:
+        body.append("kit-ce-project.exe " + arguments)
+    script = CRLF.join(body + [""])
     local = os.path.join(ROOT, "Logs", "start-cell-" + args.cell + ".cmd")
     os.makedirs(os.path.dirname(local), exist_ok=True)
     with open(local, "w", newline="") as f:
@@ -91,8 +99,11 @@ def cmd_start(args):
 
 
 def cmd_stop(args):
-    out, _, _ = ssh(args, "Stop-Process -Name kit-ce-project -Force -ErrorAction SilentlyContinue; "
-                          "Start-Sleep 1; (Get-Process kit-ce-project -ErrorAction SilentlyContinue).Count")
+    # Also kill the launcher script: with --restart it would otherwise start the cell straight back up.
+    out, _, _ = ssh(args, "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'kit-ce-project.exe' -or "
+                          "$_.CommandLine -like '*start-cell-*' } | ForEach-Object { Stop-Process -Id $_.ProcessId "
+                          "-Force -ErrorAction SilentlyContinue }; Start-Sleep 1; "
+                          "(Get-Process kit-ce-project -ErrorAction SilentlyContinue).Count")
     print("B server processes remaining:", out.strip() or "0")
     return 0
 
@@ -126,13 +137,18 @@ def cmd_fetch(args):
     """Copy B's zone logs here so the local harness can grade them alongside this machine's."""
     dest = os.path.join(ROOT, "Logs", "remote")
     os.makedirs(dest, exist_ok=True)
-    src = f"{args.user}@{args.host}:{args.dir}\\Logs\\*.log"
+    # Forward slashes: scp splits user@host:path on the first colon, and a backslash path with a drive letter
+    # gets mangled by the remote shell, so the copy silently matches nothing.
+    src = f"{args.user}@{args.host}:{args.dir}/Logs/*.log".replace("\\", "/")
     r = subprocess.run(["scp", "-i", args.key, "-o", "BatchMode=yes", src, dest],
                        capture_output=True, text=True, timeout=300)
     if r.returncode != 0:
         print("scp failed:", clean(r.stderr)[:300])
         return 1
     files = sorted(os.listdir(dest))
+    if not files:
+        print("scp reported success but copied nothing; check the remote log folder")
+        return 1
     print(f"fetched {len(files)} file(s) into Logs/remote/")
     for f in files[-6:]:
         print("   ", f)
@@ -146,6 +162,10 @@ def main():
     ap.add_argument("--port", type=int, default=8001)
     ap.add_argument("--lines", type=int, default=40)
     ap.add_argument("--grep", default="")
+    ap.add_argument("--env", action="append", default=[], metavar="KEY=VALUE",
+                    help="environment variable for the remote cell, repeatable (e.g. MESH_FAULT_DIE_ON_NOTICE=E)")
+    ap.add_argument("--restart", action="store_true",
+                    help="relaunch the cell if it exits, the way A's spawner does (needed by the crash scenario)")
     ap.add_argument("--suffix", default="info", choices=["info", "warn", "error"])
     for k, v in DEFAULTS.items():
         ap.add_argument("--" + k.replace("_", "-"), default=v)

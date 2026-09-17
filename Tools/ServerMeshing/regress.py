@@ -30,6 +30,7 @@ TEMP = os.path.join(ROOT, "Temp")
 REQUEST = os.path.join(TEMP, "ServerMesh.PlayRequest.txt")
 STOP = os.path.join(TEMP, "ServerMesh.StopRequest.txt")
 STATUS = os.path.join(TEMP, "ServerMesh.PlayStatus.txt")
+HOLD = os.path.join(TEMP, "ServerMesh.HoldRequest.txt")
 LOGS = os.path.join(ROOT, "Logs")
 MAP = "ServerMeshTestMap"
 MAP2 = "ServerMeshTestMap2"   # placed 400 m east of MAP in the world registry; its only cell C2 touches E
@@ -41,10 +42,39 @@ ITEM_BOW = -137752354      # TestBowItem-CE, equipped in both test characters' r
 ENV_KEYS = ["MESH_NO_MONSTER_HANDOFF", "MESH_FAULT_DIE_ON_NOTICE", "MESH_GHOST_LEAD", "MESH_LOAD_PLAYERS", "MESH_LOAD_CELL", "MESH_LOAD_UNCAPPED", "MESH_SLEEP", "MESH_SLEEP_RINGS", "MESH_SLEEP_AFTER", "MESH_SPAWN_CELLS"]
 EXTRA_ENV = {}   # --env KEY=VALUE from the command line, applied to every Play request of the run
 
+# Two-machine runs (--remote-cells): the named cells are served by the other machine, started and read over SSH by
+# Tools/ServerMeshing/remoteb.py. Their logs live on that machine, so they are copied into Logs/remote before grading.
+REMOTE_CELLS = []
+REMOTE_TOOL = os.path.join(ROOT, "Tools", "ServerMeshing", "remoteb.py")
+REMOTE_LOGS = os.path.join(LOGS, "remote")
+REMOTE_PORT = 8001
+_last_fetch = 0.0
+
+
+def remote(*argv, timeout=300):
+    """Run remoteb.py for one remote cell and return its output."""
+    r = subprocess.run([sys.executable, REMOTE_TOOL] + list(argv), capture_output=True, text=True, timeout=timeout)
+    return (r.stdout or "") + (r.stderr or "")
+
+
+def fetch_remote(force=False):
+    """Copy the other machine's zone logs here. Throttled: grading calls this through zone_lines many times."""
+    global _last_fetch
+    if not REMOTE_CELLS:
+        return
+    if not force and time.time() - _last_fetch < 5:
+        return
+    _last_fetch = time.time()
+    out = remote("fetch")
+    if "fetched" not in out:
+        raise RuntimeError("could not copy the remote machine's logs, so nothing about its cells can be graded: "
+                           + " ".join(out.split())[:200])
+
 
 # ------------------------------------------------------------------ rig plumbing
 def zone_log(zone, suffix, day, map_id=MAP):
-    return os.path.join(LOGS, f"Log_Map({map_id})-Ch({zone})-Alloc(False)-Instance()_{day}.{suffix}.log")
+    name = f"Log_Map({map_id})-Ch({zone})-Alloc(False)-Instance()_{day}.{suffix}.log"
+    return os.path.join(REMOTE_LOGS if zone in REMOTE_CELLS else LOGS, name)
 
 
 def read_status():
@@ -97,8 +127,52 @@ def request_play(mode, walk_x, walk_z, pet=False, mount=False, env=None):
     env = dict(EXTRA_ENV, **(env or {}))
     for key in ENV_KEYS:
         lines.append(f"env.{key}={env.get(key, '')}")   # every key set explicitly: an empty value clears it
+    if REMOTE_CELLS:
+        # The remote cells can only join once the cluster exists, and the cluster is this editor's: so hold the
+        # tester before its login, start them as soon as Play is up, and let it go when they are serving.
+        open(HOLD, "w").close()
     with open(REQUEST, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
+    if REMOTE_CELLS:
+        try:
+            start_remote_cells()
+        finally:
+            if os.path.exists(HOLD):
+                os.remove(HOLD)
+
+
+def start_remote_cells():
+    """Start the other machine's cells for this scenario and wait until they serve their map.
+
+    Each Play recreates this machine's cells, so the remote ones are recreated with them: a cell left over from the
+    previous scenario holds a dead cluster connection and a dead database connection, neither of which the kit
+    re-opens by itself.
+    """
+    wait_status(lambda st: st.get("isPlaying") == "True", 60, "Play")
+    remote("stop")
+    # Taken before the launch: the remote log is one file per day, so only lines after this instant belong to this
+    # scenario's process, and the previous scenario's "Own cell" would otherwise pass this wait straight away. The
+    # stamps are written by the other machine's clock, hence a few seconds of slack; the previous scenario is minutes
+    # away, so the cutoff still separates them.
+    t0 = time.time()
+    since = time.strftime("%H:%M:%S", time.localtime(t0 - 5))
+    out = remote("start", "--cell", REMOTE_CELLS[0], "--port", str(REMOTE_PORT), "--restart")
+    if "is running" not in out:
+        raise RuntimeError("the remote cell did not start: " + " ".join(out.split())[:200])
+    day = time.strftime("%Y-%m-%d")
+    deadline = t0 + 120
+    while time.time() < deadline:
+        time.sleep(3)
+        fetch_remote(force=True)
+        try:
+            lines = zone_lines(REMOTE_CELLS[0], since, day)
+        except RuntimeError:
+            continue        # the log for today appears a second or two after the process does
+        if count(lines, r"Own cell from channel id: " + REMOTE_CELLS[0] + r"\b") >= 1:
+            print(f"   remote cell {REMOTE_CELLS[0]} is serving after {time.time() - t0:.0f}s")
+            return
+    raise RuntimeError(f"remote cell {REMOTE_CELLS[0]} did not start serving in time; "
+                       "try: python Tools/ServerMeshing/remoteb.py status")
 
 
 def stop_play():
@@ -171,6 +245,12 @@ STAMP = re.compile(r"\[(\d{4}-\d\d-\d\d) (\d\d:\d\d:\d\d)\]")
 
 def zone_lines(zone, start, day, map_id=MAP):
     """Every line of the zone's info/warn/error logs stamped at or after `start` (HH:MM:SS)."""
+    if zone in REMOTE_CELLS:
+        fetch_remote()
+        # A missing remote log must fail loudly: read as "no lines", it turns every check on that cell into a
+        # silent pass, which is worse than no coverage at all.
+        if not any(os.path.exists(zone_log(zone, sfx, day, map_id)) for sfx in ("info", "warn", "error")):
+            raise RuntimeError(f"no log for remote cell {zone} in {REMOTE_LOGS}; it may not have started today")
     out = []
     for suffix in ("info", "warn", "error"):
         path = zone_log(zone, suffix, day, map_id)
@@ -255,6 +335,10 @@ def run_scenario(name, rep):
         # Fight at the line with a party member standing inside E: shares cross the line both ways. The member
         # starts a few metres from the line so it is inside E before the first kill (from the map origin its walk
         # took longer than the fighter's first kills and the shares stayed on C).
+        # Known flake (~1 in 10, seen 2026-09-16): the fighter shoots the nearest monster past x=100 from where it
+        # stands and does not close the distance, so a run where E's monsters happen to have wandered 13-15 m in
+        # ends hurtTarget=True kills=0 and fails the three share checks. It is the bot's targeting, not the mesh:
+        # the hits still forward and replay. Fix by having fight mode walk into range before shooting.
         db_reset((86.5, 0), (94, 58))
         request_play("fight", 99, 60, env={"MESH_NO_MONSTER_HANDOFF": "1"})
         wait_status(lambda st: st.get("isPlaying") == "True", 60, "Play")
@@ -435,6 +519,12 @@ def wait_for_bot(log, kind, timeout):
 
 
 DEFAULT = ["pet", "party", "crash", "harvest", "build", "seam", "seamcold", "sleep"]
+TWO_HOST_SKIP = {
+    "crash": "injects a zone fault through the editor's environment and relies on the spawner restarting that zone; "
+             "neither reaches a cell on the other machine yet",
+    "sleep": "needs cells started on demand by the central, which asks the first map-spawn server it knows; the other "
+             "machine runs no spawner, so placement-aware waking has to come first",
+}
 ALL = DEFAULT + ["pvp"]
 
 
@@ -443,6 +533,11 @@ def main():
     ap.add_argument("scenarios", nargs="*", help=f"any of {', '.join(ALL)} (default: {' '.join(DEFAULT)})")
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--env", action="append", default=[], metavar="KEY=VALUE", help=f"environment for the zones, any of {', '.join(ENV_KEYS)}")
+    ap.add_argument("--remote-cells", default="", metavar="CELL[,CELL]",
+                    help="cells served by the other machine (see Docs/ServerMeshing/MULTIHOST.md). This machine then "
+                         "serves the rest, the remote cells are started and stopped over SSH, and their logs are "
+                         "copied here for grading.")
+    ap.add_argument("--remote-port", type=int, default=8001, help="map port for the first remote cell")
     args = ap.parse_args()
     for kv in args.env:
         k, _, v = kv.partition("=")
@@ -459,6 +554,31 @@ def main():
         print(f"no player build at {EXE}"); return 2
     if read_status().get("isPlaying") == "True":
         print("the editor is already in Play mode; stop it first"); return 2
+
+    if args.remote_cells:
+        REMOTE_CELLS[:] = [c.strip() for c in args.remote_cells.split(",") if c.strip()]
+        known = {z for z, _ in ZONES}
+        unknown = [c for c in REMOTE_CELLS if c not in known]
+        if unknown:
+            print(f"unknown cell(s) {', '.join(unknown)}; known: {', '.join(sorted(known))}"); return 2
+        if len(REMOTE_CELLS) > 1:
+            print("only one remote cell is supported for now"); return 2
+        local = [z for z, _ in ZONES if z not in REMOTE_CELLS]
+        EXTRA_ENV["MESH_SPAWN_CELLS"] = ",".join(local)
+        skipped = [n for n in names if n in TWO_HOST_SKIP]
+        for n in skipped:
+            print(f"skipping {n}: {TWO_HOST_SKIP[n]}")
+        names = [n for n in names if n not in TWO_HOST_SKIP]
+        if not names:
+            print("nothing left to run"); return 2
+        os.makedirs(REMOTE_LOGS, exist_ok=True)
+        globals()["REMOTE_PORT"] = args.remote_port
+        print(f"two-machine run: this machine serves {', '.join(local)}; the other serves {', '.join(REMOTE_CELLS)}, "
+              f"started with each scenario while the tester is held")
+        if os.path.exists(HOLD):
+            os.remove(HOLD)     # left behind by an interrupted run; it would park every tester for ever
+        remote("stop")
+
     kill_bots()
     reports = []
     for n in names:
@@ -478,6 +598,9 @@ def main():
             print(note)
         reports.append(rep)
         time.sleep(5)  # the zone processes exit with Play; give the ports a moment
+    if REMOTE_CELLS:
+        fetch_remote(force=True)   # one last copy so the logs left behind match what was graded
+        print("stopping the remote cell:", remote("stop").strip())
     print("\n=== summary")
     for rep in reports:
         print(f"  {rep.name:8s} {'PASS' if rep.passed else 'FAIL'}  ({sum(1 for ok, _ in rep.checks if ok)}/{len(rep.checks)} checks)")

@@ -356,6 +356,35 @@ namespace MultiplayerARPG.MMO.Mesh
         public float clusterRegisterRetrySeconds = 3f;
         private int _clusterRegisterRetries;
 
+        [Tooltip("Seconds between attempts to open the cluster connection when it could not be opened at all. " +
+                 "Once the transport client is up the kit takes over: a failed attempt raises ConnectionFailed, " +
+                 "which the kit answers by reconnecting every five seconds, so a cell started before the central " +
+                 "joins by itself. That recovery never starts if StartClient returns false, because the client is " +
+                 "then inactive and its Update polls nothing, ever. 0 disables.")]
+        public float clusterConnectRetrySeconds = 5f;
+        private float _nextClusterConnectRetry;
+        private bool _clusterHandedToKit;
+
+        /// <summary>Server tick: open the cluster connection if start-up could not, then leave it to the kit.</summary>
+        private void ClusterConnectTick()
+        {
+            if (clusterConnectRetrySeconds <= 0f || _clusterHandedToKit || ClusterClient == null)
+                return;
+            if (ClusterClient.IsNetworkActive)
+            {
+                // The transport client is up, so events flow and the kit's own reconnect loop covers every later
+                // failure. Stand down for good rather than racing its five-second countdown, during which the
+                // client is briefly inactive and a retry here would start a second one.
+                _clusterHandedToKit = true;
+                return;
+            }
+            if (Time.unscaledTime < _nextClusterConnectRetry)
+                return;
+            _nextClusterConnectRetry = Time.unscaledTime + clusterConnectRetrySeconds;
+            Logging.Log("Mesh", $"Could not open the cluster connection to {ClusterServerAddress}:{ClusterServerPort}; retrying");
+            ClusterClient.OnAppStart();
+        }
+
         private void OnMeshAppServerRegister(AckResponseCode responseCode)
         {
             if (responseCode == AckResponseCode.Success)
@@ -395,6 +424,8 @@ namespace MultiplayerARPG.MMO.Mesh
             OwnCell = null;
             OwnZoneId = string.Empty;
             TryResolveOwnZone();
+            _clusterHandedToKit = false;
+            _nextClusterConnectRetry = Time.unscaledTime + Mathf.Max(1f, clusterConnectRetrySeconds);
             if (ClusterClient != null)
                 ClusterClient.RegisterMessageHandler(MeshClusterMsg.Sleep, HandleSleepMessage);
             if (ServerTransport is LiteNetLibManager.LiteNetLibTransport statsTransport && statsTransport.Server != null)
@@ -505,6 +536,7 @@ namespace MultiplayerARPG.MMO.Mesh
             if (IsServer)
             {
                 SampleFrame();
+                ClusterConnectTick();
                 MeshBoundaryTick();
                 GhostingUpdate();
             }

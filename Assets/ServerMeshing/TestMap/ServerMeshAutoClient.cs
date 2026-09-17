@@ -21,6 +21,7 @@
 
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using LiteNetLibManager;
 using UnityEngine;
@@ -90,6 +91,12 @@ namespace MultiplayerARPG.MMO.Mesh
         public float observeGhostBeyondX = 100f;
         [Tooltip("Overall timeout for the whole run.")]
         public float timeoutSeconds = 240f;
+        [Tooltip("How long to stay parked before login while Temp/ServerMesh.HoldRequest.txt exists. The run fails " +
+                 "if the file is still there afterwards, so a forgotten hold cannot look like a hang.")]
+        public float holdTimeoutSeconds = 180f;
+
+        /// <summary>The file whose presence parks this client before it logs in.</summary>
+        public static string HoldPath => Path.Combine(Path.GetDirectoryName(Application.dataPath) ?? "", "Temp", "ServerMesh.HoldRequest.txt");
 
         public static ServerMeshAutoClient Instance { get; private set; }
         public string Phase { get; private set; } = "idle";
@@ -204,6 +211,22 @@ namespace MultiplayerARPG.MMO.Mesh
         private IEnumerator Run()
         {
             float deadline = Time.realtimeSinceStartup + timeoutSeconds;
+
+            // 0) Optional hold. Cells on another machine can only join the cluster once this editor is in Play,
+            // because the cluster is in this editor; logging in before they do sends this character to a map server
+            // that is not there yet. The harness creates the hold file before Play and removes it once the remote
+            // cells have registered.
+            if (File.Exists(HoldPath))
+            {
+                Phase = "hold";
+                Log("Held before login by Temp/ServerMesh.HoldRequest.txt");
+                float holdDeadline = Time.realtimeSinceStartup + holdTimeoutSeconds;
+                while (File.Exists(HoldPath) && Time.realtimeSinceStartup < holdDeadline)
+                    yield return new WaitForSecondsRealtime(0.5f);
+                if (File.Exists(HoldPath)) { Fail($"still held after {holdTimeoutSeconds:0}s"); yield break; }
+                deadline = Time.realtimeSinceStartup + timeoutSeconds;   // the wait must not eat the scenario's budget
+                Log("Hold released");
+            }
 
             // 0) Wait for the client instance and connect to the login server.
             Phase = "wait-client-instance";

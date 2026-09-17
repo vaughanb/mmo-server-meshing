@@ -1,7 +1,8 @@
 # Cross-network test: running the mesh on two machines
 
-What to prepare on the second machine, and how to run the first two-host test. Everything here has been used on one
-machine over loopback; the point of this exercise is that nothing in the mesh has ever crossed a real network adapter.
+What to prepare on the second machine, and how to run the mesh across two of them. Everything the add-on does had only
+ever crossed loopback; it now crosses a real network adapter, and six of the eight regression scenarios run that way
+(§8b, §8c).
 
 Machine names used below:
 
@@ -166,10 +167,10 @@ Two things worth knowing. A process started over SSH on Windows is killed when t
 the session in a job object; `remoteb.py start` therefore launches through `Win32_Process.Create`, which escapes it.
 And turn the server off again when the testing is done: `Stop-Service sshd; Set-Service sshd -StartupType Disabled`.
 
-## 8. The first run
+## 8. A run by hand
 
-Drive it by hand rather than through the harness, because the harness reads every zone log from A's `Logs` folder and B's
-logs are on B.
+The regression harness now drives both machines (§8b); this is the manual version, useful when something is wrong and
+you want to watch it happen.
 
 1. Start A's rig and B's cell, and confirm the link lines above.
 2. Put a client on C standing near the C/E edge, and walk a second client from C into E and back.
@@ -196,13 +197,55 @@ Both crossings promoted the puppet in place, B held the character and handed it 
 out and 3-5 kB/s in while holding one character and its ghosts. A LAN hop costs the mesh nothing measurable, which is
 what the design predicted: the band is sized by visible range, not by link latency.
 
+## 8b. Running the regression across both machines
+
+    python Tools/ServerMeshing/regress.py --remote-cells E
+
+`--remote-cells` names the cells the other machine owns. The harness then
+
+- gives this machine's spawner the remaining cells through `MESH_SPAWN_CELLS`, so the two hosts never start the same
+  cell;
+- starts B's cell for every scenario over SSH and waits until it logs `Own cell`, because each Play recreates this
+  machine's cells and a cell left over from the previous scenario holds a dead cluster connection and a dead database
+  connection, neither of which the kit re-opens;
+- holds the editor's tester client before its login for as long as that takes (`Temp/ServerMesh.HoldRequest.txt`,
+  §9b), since a character whose map server has not joined yet has nowhere to go;
+- copies B's zone logs into `Logs/remote/` before grading, and **fails** rather than grading a cell whose log is
+  missing. A missing log reads as "no lines", which turns every check on that cell into a silent pass: the first
+  two-machine run reported `zone E: 0 exception lines` while copying nothing at all.
+
+Two scenarios are skipped in this mode and say so when they are:
+
+| Scenario | Why |
+|---|---|
+| `crash` | injects a zone fault through the editor's environment and relies on this machine's spawner restarting the zone; neither reaches the other machine yet |
+| `sleep` | needs the central to start a cell on demand, and it asks the first map-spawn server it knows; B runs no spawner, so placement-aware waking (§9) comes first |
+
+## 8c. Result of the first full suite across two machines (2026-09-16)
+
+A served C, N, NE and C2; B served E. Six of the eight scenarios apply in this mode and all six passed, 71 checks with
+no exception on either host:
+
+| Scenario | Checks | What it proves across the network |
+|---|---|---|
+| `pet` | 12/12 | a summoned pet is promoted in place on both hops |
+| `party` | 13/13 | forwarded arrow hits, kill credit and party shares cross the line |
+| `harvest` | 8/8 | swings forwarded to the other machine's node, yield back to the real character |
+| `build` | 10/10 | placement handed over, the building created there and ghosted back |
+| `seam` | 16/16 | a cross-*map* hop: frame-translated save, promoted arrival, client scene swap |
+| `seamcold` | 12/12 | the same crossing with the pre-load off, falling back to the kit's scene reload |
+
+Nothing needed a different setting for the two-machine case, which is the result worth having: the same rig, the same
+band width and the same timings.
+
 ## 9. What we already know is missing
 
 - **Placement for sleeping cells.** The central wakes a cell on the first spawner it knows, not the one that owns the
   cell. `servedCells` fixes which cells a host starts at boot; teaching the central to match a cell to its host is the
   follow-up.
-- **Harness log collection.** `regress.py` grades log files under A's `Logs`. Sharing B's log folder over SMB and
-  pointing the harness at it is the small next step that makes the scenarios runnable across two machines.
+- **A fault path to the other machine.** `crash` sets `MESH_FAULT_DIE_ON_NOTICE` in this editor's environment and
+  relies on this spawner restarting the zone. `remoteb.py start --env` already carries a variable across, so what is
+  missing is the restart, not the fault.
 - **Band sizing under latency.** The band width was chosen assuming a link hop costs nothing. A LAN barely changes that;
   a wide-area link would, and the start-up band check should compute the requirement from the measured link round trip
   rather than a constant.
@@ -215,6 +258,9 @@ what the design predicted: the band is sized by visible range, not by link laten
 | Ping between the two machines fails although everything else works | Windows blocks inbound ICMP by default. Ping proves nothing here. Send a UDP datagram to a port in the allowed range instead. |
 | A cell started over SSH disappears seconds later | OpenSSH kills the session's process tree on disconnect. Launch through `Win32_Process.Create`, which is what `remoteb.py start` does. |
 | Peers register but no link comes up | The link port is the map port plus 10 000 and is a separate firewall entry. |
+| A scenario fails because a cell on the other machine never saw the tester | The tester logged in before that cell joined. Check for `phase=hold` in `Temp/ServerMesh.PlayStatus.txt` and for `remote cell E is serving` in the harness output (§8b, §9b). |
+| The tester never logs in and the run times out | A leftover `Temp/ServerMesh.HoldRequest.txt`. Delete it. |
+| A cell on the other machine serves but every database call times out after the first scenario | It is a cell left over from the previous Play: the kit does not re-open the database connection. Restart it. |
 
 To find a blocking application rule:
 
@@ -227,6 +273,27 @@ Get-NetFirewallRule -Direction Inbound | ForEach-Object {
 
 Disable the blocking one with `Set-NetFirewallRule -Name "{...}" -Enabled False`, keeping it for later rather than
 deleting it.
+
+## 9b. Start-up ordering between the two machines
+
+The cluster lives in A's editor and only exists while A is in Play, so B's cell and A's rig cannot both be "already
+running" when the other starts. What the kit does with each order is worth knowing, because two of the three cases
+recover by themselves and one does not:
+
+- **B's cell connects, then the cluster goes away** (A stops Play between scenarios). LiteNetLib raises
+  `ConnectionFailed`, which the kit treats as a disconnect and answers by reconnecting every five seconds, for ever.
+  The cluster connection recovers; the *database* connection does not, and there is no retry for it, which is why the
+  harness restarts B's cell for every scenario instead of leaving it up.
+- **B's cell starts while the cluster is down.** Same path, so it joins as soon as A reaches Play. Nothing to do.
+- **B's cell cannot open a client socket at all** (`StartClient` returns false). The client is then inactive, its
+  `Update` polls nothing, and no disconnect is ever raised: the process runs for ever, serving nobody, and never
+  retries. The add-on covers this one — `MeshMapNetworkManager.clusterConnectRetrySeconds` (5 s, 0 disables) re-opens
+  the connection and stands down as soon as the transport client is up, leaving every later failure to the kit.
+
+The tester client is held rather than raced: while `Temp/ServerMesh.HoldRequest.txt` exists, the auto client parks
+before logging in and reports `phase=hold`. The harness creates it before Play and removes it once B's cell is
+serving; `holdTimeoutSeconds` (180 s) fails the run instead of hanging if nobody ever removes it. Delete the file by
+hand if an interrupted run left one behind — the harness does that at the start of a two-machine run for you.
 
 ## 10. When it works
 
