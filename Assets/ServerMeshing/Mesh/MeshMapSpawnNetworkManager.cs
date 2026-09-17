@@ -72,6 +72,14 @@ namespace MultiplayerARPG.MMO.Mesh
                 _kitOnRegister?.Invoke(responseCode);
                 return;
             }
+            // Tell the central which cells this host may start, so a cell wakes on the machine that can serve it.
+            // An empty list means "all of them", which is what a single-host deployment has always meant.
+            if (servedCells != null && servedCells.Length > 0 && ClusterClient != null)
+            {
+                MeshServesMessage serves = new MeshServesMessage { cellIds = servedCells };
+                ClusterClient.SendPacket(0, LiteNetLib.DeliveryMethod.ReliableOrdered, MeshClusterMsg.Serves, writer => serves.Serialize(writer));
+                Logging.Log("Mesh", $"Told the central this spawner serves {string.Join(",", servedCells)}");
+            }
             List<BaseMapInfo> maps = spawningMaps != null && spawningMaps.Count > 0 ? new List<BaseMapInfo>(spawningMaps) : new List<BaseMapInfo>(GameInstance.MapInfos.Values);
             List<BaseMapInfo> plain = new List<BaseMapInfo>();
             List<KeyValuePair<string, string>> cells = new List<KeyValuePair<string, string>>(); // (cell id, map id)

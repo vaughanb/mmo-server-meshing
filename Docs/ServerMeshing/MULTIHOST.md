@@ -329,9 +329,11 @@ doing it properly rather than by patch.
   `seamcold` (2026-09-17); characters that enter on another cell and walk across are fine. The kit clears
   player state through central-driven paths that never arrive when the central is what restarted, which is
   the place to look first.
-- **Placement for sleeping cells.** The central wakes a cell on the first spawner it knows, not the one that owns the
-  cell. `servedCells` fixes which cells a host starts at boot; teaching the central to match a cell to its host is the
-  follow-up.
+- **A map-spawn server on the second machine.** The central now asks the spawner that owns a cell rather than the
+  first one it knows (each spawner advertises its `servedCells` when it registers, and the central routes by that,
+  falling back to the old behaviour for a cell nobody claimed). What is still missing is a spawner *process* on the
+  other machine: its cell is started by hand through `remoteb.py`, so there is nothing there to receive a start
+  request and `sleep` still cannot run across two hosts.
 - **A fault path to the other machine.** `crash` sets `MESH_FAULT_DIE_ON_NOTICE` in this editor's environment and
   relies on this spawner restarting the zone. `remoteb.py start --env` already carries a variable across, so what is
   missing is the restart, not the fault.

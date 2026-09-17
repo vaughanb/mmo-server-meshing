@@ -35,6 +35,7 @@ namespace MultiplayerARPG.MMO.Mesh
     {
         public const ushort Sleep = 30010;   // central -> map server: exit when no player is on you
         public const ushort Wake = 30011;    // map server -> central (request): a cell I need is asleep
+        public const ushort Serves = 30012;  // map-spawn server -> central: the cells this host is allowed to start
     }
 
     /// <summary>Central to a map server: nobody needs this cell; save and exit (ignored while a player is on it).</summary>
@@ -43,6 +44,29 @@ namespace MultiplayerARPG.MMO.Mesh
         public string cellId;
         public void Serialize(NetDataWriter writer) { writer.Put(cellId ?? string.Empty); }
         public void Deserialize(NetDataReader reader) { cellId = reader.GetString(); }
+    }
+
+    /// <summary>
+    /// A map-spawn server tells the central which cells it may start. Without this the central wakes a cell on the
+    /// first spawner it happens to know, which is always right with one host and a coin toss with two: the spawner
+    /// that receives the request refuses cells it does not serve, and the cell never wakes.
+    /// </summary>
+    public struct MeshServesMessage : INetSerializable
+    {
+        public string[] cellIds;
+        public void Serialize(NetDataWriter writer)
+        {
+            writer.Put(cellIds != null ? cellIds.Length : 0);
+            for (int i = 0; cellIds != null && i < cellIds.Length; ++i)
+                writer.Put(cellIds[i] ?? string.Empty);
+        }
+        public void Deserialize(NetDataReader reader)
+        {
+            int count = reader.GetInt();
+            cellIds = new string[count < 0 ? 0 : count];
+            for (int i = 0; i < cellIds.Length; ++i)
+                cellIds[i] = reader.GetString();
+        }
     }
 
     /// <summary>A map server (or the login server) asks the central to wake a cell.</summary>

@@ -76,6 +76,10 @@ namespace MultiplayerARPG.MMO.Mesh
                 sleepAfterSeconds = MeshSleepConfig.EnvAfterSeconds(sleepAfterSeconds);
             }
             base.Initialize();
+            // Registered whether or not cells sleep: a spawner advertises its cells as soon as it registers, which
+            // can be long before anyone turns sleeping on, and an unhandled message is simply dropped.
+            if (ClusterServer != null)
+                ClusterServer.RegisterMessageHandler(MeshClusterMsg.Serves, HandleServesMessage);
             if (sleepCells && world != null && ClusterServer != null)
             {
                 ClusterServer.RegisterRequestHandler<MeshWakeRequest, MeshWakeResponse>(MeshClusterMsg.Wake, HandleWakeRequest);
@@ -115,6 +119,22 @@ namespace MultiplayerARPG.MMO.Mesh
                 await UniTask.Delay(200);
             }
             return IsCellUp(cell);
+        }
+
+        /// <summary>Which map-spawn server may start a given cell, from what each spawner advertised at registration.</summary>
+        private readonly Dictionary<string, long> _spawnerByCell = new Dictionary<string, long>();
+
+        private void HandleServesMessage(MessageHandlerData messageHandler)
+        {
+            MeshServesMessage message = messageHandler.ReadMessage<MeshServesMessage>();
+            if (message.cellIds == null)
+                return;
+            for (int i = 0; i < message.cellIds.Length; ++i)
+            {
+                if (!string.IsNullOrEmpty(message.cellIds[i]))
+                    _spawnerByCell[message.cellIds[i]] = messageHandler.ConnectionId;
+            }
+            Logging.Log("Mesh", $"Map-spawn server on connection {messageHandler.ConnectionId} serves {string.Join(",", message.cellIds)}");
         }
 
         private UniTaskVoid HandleWakeRequest(RequestHandlerData requestHandler, MeshWakeRequest request, RequestProceedResultDelegate<MeshWakeResponse> result)
@@ -206,11 +226,23 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private void RequestStart(MeshCell cell, float now)
         {
+            // The spawner that advertised this cell, if any: asking a host that does not serve it means the cell
+            // never wakes, because that spawner refuses it. Falling back to the first known spawner keeps the
+            // single-host case, where every spawner serves everything, exactly as it was.
             long spawnerConnectionId = -1;
-            foreach (CentralServerPeerInfo spawner in ClusterServer.MapSpawnServerPeers.Values)
+            if (_spawnerByCell.TryGetValue(cell.id, out long owner) && ClusterServer.MapSpawnServerPeers.ContainsKey(owner))
             {
-                spawnerConnectionId = spawner.connectionId;
-                break;
+                spawnerConnectionId = owner;
+            }
+            else
+            {
+                foreach (CentralServerPeerInfo spawner in ClusterServer.MapSpawnServerPeers.Values)
+                {
+                    spawnerConnectionId = spawner.connectionId;
+                    break;
+                }
+                if (spawnerConnectionId >= 0 && _spawnerByCell.Count > 0 && !_spawnRequested.ContainsKey(cell.id))
+                    Logging.LogWarning("Mesh", $"No spawner advertised cell {cell.id}; asking {spawnerConnectionId}, which may refuse it");
             }
             if (spawnerConnectionId < 0)
             {
