@@ -315,6 +315,25 @@ namespace MultiplayerARPG.MMO.Mesh
         public override UniTask<bool> DeserializeClientReadyData(uint requestId, long connectionId, NetDataReader reader, LiteNetLibIdentity playerIdentity)
         {
             Stamp($"client ready request from {connectionId}");
+#if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
+            // The kit refuses client-ready on four conditions and logs none of them: it sets a UITextKeys for the
+            // response and returns false, and the peer is dropped. Seen as a cell accepting enter-game, loading the
+            // character, then kicking on ready with nothing in its log at all (2026-09-17, a direct login into a
+            // cell that had outlived a central restart). Name the condition so the next one is not a guess.
+            if (IsServer)
+            {
+                bool hasUser = ServerUserHandlers.TryGetUserId(connectionId, out string readyUserId);
+                bool hasToken = hasUser && ServerUserHandlers.TryGetAccessToken(connectionId, out _);
+                bool hasPending = hasUser && _pendingSpawnPlayerCharactersByUserId.ContainsKey(readyUserId);
+                if (!hasUser || !hasToken || !hasPending)
+                    Logging.LogWarning("Mesh", $"Client ready from {connectionId} is about to be refused: user={hasUser} token={hasToken} pendingSpawn={hasPending}");
+                // The kit then validates asynchronously (ValidatePlayerConnection) and drops the peer on failure.
+                // All four of those paths log behind the manager's LogError flag, which is off on a server build, so
+                // that kick arrives with nothing written anywhere -- see MULTIHOST 9 for the open case. Do not be
+                // tempted to warn on "the user is already registered here": enter-game registers it a moment
+                // earlier, so it is true on every successful login too (checked against a passing run, 2026-09-17).
+            }
+#endif
             return base.DeserializeClientReadyData(requestId, connectionId, reader, playerIdentity);
         }
 

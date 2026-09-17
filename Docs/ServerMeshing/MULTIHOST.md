@@ -323,12 +323,23 @@ doing it properly rather than by patch.
   falling back when the destination answers `enter-game` with an error, which is most of the cross-machine
   crash gap (§8d). Acting on the refusal alone makes the crossing thrash, so it needs the origin's retry
   policy designed with it. Measurements and two reverted experiments are in §8d.
-- **Surviving a central restart.** A cell that outlives a central restart re-registers, relinks and re-opens
-  its database connection, but a character logging in *directly* to that cell then never spawns: the client
-  connects and the cell answers `enter-game response Success`. Seen with `--remote-persist` on `seam` and
-  `seamcold` (2026-09-17); characters that enter on another cell and walk across are fine. The kit clears
-  player state through central-driven paths that never arrive when the central is what restarted, which is
-  the place to look first.
+- **A direct login into a cell that outlived a central restart is kicked.** Narrowed on 2026-09-17, not solved.
+  What happens, in order: the cell answers `enter-game validated+loaded ok=True` and loads the character at the
+  right position; the client loads the scene and sends client-ready; the cell receives it; and 0.4 s later the
+  cell drops the peer with `DisconnectPeerCalled` and **nothing written in any log on either machine**. Only a
+  *direct* login to such a cell fails; a character that enters on another cell and walks across is fine, which is
+  why only `seam` and `seamcold` fail under `--remote-persist`.
+
+  Ruled out: the four synchronous refusals in `DeserializeClientReadyData` (a diagnostic in the add-on names them
+  and stays silent here), a stale ghost or reserved arrival (`reserved=0`, no player ghosts on the cell
+  beforehand), and login routing (the central routes to E correctly). What remains is the async
+  `ValidatePlayerConnection` in `SetPlayerReadyRoutine`: not-ready, the database access-token check, or
+  "character already registered". All four of its paths log behind the manager's `LogError` flag, which is off on
+  a server build, which is why the kick is silent — turning that flag on for one run is the cheapest next step.
+
+  One trap for whoever picks this up: do **not** treat "the user is already registered on this cell" at
+  client-ready as the cause. Enter-game registers the user a moment earlier, so it is true on every successful
+  login too; a diagnostic that warned on it fired three times during a run that passed 16/16.
 - **A map-spawn server on the second machine.** The central now asks the spawner that owns a cell rather than the
   first one it knows (each spawner advertises its `servedCells` when it registers, and the central routes by that,
   falling back to the old behaviour for a cell nobody claimed). What is still missing is a spawner *process* on the
