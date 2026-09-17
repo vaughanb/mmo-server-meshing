@@ -253,30 +253,61 @@ band width and the same timings.
 
 ## 8d. What the cross-machine crash costs (2026-09-17)
 
-The mesh behaviour all holds: the fault fires on B, A rolls the handoff back, the client falls back to the cell it
-left, B's cell restarts and re-registers, and a later handoff to the restarted cell is acked. 13 of the scenario's
-14 checks pass. The one that does not is worth more than the others:
+The mesh behaviour holds: the fault fires on B, A rolls the handoff back, the client falls back to the cell it left,
+B's cell restarts and re-registers, and a later handoff to the restarted cell is acked. 13 of the scenario's 14
+checks pass. The one that does not is worth more than the others:
 
 | | one machine | across two machines |
 |---|---|---|
 | client gap over the crash | 6.1 s | **10.5 s** |
 | does a watching client see the crossing player pop? | no | **yes** (`playerSwaps=1`) |
 
-The restart is not the cost — B's cell died at 11:29:00 and was serving again at 11:29:03. The cost is in the
-rollback:
+**The cost is in the client, not the servers.** B's cell died at 11:29:00 and was serving again at 11:29:03, and A
+rolled the handoff back promptly:
 
-    11:29:03  C: Handoff START / SENT -> E      (to the incarnation that is about to die)
+    11:29:03  C: Handoff SENT -> E
     11:29:06  C: Disconnected from neighbour (PeerNotFound)
-    11:29:14  C: Handoff ROLLBACK complete
+    11:29:08  C: Handoff ROLLBACK ... link to the destination lost   (+5 s)
+    11:29:14  C: Handoff ROLLBACK complete                           (the client is back)
 
-C notices the peer is gone three seconds in, and completes the rollback eight seconds after that. Note the ordering:
-B's cell was already serving again *before* C detected the original link had gone, so the link came back and the
-rollback's link-down condition (`handoffLinkDownGraceSeconds`, 3 s) was cleared by the very restart it was waiting
-on, leaving a slower backstop to fire. A destination that dies and restarts quickly appears to delay its own
-rollback. Rolling back on a missing ack rather than on a down link is the thing to try.
+(`ROLLBACK complete` is when the client returns, not when the rollback fires. Reading it as the trigger is how an
+earlier version of this section came to blame the server for a delay that was never there.)
+
+The client's own log says where the six seconds after the rollback went:
+
+    11:29:06.913  C client connected              (to B's restarted cell)
+    11:29:06.963  C enter-game response Error     (a definitive refusal: the reservation died with the old process)
+    11:29:13      Migration failed (timeout); falling back to 192.168.50.83:8000
+
+**The client is given an explicit refusal and ignores it**, waiting out `migrationReadyTimeoutSeconds` (10 s) before
+falling back. `ClientMigrationController`'s wait loop breaks on its deadline or on `MigrationDisconnected`, and a
+refusal is neither — the destination answered and stayed connected. About 7 s of the 10.5 s gap is the client
+sitting on an answer it already had.
+
+**Acting on the refusal is necessary but not sufficient, and this is measured, not guessed.** Three builds:
+
+| Change | checks | client gap | `playerSwaps` |
+|---|---|---|---|
+| none (current code) | **13/14** | 10.5 s | 1 |
+| fall back the moment the refusal arrives | 12/14 | **4.1 s** | 65 |
+| that, plus a 10 s no-handoff backoff for the rolled-back cell | 11/14 | bot never crossed | 0 |
+
+The fast fallback more than halves the gap and then destabilises the crossing: the client returns while the
+destination's failure is still being noticed (its link was only declared lost 8 s after it died), the boundary tick
+immediately hands off again, and the second attempt rolls back too. Backing off handoffs to the failed cell for 10 s
+stops the thrash and is too blunt — nobody crosses at all inside the scenario's window.
+
+So the client-side refusal handling and the origin's retry policy have to be designed together: something that
+resumes crossing as soon as the destination is genuinely healthy, rather than after a fixed delay, and that does not
+depend on a link flag which lags reality by seconds. Both experiments are reverted; the numbers above are the
+argument for doing it properly.
 
 ## 9. What we already know is missing
 
+- **The client ignores an explicit handoff refusal.** It waits out `migrationReadyTimeoutSeconds` instead of
+  falling back when the destination answers `enter-game` with an error, which is most of the cross-machine
+  crash gap (§8d). Acting on the refusal alone makes the crossing thrash, so it needs the origin's retry
+  policy designed with it. Measurements and two reverted experiments are in §8d.
 - **Surviving a central restart.** A cell that outlives a central restart re-registers, relinks and re-opens
   its database connection, but a character logging in *directly* to that cell then never spawns: the client
   connects and the cell answers `enter-game response Success`. Seen with `--remote-persist` on `seam` and
