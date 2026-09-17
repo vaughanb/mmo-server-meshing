@@ -8,11 +8,12 @@ so B needs nothing but the OpenSSH server, the build unpacked somewhere, and thi
     python Tools/ServerMeshing/remoteb.py status
     python Tools/ServerMeshing/remoteb.py log [--lines 40] [--grep "Neighbour zone"] [--suffix error]
     python Tools/ServerMeshing/remoteb.py fetch      copy B's zone logs into Logs/remote/ for grading here
+    python Tools/ServerMeshing/remoteb.py deploy     copy this machine's server build to B (after rebuilding it)
 
 Defaults match Docs/ServerMeshing/MULTIHOST.md; override with --host/--user/--key/--dir or the MESH_B_* environment
 variables. Nothing here changes B's configuration: it only starts, stops and reads.
 """
-import argparse, os, subprocess, sys, time
+import argparse, hashlib, os, subprocess, sys, time
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 CRLF = "\r\n"
@@ -155,9 +156,56 @@ def cmd_fetch(args):
     return 0
 
 
+# Everything a cell needs to run, which is the whole build except what belongs to B: its own Config (addresses and
+# database credentials) and its own Logs. The Burst debug folder is build output nothing reads, so it stays here.
+DEPLOY_SKIP = {"Config", "Logs", "log", "kit-ce-project_BurstDebugInformation_DoNotShip"}
+
+
+def cmd_deploy(args):
+    """Copy the server build to B, so a cell there runs the code this machine just built.
+
+    A cell runs the BUILD, not the editor's scripts: an add-on change is invisible on B until the build is rebuilt
+    here and copied over. Stops any cell first, because Windows will not overwrite a running executable's files.
+    """
+    src_root = os.path.join(ROOT, "Build", "Server")
+    if not os.path.exists(os.path.join(src_root, "kit-ce-project.exe")):
+        print(f"no server build at {src_root}; build it in the editor first")
+        return 1
+    if running(args):
+        print("stopping B's cell first (a running process locks its own files)")
+        cmd_stop(args)
+    entries = [e for e in sorted(os.listdir(src_root)) if e not in DEPLOY_SKIP]
+    total = sum(os.path.getsize(os.path.join(dp, f))
+                for e in entries for dp, _, fs in os.walk(os.path.join(src_root, e)) for f in fs) \
+        + sum(os.path.getsize(os.path.join(src_root, e)) for e in entries if os.path.isfile(os.path.join(src_root, e)))
+    print(f"copying {len(entries)} item(s), {total / 1e6:.0f} MB to {args.user}@{args.host}:{args.dir}")
+    dest = f"{args.user}@{args.host}:{args.dir}/".replace("\\", "/")
+    started = time.time()
+    r = subprocess.run(["scp", "-r", "-q", "-i", args.key, "-o", "BatchMode=yes"]
+                       + [os.path.join(src_root, e) for e in entries] + [dest],
+                       capture_output=True, text=True, timeout=1800)
+    if r.returncode != 0:
+        print("scp failed:", clean(r.stderr)[:400])
+        return 1
+    # Prove it landed rather than trusting the exit code. By content, not by size: the managed assembly is
+    # padded to a 512-byte boundary, so a build with a few methods added can come out exactly the same length
+    # as the one before it, and a size check then passes happily on a stale copy.
+    local_dll = os.path.join(src_root, "kit-ce-project_Data", "Managed", "Assembly-CSharp.dll")
+    remote_dll = args.dir + "\\kit-ce-project_Data\\Managed\\Assembly-CSharp.dll"
+    want = hashlib.sha256(open(local_dll, "rb").read()).hexdigest()
+    out, _, _ = ssh(args, "if (Test-Path '" + remote_dll + "') { (Get-FileHash '" + remote_dll +
+                          "' -Algorithm SHA256).Hash } else { 'missing' }")
+    got = out.strip().lower()
+    print(f"copied in {time.time() - started:.0f}s; Assembly-CSharp.dll sha256 {want[:16]} here, {got[:16]} on B")
+    if got != want:
+        print("the copy did not land: B's assembly does not match this machine's")
+        return 1
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["start", "stop", "status", "log", "fetch"])
+    ap.add_argument("command", choices=["start", "stop", "status", "log", "fetch", "deploy"])
     ap.add_argument("--cell", default="E")
     ap.add_argument("--port", type=int, default=8001)
     ap.add_argument("--lines", type=int, default=40)
@@ -170,7 +218,8 @@ def main():
     for k, v in DEFAULTS.items():
         ap.add_argument("--" + k.replace("_", "-"), default=v)
     args = ap.parse_args()
-    return {"start": cmd_start, "stop": cmd_stop, "status": cmd_status, "log": cmd_log, "fetch": cmd_fetch}[args.command](args)
+    return {"start": cmd_start, "stop": cmd_stop, "status": cmd_status, "log": cmd_log, "fetch": cmd_fetch,
+            "deploy": cmd_deploy}[args.command](args)
 
 
 if __name__ == "__main__":

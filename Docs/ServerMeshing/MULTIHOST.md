@@ -145,6 +145,14 @@ reads B's cells directly, and `Tools/ServerMeshing/remoteb.py` wraps it:
     python Tools/ServerMeshing/remoteb.py status
     python Tools/ServerMeshing/remoteb.py log [--lines 40] [--grep "Handoff"] [--suffix error]
     python Tools/ServerMeshing/remoteb.py fetch      copies B's zone logs into Logs/remote/
+    python Tools/ServerMeshing/remoteb.py deploy     copies this machine's server build to B
+
+**A cell runs the build, not the editor's scripts.** An add-on change is invisible on B until the build is rebuilt
+here and copied over, so `deploy` is the step between editing and testing. It stops B's cell first (Windows will not
+overwrite a running executable's files), leaves B's own `Config` and `Logs` alone, and checks the copy by comparing
+`Assembly-CSharp.dll` by SHA-256 rather than by size — the assembly is padded to a 512-byte boundary, so a
+build with a few methods added can come out exactly the same length as the one before it, and a size check then
+passes happily on a stale copy.
 
 Set-up on B, in an elevated PowerShell:
 
@@ -282,13 +290,32 @@ recover by themselves and one does not:
 
 - **B's cell connects, then the cluster goes away** (A stops Play between scenarios). LiteNetLib raises
   `ConnectionFailed`, which the kit treats as a disconnect and answers by reconnecting every five seconds, for ever.
-  The cluster connection recovers; the *database* connection does not, and there is no retry for it, which is why the
-  harness restarts B's cell for every scenario instead of leaving it up.
+  The cluster connection recovers by itself.
 - **B's cell starts while the cluster is down.** Same path, so it joins as soon as A reaches Play. Nothing to do.
 - **B's cell cannot open a client socket at all** (`StartClient` returns false). The client is then inactive, its
   `Update` polls nothing, and no disconnect is ever raised: the process runs for ever, serving nobody, and never
   retries. The add-on covers this one — `MeshMapNetworkManager.clusterConnectRetrySeconds` (5 s, 0 disables) re-opens
   the connection and stands down as soon as the transport client is up, leaving every later failure to the kit.
+- **The database connection, in every one of those cases.** The kit opens it once, in
+  `MMOServerInstance.StartDatabaseManagerClient`, and never again: the transport calls `Manager.StopClient()` on a
+  disconnect, `DatabaseNetworkManager` does not override `OnClientDisconnected`, and the base is an empty virtual. The
+  cell keeps running and keeps accepting players while every save fails, which is why the harness used to restart B
+  for every scenario. `MeshMapNetworkManager.databaseReconnectSeconds` now re-opens it, and
+  `regress.py --remote-persist` is the test: it leaves the cell running so it has to recover on its own.
+
+`--remote-persist` is **experimental**. It does what it is for — five unaided recoveries were observed in one suite
+run (5, 18, 5, 18 and 22 s) and the run fails if a cell does not reopen both connections — but `seam` fails about one
+run in one: the readiness check takes the cell's `Neighbour zone ... linked` and `Database connection ... is open`
+lines from a window starting five seconds before Play was noticed, so it can match the *previous* scenario's tail,
+release the tester early, and send it to a cell that is still mid-registration. The default (restart the cell for
+each scenario) does not have this problem and is what the six-scenario result above was measured with. Waiting for
+`App Registered successfully` after Play, rather than a time-sliced window, is the fix.
+
+Do not trust the kit's `IsClient` or `IsClientConnected` to mean "the other end is there". Both go true the moment a
+socket exists and `Connect()` returned a peer — seconds before that peer connects, and even when it never does.
+The add-on reads `ITransport.IsClientStarted` (a peer in `ConnectionState.Connected`) instead. The same optimism
+explains a cell logging `Cannot GetBuildingsAsync status: Timeout` 30 s after start-up: the map server issued the
+query before the connection existed, and `ClientSend` dropped it silently.
 
 The tester client is held rather than raced: while `Temp/ServerMesh.HoldRequest.txt` exists, the auto client parks
 before logging in and reports `phase=hold`. The harness creates it before Play and removes it once B's cell is

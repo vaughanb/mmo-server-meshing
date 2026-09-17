@@ -94,6 +94,40 @@ namespace MultiplayerARPG.MMO.Mesh
         [Tooltip("How long to stay parked before login while Temp/ServerMesh.HoldRequest.txt exists. The run fails " +
                  "if the file is still there afterwards, so a forgotten hold cannot look like a hang.")]
         public float holdTimeoutSeconds = 180f;
+        [Tooltip("How long to keep asking to use a bag item when the client refuses the request. Mounting and " +
+                 "summoning are preconditions of their scenarios rather than the thing under test, and the kit " +
+                 "turns a use-item request down in the moments after the character enters the map.")]
+        public float useItemRetrySeconds = 6f;
+        private bool _useItemSent;
+        private int _useItemAttempts;
+
+        /// <summary>
+        /// Ask to use a bag item, and keep asking until it is accepted or the budget runs out. One refusal is not
+        /// an answer: CanUseItem and the kit's global and use-item action delays all turn the request down right
+        /// after the character enters the map, which failed a pet run on a slow day (2026-09-17) while the mesh
+        /// itself was behaving perfectly.
+        /// </summary>
+        private IEnumerator UseBagItem(int index)
+        {
+            _useItemSent = false;
+            _useItemAttempts = 0;
+            float deadline = Time.realtimeSinceStartup + useItemRetrySeconds;
+            while (Time.realtimeSinceStartup < deadline)
+            {
+                BasePlayerCharacterEntity self = GameInstance.PlayingCharacterEntity;
+                if (self == null)
+                {
+                    Log("Lost the playing character while trying to use a bag item");
+                    yield break;
+                }
+                ++_useItemAttempts;
+                _useItemSent = self.CallCmdUseItem(index);
+                if (_useItemSent)
+                    yield break;
+                yield return new WaitForSecondsRealtime(0.5f);
+            }
+            Log($"The client refused to use bag item {index} on all {_useItemAttempts} attempt(s) in {useItemRetrySeconds:0}s");
+        }
 
         /// <summary>The file whose presence parks this client before it logs in.</summary>
         public static string HoldPath => Path.Combine(Path.GetDirectoryName(Application.dataPath) ?? "", "Temp", "ServerMesh.HoldRequest.txt");
@@ -452,7 +486,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (bagItem != null && bagItem.IsMount() && bagItem is IMountItem) { index = i; break; }
             }
             if (index < 0) { Log("No mount item in the inventory; continuing on foot"); yield break; }
-            bool sent = self.CallCmdUseItem(index);
+            yield return UseBagItem(index);
+            bool sent = _useItemSent;
             float end = Time.realtimeSinceStartup + 10f;
             while (Time.realtimeSinceStartup < end && (GameInstance.PlayingCharacterEntity == null || GameInstance.PlayingCharacterEntity.PassengingVehicleEntity == null))
                 yield return null;
@@ -475,13 +510,14 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (bagItem != null && bagItem.IsPet() && bagItem is IPetItem) { index = i; break; }
             }
             if (index < 0) { Log("No pet item in the inventory; continuing without a pet"); yield break; }
-            bool sent = self.CallCmdUseItem(index);
+            yield return UseBagItem(index);
+            bool sent = _useItemSent;
             float end = Time.realtimeSinceStartup + 10f;
             BaseMonsterCharacterEntity pet = null;
             while (Time.realtimeSinceStartup < end && (pet = FindOwnPet()) == null)
                 yield return new WaitForSecondsRealtime(0.25f);
             self = GameInstance.PlayingCharacterEntity;
-            Log($"Summon pet: item slot {index} sent={sent} summons={(self != null ? self.Summons.Count : 0)}" + (pet != null ? $" pet '{pet.CharacterName}' lv{pet.Level} hp={pet.CurrentHp}/{pet.MaxHp} at {pet.EntityTransform.position}" : " (pet entity not seen)"));
+            Log($"Summon pet: item slot {index} sent={sent} after {_useItemAttempts} attempt(s) summons={(self != null ? self.Summons.Count : 0)}" + (pet != null ? $" pet '{pet.CharacterName}' lv{pet.Level} hp={pet.CurrentHp}/{pet.MaxHp} at {pet.EntityTransform.position}" : " (pet entity not seen)"));
             yield return new WaitForSecondsRealtime(1f);
         }
 

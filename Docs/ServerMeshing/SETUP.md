@@ -157,6 +157,7 @@ All on `MeshMapNetworkManager` (the map-manager prefab). Defaults are the values
 | `linkAllZones` | on | Link to every cell of the map, not only neighbours (party shares and such reach any cell). |
 | `meshLinkPortOffset` | 10000 | The server-to-server link listens on the map port plus this. |
 | `expectedMaxSpeed`, `meshStatsIntervalSeconds` | 8 m/s, 10 s | Band sizing check at start-up; the `Mesh stats` log line cadence. |
+| `databaseReconnectSeconds`, `databaseReconnectGraceSeconds`, `databaseDrainWaitSeconds` | 5 s, 15 s, 35 s | Re-open the **database** connection whenever this server has none: the kit opens it once at start-up and never again, so a map server that loses the database manager -- or starts before it exists -- runs on accepting players while every save fails. The grace period keeps the retry off the kit's own first attempt; the drain wait lets requests that were in flight expire before reconnecting clears their callbacks, then reconnects anyway and says how many it stranded. A process that *hosts* the database manager is left alone. |
 | `clusterConnectRetrySeconds` | 5 s | Re-open the cluster connection when the process could not open one at all. The kit handles every later failure by itself, but not this one: with no client socket it polls no events, so no disconnect is ever raised and the server runs on serving nobody. Matters when map servers can start before the central. 0 disables. |
 
 **Client**

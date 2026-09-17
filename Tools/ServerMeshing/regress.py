@@ -48,6 +48,7 @@ REMOTE_CELLS = []
 REMOTE_TOOL = os.path.join(ROOT, "Tools", "ServerMeshing", "remoteb.py")
 REMOTE_LOGS = os.path.join(LOGS, "remote")
 REMOTE_PORT = 8001
+REMOTE_PERSIST = False
 _last_fetch = 0.0
 
 
@@ -141,37 +142,52 @@ def request_play(mode, walk_x, walk_z, pet=False, mount=False, env=None):
                 os.remove(HOLD)
 
 
-def start_remote_cells():
-    """Start the other machine's cells for this scenario and wait until they serve their map.
+def remote_running():
+    return "process: running" in remote("status")
 
-    Each Play recreates this machine's cells, so the remote ones are recreated with them: a cell left over from the
-    previous scenario holds a dead cluster connection and a dead database connection, neither of which the kit
-    re-opens by itself.
+
+def start_remote_cells():
+    """Get the other machine's cells serving this scenario, and wait until they are.
+
+    Restarted for each scenario by default, because each Play recreates this machine's cells. With --remote-persist
+    the cell is left running instead and has to recover on its own: the kit reconnects its cluster client after a
+    disconnect, and the add-on's databaseReconnectSeconds re-opens the database connection, which the kit never does.
+    That is the two-machine test of those two paths, so the wait below looks for both to come back.
     """
     wait_status(lambda st: st.get("isPlaying") == "True", 60, "Play")
-    remote("stop")
     # Taken before the launch: the remote log is one file per day, so only lines after this instant belong to this
-    # scenario's process, and the previous scenario's "Own cell" would otherwise pass this wait straight away. The
-    # stamps are written by the other machine's clock, hence a few seconds of slack; the previous scenario is minutes
-    # away, so the cutoff still separates them.
+    # scenario, and the previous scenario's would otherwise pass this wait straight away. The stamps are written by
+    # the other machine's clock, hence a few seconds of slack; the previous scenario is minutes away.
     t0 = time.time()
     since = time.strftime("%H:%M:%S", time.localtime(t0 - 5))
-    out = remote("start", "--cell", REMOTE_CELLS[0], "--port", str(REMOTE_PORT), "--restart")
-    if "is running" not in out:
-        raise RuntimeError("the remote cell did not start: " + " ".join(out.split())[:200])
+    cell = REMOTE_CELLS[0]
+    if REMOTE_PERSIST and remote_running():
+        # Nothing is restarted: the cell must notice the cluster and the database coming back by itself.
+        wanted = [(r"Neighbour zone \w+ linked", "relinked to this machine's cells"),
+                  (r"Database connection to \S+ is open", "re-opened its database connection")]
+    else:
+        remote("stop")
+        out = remote("start", "--cell", cell, "--port", str(REMOTE_PORT), "--restart")
+        if "is running" not in out:
+            raise RuntimeError("the remote cell did not start: " + " ".join(out.split())[:200])
+        wanted = [(r"Own cell from channel id: " + cell + r"\b", "is serving")]
     day = time.strftime("%Y-%m-%d")
-    deadline = t0 + 120
+    deadline = t0 + 150
+    pending = list(wanted)
     while time.time() < deadline:
         time.sleep(3)
         fetch_remote(force=True)
         try:
-            lines = zone_lines(REMOTE_CELLS[0], since, day)
+            lines = zone_lines(cell, since, day)
         except RuntimeError:
             continue        # the log for today appears a second or two after the process does
-        if count(lines, r"Own cell from channel id: " + REMOTE_CELLS[0] + r"\b") >= 1:
-            print(f"   remote cell {REMOTE_CELLS[0]} is serving after {time.time() - t0:.0f}s")
+        for want in list(pending):
+            if count(lines, want[0]) >= 1:
+                print(f"   remote cell {cell} {want[1]} after {time.time() - t0:.0f}s")
+                pending.remove(want)
+        if not pending:
             return
-    raise RuntimeError(f"remote cell {REMOTE_CELLS[0]} did not start serving in time; "
+    raise RuntimeError(f"remote cell {cell} never {pending[0][1]}; "
                        "try: python Tools/ServerMeshing/remoteb.py status")
 
 
@@ -361,7 +377,13 @@ def run_scenario(name, rep):
         rep.check(count(c_lines, r"Hit on ghost .* forwarded to zone E") >= 1, "arrow hits on the neighbour's monster puppets were forwarded to E")
         rep.check(count(zone_lines("E", start, day), r"Ghost attack replayed on MeshTester2") >= 1, "E replayed the fighter's shots on its puppet")
         c_lines, e_lines = zone_lines("C", start, day), zone_lines("E", start, day)
-        rep.check(count(c_lines, r"Party 1: shared") >= 1, "C split a kill with the ghost member")
+        # The split is logged by whichever cell holds the member whose reward arrived from elsewhere: C for the
+        # fighter's kills, E for the member's. Pinning it to C made the check depend on which side happened to make
+        # a kill in the window, and it failed on a run where every split landed on E (2026-09-17). Ask instead for
+        # what the check is named after -- a split that included a member who is a ghost on the splitting cell --
+        # which the old regex never actually verified.
+        rep.check(count(c_lines + e_lines, r"Party \d+: shared exp with \d+ here \+ [1-9]\d* on other cells") >= 1,
+                  "a kill was split with a party member that is a ghost on the splitting cell")
         # Either direction counts: the fighter's kills on C forward to the member on E, and monsters the member kills
         # back on E forward to the fighter on C (the grading used to read only the E-to-C direction).
         both = c_lines + e_lines
@@ -538,6 +560,10 @@ def main():
                          "serves the rest, the remote cells are started and stopped over SSH, and their logs are "
                          "copied here for grading.")
     ap.add_argument("--remote-port", type=int, default=8001, help="map port for the first remote cell")
+    ap.add_argument("--remote-persist", action="store_true",
+                    help="leave the remote cell running between scenarios instead of restarting it, so it has to "
+                         "recover from this machine's Play stopping and starting on its own (cluster reconnect and "
+                         "MeshMapNetworkManager.databaseReconnectSeconds)")
     args = ap.parse_args()
     for kv in args.env:
         k, _, v = kv.partition("=")
@@ -573,8 +599,10 @@ def main():
             print("nothing left to run"); return 2
         os.makedirs(REMOTE_LOGS, exist_ok=True)
         globals()["REMOTE_PORT"] = args.remote_port
-        print(f"two-machine run: this machine serves {', '.join(local)}; the other serves {', '.join(REMOTE_CELLS)}, "
-              f"started with each scenario while the tester is held")
+        globals()["REMOTE_PERSIST"] = args.remote_persist
+        how = ("left running across scenarios, recovering by itself" if args.remote_persist
+               else "started with each scenario while the tester is held")
+        print(f"two-machine run: this machine serves {', '.join(local)}; the other serves {', '.join(REMOTE_CELLS)}, {how}")
         if os.path.exists(HOLD):
             os.remove(HOLD)     # left behind by an interrupted run; it would park every tester for ever
         remote("stop")
