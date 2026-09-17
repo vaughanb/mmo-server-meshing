@@ -100,8 +100,7 @@ B runs its cells by hand, one process per cell. No spawner and no editor is invo
   -mapName ServerMeshTestMap -channelId E `
   -mapPort 8001 -publicAddress <B-IP> `
   -centralAddress 192.168.50.83 -centralPort 6010 `
-  -databaseManagerAddress 192.168.50.83 -databaseManagerPort 6100 `
-  -logFile C:\MeshTest\Logs\E.log
+  -databaseManagerAddress 192.168.50.83 -databaseManagerPort 6100
 ```
 
 Points worth knowing:
@@ -114,7 +113,15 @@ Points worth knowing:
 
 ## 7. Checking that it came up
 
-On B's `E.log`:
+**Where the logs are.** The kit writes its own logs to a `Logs` folder beside the *working directory*, not to Unity's
+`-logFile`. Launched from `C:\MeshTest\Server`, B's cell writes:
+
+    C:\MeshTest\Server\Logs\Log_Map(ServerMeshTestMap)-Ch(E)-Alloc(False)-Instance()_<date>.info.log
+
+with `.warn.log` and `.error.log` beside it. Every line below is in the `.info.log`. Unity's `-logFile` is the engine
+log and carries almost none of this, which is a good way to waste twenty minutes.
+
+In B's `.info.log`:
 
 - `Own cell from channel id: E of map ServerMeshTestMap, grid (1,0), world x [100, 300) …` with the expected rectangle
   and neighbour count. A wrong rectangle here means the two builds differ.
@@ -126,6 +133,38 @@ On A's C log, the mirror image: `Zone peer registered: E_ServerMeshTestMap -> <B
 
 If the peers register but the links never come up, the link ports are blocked: that is the map port plus 10 000, and it
 is the rule people forget.
+
+## 7a. Driving both machines from one place (recommended)
+
+Relaying instructions to a second operator is slow and loses detail. With OpenSSH on B, one session starts, stops and
+reads B's cells directly, and `Tools/ServerMeshing/remoteb.py` wraps it:
+
+    python Tools/ServerMeshing/remoteb.py start [--cell E] [--port 8001]
+    python Tools/ServerMeshing/remoteb.py stop
+    python Tools/ServerMeshing/remoteb.py status
+    python Tools/ServerMeshing/remoteb.py log [--lines 40] [--grep "Handoff"] [--suffix error]
+    python Tools/ServerMeshing/remoteb.py fetch      copies B's zone logs into Logs/remote/
+
+Set-up on B, in an elevated PowerShell:
+
+```powershell
+Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+Set-Service sshd -StartupType Automatic
+Start-Service sshd
+```
+
+Then install A's public key. **If B's account is an administrator, Windows ignores `~/.ssh/authorized_keys`** and reads
+a separate file with strict permissions instead. This is the step that usually goes wrong:
+
+```powershell
+$k = '<contents of A''s meshtest_ed25519.pub>'
+Add-Content C:\ProgramData\ssh\administrators_authorized_keys $k
+icacls C:\ProgramData\ssh\administrators_authorized_keys /inheritance:r /grant 'Administrators:F' /grant 'SYSTEM:F'
+```
+
+Two things worth knowing. A process started over SSH on Windows is killed when the session closes, because OpenSSH puts
+the session in a job object; `remoteb.py start` therefore launches through `Win32_Process.Create`, which escapes it.
+And turn the server off again when the testing is done: `Stop-Service sshd; Set-Service sshd -StartupType Disabled`.
 
 ## 8. The first run
 
@@ -142,6 +181,21 @@ logs are on B.
    `ghostSteer`, the puppet steering error. On one machine that is 0.02 to 0.2 m for a walking ghost; across a LAN it
    should barely change, and a large jump points at the band being too narrow for the new latency.
 
+## 8a. Result of the first run (2026-09-16)
+
+A served C, N and NE; B served E; both wired to the same LAN, with A hosting MySQL and the cluster. A bot walked from C
+into E and back. Everything matched the single-machine baseline:
+
+| | one machine | across two machines |
+|---|---|---|
+| handoff ack after START | 334-485 ms | 300-383 ms |
+| ghost steering error, walking | 0.02-0.20 m mean | 0.03-0.17 m mean |
+| exceptions | 0 | 0 |
+
+Both crossings promoted the puppet in place, B held the character and handed it back, and B's link carried 11-15 kB/s
+out and 3-5 kB/s in while holding one character and its ghosts. A LAN hop costs the mesh nothing measurable, which is
+what the design predicted: the band is sized by visible range, not by link latency.
+
 ## 9. What we already know is missing
 
 - **Placement for sleeping cells.** The central wakes a cell on the first spawner it knows, not the one that owns the
@@ -152,6 +206,27 @@ logs are on B.
 - **Band sizing under latency.** The band width was chosen assuming a link hop costs nothing. A LAN barely changes that;
   a wide-area link would, and the start-up band check should compute the requirement from the measured link round trip
   rather than a constant.
+
+## 9a. Troubleshooting
+
+| Symptom | Cause |
+|---|---|
+| B's cell logs `Own cell ...` but never `Zone peer registered`, and every database call times out | **A is blocking inbound traffic to the Unity editor.** Driven from the editor, the cluster, login and database manager all run inside `Unity.exe`, and a Windows Firewall **block** rule for Unity beats any port-based allow rule. Windows creates one silently if a firewall prompt for Unity was ever dismissed. This cost an hour on the first attempt; look for it first. |
+| Ping between the two machines fails although everything else works | Windows blocks inbound ICMP by default. Ping proves nothing here. Send a UDP datagram to a port in the allowed range instead. |
+| A cell started over SSH disappears seconds later | OpenSSH kills the session's process tree on disconnect. Launch through `Win32_Process.Create`, which is what `remoteb.py start` does. |
+| Peers register but no link comes up | The link port is the map port plus 10 000 and is a separate firewall entry. |
+
+To find a blocking application rule:
+
+```powershell
+Get-NetFirewallRule -Direction Inbound | ForEach-Object {
+  $r = $_; $a = $r | Get-NetFirewallApplicationFilter -ErrorAction SilentlyContinue
+  if ($a.Program -match 'Unity.exe') { $r | Select-Object Action,Enabled,Profile,Name }
+}
+```
+
+Disable the blocking one with `Set-NetFirewallRule -Name "{...}" -Enabled False`, keeping it for later rather than
+deleting it.
 
 ## 10. When it works
 
