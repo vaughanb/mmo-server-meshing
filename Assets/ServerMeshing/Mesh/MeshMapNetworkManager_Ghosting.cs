@@ -96,6 +96,7 @@ namespace MultiplayerARPG.MMO.Mesh
         private int _statsHandoffs; private float _statsHandoffSumMs, _statsHandoffMaxMs;
         // Steering error: distance between a moving ghost and the owner's freshly reported position, sampled at every snapshot.
         private int _steerSamples; private float _steerErrorSum, _steerErrorMax;
+        private int _ghostTeleportsPlayer, _ghostTeleportsOther;   // puppets yanked past ghostTeleportDistance
         private float _nextSteerLagLog;
         // Process cost, for the capacity test: frame time (the server targets a fixed rate; the mean rising above the
         // budget is saturation), CPU time of the process and its working set, and the game transport's client traffic.
@@ -164,9 +165,9 @@ namespace MultiplayerARPG.MMO.Mesh
             float cPkt = (clientPacketsOut - _statsClientPacketsOut) / meshStatsIntervalSeconds;
             _statsClientBytesOut = clientBytesOut; _statsClientPacketsOut = clientPacketsOut;
             string cost = $"frame {frame} cpu {cpuPercent:0}% mem {UnityEngine.Profiling.Profiler.GetTotalReservedMemoryLong() / (1024 * 1024)} MB clients={clients} clientOut={cOut:0.0} kB/s ({cPkt:0} pkt/s)";
-            Logging.Log("Mesh", $"Mesh stats: players={players} owned={_ownedCharacters.Count} drops={_ownedDrops.Count} statics={_ownedStatics.Count} ({_ownedDrops.Banded.Count}+{_ownedStatics.Banded.Count} in a band) ghosts={ghostPlayers}p/{ghostMonsters}m/{ghostDrops}d/{ghostStatics}s pendingAcks={_pendingHandoffAcks.Count} reserved={_reservedArrivals.Count} | link out {dOut:0.0} kB/s {pOut:0} pkt/s, in {dIn:0.0} kB/s {pIn:0} pkt/s | handoffs {handoffs} | fps {1f / Mathf.Max(0.0001f, Time.smoothDeltaTime):0} ghostSteer={steer} | {cost}");
+            Logging.Log("Mesh", $"Mesh stats: players={players} owned={_ownedCharacters.Count} drops={_ownedDrops.Count} statics={_ownedStatics.Count} ({_ownedDrops.Banded.Count}+{_ownedStatics.Banded.Count} in a band) ghosts={ghostPlayers}p/{ghostMonsters}m/{ghostDrops}d/{ghostStatics}s pendingAcks={_pendingHandoffAcks.Count} reserved={_reservedArrivals.Count} | link out {dOut:0.0} kB/s {pOut:0} pkt/s, in {dIn:0.0} kB/s {pIn:0} pkt/s | handoffs {handoffs} | fps {1f / Mathf.Max(0.0001f, Time.smoothDeltaTime):0} ghostSteer={steer} teleports={_ghostTeleportsPlayer}p/{_ghostTeleportsOther}o | {cost}");
             _statsHandoffs = 0; _statsHandoffSumMs = 0f; _statsHandoffMaxMs = 0f;
-            _steerSamples = 0; _steerErrorSum = 0f; _steerErrorMax = 0f;
+            _steerSamples = 0; _steerErrorSum = 0f; _steerErrorMax = 0f; _ghostTeleportsPlayer = 0; _ghostTeleportsOther = 0;
             _frameSamples = 0; _frameSum = 0f; _frameMax = 0f;
         }
 
@@ -1752,6 +1753,18 @@ namespace MultiplayerARPG.MMO.Mesh
                 entity.OverrideMoveSpeed = wantedSpeed;
             if (dist > ghostTeleportDistance)
             {
+                // A puppet this far from where its owner says it is cannot be walked back without looking wrong, so
+                // it is yanked -- and anyone watching this cell sees it jump. Counted and logged because it used to
+                // be neither: a 12.89 m excursion happened under 0.5% packet loss while every check still passed,
+                // since the observer watches for entities appearing and vanishing, not for jumping (2026-09-17).
+                if (ghost.kind == GhostKind.Player)
+                    ++_ghostTeleportsPlayer;
+                else
+                    ++_ghostTeleportsOther;
+                // Name it by kind and mesh id as well: a monster puppet has no CharacterName, and the first version
+                // of this line logged "Ghost  teleported ...", which a grep for a name then missed entirely.
+                string who = string.IsNullOrEmpty(entity.CharacterName) ? ghost.kind.ToString() : entity.CharacterName;
+                Logging.LogWarning("Mesh", $"Ghost teleported: {ghost.kind} {who} ({msg.characterId}) moved {dist:0.00} m to catch up with its owner (past ghostTeleportDistance {ghostTeleportDistance:0.#} m)");
                 entity.Teleport(msg.position, Quaternion.Euler(0f, msg.yaw, 0f), false);
             }
             else if (dist > 0.25f || (moving && Vector3.Distance(current, target) > 0.25f))

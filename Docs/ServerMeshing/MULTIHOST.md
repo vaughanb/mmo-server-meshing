@@ -317,6 +317,58 @@ So the work is in the migration state machine, not in a constant: when `Migratio
 whether a refusal that precedes a success inside one hop should be forgotten. The numbers above are the argument for
 doing it properly rather than by patch.
 
+## 8e. Degrading the link, and what it costs (2026-09-17)
+
+Cells are co-located to start with, and at most one datacentre later, so steady tens of milliseconds between them
+is a case this deployment never meets and is deliberately not tested. What a datacentre does produce is loss,
+jitter and reordering, and those are.
+
+`clumsy` 0.3 (with the WinDivert driver) lives in `C:\MeshTest\clumsy` on the other machine and is driven by
+
+    python Tools/ServerMeshing/remoteb.py impair --profile loss2     # lag5 loss05 loss2 loss5 reorder jitter nasty
+    python Tools/ServerMeshing/remoteb.py impair --profile off
+    python Tools/ServerMeshing/regress.py pet --remote-cells E --impair loss2
+
+The filter is **UDP and scoped to this machine's address**, so SSH (TCP) survives any loss level and the control
+channel cannot be cut by the test it is driving. clumsy holds the impairment only while it runs: if it is killed,
+or the harness dies, the link restores itself. `regress.py --impair` refuses to run if the impairment cannot be
+applied, because a mislabelled row is worse than a missing one. Verified before use: 2% configured dropped 13 of
+400 datagrams, `off` dropped 0 of 400.
+
+`pet` across every profile, one run each:
+
+| profile | client gap | handoff ack | steer mean | steer max | player pops | monster pops |
+|---|---|---|---|---|---|---|
+| `off` | 335 ms | 266 ms | 0.12-0.15 m | 1.73 m | 0 | 0 |
+| `lag5` | 450 ms | 352 ms | 0.13-0.21 m | 1.49 m | 0 | 0 |
+| `loss05` | 386 ms | 303 ms | 0.04-0.12 m | 1.45 m | 0 | 0 |
+| `loss2` | 868 ms | 754 ms | 0.09-0.13 m | 1.06 m | 0 | 0 |
+| `loss5` | 452 ms | 327 ms | 0.19-0.33 m | 2.08 m | 0 | 0 |
+| `reorder` | 350 ms | 284 ms | 0.12-0.27 m | 1.74 m | 0 | 0 |
+| `jitter` | 648 ms | 520 ms | 0.07-0.20 m | 1.11 m | 0 | 0 |
+| `nasty` | 665 ms | 529 ms | 0.20-0.34 m | 1.39 m | 0 | 0 |
+
+Everything passes, every profile, with no exceptions anywhere. Three conclusions are worth trusting and one number
+in that table is not:
+
+- **No character ever pops.** Across three sweeps, zero *player* puppets were teleported past
+  `ghostTeleportDistance`. Monster puppets were, four times, up to 14.26 m, always the same instance drifting
+  twice in a row. Visible, but a monster jumping is not a character jumping, and the two are now counted apart
+  (`teleports=0p/0o` in the `Mesh stats` line).
+- **Loss is absorbed; latency is not.** 0.5% to 5% loss does not move anything consistently — LiteNetLib
+  retransmits the reliable parts of a handoff. Added delay does: every latency profile raised the ack above
+  baseline in both sweeps that measured it.
+- **Single rows are noise.** `nasty` measured 1727 ms of ack in one sweep and 529 ms in the next; `loss2` measured
+  246 ms and 754 ms. Run-to-run variance is comparable to the differences between adjacent profiles, so this table
+  says "nothing breaks and latency costs more than loss", and nothing finer. A real curve needs repeats per
+  profile, which is cheap to add (`sweep.py` takes a scenario name; give it a loop).
+
+A note on how this table got here, because it matters for the next one: the first two sweeps were run with broken
+instrumentation and both reported healthy. A puppet teleport was neither logged nor graded, so a 12.89 m monster
+pop passed 12/12; and the check written to catch it grepped for a character name, which monster puppets do not
+have, so it reported zero while the stats line beside it said `teleports=2`. Only the third sweep's numbers are
+trustworthy. Instrument first, then measure.
+
 ## 9. What we already know is missing
 
 - **The client ignores an explicit handoff refusal.** It waits out `migrationReadyTimeoutSeconds` instead of

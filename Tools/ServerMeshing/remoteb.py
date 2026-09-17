@@ -10,6 +10,8 @@ so B needs nothing but the OpenSSH server, the build unpacked somewhere, and thi
     python Tools/ServerMeshing/remoteb.py fetch      copy B's zone logs into Logs/remote/ for grading here
     python Tools/ServerMeshing/remoteb.py deploy     copy this machine's server build to B (after rebuilding it)
     python Tools/ServerMeshing/remoteb.py clearmarkers   delete B's one-shot fault markers before a crash test
+    python Tools/ServerMeshing/remoteb.py impair --profile loss2   degrade B's UDP link to A (see PROFILES)
+    python Tools/ServerMeshing/remoteb.py impair --profile off      stop degrading it
 
 Defaults match Docs/ServerMeshing/MULTIHOST.md; override with --host/--user/--key/--dir or the MESH_B_* environment
 variables. Nothing here changes B's configuration: it only starts, stops and reads.
@@ -27,6 +29,23 @@ DEFAULTS = {
     "map": os.environ.get("MESH_MAP", "ServerMeshTestMap"),
 }
 NOISE = ("WARNING:", "** WARNING", "post-quantum", "openssh.com", "store now")
+
+# Link impairment, for the faults a datacentre actually produces: brief loss, jitter, reordering. Steady tens of
+# milliseconds is deliberately NOT here -- cells are co-located, so that is a case this deployment never meets.
+#
+# The filter is UDP ONLY and scoped to A. SSH is TCP, so the control channel this is driven over stays clean even
+# at high loss; scoping to A's address leaves B's own loopback and anything else it does alone.
+PROFILES = {
+    "off":       [],
+    "lag5":      ["--lag", "on", "--lag-time", "5"],                       # a busy switch, both directions
+    "loss05":    ["--drop", "on", "--drop-chance", "0.5"],
+    "loss2":     ["--drop", "on", "--drop-chance", "2.0"],
+    "loss5":     ["--drop", "on", "--drop-chance", "5.0"],
+    "jitter":    ["--lag", "on", "--lag-time", "20", "--drop", "on", "--drop-chance", "0.5"],
+    "reorder":   ["--ood", "on", "--ood-chance", "5.0"],
+    "nasty":     ["--lag", "on", "--lag-time", "20", "--drop", "on", "--drop-chance", "5.0",
+                  "--ood", "on", "--ood-chance", "5.0"],
+}
 
 
 def clean(text):
@@ -111,6 +130,52 @@ def cmd_clearmarkers(args):
                             "$f | Remove-Item -Force -ErrorAction SilentlyContinue; 'cleared ' + $f.Count } "
                             "else { 'cleared 0' }")
     print(out.strip() or err[:160])
+    return 0
+
+
+def cmd_impair(args):
+    """Start, change or stop clumsy on B so its UDP traffic to A is degraded.
+
+    clumsy holds the impairment only while it runs, so a profile change is stop-then-start, and stopping it (or the
+    process dying) restores the link. That is the property worth having: a crashed harness cannot leave the network
+    quietly broken for the next run.
+    """
+    if args.profile not in PROFILES:
+        print("profiles: " + ", ".join(sorted(PROFILES)))
+        return 2
+    ssh(args, "Get-Process clumsy -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue")
+    if args.profile == "off":
+        print("impairment off")
+        return 0
+    if not os.path.exists(os.path.expanduser("~/.ssh/meshtest_ed25519")):
+        pass    # key presence is checked by ssh itself; kept simple here
+    udp_filter = f"udp and (ip.DstAddr == {args.a_ip} or ip.SrcAddr == {args.a_ip})"
+    options = " ".join(PROFILES[args.profile])
+    body = ["@echo off", 'cd /d "' + args.clumsy + '"',
+            f'clumsy.exe --filter "{udp_filter}" {options}']
+    script = CRLF.join(body + [""])
+    local = os.path.join(ROOT, "Logs", "impair.cmd")
+    os.makedirs(os.path.dirname(local), exist_ok=True)
+    with open(local, "w", newline="") as f:
+        f.write(script)
+    remote_cmd = args.clumsy + "\\impair.cmd"
+    r = subprocess.run(["scp", "-i", args.key, "-o", "BatchMode=yes", local, f"{args.user}@{args.host}:{remote_cmd}"],
+                       capture_output=True, text=True, timeout=120)
+    if r.returncode != 0:
+        print("could not copy the impair script:", clean(r.stderr)[:200])
+        return 1
+    # Same job-object escape as a cell: clumsy must outlive this SSH session.
+    command = ("$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments "
+               "@{ CommandLine = '" + remote_cmd + "'; CurrentDirectory = '" + args.clumsy + "' }; "
+               "'rc=' + $r.ReturnValue + ' pid=' + $r.ProcessId")
+    out, err, _ = ssh(args, command)
+    time.sleep(3)
+    running_out, _, _ = ssh(args, "(Get-Process clumsy -ErrorAction SilentlyContinue).Count")
+    if running_out.strip() in ("", "0"):
+        print("clumsy did not stay up:", (out or err)[:200])
+        print("it needs administrator rights on B to load the WinDivert driver")
+        return 1
+    print(f"impairment '{args.profile}' on: {options} over [{udp_filter}]")
     return 0
 
 
@@ -220,7 +285,10 @@ def cmd_deploy(args):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["start", "stop", "status", "log", "fetch", "deploy", "clearmarkers"])
+    ap.add_argument("command", choices=["start", "stop", "status", "log", "fetch", "deploy", "clearmarkers", "impair"])
+    ap.add_argument("--profile", default="off", help="impairment profile: " + ", ".join(sorted(PROFILES)))
+    ap.add_argument("--clumsy", default=os.environ.get("MESH_B_CLUMSY", r"C:\MeshTest\clumsy"),
+                    help="where clumsy lives on B")
     ap.add_argument("--cell", default="E")
     ap.add_argument("--port", type=int, default=8001)
     ap.add_argument("--lines", type=int, default=40)
@@ -234,7 +302,8 @@ def main():
         ap.add_argument("--" + k.replace("_", "-"), default=v)
     args = ap.parse_args()
     return {"start": cmd_start, "stop": cmd_stop, "status": cmd_status, "log": cmd_log, "fetch": cmd_fetch,
-            "deploy": cmd_deploy, "clearmarkers": cmd_clearmarkers}[args.command](args)
+            "deploy": cmd_deploy, "clearmarkers": cmd_clearmarkers,
+            "impair": cmd_impair}[args.command](args)
 
 
 if __name__ == "__main__":

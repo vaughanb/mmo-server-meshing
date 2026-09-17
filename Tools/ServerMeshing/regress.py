@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Server Meshing regression harness (DESIGN.md §16 / changelog 0.43).
 
 Drives the 2x2 rig end to end and grades each scenario from the logs:
@@ -336,6 +336,16 @@ class Report:
 
 
 def grade_common(rep, start, day):
+    # A teleported puppet is a visible pop for everyone in that cell, and nothing used to report one: the observer
+    # watches for entities appearing and vanishing, not for jumping. A player popping is the one that matters, so
+    # the two are counted apart. Do NOT anchor this on a character name: a monster puppet has none, and the first
+    # version of this check ("Ghost \S+ teleported") passed while the stats line beside it said teleports=2.
+    for zone, map_id in ZONES:
+        lines = zone_lines(zone, start, day, map_id)
+        players = count(lines, r"Ghost teleported: Player ")
+        others = count(lines, r"Ghost teleported: (?!Player )")
+        rep.check(players == 0, f"zone {zone}: {players} PLAYER puppet teleport(s), {others} non-player")
+
     for z, map_id in ZONES:
         lines = zone_lines(z, start, day, map_id)
         ex = [l for l in lines if "Exception" in l]
@@ -596,6 +606,10 @@ def main():
                          "serves the rest, the remote cells are started and stopped over SSH, and their logs are "
                          "copied here for grading.")
     ap.add_argument("--remote-port", type=int, default=8001, help="map port for the first remote cell")
+    ap.add_argument("--impair", default="", metavar="PROFILE",
+                    help="degrade the other machine's UDP link to this one for the whole run (remoteb.py impair "
+                         "profiles: lag5, loss05, loss2, loss5, jitter, reorder, nasty). Restored at the end, and "
+                         "by clumsy exiting if this is interrupted.")
     ap.add_argument("--remote-persist", action="store_true",
                     help="leave the remote cell running between scenarios instead of restarting it, so it has to "
                          "recover from this machine's Play stopping and starting on its own (cluster reconnect and "
@@ -642,6 +656,12 @@ def main():
         if os.path.exists(HOLD):
             os.remove(HOLD)     # left behind by an interrupted run; it would park every tester for ever
         remote("stop")
+        if args.impair:
+            out = remote("impair", "--profile", args.impair)
+            print("   " + " ".join(out.split())[:170])
+            if "impairment" not in out:
+                print("the link could not be degraded; not running, because the result would be mislabelled")
+                return 2
 
     kill_bots()
     reports = []
@@ -665,7 +685,9 @@ def main():
     if REMOTE_CELLS:
         fetch_remote(force=True)   # one last copy so the logs left behind match what was graded
         print("stopping the remote cell:", remote("stop").strip())
-    print("\n=== summary")
+        if args.impair:
+            print("restoring the link:", " ".join(remote("impair", "--profile", "off").split())[:80])
+    print("\n=== summary" + (f" (link: {args.impair})" if args.impair else ""))
     for rep in reports:
         print(f"  {rep.name:8s} {'PASS' if rep.passed else 'FAIL'}  ({sum(1 for ok, _ in rep.checks if ok)}/{len(rep.checks)} checks)")
     return 0 if all(r.passed for r in reports) else 1
