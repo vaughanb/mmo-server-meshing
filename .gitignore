@@ -31,7 +31,7 @@ crashlytics-build.properties
 sysinfo.txt
 
 # Builds and runtime data (the server/client player build is regenerated from the editor)
-/Build/Server/
+/Build/
 /log/
 *.sqlite3
 *.sqlite3-journal
