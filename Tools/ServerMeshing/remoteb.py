@@ -190,10 +190,13 @@ def cmd_impair(args):
 
 
 def cmd_stop(args):
-    # Also kill the launcher script: with --restart it would otherwise start the cell straight back up.
-    out, _, _ = ssh(args, "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'kit-ce-project.exe' -or "
-                          "$_.CommandLine -like '*start-cell-*' } | ForEach-Object { Stop-Process -Id $_.ProcessId "
-                          "-Force -ErrorAction SilentlyContinue }; Start-Sleep 1; "
+    # Also kill the launcher script: with --restart it would otherwise start the cell straight back up. The filter
+    # text itself contains 'start-cell-', so the session running this command (and the shell sshd wrapped it in)
+    # matches too: excluded, or the command kills its own ssh session and reports as ssh exit 255 (UNREACHABLE).
+    out, _, _ = ssh(args, "$me = $PID; $parent = (Get-CimInstance Win32_Process -Filter \"ProcessId=$PID\").ParentProcessId; "
+                          "Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $me -and $_.ProcessId -ne $parent -and "
+                          "($_.Name -eq 'kit-ce-project.exe' -or $_.CommandLine -like '*start-cell-*') } | "
+                          "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; Start-Sleep 1; "
                           "(Get-Process kit-ce-project -ErrorAction SilentlyContinue).Count")
     print("B server processes remaining:", out.strip() or "0")
     return 0
