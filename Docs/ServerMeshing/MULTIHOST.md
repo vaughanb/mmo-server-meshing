@@ -232,12 +232,13 @@ Two scenarios are skipped in this mode and say so when they are:
 inherit it from the editor through the spawner; B's cannot), `remoteb.py start --restart` stands in for the spawner,
 and `remoteb.py clearmarkers` clears B's one-shot marker — `MESH_FAULT_DIE_ON_NOTICE` fires once per
 `Temp/ServerMesh.FaultFired.<zone>`, written relative to the working directory, so clearing this machine's `Temp`
-does nothing for the other's.
+does nothing for the other's. It must run **without** `--remote-persist`: the variable reaches a cell only when that
+cell is started for the scenario, so a persisting cell never dies and the scenario grades 24/29 for no code reason.
 
 ## 8c. Result of the first full suite across two machines (2026-09-16)
 
-A served C, N, NE and C2; B served E. Six of the eight scenarios apply in this mode and all six passed, 71 checks with
-no exception on either host:
+A served C, N, NE and C2; B served E (the rig had five cells then). Six of the eight scenarios of the day applied in
+this mode and all six passed, 71 checks with no exception on either host:
 
 | Scenario | Checks | What it proves across the network |
 |---|---|---|
@@ -397,6 +398,24 @@ pop passed 12/12; and the check written to catch it grepped for a character name
 have, so it reported zero while the stats line beside it said `teleports=2`. Only the third sweep's numbers are
 trustworthy. Instrument first, then measure.
 
+## 8f. Result after the fixes (2026-09-18)
+
+Ten cells, E on B, the build with the refusal and central-restart fixes (DESIGN 0.70):
+
+| Scenario | Mode | Checks | What it proves across the network |
+|---|---|---|---|
+| `crash` | cell restarted per scenario | 29/29 | the restarted cell's refusal is acted on: client gap **3.6 s** where §8d measured 10.5 s |
+| `seam` | `--remote-persist` | 31/31 | a direct login into a cell that outlived a central restart — the case that used to be kicked |
+| `seamcold` | `--remote-persist` | 27/27, 26/27 | same, with the client's cold scene reload; the one miss is a kit client-side NRE (`BaseMonsterCharacterEntity.GetInfo`) during the reload |
+| `pet` | `--remote-persist` | 27/27 | the plain round trip |
+
+One thing seen once and not again in two repeats: on the first `seamcold`, E promoted the returning character at the
+*other map's* frame coordinate (-98.10 instead of 297.23), as if it had loaded the row before C2's return-handoff save
+landed; the character was then handed to C and the client timed out a hop. None of the day's new code paths logged in
+that run and the local `seamcold` passes. Worth knowing if it recurs: the kit's database manager now defers character
+saves (`characterSaveMinIntervalSeconds`, 20 s) and answers reads from its cache, so "saved before the notice" holds
+only through that cache.
+
 ## 9. What we already know is missing
 
 - **A handoff refusal is acted on** — fixed 2026-09-18 (§8d, *Resolution*): the client honours a refusal per attempt,
@@ -418,9 +437,10 @@ trustworthy. Instrument first, then measure.
   falling back to the old behaviour for a cell nobody claimed). What is still missing is a spawner *process* on the
   other machine: its cell is started by hand through `remoteb.py`, so there is nothing there to receive a start
   request and `sleep` still cannot run across two hosts.
-- **A fault path to the other machine.** `crash` sets `MESH_FAULT_DIE_ON_NOTICE` in this editor's environment and
-  relies on this spawner restarting the zone. `remoteb.py start --env` already carries a variable across, so what is
-  missing is the restart, not the fault.
+- **A fault path to a persisting cell.** `crash` runs across both machines when the cell is started per scenario
+  (`remoteb.py start --env --restart` carries the fault and stands in for the spawner); a cell kept across scenarios
+  with `--remote-persist` never receives the variable, so the crash and the central-restart survival cannot yet be
+  exercised in the same run.
 - **Band sizing under latency.** The band width was chosen assuming a link hop costs nothing. A LAN barely changes that;
   a wide-area link would, and the start-up band check should compute the requirement from the measured link round trip
   rather than a constant.
@@ -476,14 +496,11 @@ tested. The cell is never restarted, so before each later scenario it has to re-
 re-open its database connection unaided, and the run fails if any of that is missing. Observed recoveries: 5 s for
 all three signals, repeatedly.
 
-What it cannot yet do is run a scenario that logs a character **directly into** the persisted cell. `seam` and
-`seamcold` put the bot at x=280, inside E, so its login goes straight there; the client connects, the cell answers
-`enter-game response Success`, and the character then never spawns. The four scenarios whose characters enter on a
-local cell and walk across (`pet`, `party`, `harvest`, `build`) pass. The cause is not established — what is known is
-that the cell has been through a central restart, and that the kit clears player state through central-driven paths
-(`OnPlayerCharacterRemoved`, force-despawn) that never arrive when the central is the thing that restarted. Treat it
-as an open question about surviving a central restart, not as a harness quirk: in production a central restart is
-rare but not impossible, and every map server would be in exactly this state afterwards.
+Until 2026-09-18 it could not run a scenario that logs a character **directly into** the persisted cell: `seam` and
+`seamcold` put the bot at x=280, inside E, the client connected, the cell answered `enter-game response Success`, and
+the character never spawned. That was the kit's stale social mirror after the central restart (§9, *Surviving a central
+restart*); both scenarios pass in this mode now, and it is the regression test for that fix as much as for the
+database reconnect. `crash` still needs the per-scenario mode (§8b).
 
 Do not trust the kit's `IsClient` or `IsClientConnected` to mean "the other end is there". Both go true the moment a
 socket exists and `Connect()` returned a peer — seconds before that peer connects, and even when it never does.

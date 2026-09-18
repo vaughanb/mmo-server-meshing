@@ -6,9 +6,9 @@
 
 | | |
 |---|---|
-| **Status** | **Working on a five-cell, two-map rig (C, E, N, NE + C2 across a seam; 2026-09-15):** P0–P3 complete and P4's sandbox form done — seamless handoff (200–300 ms, no visible break), ghosts of every entity kind with combat, loot, party/guild and quest credit across the line, seams between maps with client scene pre-load, cells of any size, sleeping cells on demand (2–4 s to serve), a 60 fps tick sized for 250 players per cell (measured), eight harness scenarios passing, six of them also across two machines. Operator path: [SETUP.md](SETUP.md) and the **Server Meshing ▸ Setup** window. Open: runtime split/merge only (optional). |
-| **Doc version** | 0.69 |
-| **Last updated** | 2026-09-17 |
+| **Status** | **Working on a ten-cell, two-map rig (a 3×3 grid plus C2 across a seam; 2026-09-18):** P0–P3 complete and P4's sandbox form done — seamless handoff (200–300 ms, no visible break), ghosts of every entity kind with combat, loot, party/guild and quest credit across the line, seams between maps with client scene pre-load, cells of any size, sleeping cells on demand (2–4 s to serve), a 60 fps tick sized for 250 players per cell (measured; a loaded neighbour costs as much as your own players, 0.69), nine harness scenarios passing, the crash recovery and the central-restart survival confirmed across two machines (0.70). Operator path: [SETUP.md](SETUP.md) and the **Server Meshing ▸ Setup** window. Open: runtime split/merge only (optional). |
+| **Doc version** | 0.70 |
+| **Last updated** | 2026-09-18 |
 | **Owner** | brenden.vaughan@gmail.com |
 | **Scope target** | Fully seamless (Phases 1–3) on a **uniform grid of equal cells** |
 | **Build constraint** | **Add-on only — extend/inherit, do not edit core.** See [§2](#2-engineering-principles--core-edit-policy) |
@@ -543,8 +543,10 @@ is needed by any of them; the registry of the few core touches stays in §17.*
 
 > **Regression (2026-09-15):** every slice since P3 is covered by `Tools/ServerMeshing/regress.py` (see changelog 0.43):
 > with the editor open on this project and a fresh player build, `python Tools/ServerMeshing/regress.py` runs the pet
-> round trip, the party fight, the destination-crash recovery, the harvest and the build scenarios on the 2x2 rig and
-> prints a pass/fail table; run it before and after any change to the add-on.
+> round trip, the party fight, the destination-crash recovery, the harvest and the build scenarios on the ten-cell rig
+> (3×3 plus C2 across a seam) and prints a pass/fail table; `seam`, `seamcold`, `sleep` and `pvp` are the other four
+> scenarios, `--remote-cells E` serves a cell from the second machine and `--impair` degrades the link to it
+> (MULTIHOST.md). Run it before and after any change to the add-on.
 
 
 - **Spike 0 — Coordinate & movement serialization across two cells. ✅ PASS (2026-06-13)** —

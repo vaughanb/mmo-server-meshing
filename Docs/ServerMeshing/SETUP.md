@@ -3,8 +3,8 @@
 How to split a map into cells served by separate map servers, join maps into one world, run it, and check it.
 The design and its measurements are in [DESIGN.md](DESIGN.md); this document is the operator's and developer's path.
 
-**Status:** everything below is exercised by the regression harness on the test rig (five cells over two maps, one
-shared machine). Version 0.59.
+**Status:** everything below is exercised by the regression harness on the test rig (ten cells over two maps: a 3×3
+grid plus one cell across a seam; one machine, or two with one cell served from the other). Version 0.70.
 
 ---
 
@@ -69,11 +69,18 @@ Open the map's scene. In panel 2:
 
 The registry inspector lets you refine a layout afterwards:
 
-- **Explicit cells** (`cellRects`): list rectangles of any size instead of a grid — a dense area cut into 200 m cells
+- **Explicit cells** (`cellRects`, each an `id`, a `min` corner and a `size`): list rectangles of any size instead of a grid — a dense area cut into 200 m cells
   next to 1 km wilderness cells. Rectangles must not overlap (the validator reports overlaps and duplicate ids).
 - **Cell ids** (`cellIds`): explicit ids for a grid, row-major.
 
 The band is not part of the layout: a cell's server streams the strip inside its own edge.
+
+The registry's own fields, for hand edits: `maps` (one layout per map), and per layout `mapId`, `worldOrigin` (where
+the map's origin sits in the shared world frame), `gridOrigin`, `cellSize`, `columns`, `rows`, `cellIdFormat` (the id
+pattern, `{0}`/`{1}` = column/row), the optional `cellRects` and `cellIds` above, and `touchTolerance` (how close two
+rectangles must come to count as neighbours across a seam, 0.01 m). Every mesh manager (`MeshMapNetworkManager`,
+`MeshLoginNetworkManager`, `MeshCentralNetworkManager`, `MeshMapSpawnNetworkManager`) carries a `world` reference to
+this asset; panel 3 assigns it.
 
 ### 4.3 Wire the prefabs
 
@@ -97,7 +104,9 @@ central components are the client halves). A LAN-only game instance can ignore t
 ### 4.4 See the cells
 
 Panel 4: **Add cell visualizer to the open scene**. The Scene view shows every cell of the map with its id, size and
-neighbour count; at runtime the lines are drawn as debug lines and the player's cell is highlighted.
+neighbour count; at runtime the lines are drawn as debug lines and the player's cell is highlighted. The
+`ZoneDebugVisualizer` fields: `world`, `mapId` (which layout to draw), `lineHeight`, `showAtRuntime`, `showZoneLabels`,
+`boundaryColor`, `currentZoneColor`.
 
 ### 4.5 Run
 
@@ -143,6 +152,9 @@ All on `MeshMapNetworkManager` (the map-manager prefab). Defaults are the values
 | `handoffRetrySeconds` | 2 s | Retry after a refused or failed handoff. |
 | `demotePlayerOnHandoff`, `promoteGhostOnArrival`, `fastSpawnOnHandoff` | on | The departing cell keeps a puppet, the arriving cell promotes its puppet in place: no pop on either side. |
 | `handoffAckGuardSeconds`, `handoffRollbackHoldSeconds`, `handoffLinkDownGraceSeconds` | 20 / 20 / 3 s | Timeouts of the notice/ack protocol and its rollback when the destination dies mid-handoff. |
+| `reservedArrivalTimeout` | 15 s | An announced arrival whose client never becomes ready releases its promoted puppet after this. |
+| `monsterHandoffCooldown` | 2 s | Minimum time between two handoffs of the same monster (a chase back and forth across the line would otherwise ping-pong every tick). |
+| `clusterRegisterRetrySeconds` | 3 s | A restarted map server is refused by the cluster while its dead predecessor is still in the peer table (`MAP_EXISTED`) and the kit never retries; the add-on retries at this interval. |
 
 **Ghosting**
 
@@ -154,6 +166,7 @@ All on `MeshMapNetworkManager` (the map-manager prefab). Defaults are the values
 | `ghostLeadSeconds` | 0.1 s | Puppets are steered ahead by the owner's velocity so they do not trail by a snapshot. |
 | `ghostTeleportDistance`, `ghostStaleSeconds` | 4 m, 2 s | A puppet further off than this is teleported; one without snapshots is removed. |
 | `ghostMonsters`, `ghostHarvestables`, `ghostBuildings`, `forwardGhostHits`, `handoffMonsters`, `ownSpawnAreasByZone` | on | What crosses the edge. Monsters chasing across the line are handed over by position; a spawn area only spawns inside its own cell. |
+| `partyMemberOnlineWindowSeconds` | 5 s | A party member on another cell counts as online when the kit's online table saw it within this long (the cluster relays every online player once a second). |
 | `linkAllZones` | on | Link to every cell of the map, not only neighbours (party shares and such reach any cell). |
 | `linkSuspectTimeoutSeconds` | 2 s | A link a handoff came back over unclaimed is doubted (no handoff goes that way) until the neighbour is heard from; silent this long, it is reconnected — a restarted neighbour is reached at once instead of after the transport's timeout. |
 | `handoffLinkSettleSeconds` | 0.5 s | No handoff across a link that has been up for less than this, so the destination has a snapshot or two of the character and promotes its puppet instead of spawning fresh (which re-summons pets — a visible swap for observers). |
@@ -171,6 +184,13 @@ All on `MeshMapNetworkManager` (the map-manager prefab). Defaults are the values
 | `migrationReadyTimeoutSeconds`, `useMaskedMigration`, `migrationMaskFadeSeconds` | 10 s, on, 0.25 s | Fallback mask if the destination is silent. |
 | `seamPreloadDistance`, `seamUnloadHysteresis` | 80 m, 40 m | Pre-load a neighbouring *map's* scene this close to the seam; drop it that much further away. 0 disables (the kit then reloads the scene with a loading screen). |
 | `heldRpcTimeoutSeconds` | 15 s | RPCs that arrive before the character exists are held, then replayed. |
+| `entityDataWaitSeconds` | 1 s | After the blend, wait up to this long for the new entity's stats before re-binding the HUD, so it never shows 0/0. |
+| `debugCaptureMigrationFrames` | off | Editor only: save a screenshot every few frames during a seamless swap to `Logs/MigrationFrames`. |
+
+**Other components.** `MeshMonsterActivityComponent`: `ghostWatchMargin` (10 m) is the range beyond the monster's visual
+range in which a player *ghost* keeps it awake (the kit sleeps a monster nobody subscribes to, and ghosts never
+subscribe), re-evaluated every `ghostWatchInterval` (0.5 s). `MeshLoginNetworkManager`: `routeByPosition` (on) sends a
+selected character to the cell that owns its saved position instead of the client's chosen channel.
 
 **Diagnostics:** `traceHandoffTiming` (on) writes one line per handoff step, ghost lag and replay; the `Mesh stats`
 line every 10 s reports players, owned and ghost counts, link traffic per neighbour, handoffs (mean/max ms), ghost
@@ -232,8 +252,10 @@ and, later, several hosts all reach one database, and SQLite is a single file on
 
 ## 7. Verifying
 
-- **Harness:** `python Tools/ServerMeshing/regress.py` runs the eight scenarios (pet, party, crash, harvest, build,
-  seam, seamcold, sleep) on the rig and grades the logs; `--env KEY=VALUE` passes rig toggles.
+- **Harness:** `python Tools/ServerMeshing/regress.py` runs the nine scenarios (pet, party, crash, harvest, build,
+  seam, seamcold, sleep, pvp; the first five by default) on the rig and grades the logs; `--env KEY=VALUE` passes rig
+  toggles, `--remote-cells E` serves a cell from a second machine and `--impair` degrades the link to it
+  ([MULTIHOST.md](MULTIHOST.md) §8b, §8e).
 - **Capacity:** `python Tools/ServerMeshing/loadtest.py --steps 100,200,300` puts synthetic players on one cell and
   prints work per frame, CPU, memory and per-client send rate (DESIGN 0.53 has the reference table).
 - **In the logs:** `Own cell from channel id: …` (the cell resolved its rectangle), `Neighbour zone X linked`,

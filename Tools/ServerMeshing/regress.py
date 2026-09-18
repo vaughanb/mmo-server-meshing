@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Server Meshing regression harness (DESIGN.md §16 / changelog 0.43).
 
-Drives the 2x2 rig end to end and grades each scenario from the logs:
+Drives the ten-cell rig (a 3x3 grid plus C2 across a seam) end to end and grades each scenario from the logs:
 
     python Tools/ServerMeshing/regress.py                 # the default set: pet party crash harvest build
-    python Tools/ServerMeshing/regress.py crash build     # a subset
+    python Tools/ServerMeshing/regress.py crash build     # a subset; also seam seamcold sleep pvp
     python Tools/ServerMeshing/regress.py --list
+    python Tools/ServerMeshing/regress.py --remote-cells E [--remote-persist] [--impair loss2] ...
+                                                          # E served by the second machine (Docs/ServerMeshing/MULTIHOST.md)
 
 Requirements (all already true on the rig machine):
   * the Unity editor is open on this project with BaseInit-CE (any scene that is not dirty) and the
@@ -15,8 +17,9 @@ Requirements (all already true on the rig machine):
 
 Each scenario: resets the test characters in the database, asks the editor to enter Play with the auto
 client in a given mode (plus environment variables the zone servers inherit), launches headless bots from
-the build, waits for the auto client's RESULT (and the bots'), stops Play, and grades: zero exceptions on
-the four zone logs since the scenario started, the expected RESULT lines, and scenario-specific log lines.
+the build, waits for the auto client's RESULT (and the bots'), stops Play, and grades: zero exceptions and no
+player-puppet teleports on any cell's logs since the scenario started, the expected RESULT lines, and
+scenario-specific log lines.
 Exit code 1 when any scenario fails. Bot logs land in Logs/regress_<scenario>_<user>.log.
 """
 import argparse, datetime, json, os, re, subprocess, sys, time, uuid
