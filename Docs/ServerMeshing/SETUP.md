@@ -290,8 +290,8 @@ and, later, several hosts all reach one database, and SQLite is a single file on
 
 **Server Meshing ▸ Build Packages** writes two Unity packages to `Build/Packages/`:
 
-- `ServerMeshing-<version>.unitypackage` — the add-on (`Assets/ServerMeshing/Mesh`, runtime and Editor) with this guide
-  and DESIGN.md under `Documentation/`, and the top-level README. The spike notes, the upstream patch series and the raw
+- `ServerMeshing-<version>.unitypackage` — the add-on (`Assets/ServerMeshing/Mesh`, runtime and Editor) with this guide,
+  DESIGN.md and MULTIHOST.md under `Documentation/`, and the top-level README. The spike notes, the upstream patch series and the raw
   capacity table stay in the repository. Import it into any
   project that has OpenMMORPG installed (master at or after the four core changes of 2026-09-15), then follow §4.
 - `ServerMeshing-TestRig-<version>.unitypackage` — `Assets/ServerMeshing/TestMap` (the two test maps, test items,

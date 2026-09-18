@@ -2,7 +2,7 @@
 //
 // Exports two Unity packages into Build/Packages/:
 //   ServerMeshing-<version>.unitypackage         the add-on: Assets/ServerMeshing/Mesh (runtime + Editor), the README and a
-//                                                Documentation/ snapshot of SETUP.md and DESIGN.md (the spike notes, the upstream
+//                                                Documentation/ snapshot of SETUP.md, DESIGN.md and MULTIHOST.md (the spike notes, the upstream
 //                                                patch series and the raw capacity table stay in the repository)
 //   ServerMeshing-TestRig-<version>.unitypackage the test rig: Assets/ServerMeshing/TestMap (scenes, prefabs, test data, auto
 //                                                client, launcher, play runner, load generator) and a snapshot of
@@ -19,7 +19,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
 {
     public static class ServerMeshPackageBuilder
     {
-        public const string Version = "0.58.0";
+        public const string Version = "0.70.0";
         private const string AddOnRoot = "Assets/ServerMeshing";
         private const string DocsSnapshot = AddOnRoot + "/Documentation";
         private const string ToolsSnapshot = AddOnRoot + "/TestMap/Tools";
@@ -38,7 +38,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         public static string BuildAddOn(string outDir)
         {
             string file = Path.Combine(outDir, $"ServerMeshing-{Version}.unitypackage");
-            CopyFiles(Path.Combine(ProjectRoot(), "Docs", "ServerMeshing"), DocsSnapshot, "SETUP.md", "DESIGN.md");
+            CopyFiles(Path.Combine(ProjectRoot(), "Docs", "ServerMeshing"), DocsSnapshot, "SETUP.md", "DESIGN.md", "MULTIHOST.md");
             try
             {
                 AssetDatabase.Refresh();
