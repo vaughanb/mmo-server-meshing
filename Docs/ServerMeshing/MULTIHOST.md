@@ -376,6 +376,10 @@ trustworthy. Instrument first, then measure.
   crash gap (§8d). Acting on the refusal alone makes the crossing thrash, so it needs the origin's retry
   policy designed with it. Measurements and two reverted experiments are in §8d.
 - **A direct login into a cell that outlived a central restart is kicked.** Narrowed on 2026-09-17, not solved.
+  **It needs the restart.** A second direct login into a long-lived cell, with nothing restarted in between,
+  works: the bot entered, registered, and no refusal was logged. So this is neither an uptime problem nor a
+  relogin problem — which is what it would have taken to make it a launch blocker, since every player
+  relogging into a cell would hit it. As it stands, a central restart is the only way in.
   What happens, in order: the cell answers `enter-game validated+loaded ok=True` and loads the character at the
   right position; the client loads the scene and sends client-ready; the cell receives it; and 0.4 s later the
   cell drops the peer with `DisconnectPeerCalled` and **nothing written in any log on either machine**. Only a

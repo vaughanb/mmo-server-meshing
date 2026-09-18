@@ -48,7 +48,7 @@ namespace MultiplayerARPG.MMO.Mesh
             _nextTry = Time.unscaledTime + 1f;
             if (!(BaseGameNetworkManager.Singleton is MeshMapNetworkManager mesh) || !mesh.IsServer || mesh.OwnCell == null)
                 return;
-            if (!string.Equals(mesh.OwnZoneId, _cell))
+            if (!ServesThisCell(mesh.OwnZoneId))
             {
                 _spawned = true; // another cell: nothing to do here
                 return;
@@ -62,6 +62,26 @@ namespace MultiplayerARPG.MMO.Mesh
                 Logging.Log("Mesh", "Load generator: frame rate uncapped on this cell (frame time = work per frame)");
             }
             Spawn(mesh);
+        }
+
+        /// <summary>
+        /// Whether this cell should spawn synthetic players. One id loads one cell, which is what a per-cell
+        /// capacity measurement wants; a comma-separated list or "all" loads several at once, which is what asking
+        /// "how much does this whole machine hold" needs -- the per-cell number was always measured with the other
+        /// cells idle, and idling cells do not compete for the box.
+        /// </summary>
+        private bool ServesThisCell(string ownZoneId)
+        {
+            if (string.IsNullOrEmpty(_cell))
+                return false;
+            if (string.Equals(_cell, "all", System.StringComparison.OrdinalIgnoreCase))
+                return true;
+            foreach (string id in _cell.Split(','))
+            {
+                if (string.Equals(id.Trim(), ownZoneId))
+                    return true;
+            }
+            return false;
         }
 
         private void Spawn(MeshMapNetworkManager mesh)
