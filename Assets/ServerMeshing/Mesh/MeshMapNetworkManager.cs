@@ -153,13 +153,28 @@ namespace MultiplayerARPG.MMO.Mesh
             MigrationDisconnected = false; // never carried into the next hop
         }
 
-        /// <summary>Set while migrating when the new cell refused us or never answered; the controller reads and clears it.</summary>
+        /// <summary>Set while migrating when the new cell dropped us; the controller reads it, BeginMigrationAttempt clears it.</summary>
         internal bool MigrationDisconnected { get; private set; }
         internal DisconnectReason MigrationDisconnectReason { get; private set; }
         internal SocketError MigrationDisconnectError { get; private set; }
         internal byte[] MigrationDisconnectData { get; private set; }
 
-        internal void ClearMigrationDisconnect() { MigrationDisconnected = false; }
+        /// <summary>Counts the controller's StartClient calls within migrations, so an answer can be told from the attempt it belongs to.</summary>
+        internal int MigrationAttempt { get; private set; }
+        private int _migrationRefusedAttempt;
+        /// <summary>The cell of the current attempt answered enter-game with anything but success: it will not seat us, and waiting on it is pointless.</summary>
+        internal bool MigrationRefused => MigrationAttempt > 0 && _migrationRefusedAttempt == MigrationAttempt;
+
+        /// <summary>
+        /// Called by the controller after StopClient and before the StartClient of every hop (the first and the
+        /// fallback). The order matters: stopping a client can complete its outstanding requests, and an enter-game
+        /// answer from the connection just stopped must never be read as the next attempt's refusal.
+        /// </summary>
+        internal void BeginMigrationAttempt()
+        {
+            MigrationAttempt++;
+            MigrationDisconnected = false;
+        }
 
         /// <summary>
         /// During a migration a disconnect is a failed hop, not the end of the session: the kit's handler would clear
@@ -271,6 +286,14 @@ namespace MultiplayerARPG.MMO.Mesh
         protected override void HandleEnterGameResponse(ResponseHandlerData responseHandler, AckResponseCode responseCode, EnterGameResponseMessage response)
         {
             Stamp($"enter-game response {responseCode}");
+            if (IsMigrating && !IsServer && responseCode != AckResponseCode.Success)
+            {
+                // A definitive answer -- most often a restarted destination that has no reservation for us. The
+                // controller falls back at once instead of waiting out migrationReadyTimeoutSeconds on a cell that
+                // has already said no (7 of the 10.5 s cross-machine crash gap were spent that way).
+                _migrationRefusedAttempt = MigrationAttempt;
+                Logging.LogWarning("Mesh", $"Enter-game refused ({responseCode}) on migration attempt {MigrationAttempt}");
+            }
             base.HandleEnterGameResponse(responseHandler, responseCode, response);
         }
 
@@ -327,14 +350,39 @@ namespace MultiplayerARPG.MMO.Mesh
                 bool hasPending = hasUser && _pendingSpawnPlayerCharactersByUserId.ContainsKey(readyUserId);
                 if (!hasUser || !hasToken || !hasPending)
                     Logging.LogWarning("Mesh", $"Client ready from {connectionId} is about to be refused: user={hasUser} token={hasToken} pendingSpawn={hasPending}");
-                // The kit then validates asynchronously (ValidatePlayerConnection) and drops the peer on failure.
-                // All four of those paths log behind the manager's LogError flag, which is off on a server build, so
-                // that kick arrives with nothing written anywhere -- see MULTIHOST 9 for the open case. Do not be
-                // tempted to warn on "the user is already registered here": enter-game registers it a moment
-                // earlier, so it is true on every successful login too (checked against a passing run, 2026-09-17).
+                // The kit then runs SetPlayerReadyRoutine, which KICKS WITHOUT LOGGING on three conditions: a
+                // database call failed, the client left, or the user is already in this cell's social registry
+                // ("prevent nested login"). ValidatePlayerConnection's failures do log (the prefab's log level is
+                // Info, so LogError is on), and a kick that arrives with nothing in any log is one of these three.
+                // Name them. Do not warn on "the user is already registered in ServerUserHandlers": enter-game
+                // registers that a moment earlier, so it is true on every successful login too (2026-09-17).
+                else
+                {
+                    bool social = IsInKitSocialRegistry(readyUserId);
+                    bool database = IsDatabaseConnected;
+                    if (social || !database)
+                        Logging.LogWarning("Mesh", $"Client ready from {connectionId} for user {readyUserId}: the kit will kick silently -- alreadyInSocialRegistry={social} databaseConnected={database}");
+                }
             }
 #endif
             return base.DeserializeClientReadyData(requestId, connectionId, reader, playerIdentity);
+        }
+
+        private static System.Reflection.FieldInfo s_socialField;
+
+        /// <summary>
+        /// Whether the kit's private per-cell social registry still holds this user. It is the "prevent nested
+        /// login" check in SetPlayerReadyRoutine, which kicks without logging; it is cleared on unregister and by a
+        /// central-driven cluster message, so an entry can outlive a session that ended while the central was gone.
+        /// Reflection, because the field is private and this is a diagnostic, not a dependency.
+        /// </summary>
+        private bool IsInKitSocialRegistry(string userId)
+        {
+            if (s_socialField == null)
+                s_socialField = typeof(MapNetworkManager).GetField("_socialCharactersByUserId", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            if (s_socialField == null || string.IsNullOrEmpty(userId))
+                return false;
+            return s_socialField.GetValue(this) is System.Collections.Concurrent.ConcurrentDictionary<string, SocialCharacterData> social && social.ContainsKey(userId);
         }
 
         public override void RegisterPlayerCharacter(long connectionId, BasePlayerCharacterEntity playerCharacter)
@@ -402,6 +450,44 @@ namespace MultiplayerARPG.MMO.Mesh
             _nextClusterConnectRetry = Time.unscaledTime + clusterConnectRetrySeconds;
             Logging.Log("Mesh", $"Could not open the cluster connection to {ClusterServerAddress}:{ClusterServerPort}; retrying");
             ClusterClient.OnAppStart();
+        }
+
+        private bool _clusterWasRegistered;
+
+        /// <summary>
+        /// Server tick: the moment the cluster link drops, forget every mirrored user who is not connected here.
+        ///
+        /// The kit keeps a per-cell mirror of every online user in the world (_socialCharactersByUserId), fed by the
+        /// central's UpdateMapUser Add/Remove relays, and SetPlayerReadyRoutine kicks -- without logging -- anyone the
+        /// mirror lists ("prevent nested login"). The central keeps no user list, so when it dies every Remove in
+        /// flight is lost and the entries stay; worse, on re-registration the kit re-announces its WHOLE mirror as
+        /// Adds, which the fresh central relays to every cell, so one stale entry anywhere is "online" everywhere and
+        /// that user is kicked from every cell until the whole cluster restarts. Reproduced 2026-09-18: a user online
+        /// on one cell when the central dies cannot log into a cell that outlived it. Purging on the drop, before the
+        /// kit's re-announcement, leaves only this cell's own players to be re-announced; the central relays the
+        /// other cells' live players again as they re-register.
+        /// </summary>
+        private void ClusterMirrorTick()
+        {
+            bool registered = ClusterClient != null && ClusterClient.IsAppRegistered;
+            if (_clusterWasRegistered && !registered)
+                PurgeRemoteSocialMirror();
+            _clusterWasRegistered = registered;
+        }
+
+        private void PurgeRemoteSocialMirror()
+        {
+            if (s_socialField == null)
+                s_socialField = typeof(MapNetworkManager).GetField("_socialCharactersByUserId", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            if (!(s_socialField?.GetValue(this) is System.Collections.Concurrent.ConcurrentDictionary<string, SocialCharacterData> mirror))
+                return;
+            int dropped = 0, kept = 0;
+            foreach (string userId in new System.Collections.Generic.List<string>(mirror.Keys))
+            {
+                if (ServerUserHandlers.TryGetConnectionIdByUserId(userId, out _)) { kept++; continue; }
+                if (mirror.TryRemove(userId, out _)) dropped++;
+            }
+            Logging.LogWarning("Mesh", $"Cluster link lost: forgot {dropped} mirrored user(s) of other cells, kept {kept} of this cell's own; the central re-sends the live ones");
         }
 
         [Tooltip("Seconds between attempts to open the database connection whenever this server does not have one. " +
@@ -536,6 +622,7 @@ namespace MultiplayerARPG.MMO.Mesh
             OwnZoneId = string.Empty;
             TryResolveOwnZone();
             _clusterHandedToKit = false;
+            _clusterWasRegistered = false;
             _databaseManager = MMOServerInstance.Singleton != null ? MMOServerInstance.Singleton.DatabaseClient as DatabaseNetworkManager : null;
             _databaseWasConnected = false;
             _databaseEverConnected = false;
@@ -655,6 +742,7 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 SampleFrame();
                 ClusterConnectTick();
+                ClusterMirrorTick();
                 DatabaseConnectTick();
                 MeshBoundaryTick();
                 GhostingUpdate();
@@ -788,6 +876,12 @@ namespace MultiplayerARPG.MMO.Mesh
                 // delivered and the client might be warped to a dead cell. Stay, retry after the backoff.
                 WarnThrottled($"Mesh link to zone {zone.id} is down; player {entity.CharacterName} stays on {OwnZoneId} (retry in {handoffRetrySeconds:0.#} s).");
                 _handoffRetryAfter[entity.Id] = Time.unscaledTime + handoffRetrySeconds;
+                return;
+            }
+            if (!IsNeighbourSettled(zone.id))
+            {
+                // The link just came up: give the destination a snapshot or two so it has a puppet to promote.
+                _handoffRetryAfter[entity.Id] = Time.unscaledTime + handoffLinkSettleSeconds;
                 return;
             }
 

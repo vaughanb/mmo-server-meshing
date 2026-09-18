@@ -300,6 +300,7 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 _nextLinkCheck = Time.unscaledTime + 1f;
                 EnsureNeighbourLinks();
+                FlushDeferredAcks();
             }
             if (meshStatsIntervalSeconds > 0f && Time.unscaledTime >= _nextStatsTime)
             {
@@ -327,6 +328,18 @@ namespace MultiplayerARPG.MMO.Mesh
         [Tooltip("Link to every cell of the logical map, not only the 8 neighbours. Ghosting still stops at the band; the extra links carry cell-to-cell notices such as a party share for a member that stands on a far cell (unlimited share distance).")]
         public bool linkAllZones = true;
 
+        [Tooltip("A link a handoff came back over unclaimed is doubted (no handoff goes that way) until the neighbour is heard from; if it stays silent this long the link is reconnected, which reaches a restarted neighbour at once instead of after the transport's own timeout.")]
+        public float linkSuspectTimeoutSeconds = 2f;
+
+        [Tooltip("No handoff across a link that has been up for less than this: the destination needs a snapshot or two of the character to have a puppet to promote, else it spawns fresh (pets re-summoned, a visible swap for observers). Seen when a rolled-back character waited at the line for a restarted cell and crossed in the tick its link came up.")]
+        public float handoffLinkSettleSeconds = 0.5f;
+
+        /// <summary>The link to the zone is up and has been for handoffLinkSettleSeconds (see the field).</summary>
+        internal bool IsNeighbourSettled(string zoneId)
+        {
+            return _linkClients.TryGetValue(zoneId, out MeshLinkClient link) && link.ConnectedFor >= handoffLinkSettleSeconds;
+        }
+
         private void EnsureNeighbourLinks()
         {
             if (linkAllZones)
@@ -353,6 +366,11 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             if (!client.IsConnected && Time.unscaledTime - client.LastConnectAttempt > 5f)
                 client.Connect(peer.networkAddress, peer.networkPort + meshLinkPortOffset);
+            else if (client.IsConnected && client.IsSuspect && client.SuspectFor > linkSuspectTimeoutSeconds)
+            {
+                Logging.LogWarning("Mesh", $"Neighbour zone {cell.id} silent for {client.SuspectFor:0.0}s since a handoff to it came back unclaimed; re-linking");
+                client.Connect(peer.networkAddress, peer.networkPort + meshLinkPortOffset);
+            }
         }
 
         // Neighbours: every cell whose rectangle touches ours (edge or corner) in the world registry, from this map or
@@ -939,7 +957,22 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (playerCharacter == null)
                 return;
-            _pendingHandoffAcks.Remove(playerCharacter.Id); // it is ours again (a handoff back before the ack, or a fresh login here)
+            if (_pendingHandoffAcks.TryGetValue(playerCharacter.Id, out PendingHandoffAck unclaimed))
+            {
+                // The client is here, so the cell we sent it to did not keep it: it refused (a restarted destination
+                // has no reservation), died, or never answered, and the client fell back -- or logged in afresh while
+                // the notice was still pending. Ours again either way (a destination that registered it acks first,
+                // on the same ordered link, so a pending entry here means it never did). Its silence is not a link
+                // loss here yet -- that takes the transport's timeout, ~8 s -- and a handoff sent meanwhile would go
+                // the same way, so doubt the link: nothing is handed that way until the neighbour is heard from, and
+                // a dead one is re-linked (EnsureLink). This is what stopped the crossing from thrashing on a
+                // restarted cell once the client began acting on refusals.
+                _pendingHandoffAcks.Remove(playerCharacter.Id);
+                _rolledBackHandoffs.Add(playerCharacter.Id);
+                Logging.LogWarning("Mesh", $"Handoff ROLLBACK {unclaimed.name} -> zone {unclaimed.zone}: its client came back to {OwnZoneId} {Time.unscaledTime - unclaimed.sentTime:0.0}s after the notice; doubting the link to {unclaimed.zone}");
+                if (_linkClients.TryGetValue(unclaimed.zone, out MeshLinkClient doubted))
+                    doubted.Suspect();
+            }
             if (_rolledBackHandoffs.Remove(playerCharacter.Id))
                 Logging.Log("Mesh", $"Handoff ROLLBACK complete: {playerCharacter.CharacterName} is back on {OwnZoneId} ({(_reservedArrivals.ContainsKey(playerCharacter.Id) ? "its puppet promoted" : "fresh spawn")})");
             TrackOwnedPlayerAfterRegistration(playerCharacter);
@@ -1257,7 +1290,18 @@ namespace MultiplayerARPG.MMO.Mesh
                 Logging.LogWarning("Mesh", $"Neighbour zone {zoneId} link lost (conn {connectionId})");
                 ReleaseLentMonsters(zoneId, "neighbour link lost");
                 ReleaseBorrowedMonsters(zoneId, "home zone link lost");
-                RollBackHandoffsToward(zoneId, "link to the destination lost");
+                if (IsNeighbourLinked(zoneId))
+                {
+                    // Our own link to that zone answers, so this is a dead incarnation's connection timing out after
+                    // its successor is already up (a restart on the same port, where the successor's hello arrives
+                    // after this timeout because the cluster delays its registration), or a one-way loss. Neither
+                    // says the destination is gone: the handoffs toward it stay pending, guarded by our link going
+                    // down (handoffLinkDownGraceSeconds) and by the ack timeout (handoffAckGuardSeconds).
+                    if (_pendingHandoffAcks.Count > 0)
+                        Logging.Log("Mesh", $"Inbound connection from zone {zoneId} lost while our link to it is up; handoffs toward it stay pending");
+                }
+                else
+                    RollBackHandoffsToward(zoneId, "link to the destination lost");
             }
         }
 
@@ -3120,7 +3164,8 @@ namespace MultiplayerARPG.MMO.Mesh
 
         internal bool IsNeighbourLinked(string zoneId)
         {
-            return _linkClients.TryGetValue(zoneId, out MeshLinkClient link) && link.IsConnected;
+            // A doubted link counts as down for handoffs (see GhostingOnRealPlayerRegistered).
+            return _linkClients.TryGetValue(zoneId, out MeshLinkClient link) && link.IsConnected && !link.IsSuspect;
         }
 
         internal void OnHandoffAck(long connectionId, HandoffAckMessage msg)
@@ -3231,10 +3276,45 @@ namespace MultiplayerARPG.MMO.Mesh
             SendHandoffAck(incoming.fromZone, new HandoffAckMessage { characterId = characterId, ok = false, reason = reason, arrivalMs = 0 });
         }
 
+        private sealed class DeferredAck { public string zone; public HandoffAckMessage msg; public float since; }
+        private readonly List<DeferredAck> _deferredAcks = new List<DeferredAck>();
+
         private void SendHandoffAck(string zoneId, HandoffAckMessage msg)
         {
-            if (!string.IsNullOrEmpty(zoneId) && _linkClients.TryGetValue(zoneId, out MeshLinkClient client) && client.IsConnected)
+            if (string.IsNullOrEmpty(zoneId))
+                return;
+            if (_linkClients.TryGetValue(zoneId, out MeshLinkClient client) && client.IsConnected)
+            {
                 client.SendHandoffAck(msg);
+                return;
+            }
+            // A cell that just (re)started serves arrivals before it has a link back to the origin: it learns the
+            // origin's address only when its own cluster registration goes through, which the cluster delays until
+            // the dead incarnation has timed out there. Dropping the ack here left a completed handoff pending on the
+            // origin, which rolled it back and held a puppet of a character that was living here. Keep it for the
+            // link instead (FlushDeferredAcks); the origin commits a late OK ack even after a rollback.
+            _deferredAcks.Add(new DeferredAck { zone = zoneId, msg = msg, since = Time.unscaledTime });
+            Logging.LogWarning("Mesh", $"Handoff ack for {msg.characterId} to zone {zoneId} deferred: no link to it yet");
+        }
+
+        /// <summary>Link tick: send every ack that waited for its link; give up on one older than the origin's ack guard (it has rolled back by then).</summary>
+        private void FlushDeferredAcks()
+        {
+            for (int i = _deferredAcks.Count - 1; i >= 0; --i)
+            {
+                DeferredAck ack = _deferredAcks[i];
+                if (_linkClients.TryGetValue(ack.zone, out MeshLinkClient client) && client.IsConnected)
+                {
+                    client.SendHandoffAck(ack.msg);
+                    Logging.Log("Mesh", $"Handoff ack for {ack.msg.characterId} to zone {ack.zone} sent {Time.unscaledTime - ack.since:0.0}s late, once the link came up");
+                    _deferredAcks.RemoveAt(i);
+                }
+                else if (Time.unscaledTime - ack.since > handoffAckGuardSeconds)
+                {
+                    Logging.LogWarning("Mesh", $"Handoff ack for {ack.msg.characterId} to zone {ack.zone} dropped: no link to it for {handoffAckGuardSeconds:0}s");
+                    _deferredAcks.RemoveAt(i);
+                }
+            }
         }
 
         /// <summary>A ghost that is our own demoted handoff (or a pet demoted with it) still waiting for the ack.</summary>

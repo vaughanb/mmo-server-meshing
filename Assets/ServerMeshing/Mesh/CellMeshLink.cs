@@ -602,6 +602,43 @@ namespace MultiplayerARPG.MMO.Mesh
         public string TargetZoneId { get; }
         public bool IsConnected { get; private set; }
         public float LastConnectAttempt { get; private set; } = -999f;
+        /// <summary>Seconds this link has been up (0 while down).</summary>
+        public float ConnectedFor => IsConnected ? Time.unscaledTime - _connectedSince : 0f;
+        private float _connectedSince;
+
+        // A handoff sent over this link came back unclaimed (its client returned to us), so the neighbour may be gone
+        // with the connection not yet timed out here. Doubt the link until the neighbour is heard from again -- any
+        // datagram counts, and LiteNetLib pings every second -- and let the manager reconnect one that stays silent.
+        private float _suspectSince = -1f;
+        private long _packetsWhenSuspected;
+
+        /// <summary>True from Suspect() until the next datagram from the neighbour (or a reconnect).</summary>
+        public bool IsSuspect
+        {
+            get
+            {
+                if (_suspectSince < 0f)
+                    return false;
+                NetStatistics stats = Statistics;
+                if (stats != null && stats.PacketsReceived > _packetsWhenSuspected)
+                {
+                    _suspectSince = -1f;
+                    return false;
+                }
+                return true;
+            }
+        }
+
+        /// <summary>Seconds this link has been doubted without an answer (0 when not doubted).</summary>
+        public float SuspectFor => _suspectSince < 0f ? 0f : Time.unscaledTime - _suspectSince;
+
+        public void Suspect()
+        {
+            if (_suspectSince >= 0f)
+                return;
+            _suspectSince = Time.unscaledTime;
+            _packetsWhenSuspected = Statistics?.PacketsReceived ?? 0;
+        }
 
         private readonly MeshMapNetworkManager _manager;
 
@@ -618,6 +655,7 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             LastConnectAttempt = Time.unscaledTime;
             IsConnected = false;
+            _suspectSince = -1f;
             StopClient();
             Logging.Log(LogTag, $"Connecting to neighbour {TargetZoneId} at {address}:{port}");
             StartClient(address, port);
@@ -631,6 +669,7 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 case ENetworkEvent.ConnectEvent:
                     IsConnected = true;
+                    _connectedSince = Time.unscaledTime;
                     Logging.Log(LogTag, "Connected to neighbour");
                     SendPacket(0, DeliveryMethod.ReliableOrdered, MeshLinkMessageTypes.Hello, writer => new MeshHelloMessage { zoneId = _manager.OwnZoneId }.Serialize(writer));
                     break;

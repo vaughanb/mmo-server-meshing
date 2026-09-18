@@ -64,8 +64,8 @@ namespace MultiplayerARPG.MMO.Mesh
             fellBack = true;
             FallbackCount++;
             Logging.LogWarning("Spike2", $"Migration to {address}:{port} failed ({why}); falling back to {_prevAddress}:{_prevPort}");
-            _manager.ClearMigrationDisconnect();
             _manager.StopClient();
+            _manager.BeginMigrationAttempt();
             address = _prevAddress;
             port = _prevPort;
             _manager.StartClient(address, port);
@@ -273,6 +273,7 @@ namespace MultiplayerARPG.MMO.Mesh
             // 3) Swap the connection (offline-scene reload suppressed by the manager; Assets.Clear() still runs).
             _manager.BeginMigration();
             _manager.StopClient();
+            _manager.BeginMigrationAttempt();
             long tStop = sw.ElapsedMilliseconds;
             _manager.StartClient(address, port);
 
@@ -284,10 +285,12 @@ namespace MultiplayerARPG.MMO.Mesh
             BasePlayerCharacterEntity newEntity = null;
             while (true)
             {
-                if (Time.realtimeSinceStartup >= deadline || _manager.MigrationDisconnected)
+                if (Time.realtimeSinceStartup >= deadline || _manager.MigrationDisconnected || _manager.MigrationRefused)
                 {
-                    // Refused, dropped, or silent: one hop back to where we came from, then give up.
-                    if (!TryFallbackHop(ref address, ref port, ref fellBack, _manager.MigrationDisconnected ? _manager.MigrationDisconnectReason.ToString() : "timeout"))
+                    // Refused, dropped, or silent: one hop back to where we came from, then give up. A refusal is
+                    // acted on the moment it arrives; the deadline is only for a cell that never answers.
+                    string why = _manager.MigrationDisconnected ? _manager.MigrationDisconnectReason.ToString() : _manager.MigrationRefused ? "refused" : "timeout";
+                    if (!TryFallbackHop(ref address, ref port, ref fellBack, why))
                         break;
                     deadline = Time.realtimeSinceStartup + _manager.migrationReadyTimeoutSeconds;
                     tConnected = -1;
@@ -600,6 +603,7 @@ namespace MultiplayerARPG.MMO.Mesh
 
             _manager.BeginMigration();
             _manager.StopClient();
+            _manager.BeginMigrationAttempt();
             long tStop = sw.ElapsedMilliseconds;
             _manager.StartClient(address, port);
 
@@ -608,9 +612,10 @@ namespace MultiplayerARPG.MMO.Mesh
             long tConnected = -1;
             while (true)
             {
-                if (Time.realtimeSinceStartup >= deadline || _manager.MigrationDisconnected)
+                if (Time.realtimeSinceStartup >= deadline || _manager.MigrationDisconnected || _manager.MigrationRefused)
                 {
-                    if (!TryFallbackHop(ref address, ref port, ref fellBack, _manager.MigrationDisconnected ? _manager.MigrationDisconnectReason.ToString() : "timeout"))
+                    string why = _manager.MigrationDisconnected ? _manager.MigrationDisconnectReason.ToString() : _manager.MigrationRefused ? "refused" : "timeout";
+                    if (!TryFallbackHop(ref address, ref port, ref fellBack, why))
                         break;
                     deadline = Time.realtimeSinceStartup + _manager.migrationReadyTimeoutSeconds;
                     tConnected = -1;

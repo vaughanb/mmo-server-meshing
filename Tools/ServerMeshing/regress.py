@@ -301,22 +301,30 @@ def remote_lines_after(mark):
 
 
 def zone_lines(zone, start, day, map_id=MAP):
-    """Every line of the zone's info/warn/error logs stamped at or after `start` (HH:MM:SS)."""
+    """Every line of the zone's info/warn/error logs stamped at or after `start` (HH:MM:SS) on `day`.
+
+    The kit writes one file per day, so a scenario that crosses midnight carries on in the next day's file: both are
+    read, and stamps are compared as "date time" rather than time alone, so a line from 00:01 is not thrown away
+    for sorting below 23:59. (Before this, a run over midnight silently lost every line after it.)
+    """
     if zone in REMOTE_CELLS:
         fetch_remote()
         # A missing remote log must fail loudly: read as "no lines", it turns every check on that cell into a
         # silent pass, which is worse than no coverage at all.
         if not any(os.path.exists(zone_log(zone, sfx, day, map_id)) for sfx in ("info", "warn", "error")):
             raise RuntimeError(f"no log for remote cell {zone} in {REMOTE_LOGS}; it may not have started today")
+    since = f"{day} {start}"
+    next_day = (datetime.date.fromisoformat(day) + datetime.timedelta(days=1)).isoformat()
     out = []
-    for suffix in ("info", "warn", "error"):
-        path = zone_log(zone, suffix, day, map_id)
-        if not os.path.exists(path):
-            continue
-        for line in open(path, encoding="utf-8", errors="replace"):
-            m = STAMP.search(line[:60])
-            if m and m.group(2) >= start:
-                out.append(line.rstrip("\n"))
+    for d in (day, next_day):
+        for suffix in ("info", "warn", "error"):
+            path = zone_log(zone, suffix, d, map_id)
+            if not os.path.exists(path):
+                continue
+            for line in open(path, encoding="utf-8", errors="replace"):
+                m = STAMP.search(line[:60])
+                if m and f"{m.group(1)} {m.group(2)}" >= since:
+                    out.append(line.rstrip("\n"))
     return out
 
 
@@ -402,10 +410,11 @@ def run_scenario(name, rep):
         # Fight at the line with a party member standing inside E: shares cross the line both ways. The member
         # starts a few metres from the line so it is inside E before the first kill (from the map origin its walk
         # took longer than the fighter's first kills and the shares stayed on C).
-        # Known flake (~1 in 10, seen 2026-09-16): the fighter shoots the nearest monster past x=100 from where it
-        # stands and does not close the distance, so a run where E's monsters happen to have wandered 13-15 m in
-        # ends hurtTarget=True kills=0 and fails the three share checks. It is the bot's targeting, not the mesh:
-        # the hits still forward and replay. Fix by having fight mode walk into range before shooting.
+        # Known flake (~1 in 10, seen 2026-09-16): a run where E's monsters have all wandered further past the line
+        # than the bow reaches ends hurtTarget=True kills=0 and fails the three share checks. The fighter DOES walk
+        # toward its target (PointClickMovement, x clamped to the line) but must stay on C for its hits to be
+        # forwarded, so it cannot follow a monster deeper into E. Inherent to using live monsters as targets; the
+        # standing party member at (104,58) is the bait that keeps them near the line, and usually does.
         db_reset((86.5, 0), (94, 58))
         request_play("fight", 99, 60, env={"MESH_NO_MONSTER_HANDOFF": "1"})
         wait_status(lambda st: st.get("isPlaying") == "True", 60, "Play")

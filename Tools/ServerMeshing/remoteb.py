@@ -52,11 +52,21 @@ def clean(text):
     return "\n".join(l for l in text.splitlines() if not any(n in l for n in NOISE))
 
 
+class Unreachable(RuntimeError):
+    """The other machine did not answer SSH at all -- asleep, off, or sshd stopped."""
+
+
 def ssh(args, command, timeout=120):
     base = ["ssh", "-i", args.key, "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", f"{args.user}@{args.host}"]
     r = subprocess.run(base + ["powershell", "-NoProfile", "-Command", '"' + command + '"'],
                        capture_output=True, text=True, timeout=timeout)
-    return clean(r.stdout).strip(), clean(r.stderr).strip(), r.returncode
+    err = clean(r.stderr).strip()
+    # 255 is ssh's own failure (no route, refused, timed out, key rejected), as opposed to the remote command's exit
+    # code. Every caller used to read stdout only, so an unreachable machine looked exactly like an idle one:
+    # "process: not running", "cleared 0", an empty log (2026-09-18).
+    if r.returncode == 255:
+        raise Unreachable(f"{args.host} did not answer: {err.splitlines()[-1] if err else 'ssh exit 255'}")
+    return clean(r.stdout).strip(), err, r.returncode
 
 
 def running(args):
@@ -301,9 +311,13 @@ def main():
     for k, v in DEFAULTS.items():
         ap.add_argument("--" + k.replace("_", "-"), default=v)
     args = ap.parse_args()
-    return {"start": cmd_start, "stop": cmd_stop, "status": cmd_status, "log": cmd_log, "fetch": cmd_fetch,
-            "deploy": cmd_deploy, "clearmarkers": cmd_clearmarkers,
-            "impair": cmd_impair}[args.command](args)
+    try:
+        return {"start": cmd_start, "stop": cmd_stop, "status": cmd_status, "log": cmd_log, "fetch": cmd_fetch,
+                "deploy": cmd_deploy, "clearmarkers": cmd_clearmarkers,
+                "impair": cmd_impair}[args.command](args)
+    except Unreachable as e:
+        print(f"UNREACHABLE: {e}")
+        return 3
 
 
 if __name__ == "__main__":

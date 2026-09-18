@@ -317,6 +317,34 @@ So the work is in the migration state machine, not in a constant: when `Migratio
 whether a refusal that precedes a success inside one hop should be forgotten. The numbers above are the argument for
 doing it properly rather than by patch.
 
+**Resolution (2026-09-18).** Both halves landed together. The client honours a refusal per *attempt*:
+`MigrationRefused` is stamped with a counter the controller advances after every `StopClient` and before the
+`StartClient` that follows it, so an answer completed by stopping the previous connection can never be read as the
+next hop's refusal — the most plausible reading of the third experiment's fallback from a cell that had accepted the
+character. The thrash has its own cause, on the origin: a link to a process that died stays `IsConnected` for the
+transport's timeout, and a client that came back was handed off across it again. Now a client re-registering while
+our handoff toward a zone is still pending (the destination acks before anything else on that ordered link, so a
+pending entry means it never registered the character) logs `Handoff ROLLBACK ... its client came back` and marks
+that link *suspect*: no handoff goes that way until the neighbour is heard from — any datagram, and LiteNetLib
+pings every second — and a link silent for `linkSuspectTimeoutSeconds` (2 s) is reconnected, which reaches a restarted
+neighbour immediately instead of ~13 s later (8 s timeout + 5 s retry). The signal is the link's own packet
+counter, already enabled for the stats line; nothing new on the wire.
+
+Emulating B's same-port restart on one machine (a hand-started E under a supervisor that restarts it on its port;
+the editor's spawner restarts on a *new* port, so `regress.py crash` never reaches the refusal) reached the refusal
+path — refused at +0.05 s after connecting, back on the origin 160 ms later, across again 2.5 s after that, gap
+2.6 s against 6.1 s with the spawner — and exposed two more gaps behind it. The restarted cell served the second
+arrival before it had a link back to the origin (it learns the origin's address only when its cluster registration
+goes through, which the cluster delays until the dead incarnation has timed out), and dropped its ack on the floor;
+and the origin rolled that completed handoff back a second later when the *dead* incarnation's inbound connection
+timed out, although its own link to the new one was up — then held a puppet of a character that was living next
+door. Acks now wait for the link (`Handoff ack ... deferred`, then `sent N s late`), and an inbound loss rolls
+handoffs back only when the outbound link is down too; a destination that is really gone still trips the link-down
+grace or the ack guard. The faster path then showed one more thing: a rolled-back character waiting at the line
+crossed in the very tick the restarted cell's link came up, before a snapshot had reached it, so the cell spawned it
+fresh and re-summoned the pet (`promoted=False`, one swap on the observer). A handoff now waits
+`handoffLinkSettleSeconds` (0.5 s) after a link comes up.
+
 ## 8e. Degrading the link, and what it costs (2026-09-17)
 
 Cells are co-located to start with, and at most one datacentre later, so steady tens of milliseconds between them
@@ -371,31 +399,20 @@ trustworthy. Instrument first, then measure.
 
 ## 9. What we already know is missing
 
-- **The client ignores an explicit handoff refusal.** It waits out `migrationReadyTimeoutSeconds` instead of
-  falling back when the destination answers `enter-game` with an error, which is most of the cross-machine
-  crash gap (§8d). Acting on the refusal alone makes the crossing thrash, so it needs the origin's retry
-  policy designed with it. Measurements and two reverted experiments are in §8d.
-- **A direct login into a cell that outlived a central restart is kicked.** Narrowed on 2026-09-17, not solved.
-  **It needs the restart.** A second direct login into a long-lived cell, with nothing restarted in between,
-  works: the bot entered, registered, and no refusal was logged. So this is neither an uptime problem nor a
-  relogin problem — which is what it would have taken to make it a launch blocker, since every player
-  relogging into a cell would hit it. As it stands, a central restart is the only way in.
-  What happens, in order: the cell answers `enter-game validated+loaded ok=True` and loads the character at the
-  right position; the client loads the scene and sends client-ready; the cell receives it; and 0.4 s later the
-  cell drops the peer with `DisconnectPeerCalled` and **nothing written in any log on either machine**. Only a
-  *direct* login to such a cell fails; a character that enters on another cell and walks across is fine, which is
-  why only `seam` and `seamcold` fail under `--remote-persist`.
-
-  Ruled out: the four synchronous refusals in `DeserializeClientReadyData` (a diagnostic in the add-on names them
-  and stays silent here), a stale ghost or reserved arrival (`reserved=0`, no player ghosts on the cell
-  beforehand), and login routing (the central routes to E correctly). What remains is the async
-  `ValidatePlayerConnection` in `SetPlayerReadyRoutine`: not-ready, the database access-token check, or
-  "character already registered". All four of its paths log behind the manager's `LogError` flag, which is off on
-  a server build, which is why the kick is silent — turning that flag on for one run is the cheapest next step.
-
-  One trap for whoever picks this up: do **not** treat "the user is already registered on this cell" at
-  client-ready as the cause. Enter-game registers the user a moment earlier, so it is true on every successful
-  login too; a diagnostic that warned on it fired three times during a run that passed 16/16.
+- **A handoff refusal is acted on** — fixed 2026-09-18 (§8d, *Resolution*): the client honours a refusal per attempt,
+  and the origin doubts the link a client came back over instead of handing off across it again.
+- **Surviving a central restart** — fixed 2026-09-18. Reproduced on one machine once the harness killed the central
+  *while the user was online on another cell* (killing the bot first let its Remove through, which is why two earlier
+  reproductions passed). The kit keeps a per-cell mirror of every online user (`_socialCharactersByUserId`), fed only by
+  the central's `UpdateMapUser` Add/Remove relays, and `SetPlayerReadyRoutine` kicks — silently — anyone the mirror
+  lists ("prevent nested login"). The central keeps no user list, so when it dies every Remove in flight is lost; and on
+  re-registration the kit re-announces its *whole* mirror as Adds, which the fresh central relays to every cell, so one
+  stale entry anywhere made that user "online" everywhere and kicked from every cell. The add-on now purges every
+  mirrored user who is not connected locally the moment the cluster registration drops (`Cluster link lost: forgot N
+  mirrored user(s) of other cells, kept M of this cell's own`), before the kit's re-announcement. The client-ready
+  diagnostic names the three silent kicks (`the kit will kick silently -- alreadyInSocialRegistry=... databaseConnected=...`).
+  (An earlier version of this note blamed a suppressed `LogError`; the prefab's log level is Info, so kit errors do
+  log — the kick was silent because those three paths never log at all.)
 - **A map-spawn server on the second machine.** The central now asks the spawner that owns a cell rather than the
   first one it knows (each spawner advertises its `servedCells` when it registers, and the central routes by that,
   falling back to the old behaviour for a cell nobody claimed). What is still missing is a spawner *process* on the
@@ -418,6 +435,7 @@ trustworthy. Instrument first, then measure.
 | Peers register but no link comes up | The link port is the map port plus 10 000 and is a separate firewall entry. |
 | A scenario fails because a cell on the other machine never saw the tester | The tester logged in before that cell joined. Check for `phase=hold` in `Temp/ServerMesh.PlayStatus.txt` and for `remote cell E is serving` in the harness output (§8b, §9b). |
 | The tester never logs in and the run times out | A leftover `Temp/ServerMesh.HoldRequest.txt`. Delete it. |
+| `remoteb.py` prints `UNREACHABLE: ... Connection timed out` | B is asleep, off, or `sshd` has stopped. Before 2026-09-18 this looked exactly like an idle machine (`process: not running`, `cleared 0`, empty logs), because every command read stdout only; ssh's exit 255 now fails loudly. |
 | A cell on the other machine serves but every database call times out after the first scenario | It is a cell left over from the previous Play: the kit does not re-open the database connection. Restart it. |
 
 To find a blocking application rule:
