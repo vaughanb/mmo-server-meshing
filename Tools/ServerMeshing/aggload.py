@@ -7,7 +7,9 @@ compete for CPU, memory or the link the way busy ones do.
 Each step loads EVERY cell with N synthetic players (MESH_LOAD_CELL=all), warms up, then averages each cell's own
 Mesh stats over a measurement window and adds the machine's totals beside them:
 
-    frame mean/max ms   per cell. The rig targets 60 fps, so a mean over 16.7 ms is that cell saturating.
+    frame mean ms       per cell. CAPPED (the default) a cell reads 16.7 ms whenever it is keeping up, so the
+                        number only says saturated or not; --uncapped removes the cap so frame time IS the work per
+                        frame, which is what a threshold can be interpolated from.
     cpu %               per cell, of ONE core. Summed across cells this is cores in use.
     ws MB               per cell working set; summed, what the box needs.
     owned               what the cell actually holds. NOT the stats line's "players=", which counts CLIENT-
@@ -50,6 +52,10 @@ def main():
     ap.add_argument("--steps", default="50,100,150,200,250", help="synthetic players PER CELL at each step")
     ap.add_argument("--warmup", type=int, default=45)
     ap.add_argument("--measure", type=int, default=60)
+    ap.add_argument("--repeats", type=int, default=1, help="runs per step; the spread across them is the only "
+                                                          "honest guide to whether two steps really differ")
+    ap.add_argument("--uncapped", action="store_true",
+                    help="uncap the cells' frame rate so frame time measures WORK, not the 60 fps cap")
     args = ap.parse_args()
     steps = [int(x) for x in args.steps.split(",") if x.strip()]
 
@@ -59,40 +65,54 @@ def main():
         print("the editor is already in Play mode; stop it first"); return 2
 
     out_lines = [f"=== aggregate load, every cell on this machine ({time.strftime('%Y-%m-%d %H:%M')})", ""]
-    header = (f"{'per cell':<9} {'total':<7} {'owned':<6} {'frame mean':<11} {'frame max':<10} "
-              f"{'cpu % (sum)':<12} {'mem MB (sum)':<13} {'link kB/s':<10}")
+    header = (f"{'per cell':<9} {'total':<7} {'owned':<6} {'frame mean':<11} {'spread':<8} "
+              f"{'cores':<7} {'mem MB':<9} {'link kB/s':<10} runs")
     out_lines += [header, "-" * len(header)]
 
     for n in steps:
-        print(f"\n########## {n} players per cell", flush=True)
-        r.kill_bots()
-        r.db_reset((86.5, 0), (0, 0))
-        r.request_play("none", 0, 0, env={"MESH_LOAD_PLAYERS": str(n), "MESH_LOAD_CELL": "all"})
-        r.wait_status(lambda st: st.get("isPlaying") == "True", 90, "Play")
-        day = time.strftime("%Y-%m-%d")
-        time.sleep(args.warmup)
-        start = time.strftime("%H:%M:%S")
-        time.sleep(args.measure)
-        end = time.strftime("%H:%M:%S")
+        per_run = []
+        for attempt in range(1, args.repeats + 1):
+            print(f"\n########## {n} players per cell, run {attempt}/{args.repeats}", flush=True)
+            r.kill_bots()
+            r.db_reset((86.5, 0), (0, 0))
+            env = {"MESH_LOAD_PLAYERS": str(n), "MESH_LOAD_CELL": "all"}
+            if args.uncapped:
+                env["MESH_LOAD_UNCAPPED"] = "1"
+            r.request_play("none", 0, 0, env=env)
+            r.wait_status(lambda st: st.get("isPlaying") == "True", 90, "Play")
+            day = time.strftime("%Y-%m-%d")
+            time.sleep(args.warmup)
+            start_t = time.strftime("%H:%M:%S")
+            time.sleep(args.measure)
+            end_t = time.strftime("%H:%M:%S")
 
-        held, fmean, fmax, cpu, mem, link = 0, [], [], 0, 0, 0.0
-        for zone, map_id in r.ZONES:
-            rows = cell_rows(zone, map_id, start, end, day)
-            if not rows:
-                print(f"   {zone}: no stats in the window", flush=True)
-                continue
-            held += int(mean([x[5] for x in rows]))
-            fmean.append(mean([x[0] for x in rows]))
-            fmax.append(max(x[1] for x in rows))
-            cpu += int(mean([x[2] for x in rows]))
-            mem += int(mean([x[3] for x in rows]))
-            link += mean([x[6] for x in rows])
-            print(f"   {zone}: owned={int(mean([x[5] for x in rows]))} frame={mean([x[0] for x in rows]):.1f}/"
-                  f"{max(x[1] for x in rows):.1f} ms cpu={int(mean([x[2] for x in rows]))}% mem={int(mean([x[3] for x in rows]))} MB", flush=True)
+            held, fmean, fmax, cpu, mem, link = 0, [], [], 0, 0, 0.0
+            for zone, map_id in r.ZONES:
+                rows = cell_rows(zone, map_id, start_t, end_t, day)
+                if not rows:
+                    print(f"   {zone}: no stats in the window", flush=True)
+                    continue
+                held += int(mean([x[5] for x in rows]))
+                fmean.append(mean([x[0] for x in rows]))
+                fmax.append(max(x[1] for x in rows))
+                cpu += int(mean([x[2] for x in rows]))
+                mem += int(mean([x[3] for x in rows]))
+                link += mean([x[6] for x in rows])
+            if fmean:
+                per_run.append((held, mean(fmean), max(fmax), cpu, mem, link))
+                print(f"   run {attempt}: owned={held} frame mean={mean(fmean):.1f} ms "
+                      f"cores={cpu / 100:.1f} mem={mem} MB link={link:.0f} kB/s", flush=True)
+            r.stop_play()
 
-        out_lines.append(f"{n:<9} {n * len(r.ZONES):<7} {held:<6} {mean(fmean):<11.1f} {max(fmax) if fmax else 0:<10.1f} "
-                         f"{cpu:<12} {mem:<13} {link:<10.1f}")
-        r.stop_play()
+        if not per_run:
+            out_lines.append(f"{n:<9} {n * len(r.ZONES):<7} (no data)")
+            continue
+        frames = [x[1] for x in per_run]
+        out_lines.append(f"{n:<9} {n * len(r.ZONES):<7} {int(mean([x[0] for x in per_run])):<6} "
+                         f"{mean(frames):<11.1f} {min(frames):.1f}-{max(frames):<7.1f} "
+                         f"{mean([x[3] / 100.0 for x in per_run]):<7.1f} "
+                         f"{int(mean([x[4] for x in per_run])):<9} "
+                         f"{mean([x[5] for x in per_run]):<10.0f} {len(per_run)}")
 
     text = "\n".join(out_lines)
     print("\n" + text, flush=True)

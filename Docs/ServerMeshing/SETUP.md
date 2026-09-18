@@ -174,6 +174,26 @@ All on `MeshMapNetworkManager` (the map-manager prefab). Defaults are the values
 line every 10 s reports players, owned and ghost counts, link traffic per neighbour, handoffs (mean/max ms), ghost
 steering error, frame time, CPU, memory and client send rate.
 
+## 5a. How many players a cell holds
+
+Measured on a 16-core box, five cells busy at once, three runs per step (`Tools/ServerMeshing/aggload.py`):
+
+| players per cell | work per frame | fits 60 Hz (16.7 ms) | fits 30 Hz (33 ms) |
+|---|---|---|---|
+| 50 | 3.0 ms | yes | yes |
+| 100 | 7.6 ms | yes | yes |
+| 150 | 13.8 ms | **yes, at the edge** | yes |
+| 200 | 21.3 ms | no | yes |
+| 250 | 27.3 ms | no | **yes, at the edge** |
+
+A cell is one single-threaded process, so this is a per-cell limit: more cores do not raise it, more cells do. Plan
+about 150 players per cell at 60 Hz or 250 at 30 Hz, and budget **1.2 to 1.5 cores per cell** (about half of that is
+outside the frame loop) and ~200 MB.
+
+**Do not read the `Mesh stats` frame mean as saturation on a capped cell.** The frame limiter delivers ~17.4 ms
+whatever the load, so a cell with nine milliseconds of headroom still reports above the 16.7 ms budget. Measure with
+`aggload.py --uncapped`, where frame time is the work per frame, and compare that against the tick budget.
+
 ## 6. The database
 
 The add-on stores nothing of its own: characters, buildings and items go through the kit's database manager as usual, so
