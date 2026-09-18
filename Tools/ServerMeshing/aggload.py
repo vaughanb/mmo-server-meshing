@@ -56,6 +56,10 @@ def main():
                                                           "honest guide to whether two steps really differ")
     ap.add_argument("--uncapped", action="store_true",
                     help="uncap the cells' frame rate so frame time measures WORK, not the 60 fps cap")
+    ap.add_argument("--cells", default="all",
+                    help="which cells carry load (comma list, or all). Uncapped cells spin, so ten of them demand "
+                         "~20 cores on any box and the contention masquerades as per-cell cost; loading a fixed "
+                         "few while the rest idle is how to compare rigs of different cell counts fairly.")
     args = ap.parse_args()
     steps = [int(x) for x in args.steps.split(",") if x.strip()]
 
@@ -75,7 +79,7 @@ def main():
             print(f"\n########## {n} players per cell, run {attempt}/{args.repeats}", flush=True)
             r.kill_bots()
             r.db_reset((86.5, 0), (0, 0))
-            env = {"MESH_LOAD_PLAYERS": str(n), "MESH_LOAD_CELL": "all"}
+            env = {"MESH_LOAD_PLAYERS": str(n), "MESH_LOAD_CELL": args.cells}
             if args.uncapped:
                 env["MESH_LOAD_UNCAPPED"] = "1"
             r.request_play("none", 0, 0, env=env)

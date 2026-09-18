@@ -176,7 +176,22 @@ steering error, frame time, CPU, memory and client send rate.
 
 ## 5a. How many players a cell holds
 
-Measured on a 16-core box, five cells busy at once, three runs per step (`Tools/ServerMeshing/aggload.py`):
+**A cell's cost depends on how busy its NEIGHBOURS are, not only on its own occupancy.** It simulates its own
+players and also holds a puppet of every entity standing in the band on the other side of each shared edge, so a
+cell surrounded by full cells does far more work than the same cell surrounded by empty ones. Measured on a 16-core
+box at 100 players per cell, varying only how many neighbours carried load:
+
+| loaded neighbours | work per frame |
+|---|---|
+| 0 | 3.2 ms |
+| 1 | 6.4 ms |
+| 3 | 7.6 ms |
+| 8 | 12.8 ms |
+
+One loaded neighbour doubles it. **Size a cell for the world you expect to be full, not for a cell measured on its
+own**, and treat any single-cell benchmark as a lower bound.
+
+With three loaded neighbours, five cells busy, three runs per step:
 
 | players per cell | work per frame | fits 60 Hz (16.7 ms) | fits 30 Hz (33 ms) |
 |---|---|---|---|
@@ -187,8 +202,12 @@ Measured on a 16-core box, five cells busy at once, three runs per step (`Tools/
 | 250 | 27.3 ms | no | **yes, at the edge** |
 
 A cell is one single-threaded process, so this is a per-cell limit: more cores do not raise it, more cells do. Plan
-about 150 players per cell at 60 Hz or 250 at 30 Hz, and budget **1.2 to 1.5 cores per cell** (about half of that is
-outside the frame loop) and ~200 MB.
+about 150 players per cell at 60 Hz or 250 at 30 Hz **in a partly-populated world**, expect less when every
+neighbour is full, and budget ~1.2 to 1.5 cores per cell and ~200 MB.
+
+The band is what drives the neighbour cost, and it is wide relative to these cells: 80 m of an 800 m perimeter on a
+200 m cell leaves only a 40x40 m interior that is in nobody's band. Doubling the cell edge to 400 m halves the
+fraction of a neighbour's players you have to hold, which is the lever to reach if ghosting dominates.
 
 **Do not read the `Mesh stats` frame mean as saturation on a capped cell.** The frame limiter delivers ~17.4 ms
 whatever the load, so a cell with nine milliseconds of headroom still reports above the 16.7 ms budget. Measure with

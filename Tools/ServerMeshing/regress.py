@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """Server Meshing regression harness (DESIGN.md §16 / changelog 0.43).
 
 Drives the 2x2 rig end to end and grades each scenario from the logs:
@@ -34,7 +34,10 @@ HOLD = os.path.join(TEMP, "ServerMesh.HoldRequest.txt")
 LOGS = os.path.join(ROOT, "Logs")
 MAP = "ServerMeshTestMap"
 MAP2 = "ServerMeshTestMap2"   # placed 400 m east of MAP in the world registry; its only cell C2 touches E
-ZONES = [("C", MAP), ("E", MAP), ("N", MAP), ("NE", MAP), ("C2", MAP2)]
+# The test map is a 3x3 grid; C/E/N/NE keep the world positions every scenario was written against, and the
+# five added cells surround them, so a crossing now happens with eight neighbours rather than three.
+ZONES = [("SW", MAP), ("S", MAP), ("SE", MAP), ("W", MAP), ("C", MAP), ("E", MAP),
+         ("NW", MAP), ("N", MAP), ("NE", MAP), ("C2", MAP2)]
 TESTER = "493cd2454f4949ebbf2f09748fe78af8"   # MeshTester2 (the editor client)
 BOT = "8cb502da59bf43b4a654875dc2934c11"      # meshbotChar (the headless bot)
 ITEM_BUILDING, ITEM_YIELD, ITEM_SKILL = 1802134084, 970799895, 357861288

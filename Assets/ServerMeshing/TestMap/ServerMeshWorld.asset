@@ -15,14 +15,19 @@ MonoBehaviour:
   maps:
   - mapId: ServerMeshTestMap
     worldOrigin: {x: 0, y: 0, z: 0}
-    gridOrigin: {x: -100, y: 0, z: -100}
+    gridOrigin: {x: -300, y: 0, z: -300}
     cellSize: 200
-    columns: 2
-    rows: 2
+    columns: 3
+    rows: 3
     cellIdFormat: '{map}-{x}-{y}'
     cellIds:
+    - SW
+    - S
+    - SE
+    - W
     - C
     - E
+    - NW
     - N
     - NE
   - mapId: ServerMeshTestMap2
