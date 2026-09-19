@@ -27,6 +27,8 @@
 *.apk
 *.aab
 *.unitypackage
+# ...except the built add-on packages, which are what the Addon Manager downloads
+!/Addons/*/dist/*.unitypackage
 crashlytics-build.properties
 sysinfo.txt
 

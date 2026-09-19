@@ -288,14 +288,24 @@ and, later, several hosts all reach one database, and SQLite is a single file on
 
 ## 10. Packaging
 
-**Server Meshing ▸ Build Packages** writes two Unity packages to `Build/Packages/`:
+**Server Meshing ▸ Build Packages** writes two add-ons into the repository's `Addons/` tree, in the layout the Open
+MMORPG Addon Manager expects (`Addons/<AddOn>/dist/<AddOn>.unitypackage` beside a generated `package.json`, with a
+hand-written `README.md` and `screenshot.png`; `Addons/README.md` has the rebuild and submission notes):
 
-- `ServerMeshing-<version>.unitypackage` — the add-on (`Assets/ServerMeshing/Mesh`, runtime and Editor) with this guide,
-  DESIGN.md and MULTIHOST.md under `Documentation/`, and the top-level README. The spike notes, the upstream patch series and the raw
-  capacity table stay in the repository. Import it into any
-  project that has OpenMMORPG installed (master at or after the four core changes of 2026-09-15), then follow §4.
-- `ServerMeshing-TestRig-<version>.unitypackage` — `Assets/ServerMeshing/TestMap` (the two test maps, test items,
-  auto client, launcher, play runner, load generator) plus `TestMap/Tools/` (the regression and capacity harnesses).
-  It references the kit's demo (the enemy prefab, default weapon item and type), so it needs `BaseDemo` present.
+- `ServerMeshing.unitypackage` — the add-on (`Assets/ServerMeshing/Mesh`, runtime and Editor) with this guide,
+  DESIGN.md and MULTIHOST.md under `Documentation/`, and the top-level README. The spike notes, the upstream patch
+  series and the raw capacity table stay in the repository. Import it into any project that has OpenMMORPG installed
+  (master at or after the four core changes of 2026-09-15), then follow §4.
+- `ServerMeshingTestRig.unitypackage` — `Assets/ServerMeshing/TestMap` (the two test maps, test items, auto client,
+  launcher, play runner, load generator) plus a reference copy of the harnesses under `TestMap/Tools/`. It references
+  the kit's demo (the enemy prefab, default weapon item and type), so it needs `BaseDemo` present, and it declares the
+  add-on as a dependency. The harnesses assume the repository layout (`Tools/ServerMeshing/`, `Build/Server/`,
+  `Config/`), so copy them there rather than running them from inside `Assets`.
 
-Dependencies are not followed on export, so neither package carries any kit or demo asset.
+Each package carries an empty, extensionless file named after the add-on's guid; the Addon Manager uses it to spot an
+installed add-on, so the guid never changes once published. Version, update date, guids and descriptions live in
+`Mesh/Editor/ServerMeshPackageBuilder.cs`. Batch mode:
+
+```
+Unity.exe -batchmode -quit -projectPath <repo> -executeMethod MultiplayerARPG.MMO.Mesh.Editor.ServerMeshPackageBuilder.BuildAll
+```

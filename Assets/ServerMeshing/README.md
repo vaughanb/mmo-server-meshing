@@ -9,8 +9,8 @@ upstream OpenMMORPG master since 2026-09-15.
 
 | Package | Contents | Needs |
 |---|---|---|
-| `ServerMeshing-<version>.unitypackage` | `Assets/ServerMeshing/Mesh` (runtime + Editor), `Assets/ServerMeshing/Documentation` (the setup guide, the design record and the two-machine guide) | OpenMMORPG (master at or after 2026-09-15, which carries the four core changes the add-on relies on) |
-| `ServerMeshing-TestRig-<version>.unitypackage` | `Assets/ServerMeshing/TestMap`: the two test maps, test items, auto client, launcher, play runner, load generator, and `TestMap/Tools` (the regression and capacity harnesses, Python) | the add-on package and the kit's demo (`BaseDemo`: the enemy prefab, the default weapon item and type are referenced by the test data and scenes) |
+| `ServerMeshing.unitypackage` | `Assets/ServerMeshing/Mesh` (runtime + Editor), `Assets/ServerMeshing/Documentation` (the setup guide, the design record and the two-machine guide) | OpenMMORPG (master at or after 2026-09-15, which carries the four core changes the add-on relies on) |
+| `ServerMeshingTestRig.unitypackage` | `Assets/ServerMeshing/TestMap`: the two test maps, test items, auto client, launcher, play runner, load generator, and `TestMap/Tools` (the regression and capacity harnesses, Python) | the add-on package and the kit's demo (`BaseDemo`: the enemy prefab, the default weapon item and type are referenced by the test data and scenes) |
 
 ## Start here
 
@@ -31,4 +31,11 @@ Documentation/              SETUP.md, DESIGN.md and MULTIHOST.md (in the package
 TestMap/                    the test rig (separate package)
 ```
 
-Build the packages with **Server Meshing ▸ Build Packages**; they land in `Build/Packages/`.
+Build the packages with **Server Meshing ▸ Build Packages**. They land in the repository's `Addons/` tree in the layout
+the Open MMORPG Addon Manager expects — `Addons/<AddOn>/dist/<AddOn>.unitypackage` beside a generated `package.json`,
+with the hand-written `README.md` and `screenshot.png` — and each package carries the empty, extensionless marker file
+named after the add-on's guid that the Addon Manager uses to spot an installed add-on. In batch mode:
+
+```
+Unity.exe -batchmode -quit -projectPath <repo> -executeMethod MultiplayerARPG.MMO.Mesh.Editor.ServerMeshPackageBuilder.BuildAll
+```
