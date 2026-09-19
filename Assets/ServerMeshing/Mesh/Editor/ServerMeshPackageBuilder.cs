@@ -26,6 +26,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Text;
+using System.Text.RegularExpressions;
 using UnityEditor;
 using UnityEngine;
 
@@ -90,6 +91,8 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             MarkerFolder = AddOnRoot + "/TestMap",
             ExportPaths = new[] { AddOnRoot + "/TestMap" },
         };
+
+        private static readonly Addon[] AllAddons = { MeshAddon, TestRigAddon };
 
         [MenuItem("Server Meshing/Build Packages")]
         public static void BuildAllFromMenu()
@@ -161,6 +164,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             // export paths can be checked or exported.
             AssetDatabase.Refresh();
             addon.Validate();
+            CheckStrayReferences(addon);
 
             string distDir = Path.Combine(ProjectRoot(), "Addons", addon.Folder, "dist");
             Directory.CreateDirectory(distDir);
@@ -189,6 +193,44 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
 
             File.WriteAllText(Path.Combine(distDir, "package.json"), Manifest(addon), new UTF8Encoding(false));
             return file;
+        }
+
+        // A script the package carries must not use a type declared in a script it leaves behind — unless a declared
+        // dependency carries that script. Runtime code that still lived in the spike and rig folders shipped that way
+        // once (GhostSuppression, ServerMeshZoneBootstrap, the ProcessArguments partial), and the target project only
+        // found out at compile time. Declarations are matched at the start of a line so a "class" in a comment does not
+        // count; a reference is any whole-word use of the name, which errs on the side of failing the build.
+        private static void CheckStrayReferences(Addon addon)
+        {
+            List<string> carried = new List<string>(addon.ExportPaths);
+            foreach (string guid in addon.Dependencies ?? new string[0])
+                foreach (Addon other in AllAddons)
+                    if (other.Guid == guid)
+                        carried.AddRange(other.ExportPaths);
+            bool Carried(string assetPath) => carried.Exists(p => assetPath == p || assetPath.StartsWith(p + "/"));
+
+            string root = Path.Combine(ProjectRoot(), AddOnRoot.Replace('/', Path.DirectorySeparatorChar));
+            Regex declaration = new Regex(@"^\s*(?:(?:public|internal|private|protected|static|sealed|abstract|partial)\s+)*(?:class|struct|enum|interface)\s+([A-Za-z_]\w*)", RegexOptions.Multiline);
+            Dictionary<string, string> leftBehind = new Dictionary<string, string>(); // type -> declaring asset path
+            List<KeyValuePair<string, string>> shipped = new List<KeyValuePair<string, string>>(); // asset path, text
+            foreach (string file in Directory.GetFiles(root, "*.cs", SearchOption.AllDirectories))
+            {
+                string assetPath = AddOnRoot + "/" + file.Substring(root.Length).TrimStart(Path.DirectorySeparatorChar, '/').Replace('\\', '/');
+                string text = File.ReadAllText(file);
+                if (Carried(assetPath))
+                    shipped.Add(new KeyValuePair<string, string>(assetPath, text));
+                else
+                    foreach (Match m in declaration.Matches(text))
+                        leftBehind[m.Groups[1].Value] = assetPath;
+            }
+
+            List<string> strays = new List<string>();
+            foreach (KeyValuePair<string, string> script in shipped)
+                foreach (KeyValuePair<string, string> type in leftBehind)
+                    if (Regex.IsMatch(script.Value, $@"\b{Regex.Escape(type.Key)}\b"))
+                        strays.Add($"{script.Key} uses {type.Key} ({type.Value})");
+            if (strays.Count > 0)
+                throw new InvalidOperationException($"{addon.Name}: the package would not compile on its own:\n  " + string.Join("\n  ", strays));
         }
 
         // package.json in the Addon Manager's field order. Hand-written rather than JsonUtility, which cannot express the
