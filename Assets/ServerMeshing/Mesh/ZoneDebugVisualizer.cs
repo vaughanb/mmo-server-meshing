@@ -51,6 +51,8 @@ namespace MultiplayerARPG.MMO.Mesh
             for (int i = 0; i < cells.Count; ++i)
             {
                 MeshCell cell = cells[i];
+                if (cell.owned.IsEmpty)
+                    continue;   // a dynamic cell being made or emptied owns nothing to draw
                 Vector3 min = new Vector3(cell.worldMinX, 0f, cell.worldMinZ) - cell.frameOrigin;
                 Vector3 max = new Vector3(cell.worldMaxX, 0f, cell.worldMaxZ) - cell.frameOrigin;
                 Vector3 bl = new Vector3(min.x, 0f, min.z), br = new Vector3(max.x, 0f, min.z), tl = new Vector3(min.x, 0f, max.z), tr = new Vector3(max.x, 0f, max.z);
@@ -89,7 +91,7 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 BasePlayerCharacterEntity player = GameInstance.PlayingCharacterEntity;
                 MeshCell cell = player != null ? world.CellAt(mapId, player.EntityTransform.position) : null;
-                if (cell != null)
+                if (cell != null && !cell.owned.IsEmpty)
                 {
                     Vector3 min = new Vector3(cell.worldMinX, 0f, cell.worldMinZ) - cell.frameOrigin;
                     Vector3 size = new Vector3(cell.worldMaxX - cell.worldMinX, 1f, cell.worldMaxZ - cell.worldMinZ);

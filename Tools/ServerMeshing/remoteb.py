@@ -12,11 +12,19 @@ so B needs nothing but the OpenSSH server, the build unpacked somewhere, and thi
     python Tools/ServerMeshing/remoteb.py clearmarkers   delete B's one-shot fault markers before a crash test
     python Tools/ServerMeshing/remoteb.py impair --profile loss2   degrade B's UDP link to A (see PROFILES)
     python Tools/ServerMeshing/remoteb.py impair --profile off      stop degrading it
+    python Tools/ServerMeshing/remoteb.py sink-start --sink-port 7770 [--sink-count 50] [--sink-base 9000]
+                                         start the phantom sink (Phase 0 step 5) against A's cell on that port
+    python Tools/ServerMeshing/remoteb.py sink-stop  stop it (start/stop/status only ever count and stop cells)
 
 Defaults match Docs/ServerMeshing/MULTIHOST.md; override with --host/--user/--key/--dir or the MESH_B_* environment
 variables. Nothing here changes B's configuration: it only starts, stops and reads.
 """
-import argparse, hashlib, os, subprocess, sys, time
+import argparse
+import hashlib
+import os
+import subprocess
+import sys
+import time
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 CRLF = "\r\n"
@@ -49,7 +57,7 @@ PROFILES = {
 
 
 def clean(text):
-    return "\n".join(l for l in text.splitlines() if not any(n in l for n in NOISE))
+    return "\n".join(line for line in text.splitlines() if not any(n in line for n in NOISE))
 
 
 class Unreachable(RuntimeError):
@@ -69,9 +77,82 @@ def ssh(args, command, timeout=120):
     return clean(r.stdout).strip(), err, r.returncode
 
 
+# The phantom sink (Phase 0 step 5) is the same executable as a cell, told apart by its command line, which
+# Get-Process cannot read: these filters list Win32_Process instead. A cell is any kit process without the sink flag.
+SINK_FLAG = "-meshPhantomSink"
+IS_CELL = "($_.Name -eq 'kit-ce-project.exe' -and $_.CommandLine -notlike '*" + SINK_FLAG + "*')"
+IS_SINK = "($_.Name -eq 'kit-ce-project.exe' -and $_.CommandLine -like '*" + SINK_FLAG + "*')"
+# Stop filters also catch the launch scripts. Their own text names those scripts, so the session running one (and
+# the shell sshd wrapped it in) matches too: excluded, or the command kills its own ssh session (ssh exit 255).
+NOT_THIS_SESSION = ("$me = $PID; $parent = (Get-CimInstance Win32_Process -Filter \"ProcessId=$PID\").ParentProcessId; "
+                    "Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $me -and $_.ProcessId -ne $parent")
+STOP_CELLS = IS_CELL + " -or $_.CommandLine -like '*start-cell-*'"
+STOP_SINK = "$_.CommandLine -like '*" + SINK_FLAG + "*' -or $_.CommandLine -like '*start-sink*'"
+
+
+def count_command(test):
+    """The PowerShell that prints how many processes on B pass a Where-Object test."""
+    return "@(Get-CimInstance Win32_Process | Where-Object { " + test + " }).Count"
+
+
+def stop_command(test, remaining):
+    """The PowerShell that kills every process passing a test except this ssh session, then counts `remaining`."""
+    return (NOT_THIS_SESSION + " -and (" + test + ") } | "
+            "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; Start-Sleep 1; "
+            + count_command(remaining))
+
+
 def running(args):
-    out, _, _ = ssh(args, "(Get-Process kit-ce-project -ErrorAction SilentlyContinue).Count")
+    """Whether B runs a cell (a phantom sink alone does not count)."""
+    out, _, _ = ssh(args, count_command(IS_CELL))
     return out.strip() not in ("", "0")
+
+
+def sink_running(args):
+    """Whether B runs a phantom sink."""
+    out, _, _ = ssh(args, count_command(IS_SINK))
+    return out.strip() not in ("", "0")
+
+
+def sink_arguments(a_ip, port, count, base, directory):
+    """The sink process's command-line arguments: it connects `count` peers to A's cell at a_ip:port, from local ports
+    starting at `base` when given, and logs to <directory>\\Logs\\sink.log (a sink gets no kit file log of its own).
+    Raises ValueError for a port or base outside 1-65535 or a count below 1."""
+    if not 1 <= port <= 65535:
+        raise ValueError(f"sink port {port} is not from 1 to 65535")
+    if count < 1:
+        raise ValueError(f"sink count {count} is not at least 1")
+    target = f"{a_ip}:{port}:{count}"
+    if base is not None:
+        if not 1 <= base <= 65535:
+            raise ValueError(f"sink port base {base} is not from 1 to 65535")
+        target += f":{base}"
+    return " ".join(["-batchmode", "-nographics", SINK_FLAG, target, "-logFile", directory + "\\Logs\\sink.log"])
+
+
+def launch_detached(args, name, body):
+    """Copy a .cmd script to B's build folder and start it outside this SSH session; the launch output, or None when
+    the copy failed (printed).
+
+    A process started with Start-Process over SSH dies when the session closes: OpenSSH puts the session in a job
+    object and kills the tree with it. Launching the script through Win32_Process.Create escapes the job object, so
+    the process keeps running after we disconnect.
+    """
+    local = os.path.join(ROOT, "Logs", name)
+    os.makedirs(os.path.dirname(local), exist_ok=True)
+    with open(local, "w", newline="") as f:
+        f.write(CRLF.join(body + [""]))
+    remote = args.dir + "\\" + name
+    r = subprocess.run(["scp", "-i", args.key, "-o", "BatchMode=yes", local, f"{args.user}@{args.host}:{remote}"],
+                       capture_output=True, text=True, timeout=120)
+    if r.returncode != 0:
+        print("could not copy the launch script:", clean(r.stderr)[:200])
+        return None
+    command = ("$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments "
+               "@{ CommandLine = '" + remote + "'; CurrentDirectory = '" + args.dir + "' }; "
+               "'rc=' + $r.ReturnValue + ' pid=' + $r.ProcessId")
+    out, err, _ = ssh(args, command)
+    return out.strip() or err[:160]
 
 
 def log_path(args, cell, suffix="info"):
@@ -80,12 +161,7 @@ def log_path(args, cell, suffix="info"):
 
 
 def cmd_start(args):
-    """Launch the cell on B, detached from this SSH session.
-
-    A process started with Start-Process over SSH dies when the session closes: OpenSSH puts the session in a job
-    object and kills the tree with it. Writing a small .cmd and launching that through Win32_Process.Create escapes
-    the job object, so the cell keeps running after we disconnect.
-    """
+    """Launch the cell on B, detached from this SSH session (launch_detached)."""
     if running(args):
         print("B already has a server process running; stop it first.")
         return 1
@@ -104,22 +180,10 @@ def cmd_start(args):
         body += [":restart", "kit-ce-project.exe " + arguments, "timeout /t 2 /nobreak >nul", "goto restart"]
     else:
         body.append("kit-ce-project.exe " + arguments)
-    script = CRLF.join(body + [""])
-    local = os.path.join(ROOT, "Logs", "start-cell-" + args.cell + ".cmd")
-    os.makedirs(os.path.dirname(local), exist_ok=True)
-    with open(local, "w", newline="") as f:
-        f.write(script)
-    remote = args.dir + "\\start-cell-" + args.cell + ".cmd"
-    r = subprocess.run(["scp", "-i", args.key, "-o", "BatchMode=yes", local, f"{args.user}@{args.host}:{remote}"],
-                       capture_output=True, text=True, timeout=120)
-    if r.returncode != 0:
-        print("could not copy the launch script:", clean(r.stderr)[:200])
+    launched = launch_detached(args, "start-cell-" + args.cell + ".cmd", body)
+    if launched is None:
         return 1
-    command = ("$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments "
-               "@{ CommandLine = '" + remote + "'; CurrentDirectory = '" + args.dir + "' }; "
-               "'rc=' + $r.ReturnValue + ' pid=' + $r.ProcessId")
-    out, err, _ = ssh(args, command)
-    print("launch:", out.strip() or err[:160])
+    print("launch:", launched)
     for _ in range(12):
         time.sleep(2)
         if running(args):
@@ -190,15 +254,44 @@ def cmd_impair(args):
 
 
 def cmd_stop(args):
-    # Also kill the launcher script: with --restart it would otherwise start the cell straight back up. The filter
-    # text itself contains 'start-cell-', so the session running this command (and the shell sshd wrapped it in)
-    # matches too: excluded, or the command kills its own ssh session and reports as ssh exit 255 (UNREACHABLE).
-    out, _, _ = ssh(args, "$me = $PID; $parent = (Get-CimInstance Win32_Process -Filter \"ProcessId=$PID\").ParentProcessId; "
-                          "Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $me -and $_.ProcessId -ne $parent -and "
-                          "($_.Name -eq 'kit-ce-project.exe' -or $_.CommandLine -like '*start-cell-*') } | "
-                          "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; Start-Sleep 1; "
-                          "(Get-Process kit-ce-project -ErrorAction SilentlyContinue).Count")
+    # Also kill the launcher script: with --restart it would otherwise start the cell straight back up. A phantom
+    # sink is left running (sink-stop stops it).
+    out, _, _ = ssh(args, stop_command(STOP_CELLS, IS_CELL))
     print("B server processes remaining:", out.strip() or "0")
+    return 0
+
+
+def cmd_sink_start(args):
+    """Launch the phantom sink on B (Phase 0 step 5), detached like a cell: --sink-count peers connect to A's cell on
+    --sink-port, the port its 'Phantoms: cell C port N' line names."""
+    if args.sink_port is None:
+        print("sink-start needs --sink-port: A's cell port, from its 'Phantoms: cell C port N' line")
+        return 2
+    if sink_running(args):
+        print("B already runs a phantom sink; sink-stop it first.")
+        return 1
+    try:
+        arguments = sink_arguments(args.a_ip, args.sink_port, args.sink_count, args.sink_base, args.dir)
+    except ValueError as e:
+        print(f"sink-start: {e}")
+        return 2
+    launched = launch_detached(args, "start-sink.cmd", ["@echo off", 'cd /d "' + args.dir + '"',
+                                                        "kit-ce-project.exe " + arguments])
+    if launched is None:
+        return 1
+    print("launch:", launched)
+    for _ in range(12):
+        time.sleep(2)
+        if sink_running(args):
+            print(f"phantom sink is running on {args.host}: {args.sink_count} peers to {args.a_ip}:{args.sink_port}")
+            return 0
+    print(f"the sink did not stay up; read {args.dir}\\Logs\\sink.log")
+    return 1
+
+
+def cmd_sink_stop(args):
+    out, _, _ = ssh(args, stop_command(STOP_SINK, IS_SINK))
+    print("B phantom sinks remaining:", out.strip() or "0")
     return 0
 
 
@@ -267,6 +360,9 @@ def cmd_deploy(args):
     if running(args):
         print("stopping B's cell first (a running process locks its own files)")
         cmd_stop(args)
+    if sink_running(args):
+        print("stopping B's phantom sink first (the same executable)")
+        cmd_sink_stop(args)
     entries = [e for e in sorted(os.listdir(src_root)) if e not in DEPLOY_SKIP]
     total = sum(os.path.getsize(os.path.join(dp, f))
                 for e in entries for dp, _, fs in os.walk(os.path.join(src_root, e)) for f in fs) \
@@ -298,7 +394,12 @@ def cmd_deploy(args):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["start", "stop", "status", "log", "fetch", "deploy", "clearmarkers", "impair"])
+    ap.add_argument("command", choices=["start", "stop", "status", "log", "fetch", "deploy", "clearmarkers", "impair",
+                                        "sink-start", "sink-stop"])
+    ap.add_argument("--sink-port", type=int, default=None,
+                    help="sink-start: A's cell port, from its 'Phantoms: cell C port N' line (required)")
+    ap.add_argument("--sink-count", type=int, default=50, help="sink-start: peers to connect (default 50)")
+    ap.add_argument("--sink-base", type=int, default=None, help="sink-start: the peers' first local port")
     ap.add_argument("--profile", default="off", help="impairment profile: " + ", ".join(sorted(PROFILES)))
     ap.add_argument("--clumsy", default=os.environ.get("MESH_B_CLUMSY", r"C:\MeshTest\clumsy"),
                     help="where clumsy lives on B")
@@ -316,8 +417,8 @@ def main():
     args = ap.parse_args()
     try:
         return {"start": cmd_start, "stop": cmd_stop, "status": cmd_status, "log": cmd_log, "fetch": cmd_fetch,
-                "deploy": cmd_deploy, "clearmarkers": cmd_clearmarkers,
-                "impair": cmd_impair}[args.command](args)
+                "deploy": cmd_deploy, "clearmarkers": cmd_clearmarkers, "impair": cmd_impair,
+                "sink-start": cmd_sink_start, "sink-stop": cmd_sink_stop}[args.command](args)
     except Unreachable as e:
         print(f"UNREACHABLE: {e}")
         return 3

@@ -1,7 +1,7 @@
 # Core changes to upstream (open-mmorpg/OpenMMORPG)
 
-The server-meshing add-on needed four small changes in the kit itself (DESIGN.md §17, CE-6 to CE-9). They are
-kept here as a patch series against the upstream `develop` branch, one commit per change, with upstream-neutral
+The server-meshing add-on needed a few small changes in the kit itself (DESIGN.md §17: CE-6 to CE-9, CE-11 to CE-13).
+They are kept here as a patch series against the upstream `develop` branch, one commit per change, with upstream-neutral
 wording (no add-on markers). The local copy of the kit in `Assets/OpenMMORPG/` carries the same changes with
 `MESH-EDIT` markers.
 
@@ -11,14 +11,30 @@ wording (no add-on markers). The local copy of the kit in `Assets/OpenMMORPG/` c
 | 0002 Wait for request responses per frame instead of polling every 100 ms (CE-6) | **performance** | `ThirdParty/LiteNetLibManager/Scripts/LiteNetLibClient.cs`, `LiteNetLibServer.cs` |
 | 0003 MonsterActivityComponent: make the subscriber gate a virtual IsWatched() (CE-7) | extension seam | `MonsterActivityComponent.cs` |
 | 0004 MapNetworkManager: let subclasses reach the pending spawn data (CE-8) | extension seam | `MapNetworkManager.cs` |
+| 0005 CharacterDataCache: drop the finalizer that released pooled collections off the main thread (CE-11) | **bug fix** | `CharacterDataCache.cs` |
+| 0006 Send one-shot movement flags to every receiver of a tick (CE-12) | **bug fix** | `IEntityMovementDataHandler.cs`, `BaseGameNetworkManager.cs`, `BuiltInEntityMovementFunctions3D.cs`, `NavMeshEntityMovement.cs` |
+| 0007 Read entity states synchronously and resume at each state's length (CE-13) | **bug fix** | `BaseGameNetworkManager.cs`, the five movement readers (`BuiltInEntityMovementFunctions3D.cs`, `NavMeshEntityMovement.cs`, `RigidBodyEntityMovement2D.cs`, `BuiltInSimpleEntityMovementFunctions3D.cs`, `SimpleNavMeshEntityMovement.cs`) |
 
-Total: 7 files, 30 insertions, 4 deletions. Verified against upstream `develop` at `aa8ecf1` (2026-09-15): every
+0001-0004: 7 files, 30 insertions, 4 deletions, verified against upstream `develop` at `aa8ecf1` (2026-09-15): every
 anchor line is present and unchanged, and the diff contains nothing but these lines (byte-order marks and line
 endings preserved).
 
+0006 and 0007 are the space team's kit patches #9 and #10 (their `VENDOR_PATCHES.md`), reviewed here on 2026-09-30
+and carried by both downstream kit copies. They are the same code as the space team's diffs, checked file by file
+with comments ignored. Only the comments were reworded upstream-neutral, and NavMesh's class line was applied by hand
+because upstream's class is not `partial`. 0007 applies on top of 0006. The add-on's state sender (Phase 0 step 6)
+calls `IEntityMovementServerStateFlags.ConsumeServerStateFlags()` from 0006, so it needs a kit that carries 0006.
+
 ## Status
 
-**Merged.** Fast-forwarded onto upstream `master` and `develop` on 2026-09-15 (aa8ecf1 → 98a2d18); [PR #1](https://github.com/open-mmorpg/OpenMMORPG/pull/1) records it. The patches stay here as the record of what changed in the kit and why.
+**0001-0004: merged.** Fast-forwarded onto upstream `master` and `develop` on 2026-09-15 (aa8ecf1 → 98a2d18); [PR #1](https://github.com/open-mmorpg/OpenMMORPG/pull/1) records it. The patches stay here as the record of what changed in the kit and why.
+
+**0005: merged.** [PR #2](https://github.com/open-mmorpg/OpenMMORPG/pull/2) merged it into `master` on 2026-10-01
+(UTC; e37cfe4), and `develop` was fast-forwarded to the same commit the same evening (5d308aa → e37cfe4).
+
+**0006-0007: merged.** Written against `develop` at e37cfe4 (2026-09-30) on the upstream branch `movement-state-fixes`;
+[PR #3](https://github.com/open-mmorpg/OpenMMORPG/pull/3) merged them into `develop` on 2026-10-02 (bb9895f), after the
+add-on's kit copy had compiled them (CE-12/CE-13), passed 1094 EditMode tests and passed accept-a on the rig.
 
 ## Pushing (how it was done; for a re-run)
 

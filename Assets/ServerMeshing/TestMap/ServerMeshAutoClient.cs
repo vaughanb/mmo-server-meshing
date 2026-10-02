@@ -18,6 +18,7 @@
 //
 // Enable with command-line `-meshAutoClient` (build) or the "Server Meshing/Auto Client" menu (editor).
 // Optional: -meshAutoMode walk|self|none  -meshChannel C  -meshUser name  -meshWalkX 130
+// -meshBotNetSeconds 5 logs a "Bot net window" line every 5 s (off unless given): the bot's own client traffic.
 
 using System.Collections;
 using System.Collections.Generic;
@@ -44,6 +45,8 @@ namespace MultiplayerARPG.MMO.Mesh
         public const string ARG_RETURN_X = "-meshReturnX";
         public const string ARG_SEAM_PRELOAD = "-meshSeamPreload"; // metres; 0 disables the seam pre-load (the kit reloads the scene at a seam crossing)
         public const string ARG_STOP_ON_MIGRATION = "-meshStopOnMigration"; // a walk leg ends when a migration completes (seam tests: the frame changes with the hop)
+        /// <summary>ARG_BOT_NET_SECONDS turns the Bot net window on: one line every that many seconds (bots get no environment, so this is an argument).</summary>
+        public const string ARG_BOT_NET_SECONDS = "-meshBotNetSeconds";
 
 #if UNITY_EDITOR
         public const string PREF_ENABLE = "ServerMesh.AutoClient.Enabled";
@@ -62,6 +65,13 @@ namespace MultiplayerARPG.MMO.Mesh
         public string username = "meshtest";
         public string password = "meshtest123";
         public string email = "meshtest@example.com";
+
+        /// <summary>RegistrationEmail is the email a bot registers with: one per user, so a login manager that requires unique
+        /// emails accepts every bot (they all used to register with the same address).</summary>
+        public string RegistrationEmail()
+        {
+            return string.Equals(username, "meshtest", System.StringComparison.OrdinalIgnoreCase) ? email : $"{username}@example.com";
+        }
         public string channelId = "C";
         public string characterName = "MeshTester";
         [Tooltip("Map the test expects to play on; an existing character on another map is skipped and a new one created.")]
@@ -83,6 +93,8 @@ namespace MultiplayerARPG.MMO.Mesh
         public bool stopWalkOnMigration = false;
         [Tooltip("If >= 0, overrides the map manager's seam pre-load distance on this client (0 = the kit reloads the scene at a seam).")]
         public float seamPreloadOverride = -1f;
+        [Tooltip("Seconds between Bot net window lines; 0 (the default) logs none.")]
+        public float botNetSeconds = 0f;
         [Tooltip("Seconds to wait after entering the map before starting the test.")]
         public float settleSeconds = 3f;
         [Tooltip("observe mode: seconds to watch for other player entities after arriving.")]
@@ -157,6 +169,7 @@ namespace MultiplayerARPG.MMO.Mesh
             string returnX = ReadArg(args, ARG_RETURN_X, null);
             string seamPreload = ReadArg(args, ARG_SEAM_PRELOAD, null);
             bool stopOnMigration = args.Contains(ARG_STOP_ON_MIGRATION);
+            string botNet = ReadArg(args, ARG_BOT_NET_SECONDS, null);
 #if UNITY_EDITOR
             if (!enabled && EditorPrefs.GetBool(PREF_ENABLE, false))
             {
@@ -186,6 +199,7 @@ namespace MultiplayerARPG.MMO.Mesh
             c.stopWalkOnMigration = stopOnMigration;
             if (!string.IsNullOrEmpty(returnX) && float.TryParse(returnX, out float rx)) c.walkReturnX = rx;
             if (!string.IsNullOrEmpty(seamPreload) && float.TryParse(seamPreload, out float sp)) c.seamPreloadOverride = sp;
+            if (!string.IsNullOrEmpty(botNet) && float.TryParse(botNet, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float bn) && bn > 0f) c.botNetSeconds = bn;
         }
 
         private static string ReadArg(string[] args, string key, string fallback)
@@ -206,8 +220,127 @@ namespace MultiplayerARPG.MMO.Mesh
         private void Start()
         {
             StartCoroutine(Run());
+            StartCoroutine(WatchMoveSpeedOverride());
             if (Application.isBatchMode)
                 StartCoroutine(HeadlessGuards());
+            if (botNetSeconds > 0f)
+                StartCoroutine(BotNetWindows());
+        }
+
+        /// <summary>
+        /// Every botNetSeconds, logs the Bot net window: the client NetManager's received and sent bytes and datagrams over
+        /// the window, migration hops, RTT and the other players in view. The kit builds a new client NetManager on every
+        /// connect and migration hop, so the manager is found again by reference each frame; a new one gets statistics on and
+        /// a fresh baseline, and the old one's last counts stay in the window.
+        /// </summary>
+        private IEnumerator BotNetWindows()
+        {
+            LiteNetLib.NetManager client = null;
+            long baseIn = 0, basePacketsIn = 0, baseOut = 0, basePacketsOut = 0;
+            long bytesIn = 0, packetsIn = 0, bytesOut = 0, packetsOut = 0;
+            int hopsBase = ClientMigrationController.CompletedCount;
+            float windowStart = Time.realtimeSinceStartup;
+            while (true)
+            {
+                BaseGameNetworkManager manager = BaseGameNetworkManager.Singleton;
+                LiteNetLibTransport transport = manager != null ? MeshTransportUnwrap.Innermost<LiteNetLibTransport>(manager.ClientTransport) : null;
+                LiteNetLib.NetManager current = transport != null ? transport.Client : null;
+                if (!ReferenceEquals(current, client))
+                {
+                    if (client != null)
+                    {
+                        bytesIn += client.Statistics.BytesReceived - baseIn;
+                        packetsIn += client.Statistics.PacketsReceived - basePacketsIn;
+                        bytesOut += client.Statistics.BytesSent - baseOut;
+                        packetsOut += client.Statistics.PacketsSent - basePacketsOut;
+                    }
+                    client = current;
+                    if (client != null)
+                    {
+                        client.EnableStatistics = true;
+                        baseIn = client.Statistics.BytesReceived;
+                        basePacketsIn = client.Statistics.PacketsReceived;
+                        baseOut = client.Statistics.BytesSent;
+                        basePacketsOut = client.Statistics.PacketsSent;
+                    }
+                }
+                float now = Time.realtimeSinceStartup;
+                if (now - windowStart >= botNetSeconds)
+                {
+                    long rtt = 0;
+                    if (client != null)
+                    {
+                        long received = client.Statistics.BytesReceived, receivedPackets = client.Statistics.PacketsReceived;
+                        long sent = client.Statistics.BytesSent, sentPackets = client.Statistics.PacketsSent;
+                        bytesIn += received - baseIn;
+                        packetsIn += receivedPackets - basePacketsIn;
+                        bytesOut += sent - baseOut;
+                        packetsOut += sentPackets - basePacketsOut;
+                        baseIn = received;
+                        basePacketsIn = receivedPackets;
+                        baseOut = sent;
+                        basePacketsOut = sentPackets;
+                        if (client.FirstPeer != null)
+                            rtt = client.FirstPeer.RoundTripTime;
+                    }
+                    int hops = ClientMigrationController.CompletedCount - hopsBase;
+                    hopsBase = ClientMigrationController.CompletedCount;
+                    Log(BotNetWindowLine(now - windowStart, bytesIn, packetsIn, bytesOut, packetsOut, hops, rtt, CountOtherPlayers(), System.DateTime.UtcNow));
+                    bytesIn = packetsIn = bytesOut = packetsOut = 0;
+                    windowStart = now;
+                }
+                yield return null;
+            }
+        }
+
+        private static int CountOtherPlayers()
+        {
+            BasePlayerCharacterEntity own = GameInstance.PlayingCharacterEntity;
+            int seen = 0;
+            foreach (BasePlayerCharacterEntity player in FindObjectsByType<BasePlayerCharacterEntity>(FindObjectsSortMode.None))
+            {
+                if (player != null && player != own)
+                    ++seen;
+            }
+            return seen;
+        }
+
+        /// <summary>
+        /// BotNetWindowLine is the Bot net window line: in and out kB/s (1024 B) and datagrams/s over seconds, hops, RTT in ms,
+        /// the other players seen, and the UTC time (bot log lines carry no stamp). Invariant; negative or NaN values print
+        /// as 0, and every rate is 0 when the window has no length.
+        /// </summary>
+        public static string BotNetWindowLine(double seconds, long bytesIn, long packetsIn, long bytesOut, long packetsOut, int hops, long rttMs, int playersSeen, System.DateTime utcNow)
+        {
+            double s = seconds > 0 && !double.IsInfinity(seconds) ? seconds : 0;
+            System.Globalization.CultureInfo invariant = System.Globalization.CultureInfo.InvariantCulture;
+            return "Bot net window " + s.ToString("0.00", invariant) + " s: in " + BotNetRate(bytesIn / 1024.0, s).ToString("0.0", invariant) + " kB/s "
+                + BotNetRate(packetsIn, s).ToString("0", invariant) + " pkt/s out " + BotNetRate(bytesOut / 1024.0, s).ToString("0.0", invariant) + " kB/s "
+                + BotNetRate(packetsOut, s).ToString("0", invariant) + " pkt/s | hops " + System.Math.Max(0, hops).ToString(invariant)
+                + " | rtt " + System.Math.Max(0, rttMs).ToString(invariant) + " ms | players seen " + System.Math.Max(0, playersSeen).ToString(invariant)
+                + " | at " + utcNow.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", invariant);
+        }
+
+        private static double BotNetRate(double amount, double seconds) => seconds > 0 && amount > 0 ? amount / seconds : 0;
+
+        /// <summary>
+        /// Nothing in the rig sets the kit's move-speed override on a playing character, but a cell's puppet steering
+        /// does on puppets, and until 0.72 a promotion kept it: the client then ran at the puppet's catch-up speed, faster
+        /// after every crossing. Logged on every change so the harness fails any bot that ever carries one.
+        /// </summary>
+        private IEnumerator WatchMoveSpeedOverride()
+        {
+            WaitForSecondsRealtime wait = new WaitForSecondsRealtime(0.25f);
+            float logged = -1f;
+            while (true)
+            {
+                BasePlayerCharacterEntity p = GameInstance.PlayingCharacterEntity;
+                float value = p != null ? p.OverrideMoveSpeed : -1f;
+                if (value >= 0f && Mathf.Abs(value - logged) > 0.05f)
+                    Log($"Move speed override on the playing character: {value:0.0} m/s (normal {p.GetMoveSpeed_Implementation(p.MovementState, p.ExtraMovementState):0.0} m/s)");
+                logged = value;
+                yield return wait;
+            }
         }
 
         /// <summary>
@@ -310,7 +443,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 Log($"Login failed ({code}/{msg}); registering '{username}'");
                 Phase = "register";
                 done = false;
-                client.RequestUserRegister(username, password, email, (h, c, r) => { code = c; msg = r.message; done = true; });
+                client.RequestUserRegister(username, password, RegistrationEmail(), (h, c, r) => { code = c; msg = r.message; done = true; });
                 while (!done && Time.realtimeSinceStartup < deadline) yield return null;
                 if (code != AckResponseCode.Success) { Fail($"Register failed: {code}/{msg}"); yield break; }
                 Phase = "login2";
@@ -1032,6 +1165,13 @@ namespace MultiplayerARPG.MMO.Mesh
             float holdX = east ? observeGhostBeyondX + 0.5f : observeGhostBeyondX - 0.5f;
             bool Beyond(float x, float margin) => east ? x < holdX - margin : x > holdX + margin;
             float attackRange = Mathf.Max(1f, self.GetAttackDistance(false) - 0.3f);
+            // GetAttackDistance is where the kit starts an attack (0.5 m unless the weapon sets it), not how far the weapon
+            // reaches. The fighter may not cross the line to close in, so a target standing just past it (a monster hitting
+            // our puppet over there) was never shot at and the whole fight stalled (party, 2026-09-26): from the line, shoot.
+            bool reachLeftHand = false;
+            DamageInfo reachInfo = self.GetAvailableWeaponDamageInfo(ref reachLeftHand);
+            float shotReach = reachInfo.damageType == DamageType.Missile || reachInfo.damageType == DamageType.Raycast
+                ? Mathf.Max(attackRange, reachInfo.missileDistance * 0.8f) : attackRange;
             float end = Time.realtimeSinceStartup + 150f;
             float nextAttack = 0f, nextLog = 0f;
             BaseMonsterCharacterEntity target = null;
@@ -1051,14 +1191,14 @@ namespace MultiplayerARPG.MMO.Mesh
                 if ((sk.skillBuffType == Skill.SkillBuffType.BuffToAlly || sk.skillBuffType == Skill.SkillBuffType.BuffToTarget) && allySkillId == 0) allySkillId = sk.DataId;
             }
             Log($"fight: enemySkill={enemySkillId} allySkill={allySkillId}");
-            uint lastEnemyCastTarget = 0, lastItemCastTarget = 0; float nextAllyCast = 0f; int itemTries = 0;
+            uint lastEnemyCastTarget = 0, lastItemCastTarget = 0; float nextAllyCast = 0f, nextRefusalLog = 0f; int itemTries = 0;
             int skillItemIndex = -1;
             for (int i = 0; i < self.NonEquipItems.Count; ++i)
             {
                 BaseItem bagItem = self.NonEquipItems[i].GetItem();
                 if (bagItem != null && bagItem.IsSkill() && bagItem is ISkillItem) { skillItemIndex = i; break; }
             }
-            Log($"fight: skillItemSlot={skillItemIndex}");
+            Log($"fight: skillItemSlot={skillItemIndex} attackRange={attackRange:0.0}m shotReach={shotReach:0.0}m holdX={holdX:0.0}");
             HashSet<uint> dropsSeen = new HashSet<uint>();
             HashSet<uint> dropsTried = new HashSet<uint>();
             float nextPickup = 0f;
@@ -1092,7 +1232,9 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (target != null)
                 {
                     Vector3 toTarget = target.EntityTransform.position - self.EntityTransform.position; toTarget.y = 0f;
-                    if (toTarget.magnitude > attackRange)
+                    bool shootFromLine = Mathf.Abs(self.EntityTransform.position.x - holdX) < 0.3f
+                        && Beyond(target.EntityTransform.position.x, 0f) && toTarget.magnitude <= shotReach;
+                    if (toTarget.magnitude > attackRange && !shootFromLine)
                     {
                         Vector3 dest = target.EntityTransform.position - toTarget.normalized * (attackRange * 0.7f);
                         dest.x = east ? Mathf.Max(dest.x, holdX) : Mathf.Min(dest.x, holdX);
@@ -1123,8 +1265,16 @@ namespace MultiplayerARPG.MMO.Mesh
                             if (sent) { lastEnemyCastTarget = target.ObjectId; casts++; }
                             Log($"cast enemy skill {enemySkillId} on '{target.name}' sent={sent}");
                         }
-                        else
-                            self.Attack(ref whs);
+                        else if (!self.Attack(ref whs) && Time.realtimeSinceStartup >= nextRefusalLog)
+                        {
+                            // The kit refuses silently; name the state it checks (its action-delay gate cannot be read back).
+                            nextRefusalLog = Time.realtimeSinceStartup + 5f;
+                            bool leftHand = false;
+                            CharacterItem weapon = self.GetAvailableWeapon(ref leftHand);
+                            Log($"attack refused: sheathed={self.IsWeaponsSheathed} dead={self.IsDead()} attacking={self.IsAttacking} usingSkill={self.IsUsingSkill} "
+                                + $"reloading={self.IsReloading} action={self.IsPlayingActionAnimation()} disallowAttack={self.CachedData.DisallowAttack} "
+                                + $"ammo={self.ValidateAmmo(weapon, 1)} state={self.MovementState} extra={self.ExtraMovementState} buffs={self.Buffs.Count} dist={toTarget.magnitude:0.0}m");
+                        }
                     }
                     if (target.CurrentHp < targetHpStart) anyHurt = true;
                     minTargetHp = Mathf.Min(minTargetHp, target.CurrentHp);

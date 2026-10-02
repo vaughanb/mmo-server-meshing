@@ -70,6 +70,10 @@ namespace MultiplayerARPG.MMO.Mesh
             public string summonerMeshId;         // a pet puppet: mesh id of its summoner, from its snapshots
             public string summonId;               // ... and the CharacterSummon.id it is on that summoner
             public float holdUntil;               // a demoted handoff rolled back: kept (not stale) until then for the client's return
+            public float ownMoveSpeedOverride = -1f; // the kit's OverrideMoveSpeed before steering took it over (-1: none)
+            public MeshKinematicCharacterBody body;        // kinematic motion in the kit's handler slot (null: steered)
+            public IReadOnlyList<string> suppressedExtras; // what Ghostify silenced beyond its deny list, handed back to Unghostify
+            public MeshPuppetFallback refusal;             // why this puppet stays steered for good (handler, grid, install), or None
         }
 
         private MeshLinkServer _linkServer;
@@ -80,9 +84,6 @@ namespace MultiplayerARPG.MMO.Mesh
         private readonly Dictionary<string, HashSet<string>> _streamedToZone = new Dictionary<string, HashSet<string>>();     // zoneId -> ids streamed last tick
         private readonly Dictionary<string, HashSet<string>> _streamedPrevToZone = new Dictionary<string, HashSet<string>>(); // zoneId -> the spare set swapped in each tick
         private readonly List<string> _tmpIds = new List<string>();
-        private readonly OwnedTable<BaseCharacterEntity> _ownedCharacters = new OwnedTable<BaseCharacterEntity>(); // players + server-owned monsters
-        private readonly OwnedTable<ItemDropEntity> _ownedDrops = new OwnedTable<ItemDropEntity>();
-        private readonly OwnedTable<DamageableEntity> _ownedStatics = new OwnedTable<DamageableEntity>();         // harvestables + buildings
         private float _nextSnapshotTime;
         private float _nextLinkCheck;
 
@@ -102,6 +103,7 @@ namespace MultiplayerARPG.MMO.Mesh
         // budget is saturation), CPU time of the process and its working set, and the game transport's client traffic.
         private int _frameSamples; private float _frameSum, _frameMax;
         private System.TimeSpan _lastCpuTime; private float _lastCpuWall;
+        private float _lastStatsTime;
         private long _statsClientBytesOut, _statsClientPacketsOut;
 
         /// <summary>Test rig: an entity spawned by the load generator is owned like a registered player (streamed, banded).</summary>
@@ -125,6 +127,10 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private void LogMeshStats()
         {
+            // Rates over the time that actually passed: the stats tick runs inside a 0.1 s cadence and can slip.
+            float now = Time.unscaledTime;
+            float interval = _lastStatsTime > 0f && now > _lastStatsTime ? now - _lastStatsTime : Mathf.Max(0.001f, meshStatsIntervalSeconds);
+            _lastStatsTime = now;
             long bytesOut = 0, packetsOut = 0, bytesIn = 0, packetsIn = 0;
             System.Text.StringBuilder links = new System.Text.StringBuilder();
             foreach (KeyValuePair<string, MeshLinkClient> kv in _linkClients)
@@ -134,14 +140,14 @@ namespace MultiplayerARPG.MMO.Mesh
                 bytesOut += st.BytesSent; packetsOut += st.PacketsSent;
                 long prev = _statsLinkPrevOut.TryGetValue(kv.Key, out long pv) ? pv : 0;
                 _statsLinkPrevOut[kv.Key] = st.BytesSent;
-                links.Append(kv.Key).Append(kv.Value.IsConnected ? "=" : "(down)=").Append(((st.BytesSent - prev) / 1024f / meshStatsIntervalSeconds).ToString("0.0")).Append("kB/s ");
+                links.Append(' ').Append(kv.Key).Append(kv.Value.IsConnected ? "=" : "(down)=").Append(((st.BytesSent - prev) / 1024f / interval).ToString("0.0")).Append("kB/s");
             }
             NetStatistics sst = _linkServer != null ? _linkServer.Statistics : null;
             if (sst != null) { bytesIn = sst.BytesReceived; packetsIn = sst.PacketsReceived; }
-            float dOut = (bytesOut - _statsLinkBytesOut) / 1024f / meshStatsIntervalSeconds;
-            float dIn = (bytesIn - _statsLinkBytesIn) / 1024f / meshStatsIntervalSeconds;
-            float pOut = (packetsOut - _statsLinkPacketsOut) / meshStatsIntervalSeconds;
-            float pIn = (packetsIn - _statsLinkPacketsIn) / meshStatsIntervalSeconds;
+            float dOut = (bytesOut - _statsLinkBytesOut) / 1024f / interval;
+            float dIn = (bytesIn - _statsLinkBytesIn) / 1024f / interval;
+            float pOut = (packetsOut - _statsLinkPacketsOut) / interval;
+            float pIn = (packetsIn - _statsLinkPacketsIn) / interval;
             _statsLinkBytesOut = bytesOut; _statsLinkBytesIn = bytesIn; _statsLinkPacketsOut = packetsOut; _statsLinkPacketsIn = packetsIn;
             int players = 0;
             foreach (IPlayerCharacterData _ in ServerUserHandlers.GetPlayerCharacters()) players++;
@@ -151,21 +157,24 @@ namespace MultiplayerARPG.MMO.Mesh
             foreach (GhostStatic g in _ghostStatics.Values) { if (g.kind == GhostKind.ItemDrop) ghostDrops++; else ghostStatics++; }
             string handoffs = _statsHandoffs > 0 ? $"{_statsHandoffs} (mean {_statsHandoffSumMs / _statsHandoffs:0} ms, max {_statsHandoffMaxMs:0} ms)" : "0";
             string steer = _steerSamples > 0 ? $"{_steerSamples} samples, mean {_steerErrorSum / _steerSamples:0.00} m, max {_steerErrorMax:0.00} m" : "none";
-            System.Diagnostics.Process process = System.Diagnostics.Process.GetCurrentProcess();
+            System.TimeSpan cpuTime;
+            using (System.Diagnostics.Process process = System.Diagnostics.Process.GetCurrentProcess())
+                cpuTime = process.TotalProcessorTime;
             float wall = Time.realtimeSinceStartup;
-            float cpuPercent = _lastCpuWall > 0f && wall > _lastCpuWall ? (float)(process.TotalProcessorTime - _lastCpuTime).TotalSeconds / (wall - _lastCpuWall) * 100f : 0f;
-            _lastCpuTime = process.TotalProcessorTime; _lastCpuWall = wall;
+            float cpuPercent = _lastCpuWall > 0f && wall > _lastCpuWall ? (float)(cpuTime - _lastCpuTime).TotalSeconds / (wall - _lastCpuWall) * 100f : 0f;
+            _lastCpuTime = cpuTime; _lastCpuWall = wall;
             string frame = _frameSamples > 0 ? $"mean {_frameSum / _frameSamples * 1000f:0.0} ms max {_frameMax * 1000f:0.0} ms" : "none";
             long clientBytesOut = 0, clientPacketsOut = 0; int clients = 0;
-            if (ServerTransport is LiteNetLibManager.LiteNetLibTransport transport && transport.Server != null && transport.Server.Statistics != null)
+            LiteNetLibManager.LiteNetLibTransport transport = MeshTransportUnwrap.Innermost<LiteNetLibManager.LiteNetLibTransport>(ServerTransport);
+            if (transport != null && transport.Server != null && transport.Server.Statistics != null)
             {
                 clientBytesOut = transport.Server.Statistics.BytesSent; clientPacketsOut = transport.Server.Statistics.PacketsSent; clients = transport.Server.ConnectedPeersCount;
             }
-            float cOut = (clientBytesOut - _statsClientBytesOut) / 1024f / meshStatsIntervalSeconds;
-            float cPkt = (clientPacketsOut - _statsClientPacketsOut) / meshStatsIntervalSeconds;
+            float cOut = (clientBytesOut - _statsClientBytesOut) / 1024f / interval;
+            float cPkt = (clientPacketsOut - _statsClientPacketsOut) / interval;
             _statsClientBytesOut = clientBytesOut; _statsClientPacketsOut = clientPacketsOut;
             string cost = $"frame {frame} cpu {cpuPercent:0}% mem {UnityEngine.Profiling.Profiler.GetTotalReservedMemoryLong() / (1024 * 1024)} MB clients={clients} clientOut={cOut:0.0} kB/s ({cPkt:0} pkt/s)";
-            Logging.Log("Mesh", $"Mesh stats: players={players} owned={_ownedCharacters.Count} drops={_ownedDrops.Count} statics={_ownedStatics.Count} ({_ownedDrops.Banded.Count}+{_ownedStatics.Banded.Count} in a band) ghosts={ghostPlayers}p/{ghostMonsters}m/{ghostDrops}d/{ghostStatics}s pendingAcks={_pendingHandoffAcks.Count} reserved={_reservedArrivals.Count} | link out {dOut:0.0} kB/s {pOut:0} pkt/s, in {dIn:0.0} kB/s {pIn:0} pkt/s | handoffs {handoffs} | fps {1f / Mathf.Max(0.0001f, Time.smoothDeltaTime):0} ghostSteer={steer} teleports={_ghostTeleportsPlayer}p/{_ghostTeleportsOther}o | {cost}");
+            Logging.Log("Mesh", $"Mesh stats: players={players} owned={_ownedCharacters.Count} drops={_ownedDrops.Count} statics={_ownedStatics.Count} ({_ownedDrops.Banded.Count}+{_ownedStatics.Banded.Count} in a band) ghosts={ghostPlayers}p/{ghostMonsters}m/{ghostDrops}d/{ghostStatics}s pendingAcks={_pendingHandoffAcks.Count} reserved={_reservedArrivals.Count} | link out {dOut:0.0} kB/s {pOut:0} pkt/s, in {dIn:0.0} kB/s {pIn:0} pkt/s | handoffs {handoffs} | fps {1f / Mathf.Max(0.0001f, Time.smoothDeltaTime):0} ghostSteer={steer} teleports={_ghostTeleportsPlayer}p/{_ghostTeleportsOther}o | {cost}{LoadStatsSuffix()} | links{(links.Length > 0 ? links.ToString() : " none")}");
             _statsHandoffs = 0; _statsHandoffSumMs = 0f; _statsHandoffMaxMs = 0f;
             _steerSamples = 0; _steerErrorSum = 0f; _steerErrorMax = 0f; _ghostTeleportsPlayer = 0; _ghostTeleportsOther = 0;
             _frameSamples = 0; _frameSum = 0f; _frameMax = 0f;
@@ -194,6 +203,9 @@ namespace MultiplayerARPG.MMO.Mesh
         private float _nextMonsterScan;
         private string _cellIncarnation;
 
+        /// <summary>CellIncarnation identifies this server process (its start time); a restart gets a new one.</summary>
+        internal string CellIncarnation => _cellIncarnation ?? string.Empty;
+
 #if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
         private void GhostingOnStartServer()
         {
@@ -210,6 +222,7 @@ namespace MultiplayerARPG.MMO.Mesh
             if (_linkServer.Statistics != null)
                 ((LiteNetLibTransport)_linkServer.Transport).Server.EnableStatistics = true;
             LogBandSizing();
+            PuppetsOnStartServer();
             // Owned registry: event-driven from here on (spawn/destroy), one scan for what is already in the scene.
             Assets.onObjectSpawn.AddListener(OnAssetObjectSpawn);
             Assets.onObjectDestroy.AddListener(OnAssetObjectDestroy);
@@ -228,6 +241,7 @@ namespace MultiplayerARPG.MMO.Mesh
             _tmpIds.Clear(); _tmpIds.AddRange(_ghosts.Keys);
             for (int i = 0; i < _tmpIds.Count; ++i)
                 DestroyGhost(_tmpIds[i], "server stopping");
+            PuppetsOnStopServer();
             _tmpIds.Clear(); _tmpIds.AddRange(_ghostStatics.Keys);
             for (int i = 0; i < _tmpIds.Count; ++i)
                 DestroyGhostStatic(_tmpIds[i], "server stopping");
@@ -243,6 +257,7 @@ namespace MultiplayerARPG.MMO.Mesh
             _streamedPrevToZone.Clear();
             _neighbourZoneByConnection.Clear();
             _frameOffsetByConnection.Clear();
+            _neighbourIncarnation.Clear();
             _ownedCharacters.Clear();
             _ownedDrops.Clear();
             _ownedStatics.Clear();
@@ -257,32 +272,62 @@ namespace MultiplayerARPG.MMO.Mesh
             _rolledBackHandoffs.Clear();
         }
 
+        /// <summary>Rig toggle: "1" disables every monster spawn area (capacity runs without monsters).</summary>
+        public const string ENV_NO_MONSTERS = "MESH_NO_MONSTERS";
+        /// <summary>
+        /// Rig toggle: "all" also switches on the monster spawn areas a scene saves inactive, on the cell that owns each
+        /// one. The test maps keep all but one area off because the scenarios are written around that one; capacity runs
+        /// with monsters want the whole population.
+        /// </summary>
+        public const string ENV_MONSTER_AREAS = "MESH_MONSTER_AREAS";
+
         /// <summary>
         /// DESIGN §12 / risk #6: a map scene is shared by every cell of the logical map, so without this each
         /// cell would spawn every spawn area's monsters (double spawn). Deactivate areas outside our zone
-        /// before the base class discovers them.
+        /// before the base class discovers them. A server of a meshed map that cannot place itself on a cell
+        /// disables every area.
         /// </summary>
         public override void OnServerOnlineSceneLoaded()
         {
-            if (ownSpawnAreasByZone && world != null && TryResolveOwnZone())
+            if (ownSpawnAreasByZone && world != null && world.HasLayout(OwnMapId))
             {
-                int kept = 0, disabled = 0;
-                foreach (MonsterSpawnArea area in FindObjectsByType<MonsterSpawnArea>(FindObjectsSortMode.None))
+                // A server of a meshed map that cannot place itself on a cell must spawn nothing: every other cell of
+                // the map already runs these areas, so running them all here would double the map's population.
+                bool resolved = TryResolveOwnZone();
+                // Rig toggle for capacity runs that must separate the players' cost from the monsters'.
+                bool noMonsters = System.Environment.GetEnvironmentVariable(ENV_NO_MONSTERS) == "1";
+                bool allMonsterAreas = !noMonsters && System.Environment.GetEnvironmentVariable(ENV_MONSTER_AREAS) == "all";
+                int kept = 0, disabled = 0, switchedOn = 0;
+                FindObjectsInactive inactive = allMonsterAreas ? FindObjectsInactive.Include : FindObjectsInactive.Exclude;
+                // Switched on before the base class discovers the active areas below, so each area has one owner.
+                foreach (MonsterSpawnArea area in FindObjectsByType<MonsterSpawnArea>(inactive, FindObjectsSortMode.None))
                 {
-                    if (world.OwnerOf(OwnCell, area.transform.position) == OwnCell) { kept++; continue; }
-                    area.gameObject.SetActive(false); disabled++;
+                    if (!noMonsters && resolved && MeshCell.Same(world.OwnerOf(OwnCell, area.transform.position), OwnCell))
+                    {
+                        if (!area.gameObject.activeSelf) { area.gameObject.SetActive(true); switchedOn++; }
+                        kept++;
+                        continue;
+                    }
+                    if (area.gameObject.activeSelf) { area.gameObject.SetActive(false); disabled++; }
                 }
+                if (noMonsters)
+                    Logging.Log("Mesh", $"{ENV_NO_MONSTERS}=1: every monster spawn area disabled on this cell");
+                if (allMonsterAreas)
+                    Logging.Log("Mesh", $"{ENV_MONSTER_AREAS}=all: {switchedOn} monster spawn area(s) saved inactive switched on in zone {OwnZoneId}");
                 foreach (HarvestableSpawnArea area in FindObjectsByType<HarvestableSpawnArea>(FindObjectsSortMode.None))
                 {
-                    if (world.OwnerOf(OwnCell, area.transform.position) == OwnCell) { kept++; continue; }
+                    if (resolved && MeshCell.Same(world.OwnerOf(OwnCell, area.transform.position), OwnCell)) { kept++; continue; }
                     area.gameObject.SetActive(false); disabled++;
                 }
                 foreach (ItemDropSpawnArea area in FindObjectsByType<ItemDropSpawnArea>(FindObjectsSortMode.None))
                 {
-                    if (world.OwnerOf(OwnCell, area.transform.position) == OwnCell) { kept++; continue; }
+                    if (resolved && MeshCell.Same(world.OwnerOf(OwnCell, area.transform.position), OwnCell)) { kept++; continue; }
                     area.gameObject.SetActive(false); disabled++;
                 }
-                Logging.Log("Mesh", $"Spawn areas owned by zone {OwnZoneId}: {kept} kept, {disabled} disabled (outside zone)");
+                if (resolved)
+                    Logging.Log("Mesh", $"Spawn areas owned by zone {OwnZoneId}: {kept} kept, {disabled} disabled (outside zone)");
+                else
+                    Logging.LogWarning("Mesh", $"Channel {ChannelId} is not a cell of meshed map {OwnMapId}: all {disabled} spawn areas disabled");
             }
             base.OnServerOnlineSceneLoaded();
         }
@@ -292,6 +337,8 @@ namespace MultiplayerARPG.MMO.Mesh
             _linkServer?.Update();
             foreach (MeshLinkClient client in _linkClients.Values)
                 client.Update();
+            if (_kinematicGhosts.Count > 0)
+                KinematicPuppetsUpdate(); // after the pumps: every snapshot of this frame is in
 
             if (!enableBorderGhosting || world == null || !HasOwnZone)
                 return;
@@ -301,11 +348,14 @@ namespace MultiplayerARPG.MMO.Mesh
                 _nextLinkCheck = Time.unscaledTime + 1f;
                 EnsureNeighbourLinks();
                 FlushDeferredAcks();
+                ReleaseRecordsOfUnreachableZones();
             }
             if (meshStatsIntervalSeconds > 0f && Time.unscaledTime >= _nextStatsTime)
             {
                 _nextStatsTime = Time.unscaledTime + meshStatsIntervalSeconds;
                 LogMeshStats();
+                if (puppetMotion == MeshPuppetMotion.Kinematic)
+                    LogPuppetsWindow();
             }
             if (Time.unscaledTime >= _nextMonsterScan)
             {
@@ -324,7 +374,7 @@ namespace MultiplayerARPG.MMO.Mesh
             }
         }
 
-        /// <summary>Open (or re-open) one link per 4-neighbour zone whose map server the cluster has told us about.</summary>
+        /// <summary>Open (or re-open) one link per band neighbour whose map server the cluster has told us about.</summary>
         [Tooltip("Link to every cell of the logical map, not only the 8 neighbours. Ghosting still stops at the band; the extra links carry cell-to-cell notices such as a party share for a member that stands on a far cell (unlimited share distance).")]
         public bool linkAllZones = true;
 
@@ -348,14 +398,15 @@ namespace MultiplayerARPG.MMO.Mesh
                 for (int i = 0; i < cells.Count; ++i)
                     EnsureLink(cells[i]);
             }
-            List<MeshCell> neighbours = OwnCell.neighbours; // includes cells of another map placed next to ours
+            List<MeshCell> neighbours = OwnCell.bandNeighbours; // includes cells of another map placed next to ours
             for (int i = 0; i < neighbours.Count; ++i)
                 EnsureLink(neighbours[i]);
         }
 
-        private void EnsureLink(MeshCell cell)
+        /// <summary>Opens the link to a cell; <paramref name="force"/> (a layout just made it a band neighbour) retries after 1 s instead of 5 s.</summary>
+        private void EnsureLink(MeshCell cell, bool force = false)
         {
-            if (cell == null || cell == OwnCell)
+            if (cell == null || MeshCell.Same(cell, OwnCell))
                 return;
             if (!_meshPeers.TryGetValue(PeerInfoExtensions.GetPeerInfoKey(cell.id, cell.mapId), out CentralServerPeerInfo peer))
                 return;
@@ -364,7 +415,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 client = new MeshLinkClient(this, cell.id);
                 _linkClients[cell.id] = client;
             }
-            if (!client.IsConnected && Time.unscaledTime - client.LastConnectAttempt > 5f)
+            if (!client.IsConnected && Time.unscaledTime - client.LastConnectAttempt > (force ? 1f : 5f))
                 client.Connect(peer.networkAddress, peer.networkPort + meshLinkPortOffset);
             else if (client.IsConnected && client.IsSuspect && client.SuspectFor > linkSuspectTimeoutSeconds)
             {
@@ -373,16 +424,17 @@ namespace MultiplayerARPG.MMO.Mesh
             }
         }
 
-        // Neighbours: every cell whose rectangle touches ours (edge or corner) in the world registry, from this map or
-        // from another map placed next to it. Near a corner an entity is within the band of a diagonal cell too (whose
-        // players can be a few metres away across the corner), so it is streamed there as well.
-        private int NeighbourCount => OwnCell != null ? OwnCell.neighbours.Count : 0;
+        // Band neighbours: every cell whose rectangle touches ours (edge or corner) in the world registry, from this map
+        // or from another map placed next to it -- and, on a Dynamic map, every cell within the band. Near a corner an
+        // entity is within the band of a diagonal cell too (whose players can be a few metres away across the corner),
+        // so it is streamed there as well.
+        private int NeighbourCount => OwnCell != null ? OwnCell.bandNeighbours.Count : 0;
 
         /// <summary>
         /// Distance from a position (our frame) to neighbour i's rectangle: the shared line for an edge neighbour, and
         /// for a diagonal neighbour the Chebyshev distance to the shared corner (within the band of both edges).
         /// </summary>
-        private float DistanceToSharedEdge(Vector3 pos, int i) => OwnCell.DistanceTo(OwnCell.neighbours[i], pos);
+        private float DistanceToSharedEdge(Vector3 pos, int i) => OwnCell.InterestDistanceTo(OwnCell.bandNeighbours[i], pos);
 
         // ---- Owned registry ----
         // Owned = registered players + server-owned monsters (and item drops) that are not ghosts. Kept by events:
@@ -390,10 +442,13 @@ namespace MultiplayerARPG.MMO.Mesh
         // what an entity is. No per-second FindObjectsByType; a rare prune drops references the events could not
         // (a pooled instance destroyed outside the network path).
         private bool _spawningPuppet; // set around the ghosting code's own NetworkSpawn calls: those are never ours
+        private readonly OwnedTable<BaseCharacterEntity> _ownedCharacters = new OwnedTable<BaseCharacterEntity>(); // players + server-owned monsters
+        private readonly OwnedTable<ItemDropEntity> _ownedDrops = new OwnedTable<ItemDropEntity>();
+        private readonly OwnedTable<DamageableEntity> _ownedStatics = new OwnedTable<DamageableEntity>();         // harvestables + buildings
 
         /// <summary>
         /// One owned entity with what the band scan needs cached: its mesh id (no component lookup per tick) and, for
-        /// entities that never move, which neighbours' bands it stands in (bit i = OwnCell.neighbours[i]; 0 = interior).
+        /// entities that never move, which neighbours' bands it stands in (bit i = OwnCell.bandNeighbours[i]; 0 = interior).
         /// </summary>
         private sealed class OwnedEntry<T> where T : BaseGameEntity
         {
@@ -498,18 +553,12 @@ namespace MultiplayerARPG.MMO.Mesh
             return entity.Identity == null || entity.Identity.IsDestroyed || MeshIdentity.IsGhostEntity(entity);
         }
 
-        /// <summary>Which neighbours' bands a position lies in (bit i = OwnCell.neighbours[i]); cached for entities that never move.</summary>
+        /// <summary>Which band neighbours' bands a position lies in (bit i = OwnCell.bandNeighbours[i]); cached for entities that never move.</summary>
         private int BandMaskOf(Vector3 pos)
         {
             if (world == null || OwnCell == null)
                 return 0;
-            int mask = 0;
-            for (int i = 0; i < NeighbourCount; ++i)
-            {
-                if (DistanceToSharedEdge(pos, i) <= ghostBandWidth)
-                    mask |= 1 << i;
-            }
-            return mask;
+            return MeshBandMask.Of(OwnCell, OwnCell.bandNeighbours, pos, ghostBandWidth);
         }
 
         /// <summary>The key an owned entity is registered under: players by character id, everything else by mesh id.</summary>
@@ -667,7 +716,7 @@ namespace MultiplayerARPG.MMO.Mesh
             }
         }
 
-        // Per-tick view of the neighbours a snapshot can go to (index = OwnCell.neighbours index).
+        // Per-tick view of the band neighbours a snapshot can go to (index = OwnCell.bandNeighbours index).
         private readonly MeshLinkClient[] _bandClients = new MeshLinkClient[MeshWorldRegistry.MaxNeighbours];
         private readonly HashSet<string>[] _bandStreamed = new HashSet<string>[MeshWorldRegistry.MaxNeighbours];
         private readonly HashSet<string>[] _bandPrevious = new HashSet<string>[MeshWorldRegistry.MaxNeighbours];
@@ -684,7 +733,7 @@ namespace MultiplayerARPG.MMO.Mesh
             for (int i = 0; i < NeighbourCount; ++i)
             {
                 _bandClients[i] = null;
-                MeshCell zone = OwnCell.neighbours[i];
+                MeshCell zone = OwnCell.bandNeighbours[i];
                 if (!_linkClients.TryGetValue(zone.id, out MeshLinkClient client) || !client.IsConnected)
                     continue;
                 if (!_streamedToZone.TryGetValue(zone.id, out HashSet<string> previous) || previous == null)
@@ -923,6 +972,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 // Nothing of the puppet survives into a pooled reuse of the instance: the hit hook and the identity.
                 if (ghost.hitHook != null)
                     ghost.entity.onReceiveDamage -= ghost.hitHook;
+                if (ghost.body != null)
+                    EndPuppetMotion(ghost, MeshPuppetFallback.None); // the kit's handler back and its movement component on
                 UnlinkSummonPuppets(meshId);
                 ResetMeshIdentity(ghost.entity);
                 ghost.entity.NetworkDestroy();
@@ -1101,6 +1152,7 @@ namespace MultiplayerARPG.MMO.Mesh
             // vulnerable or AI-driven ever stood here, and ExpireReservedArrivals reclaims it.
             ghost.reserved = true;
             ghost.lastSeen = Time.unscaledTime;
+            StopPuppetMotion(ghost);
             // The pets that came along as puppets wait with the player: the origin stopped streaming them at demotion,
             // so without this they would expire stale before a slow client registers and could not be promoted.
             foreach (string petId in PetGhostsOf(data.Id))
@@ -1109,6 +1161,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 {
                     pet.reserved = true;
                     pet.lastSeen = Time.unscaledTime;
+                    StopPuppetMotion(pet);
                 }
             }
             MeshIdentity id = MeshIdentity.GetOrAdd(player);
@@ -1253,8 +1306,26 @@ namespace MultiplayerARPG.MMO.Mesh
             Logging.Log("Mesh", $"Player {entity.CharacterName} demoted to ghost (owner {newOwnerZone}, mounted={riddenMount != null}, summons={pets})");
         }
 
-        internal void OnMeshNeighbourHello(long connectionId, string zoneId)
+        internal void OnMeshNeighbourHello(long connectionId, string zoneId, string incarnation)
         {
+            // A new incarnation of a zone is a restarted process: whatever the dead one held for us, or lent us, is gone
+            // with it. It is released here because nothing else would: the new inbound connection makes the zone look
+            // reachable to the unreachable-zone sweep, and the superseded connection's late timeout is ignored below.
+            // Only what the dead incarnation held goes. Our outbound link may have reached the new process before its
+            // hello reached us, and monsters handed to it over that link are alive there, so a lent record made (or
+            // re-pointed) after our current outbound connection came up stays; monsters born in the new incarnation
+            // (its id is in their mesh id) stay too. Pending handoffs are left to their own guards for the same reason.
+            if (!string.IsNullOrEmpty(incarnation) && _neighbourIncarnation.TryGetValue(zoneId, out string previous)
+                && !string.Equals(previous, incarnation))
+            {
+                float linkUpAt = _linkClients.TryGetValue(zoneId, out MeshLinkClient link) && link.IsConnected
+                    ? Time.unscaledTime - link.ConnectedFor : float.MaxValue;
+                Logging.LogWarning("Mesh", $"Neighbour zone {zoneId} restarted (incarnation {previous} -> {incarnation}); releasing what the old process held");
+                ReleaseLentMonsters(zoneId, "neighbour restarted", linkUpAt);
+                ReleaseBorrowedMonsters(zoneId, "home zone restarted", incarnation);
+            }
+            if (!string.IsNullOrEmpty(incarnation))
+                _neighbourIncarnation[zoneId] = incarnation;
             // A neighbour that reconnected (its link client timed out on a one-way loss, or the process restarted) says
             // hello on a new connection while the old one has not timed out here yet: forget the old one now, so its
             // late timeout is not taken for the live neighbour leaving.
@@ -1276,11 +1347,12 @@ namespace MultiplayerARPG.MMO.Mesh
         }
 
         /// <summary>
-        /// A neighbour's link dropped (it died, or the network between us did). Nothing of ours may depend on it any
-        /// longer: monsters it held for us respawn at home, monsters we hold for it go (its spawn areas own their
-        /// respawn and will re-spawn them when it returns), handoffs we sent it and never saw acknowledged roll back.
-        /// Its ghosts here expire stale on their own; a client mid-arrival from it is still served (the notice and
-        /// the warp were sent before it died).
+        /// A neighbour's inbound connection dropped. When our own link to it is down too, it is gone: monsters it held
+        /// for us respawn at home, monsters we hold for it go (its spawn areas own their respawn and re-spawn them when
+        /// it returns), and handoffs we sent it that were never acknowledged roll back. With our link to it still up,
+        /// this is a one-way loss or a dead incarnation's late timeout: nothing is released here, and the unreachable-
+        /// zone sweep releases it once the zone is down both ways. Its ghosts here expire stale on their own; a client
+        /// mid-arrival from it is still served (the notice and the warp were sent before it died).
         /// </summary>
         internal void OnMeshNeighbourDisconnected(long connectionId)
         {
@@ -1288,8 +1360,14 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 _neighbourZoneByConnection.Remove(connectionId); _frameOffsetByConnection.Remove(connectionId);
                 Logging.LogWarning("Mesh", $"Neighbour zone {zoneId} link lost (conn {connectionId})");
-                ReleaseLentMonsters(zoneId, "neighbour link lost");
-                ReleaseBorrowedMonsters(zoneId, "home zone link lost");
+                // Monsters are released only once the zone is unreachable both ways (ReleaseRecordsOfUnreachableZones):
+                // with our own link to it still up this is a one-way loss or a dead incarnation's late timeout, and
+                // respawning here while the neighbour still holds the monster would put two of it in the world.
+                if (!IsNeighbourLinked(zoneId))
+                {
+                    ReleaseLentMonsters(zoneId, "neighbour link lost");
+                    ReleaseBorrowedMonsters(zoneId, "home zone link lost");
+                }
                 if (IsNeighbourLinked(zoneId))
                 {
                     // Our own link to that zone answers, so this is a dead incarnation's connection timing out after
@@ -1305,16 +1383,68 @@ namespace MultiplayerARPG.MMO.Mesh
             }
         }
 
-        /// <summary>Monsters handed to us by a zone that is gone: their respawn belongs to its spawn areas, which respawn everything when it returns.</summary>
-        private void ReleaseBorrowedMonsters(string homeZone, string reason)
+        private readonly Dictionary<string, string> _neighbourIncarnation = new Dictionary<string, string>(); // zoneId -> last incarnation heard
+        private readonly HashSet<string> _unreachableZones = new HashSet<string>();
+
+        private bool IsInboundLinked(string zoneId)
+        {
+            foreach (string zone in _neighbourZoneByConnection.Values)
+                if (string.Equals(zone, zoneId)) return true;
+            return false;
+        }
+
+        /// <summary>
+        /// Every second: a zone we lent monsters to, or borrowed them from, that we have been linked with (either way)
+        /// and that is now unreachable both ways is gone. Its records are released here rather than on the first
+        /// dropped connection, which is only one direction and can be a live neighbour's one-way loss. A zone we were
+        /// never linked with -- a monster that wandered two cells from home, across a seam or with linkAllZones off --
+        /// says nothing about being gone, and its records are kept as before.
+        /// </summary>
+        private void ReleaseRecordsOfUnreachableZones()
+        {
+            _unreachableZones.Clear();
+            foreach (LentMonster lent in _lentMonsters.Values)
+            {
+                if (!string.IsNullOrEmpty(lent.ownerZone) && !string.Equals(lent.ownerZone, OwnZoneId))
+                    _unreachableZones.Add(lent.ownerZone);
+            }
+            List<OwnedEntry<BaseCharacterEntity>> owned = _ownedCharacters.Entries;
+            for (int i = 0; i < owned.Count; ++i)
+            {
+                MeshIdentity id = owned[i].entity != null ? MeshIdentity.Get(owned[i].entity) : null;
+                if (id != null && !string.IsNullOrEmpty(id.HomeZoneId) && !string.Equals(id.HomeZoneId, OwnZoneId))
+                    _unreachableZones.Add(id.HomeZoneId);
+            }
+            foreach (string zone in _unreachableZones)
+            {
+                if (IsInboundLinked(zone) || IsNeighbourLinked(zone))
+                    continue;
+                bool wasLinked = _neighbourIncarnation.ContainsKey(zone)
+                    || (_linkClients.TryGetValue(zone, out MeshLinkClient link) && link.EverConnected);
+                if (!wasLinked)
+                    continue;
+                ReleaseLentMonsters(zone, "neighbour unreachable");
+                ReleaseBorrowedMonsters(zone, "home zone unreachable");
+            }
+        }
+
+        /// <summary>
+        /// Monsters handed to us by a zone that is gone: their respawn belongs to its spawn areas, which respawn everything
+        /// when it returns. With <paramref name="keepIncarnation"/> set, monsters born in that incarnation of the zone
+        /// (the live one) are kept.
+        /// </summary>
+        private void ReleaseBorrowedMonsters(string homeZone, string reason, string keepIncarnation = null)
         {
             _tmpIds.Clear();
             List<OwnedEntry<BaseCharacterEntity>> owned = _ownedCharacters.Entries;
             for (int i = 0; i < owned.Count; ++i)
             {
                 MeshIdentity id = owned[i].entity != null ? MeshIdentity.Get(owned[i].entity) : null;
-                if (id != null && string.Equals(id.HomeZoneId, homeZone) && owned[i].entity is BaseMonsterCharacterEntity)
-                    _tmpIds.Add(owned[i].meshId);
+                if (id == null || !string.Equals(id.HomeZoneId, homeZone) || !(owned[i].entity is BaseMonsterCharacterEntity))
+                    continue;
+                if (keepIncarnation != null && string.Equals(MeshIdentity.BirthIncarnation(owned[i].meshId), keepIncarnation))
+                    continue;
+                _tmpIds.Add(owned[i].meshId);
             }
             for (int i = 0; i < _tmpIds.Count; ++i)
             {
@@ -1332,12 +1462,15 @@ namespace MultiplayerARPG.MMO.Mesh
             }
         }
 
-        /// <summary>A neighbour is gone: every monster it was holding for us respawns from its home spawn area.</summary>
-        private void ReleaseLentMonsters(string zoneId, string reason)
+        /// <summary>
+        /// A neighbour is gone: every monster it was holding for us respawns from its home spawn area. With
+        /// <paramref name="ownedBefore"/> set, only monsters that zone has held since before that time are released.
+        /// </summary>
+        private void ReleaseLentMonsters(string zoneId, string reason, float ownedBefore = float.MaxValue)
         {
             _tmpIds.Clear();
             foreach (KeyValuePair<string, LentMonster> kv in _lentMonsters)
-                if (string.Equals(kv.Value.ownerZone, zoneId)) _tmpIds.Add(kv.Key);
+                if (string.Equals(kv.Value.ownerZone, zoneId) && kv.Value.ownerSince < ownedBefore) _tmpIds.Add(kv.Key);
             for (int i = 0; i < _tmpIds.Count; ++i)
             {
                 LentMonster lent = _lentMonsters[_tmpIds[i]];
@@ -1367,8 +1500,12 @@ namespace MultiplayerARPG.MMO.Mesh
                 OnGhostStaticSnapshot(connectionId, msg);
                 return;
             }
-            // Dedup: this cell owns the real thing → the neighbour's copy is stale; ignore.
+            // Dedup: this cell owns the real thing → the neighbour's copy is stale; ignore. Registered players are checked
+            // by registration; monsters and the rig's synthetic players by the owned registry, so a late snapshot from
+            // the previous owner after an in-place promotion cannot spawn a second copy next to the real one.
             if (msg.kind == GhostKind.Player && ServerUserHandlers.TryGetPlayerCharacterById(msg.characterId, out _))
+                return;
+            if (_ownedCharacters.TryGet(msg.characterId, out _))
                 return;
             // A ghost already promoted for an arriving client: the departing cell's last snapshots are in flight; ignore.
             if (_reservedArrivals.ContainsKey(msg.characterId))
@@ -1385,7 +1522,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 id.MeshEntityId = msg.characterId;
                 id.IsGhost = true;
                 id.OwnerZoneId = _neighbourZoneByConnection.TryGetValue(connectionId, out string z) ? z : "?";
-                int silenced = GhostSuppression.Ghostify(entity, this, null, false, false, disableMovement: false);
+                IReadOnlyList<string> extras = PuppetExtrasFor(msg.kind);
+                int silenced = GhostSuppression.Ghostify(entity, this, extras, false, false, disableMovement: false);
                 entity.IsInvincible = true; // never damaged by the local simulation: hits are forwarded to the owner (P3)
                 string capturedMeshId = msg.characterId;
                 ReceiveDamageDelegate hitHook = (target, position, fromPosition, instigator, damageAmounts, weapon, skill, skillLevel) =>
@@ -1393,7 +1531,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 entity.onReceiveDamage += hitHook;
                 // Kill credit: rewards the kit gives this ghost (it was in a monster's damage records here) are intercepted
                 // by MeshGameplayRule and forwarded to the owner — see ForwardGhostReward.
-                ghost = new MeshGhost { entity = entity, kind = msg.kind, hitHook = hitHook };
+                ghost = new MeshGhost { entity = entity, kind = msg.kind, hitHook = hitHook, suppressedExtras = extras };
                 _ghosts[msg.characterId] = ghost;
                 if (msg.kind == GhostKind.Player)
                     _playerGhosts.Add(entity);
@@ -1407,14 +1545,18 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (gid != null && gid.OwnerZoneId != ownerZone)
                     gid.OwnerZoneId = ownerZone; // ownership moved (monster handoff between neighbours)
                 if (_lentMonsters.TryGetValue(msg.characterId, out LentMonster lent))
-                    lent.ownerZone = ownerZone;
+                    lent.SetOwner(ownerZone);
             }
             if (ghost.reserved)
                 return; // claimed by an arriving client: it sits where the saved data put it until registration
+            if (ghost.body != null && IsMountedPuppet(ghost, msg))
+                EndPuppetMotion(ghost, MeshPuppetFallback.Mounted); // the seat moves a rider; a body would fight it
             SyncGhostMount(ghost, msg);
             SyncGhostSummoner(ghost, msg);
             SyncGhostWeapons(ghost, msg);
             SyncGhostAffiliation(ghost, msg);
+            if (puppetMotion == MeshPuppetMotion.Kinematic && ghost.body == null)
+                EnsurePuppetMotion(ghost, msg);
             SteerGhost(ghost, msg);
         }
 
@@ -1772,43 +1914,49 @@ namespace MultiplayerARPG.MMO.Mesh
             return monster;
         }
 
+        /// <summary>
+        /// Steering drives the kit's OverrideMoveSpeed, which the kit syncs to every client, the owner's included. A
+        /// puppet that stops being steered gets back the value it had before, or a promoted player keeps its puppet's
+        /// catch-up speed (1.5x the owner's plus the lag) and its client runs that fast, faster after every crossing.
+        /// </summary>
+        private static void EndSteering(MeshGhost ghost)
+        {
+            if (ghost.entity != null && ghost.entity.OverrideMoveSpeed != ghost.ownMoveSpeedOverride)
+                ghost.entity.OverrideMoveSpeed = ghost.ownMoveSpeedOverride;
+        }
+
         private void SteerGhost(MeshGhost ghost, GhostSnapshotMessage msg)
         {
             BaseCharacterEntity entity = ghost.entity;
-            Vector3 current = entity.EntityTransform.position;
+            Vector3 current = ghost.body != null ? ghost.body.Pose(Time.unscaledTime) : entity.EntityTransform.position;
             float dist = Vector3.Distance(current, msg.position);
             bool moving = msg.velocity.sqrMagnitude > 0.04f;
             if (moving)
             {
                 // How far the puppet trails the real entity at the moment the owner sampled it.
                 _steerSamples++; _steerErrorSum += dist; if (dist > _steerErrorMax) _steerErrorMax = dist;
+                if (puppetMotion == MeshPuppetMotion.Kinematic)
+                    (ghost.body != null ? _puppetSteerKinematic : _puppetSteerSteered).Add(dist);
                 if (traceHandoffTiming && dist > 1.5f && Time.unscaledTime >= _nextSteerLagLog)
                 {
                     _nextSteerLagLog = Time.unscaledTime + 1f;
                     Logging.Log("Mesh", $"Ghost lag: {msg.kind} {entity.CharacterName} {dist:0.0} m behind, owner v={msg.velocity.magnitude:0.0} m/s, puppet speed={entity.GetMoveSpeed():0.0} m/s, state={entity.MovementState}, extra={entity.ExtraMovementState}");
                 }
             }
+            if (ghost.body != null)
+            {
+                FeedKinematicPuppet(ghost, msg, dist, moving);
+                return;
+            }
             Vector3 target = moving ? msg.position + msg.velocity * ghostLeadSeconds : msg.position;
-            // The puppet replays the owner's attacks, and the kit slows or stops a character while it attacks (and for a
-            // moment after); the owner's reported velocity is the truth, so the puppet moves at that speed (with a margin
-            // to catch up) whatever its replayed action state says. Restored when the owner stands still.
-            float wantedSpeed = moving ? msg.velocity.magnitude * 1.5f + Mathf.Min(dist, ghostTeleportDistance) : -1f;
-            if (Mathf.Abs(entity.OverrideMoveSpeed - wantedSpeed) > 0.05f)
-                entity.OverrideMoveSpeed = wantedSpeed;
+            ApplySteerMoveSpeed(entity, msg, dist, moving);
             if (dist > ghostTeleportDistance)
             {
                 // A puppet this far from where its owner says it is cannot be walked back without looking wrong, so
                 // it is yanked -- and anyone watching this cell sees it jump. Counted and logged because it used to
                 // be neither: a 12.89 m excursion happened under 0.5% packet loss while every check still passed,
                 // since the observer watches for entities appearing and vanishing, not for jumping (2026-09-17).
-                if (ghost.kind == GhostKind.Player)
-                    ++_ghostTeleportsPlayer;
-                else
-                    ++_ghostTeleportsOther;
-                // Name it by kind and mesh id as well: a monster puppet has no CharacterName, and the first version
-                // of this line logged "Ghost  teleported ...", which a grep for a name then missed entirely.
-                string who = string.IsNullOrEmpty(entity.CharacterName) ? ghost.kind.ToString() : entity.CharacterName;
-                Logging.LogWarning("Mesh", $"Ghost teleported: {ghost.kind} {who} ({msg.characterId}) moved {dist:0.00} m to catch up with its owner (past ghostTeleportDistance {ghostTeleportDistance:0.#} m)");
+                NoteGhostTeleport(ghost, msg, dist);
                 entity.Teleport(msg.position, Quaternion.Euler(0f, msg.yaw, 0f), false);
             }
             else if (dist > 0.25f || (moving && Vector3.Distance(current, target) > 0.25f))
@@ -1821,6 +1969,38 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 entity.StopMove();
             }
+            SyncGhostHp(ghost, msg);
+        }
+
+        /// <summary>
+        /// The catch-up move speed: the puppet replays the owner's attacks, and the kit slows or stops a character while it
+        /// attacks (and for a moment after); the owner's reported velocity is the truth, so the puppet moves at that speed
+        /// (with a margin to catch up) whatever its replayed action state says. Restored when the owner stands still.
+        /// </summary>
+        private void ApplySteerMoveSpeed(BaseCharacterEntity entity, GhostSnapshotMessage msg, float dist, bool moving)
+        {
+            float wantedSpeed = moving ? msg.velocity.magnitude * 1.5f + Mathf.Min(dist, ghostTeleportDistance) : -1f;
+            if (Mathf.Abs(entity.OverrideMoveSpeed - wantedSpeed) > 0.05f)
+                entity.OverrideMoveSpeed = wantedSpeed;
+        }
+
+        /// <summary>A puppet jumped past ghostTeleportDistance to catch up with its owner: counted by kind for the Mesh stats line and logged.</summary>
+        private void NoteGhostTeleport(MeshGhost ghost, GhostSnapshotMessage msg, float dist)
+        {
+            if (ghost.kind == GhostKind.Player)
+                ++_ghostTeleportsPlayer;
+            else
+                ++_ghostTeleportsOther;
+            // Name it by kind and mesh id as well: a monster puppet has no CharacterName, and the first version
+            // of this line logged "Ghost  teleported ...", which a grep for a name then missed entirely.
+            BaseCharacterEntity entity = ghost.entity;
+            string who = string.IsNullOrEmpty(entity.CharacterName) ? ghost.kind.ToString() : entity.CharacterName;
+            Logging.LogWarning("Mesh", $"Ghost teleported: {ghost.kind} {who} ({msg.characterId}) moved {dist:0.00} m to catch up with its owner (past ghostTeleportDistance {ghostTeleportDistance:0.#} m)");
+        }
+
+        private void SyncGhostHp(MeshGhost ghost, GhostSnapshotMessage msg)
+        {
+            BaseCharacterEntity entity = ghost.entity;
             if (entity.CurrentHp != msg.currentHp && msg.maxHp > 0)
             {
                 entity.CurrentHp = msg.currentHp;
@@ -1829,9 +2009,22 @@ namespace MultiplayerARPG.MMO.Mesh
             }
         }
 
-        internal void OnGhostRemove(string meshId)
+        internal void OnGhostRemove(long connectionId, string meshId)
         {
-            if (_ghostStatics.ContainsKey(meshId))
+            // Only the cell that owns the entity may remove its puppet. Ownership moves by snapshot (the new owner's
+            // stream takes the puppet over), so a removal from the previous owner that arrives after the move would
+            // destroy a puppet the new owner is streaming, and _recentlyRemoved would then hide it for a second.
+            string sender = _neighbourZoneByConnection.TryGetValue(connectionId, out string zone) ? zone : null;
+            BaseGameEntity puppet = _ghostStatics.TryGetValue(meshId, out GhostStatic ghostStatic) ? ghostStatic.entity
+                : _ghosts.TryGetValue(meshId, out MeshGhost ghost) ? ghost.entity : null;
+            MeshIdentity id = puppet != null ? MeshIdentity.Get(puppet) : null;
+            if (sender != null && id != null && !string.IsNullOrEmpty(id.OwnerZoneId) && id.OwnerZoneId != "?" && !string.Equals(id.OwnerZoneId, sender))
+            {
+                if (traceHandoffTiming)
+                    Logging.Log("Mesh", $"GhostRemove for {meshId} from zone {sender} ignored: owned by zone {id.OwnerZoneId}");
+                return;
+            }
+            if (ghostStatic != null)
                 DestroyGhostStatic(meshId, "neighbour removed");
             else
                 DestroyGhost(meshId, "neighbour removed");
@@ -1859,6 +2052,8 @@ namespace MultiplayerARPG.MMO.Mesh
 
         public override async UniTask<BuildingEntity> CreateBuildingEntity(BuildingSaveData saveData, bool initialize)
         {
+            if (!initialize && IsLayoutGated && TryHoldGatedPlacement(saveData, received: false))
+                return null; // created when the layout gate opens (or here at its deadline)
             if (!initialize && ghostBuildings && world != null && TryResolveOwnZone())
             {
                 // A child (snapped onto a parent) belongs to its PARENT's cell whatever its position: the kit links
@@ -1876,7 +2071,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 else
                 {
                     MeshCell owner = world.OwnerOf(OwnCell, saveData.Position);
-                    if (owner != null && owner != OwnCell)
+                    if (owner != null && !MeshCell.Same(owner, OwnCell))
                         targetZone = owner.id;
                 }
                 if (!string.IsNullOrEmpty(targetZone) && !string.Equals(targetZone, OwnZoneId))
@@ -1898,9 +2093,14 @@ namespace MultiplayerARPG.MMO.Mesh
             if (!IsServer || msg.building == null)
                 return;
             msg.building.Position = (Vector3)msg.building.Position + OffsetFrom(connectionId);
+            if (IsLayoutGated && TryHoldGatedPlacement(msg.building, received: true))
+                return;
             string from = _neighbourZoneByConnection.TryGetValue(connectionId, out string z) ? z : "?";
             Logging.Log("Mesh", $"Building {msg.building.Id} placed from zone {from} by {msg.building.CreatorName} at {(Vector3)msg.building.Position}: creating here");
-            CreateBuildingEntity(msg.building, false).Forget();
+            if (IsDynamicMap)
+                CreateBuildingHere(msg.building); // never forwarded again, whatever this cell's layout says
+            else
+                CreateBuildingEntity(msg.building, false).Forget();
         }
         [Tooltip("Seconds between snapshots of a static entity (position never changes; hp does).")]
         public float staticSnapshotInterval = 1f;
@@ -1965,6 +2165,8 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private void OnGhostStaticSnapshot(long connectionId, GhostSnapshotMessage msg)
         {
+            if (_ownedStatics.TryGet(msg.characterId, out _))
+                return; // we own the real one; the neighbour's copy is a stale view
             if (!_ghostStatics.TryGetValue(msg.characterId, out GhostStatic ghost) || ghost.kind == GhostKind.ItemDrop || ghost.entity == null || ghost.entity.Identity == null || ghost.entity.Identity.IsDestroyed)
             {
                 if (ghost != null)
@@ -2127,6 +2329,8 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private void OnGhostDropSnapshot(long connectionId, GhostSnapshotMessage msg)
         {
+            if (_ownedDrops.TryGet(msg.characterId, out _))
+                return; // we own the real one; the neighbour's copy is a stale view
             if (!_ghostStatics.TryGetValue(msg.characterId, out GhostStatic ghost) || ghost.kind != GhostKind.ItemDrop || ghost.entity == null || ghost.entity.Identity == null || ghost.entity.Identity.IsDestroyed)
             {
                 if (ghost != null)
@@ -2259,11 +2463,20 @@ namespace MultiplayerARPG.MMO.Mesh
         private sealed class LentMonster
         {
             public string ownerZone;               // who has it now (refreshed from its ghost's snapshots)
+            public float ownerSince;               // when ownerZone last changed (a restarted owner only drops what it held before)
             public GameSpawnArea<BaseMonsterCharacterEntity> area;
             public BaseMonsterCharacterEntity prefab;
             public int level;
             public float respawnDelay;
             public Vector3 spawnPosition;
+
+            public void SetOwner(string zone)
+            {
+                if (string.Equals(ownerZone, zone))
+                    return;
+                ownerZone = zone;
+                ownerSince = Time.unscaledTime;
+            }
         }
 
         private readonly Dictionary<string, LentMonster> _lentMonsters = new Dictionary<string, LentMonster>();                 // meshId -> home spawn info (this cell is home)
@@ -2272,7 +2485,7 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private void MonsterHandoffTick()
         {
-            if (!handoffMonsters || !enableServerBoundaryHandoff || !ghostMonsters)
+            if (!handoffMonsters || !enableServerBoundaryHandoff || !ghostMonsters || IsLayoutGated)
                 return;
             _monsterHandoffCandidates.Clear();
             for (int i = 0; i < _ownedCharacters.Count; ++i)
@@ -2281,7 +2494,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (monster == null || monster.IsDead() || monster.IsSummoned)
                     continue;
                 Vector3 pos = monster.EntityTransform.position;
-                if (world.OwnerOf(OwnCell, pos) == OwnCell)
+                if (MeshCell.Same(world.OwnerOf(OwnCell, pos), OwnCell))
                     continue;
                 if (-OwnCell.DistanceToEdge(pos) < handoffHysteresis)
                     continue; // same hysteresis as players: only once clearly past the line
@@ -2296,7 +2509,7 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             Vector3 pos = monster.EntityTransform.position;
             MeshCell zone = world.OwnerOf(OwnCell, pos);
-            if (zone == null || zone == OwnCell)
+            if (zone == null || MeshCell.Same(zone, OwnCell))
                 return;
             if (!_linkClients.TryGetValue(zone.id, out MeshLinkClient link) || !link.IsConnected)
                 return; // stays ours until the link is up
@@ -2312,6 +2525,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 _lentMonsters[meshId] = new LentMonster
                 {
                     ownerZone = zone.id,
+                    ownerSince = Time.unscaledTime,
                     area = monster.SpawnArea, prefab = monster.SpawnPrefab, level = monster.SpawnLevel,
                     respawnDelay = monster.DestroyRespawnDelay, spawnPosition = monster.SpawnPosition,
                 };
@@ -2353,11 +2567,12 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             _ghosts.Remove(meshId);
             SetGhostSummoner(meshId, ghost, null, null);
+            StopPuppetMotion(ghost);
             BaseCharacterEntity entity = ghost.entity;
             _playerGhosts.Remove(entity);
             if (ghost.hitHook != null)
                 entity.onReceiveDamage -= ghost.hitHook;
-            GhostSuppression.Unghostify(entity, this);
+            GhostSuppression.Unghostify(entity, this, ghost.suppressedExtras);
             entity.IsInvincible = false;
             SetDealingGuard(entity as BasePlayerCharacterEntity, false);
             MeshIdentity id = MeshIdentity.GetOrAdd(entity);
@@ -2380,7 +2595,8 @@ namespace MultiplayerARPG.MMO.Mesh
             id.IsGhost = true;
             id.OwnerZoneId = newOwnerZone;
             id.LastHandoffTime = Time.unscaledTime;
-            GhostSuppression.Ghostify(entity, this, null, false, false, disableMovement: false);
+            IReadOnlyList<string> extras = PuppetExtrasFor(kind);
+            GhostSuppression.Ghostify(entity, this, extras, false, false, disableMovement: false);
             entity.IsInvincible = true;
             if (entity is BasePlayerCharacterEntity demotedPlayer && demotedPlayer.DealingComponent != null && demotedPlayer.DealingComponent.DealingCharacter != null)
                 demotedPlayer.DealingComponent.StopDealing(); // a trade in progress ends for both sides, as the kit does on a warp
@@ -2390,7 +2606,7 @@ namespace MultiplayerARPG.MMO.Mesh
             entity.onReceiveDamage += hitHook;
             if (_ghosts.TryGetValue(meshId, out MeshGhost stale) && stale.entity != null && stale.entity != entity)
                 DestroyGhost(meshId, "replaced by demotion"); // should not happen (a ghost and the real one on the same cell), be safe
-            _ghosts[meshId] = new MeshGhost { entity = entity, kind = kind, lastSeen = Time.unscaledTime, hitHook = hitHook, vehicle = mount };
+            _ghosts[meshId] = new MeshGhost { entity = entity, kind = kind, lastSeen = Time.unscaledTime, hitHook = hitHook, vehicle = mount, ownMoveSpeedOverride = entity.OverrideMoveSpeed, suppressedExtras = extras };
             if (kind == GhostKind.Player)
                 _playerGhosts.Add(entity);
             UntrackOwned(entity);
@@ -2509,7 +2725,7 @@ namespace MultiplayerARPG.MMO.Mesh
         internal void OnLentMonsterOwner(string meshId, string ownerZone)
         {
             if (IsServer && _lentMonsters.TryGetValue(meshId, out LentMonster lent))
-                lent.ownerZone = ownerZone;
+                lent.SetOwner(ownerZone);
         }
 
         internal void OnMonsterGone(string meshId)
@@ -3427,10 +3643,10 @@ namespace MultiplayerARPG.MMO.Mesh
         private void GhostingOnPlayerHandoffStart(string characterId, string toZone) { }
         private bool TryPromoteGhostForArrival(long connectionId, string userId, PlayerCharacterData data, out BasePlayerCharacterEntity entity) { entity = null; return false; }
         private void DemotePlayerToGhost(BasePlayerCharacterEntity entity, string newOwnerZone) { }
-        internal void OnMeshNeighbourHello(long connectionId, string zoneId) { }
+        internal void OnMeshNeighbourHello(long connectionId, string zoneId, string incarnation) { }
         internal void OnMeshNeighbourDisconnected(long connectionId) { }
         internal void OnGhostSnapshot(long connectionId, GhostSnapshotMessage msg) { }
-        internal void OnGhostRemove(string characterId) { }
+        internal void OnGhostRemove(long connectionId, string characterId) { }
         internal void OnBuildingPlace(long connectionId, BuildingPlaceMessage msg) { }
         internal void OnHandoffNotice(long connectionId, HandoffNoticeMessage msg) { }
         internal void OnHandoffAck(long connectionId, HandoffAckMessage msg) { }

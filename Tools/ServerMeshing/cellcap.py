@@ -1,23 +1,24 @@
 """What ONE cell holds, with nothing else competing for the box.
 
-The five-loaded-cell curve is inflated: uncapped cells spin, so five of them contend and each reports more work than
-it does. At 100 players one cell alone measures 3.2 ms and the same load inside a five-cell run measured 7.6 ms --
-a 2.4x artefact that production does not have, because real cells are capped and sleep between frames.
+With every cell loaded, each cell also holds puppets of its loaded neighbours' band, so a loaded cell costs more
+than the same players alone (DESIGN 0.69: 3.2 ms at 100 players with idle neighbours against 7.6 ms with three loaded
+neighbours). An earlier version of this note called that difference a contention artefact; 0.69 retracted it.
 
 So: load ONE cell (C, the centre, with 8 neighbours -- the pessimistic case), leave the other nine idle, uncap it
 so frame time is work per frame, and sweep occupancy. That is the number to compare against a tick budget.
 """
-import os, re, sys, time
-ROOT = "D:/Game Development/mmo-server-meshing"
+import os
+import re
+import sys
+import time
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "Tools", "ServerMeshing"))
-os.chdir(ROOT)
-import regress as r
+import regress as r  # noqa: E402 -- the harness folder goes on sys.path first
 
 COST = re.compile(r"frame mean ([\d.]+) ms max ([\d.]+) ms cpu (\d+)% mem (\d+) MB")
 OWNED = re.compile(r"players=\d+ owned=(\d+)")
 LINK = re.compile(r"link out ([\d.]+) kB/s")
 CELL = "C"
-STEPS = [int(x) for x in (sys.argv[1] if len(sys.argv) > 1 else "100,200,300,400,500").split(",")]
 REPEATS = 2
 
 
@@ -26,25 +27,28 @@ def measure(day, start, end):
     for line in r.zone_lines(CELL, start, day, r.MAP):
         if "Mesh stats" not in line:
             continue
-        m = r.STAMP.search(line[:60])
+        m = r.STAMP.search(line)
         if not m or not (start <= m.group(2) <= end):
             continue
-        c, o, l = COST.search(line), OWNED.search(line), LINK.search(line)
+        c, o, link = COST.search(line), OWNED.search(line), LINK.search(line)
         if c and o:
             frames.append(float(c.group(1)))
             maxes.append(float(c.group(2)))
             cpus.append(int(c.group(3)))
             owned.append(int(o.group(1)))
-            links.append(float(l.group(1)) if l else 0.0)
+            links.append(float(link.group(1)) if link else 0.0)
     if not frames:
         return None
-    avg = lambda xs: sum(xs) / len(xs)
+    def avg(xs):
+        return sum(xs) / len(xs)
     return (avg(frames), max(maxes), avg(cpus), avg(owned), avg(links))
 
 
 def main():
+    os.chdir(ROOT)
+    steps = [int(x) for x in (sys.argv[1] if len(sys.argv) > 1 else "100,200,300,400,500").split(",")]
     rows = []
-    for players in STEPS:
+    for players in steps:
         runs = []
         for attempt in range(1, REPEATS + 1):
             print(f"\n########## {CELL} alone, {players} players, run {attempt}/{REPEATS}", flush=True)
@@ -52,7 +56,7 @@ def main():
             r.db_reset((86.5, 0), (0, 0))
             r.request_play("none", 0, 0, env={"MESH_LOAD_PLAYERS": str(players), "MESH_LOAD_CELL": CELL,
                                               "MESH_LOAD_UNCAPPED": "1"})
-            r.wait_status(lambda st: st.get("isPlaying") == "True", 90, "Play")
+            r.wait_play(90)
             day = time.strftime("%Y-%m-%d")
             time.sleep(35)
             start = time.strftime("%H:%M:%S")
@@ -74,7 +78,8 @@ def main():
     lines = ["=== one cell (C, 8 neighbours), nothing else loaded, uncapped", "", header, "-" * len(header)]
     for players, runs in rows:
         f = [x[0] for x in runs]
-        avg = lambda i: sum(x[i] for x in runs) / len(runs)
+        def avg(i):
+            return sum(x[i] for x in runs) / len(runs)
         lines.append(f"{players:<9} {avg(3):<7.0f} {sum(f) / len(f):<11.1f} {min(f):.1f}-{max(f):<7.1f} "
                      f"{max(x[1] for x in runs):<10.0f} {avg(2):<7.0f} {avg(4):.0f}")
     text = "\n".join(lines)

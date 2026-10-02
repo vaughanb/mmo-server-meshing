@@ -3,8 +3,8 @@
 
 Drives the ten-cell rig (a 3x3 grid plus C2 across a seam) end to end and grades each scenario from the logs:
 
-    python Tools/ServerMeshing/regress.py                 # the default set: pet party crash harvest build
-    python Tools/ServerMeshing/regress.py crash build     # a subset; also seam seamcold sleep pvp
+    python Tools/ServerMeshing/regress.py                 # the default set: pet party crash harvest build seam seamcold sleep
+    python Tools/ServerMeshing/regress.py crash build     # a subset; also pvp wake dynidle
     python Tools/ServerMeshing/regress.py --list
     python Tools/ServerMeshing/regress.py --remote-cells E [--remote-persist] [--impair loss2] ...
                                                           # E served by the second machine (Docs/ServerMeshing/MULTIHOST.md)
@@ -13,7 +13,8 @@ Requirements (all already true on the rig machine):
   * the Unity editor is open on this project with BaseInit-CE (any scene that is not dirty) and the
     ServerMeshPlayRunner watching Temp/ServerMesh.PlayRequest.txt (it does whenever the editor is up);
   * a fresh player build at Build/Server/kit-ce-project.exe (the zone servers and the headless bots);
-  * the MySQL database named in Config/mySqlConfig.json, with the two test characters (MeshTester2, meshbotChar).
+  * the MySQL database named in Config/mySqlConfig.json (the kit's schema; provision.py creates the two test accounts
+    and characters, MeshTester2 and meshbotChar, and every scenario resets them to that state).
 
 Each scenario: resets the test characters in the database, asks the editor to enter Play with the auto
 client in a given mode (plus environment variables the zone servers inherit), launches headless bots from
@@ -22,30 +23,68 @@ player-puppet teleports on any cell's logs since the scenario started, the expec
 scenario-specific log lines.
 Exit code 1 when any scenario fails. Bot logs land in Logs/regress_<scenario>_<user>.log.
 """
-import argparse, datetime, json, os, re, subprocess, sys, time, uuid
+import argparse
+import datetime
+import hashlib
+import os
+import re
+import subprocess
+import sys
+import time
+import uuid
 
-import pymysql   # pip install pymysql
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import provision
+import rigtools
+from provision import ITEM_BOW, ITEM_YIELD, db_connect
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-DB_CONFIG = os.path.join(ROOT, "Config", "mySqlConfig.json")
 EXE = os.path.join(ROOT, "Build", "Server", "kit-ce-project.exe")
 TEMP = os.path.join(ROOT, "Temp")
 REQUEST = os.path.join(TEMP, "ServerMesh.PlayRequest.txt")
 STOP = os.path.join(TEMP, "ServerMesh.StopRequest.txt")
 STATUS = os.path.join(TEMP, "ServerMesh.PlayStatus.txt")
 HOLD = os.path.join(TEMP, "ServerMesh.HoldRequest.txt")
+REFRESH_REQUEST = os.path.join(TEMP, "ServerMesh.RefreshRequest.txt")
+BUILD_REQUEST = os.path.join(TEMP, "ServerMesh.BuildRequest.txt")
+BUILD_STATUS = os.path.join(TEMP, "ServerMesh.BuildStatus.txt")
+TEST_REQUEST = os.path.join(TEMP, "ServerMesh.TestRequest.txt")
+TEST_STATUS = os.path.join(TEMP, "ServerMesh.TestStatus.txt")
+PACKAGE_REQUEST = os.path.join(TEMP, "ServerMesh.PackageRequest.txt")
+PACKAGE_STATUS = os.path.join(TEMP, "ServerMesh.PackageStatus.txt")
+BUILD_DLL = os.path.join(ROOT, "Build", "Server", "kit-ce-project_Data", "Managed", "Assembly-CSharp.dll")
+BUILD_MANIFEST = os.path.join(ROOT, "Build", "Server", "rigbuild-manifest.txt")
 LOGS = os.path.join(ROOT, "Logs")
+ASSETS = os.path.join(ROOT, "Assets")
+RIG_REGISTRY = os.path.join(ASSETS, "ServerMeshing", "TestMap", "ServerMeshWorld.asset")
+# MeshCoordinatorStore.DefaultRelativePath, relative to the editor's working directory (the central runs there).
+COORDINATOR_STORE = os.path.join(TEMP, "ServerMesh.Coordinator.json")
 MAP = "ServerMeshTestMap"
 MAP2 = "ServerMeshTestMap2"   # placed 400 m east of MAP in the world registry; its only cell C2 touches E
 # The test map is a 3x3 grid; C/E/N/NE keep the world positions every scenario was written against, and the
 # five added cells surround them, so a crossing now happens with eight neighbours rather than three.
 ZONES = [("SW", MAP), ("S", MAP), ("SE", MAP), ("W", MAP), ("C", MAP), ("E", MAP),
          ("NW", MAP), ("N", MAP), ("NE", MAP), ("C2", MAP2)]
-TESTER = "493cd2454f4949ebbf2f09748fe78af8"   # MeshTester2 (the editor client)
-BOT = "8cb502da59bf43b4a654875dc2934c11"      # meshbotChar (the headless bot)
-ITEM_BUILDING, ITEM_YIELD, ITEM_SKILL = 1802134084, 970799895, 357861288
-ITEM_BOW = -137752354      # TestBowItem-CE, equipped in both test characters' right hand since 0.30
-ENV_KEYS = ["MESH_NO_MONSTER_HANDOFF", "MESH_FAULT_DIE_ON_NOTICE", "MESH_GHOST_LEAD", "MESH_LOAD_PLAYERS", "MESH_LOAD_CELL", "MESH_LOAD_UNCAPPED", "MESH_SLEEP", "MESH_SLEEP_RINGS", "MESH_SLEEP_AFTER", "MESH_SPAWN_CELLS"]
+TESTER, BOT = provision.TESTER.character_name, provision.BOT.character_name   # the editor client, the headless bot
+ENV_KEYS = ["MESH_NO_MONSTER_HANDOFF", "MESH_FAULT_DIE_ON_NOTICE", "MESH_GHOST_LEAD", "MESH_LOAD_PLAYERS", "MESH_LOAD_CELL", "MESH_LOAD_UNCAPPED", "MESH_SLEEP", "MESH_SLEEP_RINGS", "MESH_SLEEP_AFTER", "MESH_SPAWN_CELLS",
+            # 0.71 measurement toggles (DESIGN 0.71): re-cut maps, per-cell synthetic load, a crowd square, the probe's burn test
+            "MESH_LAYOUT_OVERRIDE", "MESH_LOAD_PLAN", "MESH_LOAD_AREA", "MESH_PROBE_BURN_MS", "MESH_NO_MONSTERS", "MESH_BAND",
+            "MESH_LOAD_SEED", "MESH_MONSTER_AREAS",
+            # 0.72 dynamic cells: per-map cell mode, and where the central's layout coordinator keeps its store
+            "MESH_CELL_MODE", "MESH_COORDINATOR_STORE",
+            # Phase 0 step 2 instrument toggles (p0tools.ENV_REGISTRY): tick-frame bins, frame and physics rates,
+            # per-cell uncapping, the timed AOI, per-thread CPU, a burn inside every kit tick
+            "MESH_WORK_BINS", "MESH_RATES", "MESH_UNCAPPED_CELLS", "MESH_AOI_TIMING", "MESH_THREAD_CPU",
+            "MESH_PROBE_BURN_TICK_MS",
+            # Phase 0 step 3 (p0tools.ENV_REGISTRY): kinematic puppets, server-side animation, the load generator's
+            # motion (steered, kinematic, inert) and whether its steered players fight
+            "MESH_PUPPET_MOTION", "MESH_RIG_SERVER_ANIMATION", "MESH_LOAD_MOTION", "MESH_LOAD_FIGHT",
+            # Phase 0 step 5 (p0tools.ENV_REGISTRY): the send meter, and phantom clients (virtual or served by
+            # the sink; characters or eyes) with their view, pacing, upload rate and payload, steps, area, and the
+            # shares that stand and fight
+            "MESH_METER_SENDS", "MESH_PHANTOM", "MESH_PHANTOM_VIEW", "MESH_PHANTOM_ARRIVAL_PER_S",
+            "MESH_PHANTOM_UPLOAD_HZ", "MESH_PHANTOM_PAYLOAD", "MESH_PHANTOM_STEPS", "MESH_PHANTOM_AREA",
+            "MESH_PHANTOM_STAND", "MESH_PHANTOM_FIGHT"]
 EXTRA_ENV = {}   # --env KEY=VALUE from the command line, applied to every Play request of the run
 
 # Two-machine runs (--remote-cells): the named cells are served by the other machine, started and read over SSH by
@@ -85,15 +124,8 @@ def zone_log(zone, suffix, day, map_id=MAP):
 
 
 def read_status():
-    st = {}
-    try:
-        for line in open(STATUS, encoding="utf-8", errors="replace"):
-            if "=" in line:
-                k, v = line.rstrip("\n").split("=", 1)
-                st[k] = v
-    except FileNotFoundError:
-        pass
-    return st
+    """The play runner's status (every key; a torn read while the editor rewrites it is read again)."""
+    return rigtools.read_status_file(STATUS)
 
 
 def wait_status(pred, timeout, what):
@@ -107,16 +139,64 @@ def wait_status(pred, timeout, what):
 
 
 def ps(script):
-    return subprocess.run(["powershell", "-NoProfile", "-Command", script], capture_output=True, text=True).stdout.strip()
+    """Run a PowerShell snippet and return its output; a failing snippet raises rather than reading as empty."""
+    r = subprocess.run(["powershell", "-NoProfile", "-Command", script], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError(f"PowerShell failed ({r.returncode}): {(r.stderr or r.stdout).strip()[:300]}")
+    return r.stdout.strip()
+
+
+# Only processes of the rig's own build: a player started from anywhere else on this machine is not the rig's to kill.
+# "No such process" must not fail the snippet (ps raises on a failure). Get-Process -Name marks the pipeline failed when
+# nothing matches, whatever its -ErrorAction; collecting it in @() first does not. A process that exits before
+# Stop-Process reaches it is ignored too: every kill is followed by kit_process_count, which catches a real survivor.
+RIG_PROCESSES = "@(Get-Process kit-ce-project -ErrorAction Ignore) | Where-Object { $_.Path -eq '" + EXE.replace("'", "''") + "' }"
+
+
+# The ports the editor's servers and the cells bind (Config/serverConfig.json, MMOServerInstance-CE.prefab): map spawner,
+# cluster, database manager, central, login, then the cells from spawnStartPort and their links meshLinkPortOffset above.
+RIG_PORTS = [6001, 6010, 6100, 7000, 7500] + list(range(8000, 8016)) + list(range(18000, 18016))
+
+
+def foreign_port_holders(ports=RIG_PORTS):
+    """(port, pid, process name) for each rig UDP port held by anything but the rig's own build (by path).
+
+    Called only while this editor is out of Play, when it binds none of these ports: any editor holding one, this one
+    included after a stop that did not take, is named. A process whose path cannot be read (a service running as
+    another user) counts as foreign."""
+    out = ps("$ports = @(" + ",".join(str(p) for p in ports) + "); "
+             "@(Get-NetUDPEndpoint -ErrorAction Ignore) | Where-Object { $ports -contains $_.LocalPort } | ForEach-Object { "
+             "$p = Get-Process -Id $_.OwningProcess -ErrorAction Ignore; "
+             "\"$($_.LocalPort)`t$($_.OwningProcess)`t$($p.ProcessName)`t$($p.Path)\" }")
+    holders = set()
+    for line in out.splitlines():
+        port, pid, name, path = (line.split("\t") + ["", "", ""])[:4]
+        if path and os.path.normcase(path) == os.path.normcase(EXE):
+            continue
+        holders.add((int(port), int(pid), name or "?"))
+    return sorted(holders)
+
+
+def preflight():
+    """What would make every scenario fail before it starts: another server holding the rig's ports. The editor's servers
+    then fail to bind, its login server joins the other cluster, and no cell ever logs."""
+    by_process = {}
+    for port, pid, name in foreign_port_holders():
+        by_process.setdefault((pid, name), []).append(port)
+    return [f"{name} (pid {pid}) holds rig port(s) {', '.join(map(str, ports))}; stop it for the run"
+            for (pid, name), ports in sorted(by_process.items())]
 
 
 def kill_bots():
-    ps("Get-Process kit-ce-project -ErrorAction SilentlyContinue | Where-Object { (Get-CimInstance Win32_Process -Filter \"ProcessId=$($_.Id)\").CommandLine -like '*-meshAutoClient*' } | Stop-Process -Force")
+    ps(RIG_PROCESSES + " | Where-Object { (Get-CimInstance Win32_Process -Filter \"ProcessId=$($_.Id)\").CommandLine -like '*-meshAutoClient*' } | Stop-Process -Force -ErrorAction Ignore")
 
 
 def kit_process_count():
-    out = ps("(Get-Process kit-ce-project -ErrorAction SilentlyContinue | Measure-Object).Count")
-    return int(out or 0)
+    out = ps("(" + RIG_PROCESSES + " | Measure-Object).Count")
+    try:
+        return int(out)
+    except ValueError as ex:
+        raise RuntimeError(f"could not count the rig's processes: {out[:200]!r}") from ex
 
 
 def launch_bot(scenario, user, args):
@@ -128,10 +208,19 @@ def launch_bot(scenario, user, args):
     return log
 
 
-def request_play(mode, walk_x, walk_z, pet=False, mount=False, env=None):
+_play_seq = None   # the id of the last Play requested, echoed by the runner as playSeq= while that Play runs
+_play_env = {}     # the environment that Play was asked for (the scenario's own plus --env), for grading
+
+
+def request_play(mode, walk_x, walk_z, pet=False, mount=False, env=None, enabled=True):
+    """Ask the editor to enter Play with the auto client in a mode (enabled=False: no client logs in at all)."""
+    global _play_seq, _play_env
     os.makedirs(TEMP, exist_ok=True)
-    lines = [f"mode={mode}", "channel=C", "user=meshtest", f"walkX={walk_x}", f"walkZ={walk_z}", f"pet={1 if pet else 0}", f"mount={1 if mount else 0}", "enabled=1"]
+    _play_seq = uuid.uuid4().hex[:8]
+    lines = [f"seq={_play_seq}", f"mode={mode}", "channel=C", "user=meshtest", f"walkX={walk_x}", f"walkZ={walk_z}",
+             f"pet={1 if pet else 0}", f"mount={1 if mount else 0}", f"enabled={1 if enabled else 0}"]
     env = dict(EXTRA_ENV, **(env or {}))
+    _play_env = env
     for key in ENV_KEYS:
         lines.append(f"env.{key}={env.get(key, '')}")   # every key set explicitly: an empty value clears it
     mark = {}
@@ -152,6 +241,18 @@ def request_play(mode, walk_x, walk_z, pet=False, mount=False, env=None):
                 os.remove(HOLD)
 
 
+def wait_play(timeout):
+    """Wait until the Play of the last request_play is running: not merely any Play, which could be one that an earlier,
+    abandoned request started late, with that request's environment."""
+    return wait_status(lambda st: st.get("isPlaying") == "True" and st.get("playSeq") == _play_seq, timeout, "Play")
+
+
+def play_still_running():
+    """Whether the Play of the last request_play is still the one running (a run that lost it measured nothing)."""
+    st = read_status()
+    return st.get("isPlaying") == "True" and st.get("playSeq") == _play_seq
+
+
 def remote_running():
     return "process: running" in remote("status")
 
@@ -165,7 +266,7 @@ def start_remote_cells(mark, env=None):
     does. That is the two-machine test of those two paths, so the wait below looks for all of it to come back --
     registration first, because a cell that has relinked is still not somewhere a player can be sent.
     """
-    wait_status(lambda st: st.get("isPlaying") == "True", 60, "Play")
+    wait_play(60)
     t0 = time.time()
     cell = REMOTE_CELLS[0]
     if REMOTE_PERSIST and remote_running():
@@ -200,72 +301,152 @@ def start_remote_cells(mark, env=None):
                        "try: python Tools/ServerMeshing/remoteb.py status")
 
 
+def kill_all_kit_processes():
+    """Kill every process of the rig's build; returns how many are still alive afterwards (0 when it worked)."""
+    ps(RIG_PROCESSES + " | Stop-Process -Force -ErrorAction Ignore")
+    end = time.time() + 10
+    while time.time() < end:
+        alive = kit_process_count()
+        if alive == 0:
+            return 0
+        time.sleep(1)
+    return kit_process_count()
+
+
 def stop_play():
+    """Stop Play and wait for every rig process to exit. Returns how many had to be killed.
+
+    Cells started by the editor's spawner exit with Play. One that outlives it (a dynamic cell whose parent forgot it,
+    a hung process) would leak into the next scenario and serve its players, so it is killed and reported.
+    """
+    # A request the runner has not read yet would start a Play after this one stops, with this run's environment. If
+    # the runner is taking it right now, the stop below is held until that Play has started, and then stops it.
+    try:
+        os.remove(REQUEST)
+    except (FileNotFoundError, PermissionError):
+        pass
     open(STOP, "w").close()
     try:
-        wait_status(lambda st: st.get("isPlaying") == "False", 60, "Play to stop")
+        # The stop file first, then the status: a status read after the runner consumed the stop was written by that
+        # tick or a later one, so an isPlaying=False read then is current.
+        end = time.time() + 90
+        while os.path.exists(STOP):
+            if time.time() > end:
+                raise TimeoutError("timed out waiting for the play runner to take the stop request")
+            time.sleep(0.5)
+        wait_status(lambda st: st.get("isPlaying") == "False", max(1, end - time.time()), "Play to stop")
     except TimeoutError:
         print("  ! Play did not stop in time")
     kill_bots()
     end = time.time() + 15
     while time.time() < end and kit_process_count() > 0:
         time.sleep(1)
+    survivors = kit_process_count()
+    if survivors > 0:
+        still = kill_all_kit_processes()
+        if still > 0:
+            print(f"  ! {still} rig process(es) survived being killed")
+    return survivors
+
+
+def request_and_wait(request_path, seq, status_path, done, timeout, what):
+    """Write a sequenced request for the editor's play runner and wait until done(status) holds for that sequence."""
+    os.makedirs(TEMP, exist_ok=True)
+    with open(request_path, "w", encoding="utf-8") as f:
+        f.write(seq + "\n")
+    end = time.time() + timeout
+    while time.time() < end:
+        st = rigtools.read_kv(status_path)
+        if st.get("seq") == seq and done(st):
+            return st
+        time.sleep(2)
+    raise TimeoutError(f"timed out waiting for {what}")
+
+
+def refresh_editor(timeout=300):
+    """Make the editor import changed scripts (it only auto-refreshes on focus) and wait for the compile to settle."""
+    seq = uuid.uuid4().hex[:8]
+    os.makedirs(TEMP, exist_ok=True)
+    with open(REFRESH_REQUEST, "w", encoding="utf-8") as f:
+        f.write(seq + "\n")
+    # A refresh that recompiles reloads the domain, which resets the runner's echo, so the sequence cannot be relied
+    # on. Instead: the request file is consumed, then the runner reports an idle editor on three consecutive status
+    # writes (the compile starts a moment after the refresh returns, so one idle reading proves nothing).
+    end = time.time() + timeout
+    idle, last_time = 0, None
+    while time.time() < end:
+        time.sleep(2)
+        st = read_status()
+        if os.path.exists(REFRESH_REQUEST) or st.get("time") == last_time:
+            continue
+        last_time = st.get("time")
+        idle = idle + 1 if st.get("isCompiling") == "False" and st.get("isUpdating") == "False" else 0
+        if idle >= 3:
+            return st
+    raise TimeoutError("timed out waiting for the editor to refresh and compile")
+
+
+def run_unit_tests(timeout=600):
+    """Run the add-on's EditMode tests in the open editor. Returns (state, selected, passed, failed, failures)."""
+    seq = uuid.uuid4().hex[:8]
+    st = request_and_wait(TEST_REQUEST, seq, TEST_STATUS, lambda s: s.get("state") in ("done", "error"), timeout, "the EditMode tests")
+    return (st.get("state"), int(st.get("selected", 0)), int(st.get("passed", 0)), int(st.get("failed", 0)),
+            rigtools.as_list(st.get("failure")))
+
+
+def build_player(timeout=1800):
+    """Build the rig player in the open editor (ServerMeshRigBuild). Returns the build's result text."""
+    seq = uuid.uuid4().hex[:8]
+    st = request_and_wait(BUILD_REQUEST, seq, BUILD_STATUS, lambda s: s.get("result") not in (None, "running"), timeout, "the player build")
+    return st.get("result", "")
+
+
+def build_packages(timeout=900):
+    """Build both .unitypackages in the open editor (ServerMeshPackageBuilder). Returns the build's result text."""
+    seq = uuid.uuid4().hex[:8]
+    st = request_and_wait(PACKAGE_REQUEST, seq, PACKAGE_STATUS, lambda s: s.get("result") not in (None, "running"), timeout, "the package build")
+    return st.get("result", "")
 
 
 # ------------------------------------------------------------------ database
-def db_connect():
-    """The game database the editor's database manager uses (backend chosen by the server prefab's databaseOptionIndex)."""
-    with open(DB_CONFIG, encoding="utf-8-sig") as f:
-        c = json.load(f)
-    return pymysql.connect(
-        host=c.get("mySqlAddress") or "127.0.0.1", port=int(c.get("mySqlPort") or 3306),
-        user=c.get("mySqlUsername") or "root", password=c.get("mySqlPassword") or "",
-        database=c.get("mySqlDbName") or "mmorpg_kit", charset="utf8mb4", autocommit=True)
+def db_reset(tester_pos, bot_pos, tester_party=1, bot_party=1, clear_buildings=False):
+    """Put both test characters back to their provisioned state (provision.py) at the given (x, z), in the given parties.
 
-
-def db_reset(tester_pos, bot_pos, tester_party=1, bot_party=1, building_items=None, drop_yield=False, clear_buildings=False):
+    Every scenario starts from the same bag, skills, quest and party, so none depends on what the previous one left
+    (a consumed skill stack, a harvested yield, a saved summon). Refuses while the editor is in Play: its database
+    manager caches characters and would not see these rows.
+    """
+    if provision.editor_is_playing(STATUS):
+        raise RuntimeError("the editor is still in Play; the test characters can only be reset while it is stopped")
     conn = db_connect()
-    cur = conn.cursor()
-    move = ("update characters set currentHp=500,currentMp=100,currentChannel='C',currentMapName='ServerMeshTestMap',"
-            "currentPositionX=%s,currentPositionY=0,currentPositionZ=%s,partyId=%s where characterName=%s")
-    cur.execute(move, (tester_pos[0], tester_pos[1], tester_party, "MeshTester2"))
-    cur.execute(move, (bot_pos[0], bot_pos[1], bot_party, "meshbotChar"))
-    if drop_yield:
-        cur.execute("delete from characteritem where characterId=%s and inventoryType=0 and dataId=%s", (TESTER, ITEM_YIELD))
-    if building_items:
-        # The kit stores the bag as one row per slot (empty slots have dataId 0). Reuse the building item's own row,
-        # else an empty slot, else clone any occupied row (the skill item used to be the template; the fighter consumes it).
-        cur.execute("select idx from characteritem where characterId=%s and inventoryType=0 and dataId=%s", (TESTER, ITEM_BUILDING))
-        row = cur.fetchone()
-        if row is None:
-            cur.execute("select idx from characteritem where characterId=%s and inventoryType=0 and dataId=0 order by idx", (TESTER,))
-            row = cur.fetchone()
-        if row is not None:
-            cur.execute("update characteritem set dataId=%s, amount=%s, level=1, equipSlotIndex=0, durability=0, exp=0, ammo=0"
-                        " where characterId=%s and inventoryType=0 and idx=%s", (ITEM_BUILDING, building_items, TESTER, row[0]))
-        else:
-            cur.execute("show columns from characteritem")
-            cols = [r[0] for r in cur.fetchall()]
-            cur.execute("select * from characteritem where characterId=%s and inventoryType=0 and dataId<>0", (TESTER,))
-            template = cur.fetchone()
-            if template is None:
-                raise RuntimeError("no bag row to use as a template for the building item")
-            d = dict(zip(cols, template))
-            d.update(dataId=ITEM_BUILDING, amount=building_items, level=1)
-            if "id" in d:
-                d["id"] = uuid.uuid4().hex
-            cur.execute("select idx from characteritem where characterId=%s and inventoryType=0", (TESTER,))
-            used = {r[0] for r in cur.fetchall()}
-            d["idx"] = next(i for i in range(1, 200) if i not in used)
-            cur.execute("insert into characteritem (%s) values (%s)" % (",".join("`%s`" % k for k in d), ",".join(["%s"] * len(d))), list(d.values()))
-    if clear_buildings:
-        cur.execute("delete from buildings where channel='E'")
-    cur.close()
-    conn.close()
+    try:
+        provision.provision(conn, {TESTER: provision.Placement(tester_pos[0], tester_pos[1], tester_party),
+                                   BOT: provision.Placement(bot_pos[0], bot_pos[1], bot_party)})
+        if clear_buildings:
+            with conn.cursor() as cur:
+                # Every channel of the test map, and nothing else: the database may be shared with another game. A
+                # building loads by channel id, not by position, so one left on any cell lands differently per layout.
+                cur.execute("delete from buildings where mapName=%s", (MAP,))
+    finally:
+        conn.close()
+
+
+def character_id(name):
+    """The id of the one character with this name (names are unique in the kit, but not by index)."""
+    conn = db_connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("select id from characters where characterName=%s", (name,))
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+    if len(rows) != 1:
+        raise RuntimeError(f"{len(rows)} characters named {name}; run Tools/ServerMeshing/provision.py")
+    return rows[0][0]
 
 
 # ------------------------------------------------------------------ grading
-STAMP = re.compile(r"\[(\d{4}-\d\d-\d\d) (\d\d:\d\d:\d\d)\]")
+STAMP = rigtools.STAMP
 
 
 def remote_log_mark():
@@ -303,8 +484,8 @@ def remote_lines_after(mark):
     return out
 
 
-def zone_lines(zone, start, day, map_id=MAP):
-    """Every line of the zone's info/warn/error logs stamped at or after `start` (HH:MM:SS) on `day`.
+def zone_lines(zone, start, day, map_id=MAP, suffixes=("info", "warn", "error")):
+    """Every line of the zone's logs (info, warn and error by default) stamped at or after `start` (HH:MM:SS) on `day`.
 
     The kit writes one file per day, so a scenario that crosses midnight carries on in the next day's file: both are
     read, and stamps are compared as "date time" rather than time alone, so a line from 00:01 is not thrown away
@@ -320,20 +501,49 @@ def zone_lines(zone, start, day, map_id=MAP):
     next_day = (datetime.date.fromisoformat(day) + datetime.timedelta(days=1)).isoformat()
     out = []
     for d in (day, next_day):
-        for suffix in ("info", "warn", "error"):
+        for suffix in suffixes:
             path = zone_log(zone, suffix, d, map_id)
             if not os.path.exists(path):
                 continue
             for line in open(path, encoding="utf-8", errors="replace"):
-                m = STAMP.search(line[:60])
-                if m and f"{m.group(1)} {m.group(2)}" >= since:
+                stamp = rigtools.stamp_of(line)
+                if stamp and f"{stamp[0]} {stamp[1]}" >= since:
                     out.append(line.rstrip("\n"))
     return out
 
 
+def wait_log(zone, map_id, pattern, start, day, timeout):
+    """Wait until the zone logs a line matching pattern after the scenario start; returns it, or None on timeout."""
+    rx = re.compile(pattern)
+    end = time.time() + timeout
+    while time.time() < end:
+        for line in zone_lines(zone, start, day, map_id):
+            if rx.search(line):
+                return line
+        time.sleep(2)
+    return None
+
+
+def expected_zones(expect):
+    """The cells a scenario expects to have run: every local static cell by default, or the ids it names."""
+    if expect is None:
+        return [(z, m) for z, m in ZONES if z not in REMOTE_CELLS]
+    return [(z, m) for z, m in ZONES if z in expect and z not in REMOTE_CELLS]
+
+
+def graded_zones(day):
+    """The static rig cells plus every cell that logged today or tomorrow: dynamic cells have runtime ids."""
+    next_day = (datetime.date.fromisoformat(day) + datetime.timedelta(days=1)).isoformat()
+    zones = list(ZONES)
+    for cell, map_id in rigtools.discover_cells(LOGS, {day, next_day}):
+        if (cell, map_id) not in zones and cell not in REMOTE_CELLS:
+            zones.append((cell, map_id))
+    return zones
+
+
 def count(lines, pattern):
     rx = re.compile(pattern)
-    return sum(1 for l in lines if rx.search(l))
+    return sum(1 for line in lines if rx.search(line))
 
 
 class Report:
@@ -349,23 +559,68 @@ class Report:
         return all(ok for ok, _ in self.checks)
 
 
-def grade_common(rep, start, day):
+def grade_common(rep, start, day, expect=None):
     # A teleported puppet is a visible pop for everyone in that cell, and nothing used to report one: the observer
     # watches for entities appearing and vanishing, not for jumping. A player popping is the one that matters, so
     # the two are counted apart. Do NOT anchor this on a character name: a monster puppet has none, and the first
     # version of this check ("Ghost \S+ teleported") passed while the stats line beside it said teleports=2.
-    for zone, map_id in ZONES:
+    zones = graded_zones(day)
+    # A cell that should have run and logged nothing (every cell logs its Mesh stats every 10 s) was never started, or
+    # died before logging: its zero teleports and zero exceptions below would otherwise pass for it.
+    for zone, map_id in expected_zones(expect):
+        rep.check(len(zone_lines(zone, start, day, map_id)) > 0, f"zone {zone}: logged since the scenario started")
+    for zone, map_id in zones:
         lines = zone_lines(zone, start, day, map_id)
         players = count(lines, r"Ghost teleported: Player ")
         others = count(lines, r"Ghost teleported: (?!Player )")
         rep.check(players == 0, f"zone {zone}: {players} PLAYER puppet teleport(s), {others} non-player")
 
-    for z, map_id in ZONES:
+    for z, map_id in zones:
         lines = zone_lines(z, start, day, map_id)
-        ex = [l for l in lines if "Exception" in l]
+        ex = [line for line in lines if "Exception" in line]
         rep.check(len(ex) == 0, f"zone {z}: {len(ex)} exception lines")
-        for l in ex[:3]:
-            rep.notes.append(f"   {z}: {l[:160]}")
+        for line in ex[:3]:
+            rep.notes.append(f"   {z}: {line[:160]}")
+
+
+def grade_layout(rep, start, day):
+    """Dynamic cells as far as 2a goes (DESIGN.md 0.72): a Dynamic map's cells apply the central's layout once per
+    process, before a player registers; a Static map's cells apply none; no cell splits, merges, retires or waits at
+    the layout gate. Which maps are Dynamic comes from the rig's registry asset and the Play's MESH_CELL_MODE."""
+    try:
+        dynamic = rigtools.dynamic_maps(_play_env.get("MESH_CELL_MODE", ""), rigtools.asset_cell_modes(RIG_REGISTRY),
+                                        {m for _, m in ZONES})
+    except (OSError, ValueError) as ex:
+        rep.check(False, f"layout: cannot tell which maps are Dynamic: {ex}")
+        return
+    for zone, map_id in graded_zones(day):
+        if zone in REMOTE_CELLS and REMOTE_PERSIST:
+            continue    # a persisted remote cell got no environment from this Play: its mode is the asset's
+        info = zone_lines(zone, start, day, map_id, suffixes=("info",))
+        problems = rigtools.layout_apply_violations(zone, info, map_id in dynamic)
+        everything = zone_lines(zone, start, day, map_id)
+        ops = sum(1 for line in everything if rigtools.OP_LINE.search(line))
+        gate = sum(1 for line in everything if rigtools.LAYOUT_GATE_WARNING.search(line))
+        if ops:
+            problems.append(f"{ops} split/merge/retire line(s)")
+        if gate:
+            problems.append(f"{gate} layout gate warning(s)")
+        how = "Dynamic: layout applied before any player" if map_id in dynamic else "Static: no layout applied"
+        rep.check(not problems, f"zone {zone}: {how}" + (f" ({'; '.join(problems[:2])})" if problems else ""))
+
+
+def registry_state(paths):
+    """(git status of the world registry assets, {path: sha1 of their line-end-normalized bytes}). Play must never
+    write a runtime layout into an asset, and git cannot see an asset the editor has changed but not yet saved, so
+    both are compared."""
+    status = subprocess.run(["git", "-C", ROOT, "status", "--porcelain", "--", *paths], capture_output=True, text=True)
+    if status.returncode != 0:
+        raise RuntimeError(f"git status of the registry assets failed: {status.stderr.strip()}")
+    digests = {}
+    for path in paths:
+        with open(path, "rb") as f:
+            digests[path] = hashlib.sha1(rigtools.normalized_bytes(f.read())).hexdigest()
+    return status.stdout.strip(), digests
 
 
 def hms(t):
@@ -390,13 +645,18 @@ def run_scenario(name, rep):
     for marker in os.listdir(TEMP) if os.path.isdir(TEMP) else []:
         if marker.startswith("ServerMesh.FaultFired."):
             os.remove(os.path.join(TEMP, marker))
+    # The central's layout coordinator keeps its store across Plays; one left by an earlier run would be recovered
+    # from, so every scenario starts without one.
+    for leftover in (COORDINATOR_STORE, COORDINATOR_STORE + ".tmp"):
+        if os.path.exists(leftover):
+            os.remove(leftover)
     bots = []
 
     if name == "pet":
         # The pet round trip: an observer 12 m from the line watches the bot cross with its pet and come back.
         db_reset((86.5, 0), (0, 0))
         request_play("observe", 88, 0)
-        wait_status(lambda st: st.get("isPlaying") == "True", 60, "Play")
+        wait_play(60)
         time.sleep(20)
         bots.append(("walk", launch_bot(name, "meshbot", ["-meshAutoMode", "walk", "-meshWalkX", "130", "-meshWalkZ", "0", "-meshPet"])))
         st = wait_status(lambda st: st.get("finished") == "True", 240, "the observer")
@@ -418,9 +678,12 @@ def run_scenario(name, rep):
         # toward its target (PointClickMovement, x clamped to the line) but must stay on C for its hits to be
         # forwarded, so it cannot follow a monster deeper into E. Inherent to using live monsters as targets; the
         # standing party member at (104,58) is the bait that keeps them near the line, and usually does.
+        # A second stall, fixed 2026-09-26 (3 of 4 Dynamic runs that day): the kit starts an attack 0.5 m out, so a monster
+        # standing 1-1.5 m past the line, hitting the fighter's puppet over there, was neither reachable nor dropped, and
+        # the fighter stood at the line for 150 s without a shot (hurtTarget=False). It now shoots from the line.
         db_reset((86.5, 0), (94, 58))
         request_play("fight", 99, 60, env={"MESH_NO_MONSTER_HANDOFF": "1"})
-        wait_status(lambda st: st.get("isPlaying") == "True", 60, "Play")
+        wait_play(60)
         time.sleep(20)
         bots.append(("stand", launch_bot(name, "meshbot", ["-meshAutoMode", "stand", "-meshWalkX", "104", "-meshWalkZ", "58"])))
         st = wait_status(lambda st: st.get("finished") == "True", 300, "the fighter")
@@ -430,11 +693,12 @@ def run_scenario(name, rep):
         # Projectiles: the tester fights with the test bow (right hand), so its hits on E's monsters are arrows that struck
         # puppets on C and were forwarded; E replays the shots on the tester's puppet so its players see them.
         conn = db_connect()
-        cur = conn.cursor()
-        cur.execute("select dataId from characteritem where characterId=%s and inventoryType=2", (TESTER,))
-        weapon = cur.fetchone()
-        cur.close()
-        conn.close()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("select dataId from characteritem where characterId=%s and inventoryType=2", (character_id(TESTER),))
+                weapon = cur.fetchone()
+        finally:
+            conn.close()
         rep.check(weapon is not None and weapon[0] == ITEM_BOW, "the fighter's right hand holds the test bow (projectile weapon)")
         c_lines = zone_lines("C", start, day)
         rep.check(count(c_lines, r"Hit on ghost .* forwarded to zone E") >= 1, "arrow hits on the neighbour's monster puppets were forwarded to E")
@@ -458,7 +722,7 @@ def run_scenario(name, rep):
         # ghost at the translated position (-108) and the bot's row is saved in C2's frame on the way over.
         db_reset((292, 0), (280, 0))
         request_play("stand", 292, 0)
-        wait_status(lambda st: st.get("isPlaying") == "True", 60, "Play")
+        wait_play(60)
         time.sleep(20)
         bots.append(("walk", launch_bot(name, "meshbot", ["-meshAutoMode", "walk", "-meshWalkX", "310", "-meshReturnX", "-110", "-meshStopOnMigration"])))
         walk = wait_for_bot(bots[0][1], "walk", 240)
@@ -480,7 +744,7 @@ def run_scenario(name, rep):
         # hop must still complete both ways without exceptions; no frame swap may be logged.
         db_reset((292, 0), (280, 0))
         request_play("stand", 292, 0)
-        wait_status(lambda st: st.get("isPlaying") == "True", 60, "Play")
+        wait_play(60)
         time.sleep(20)
         bots.append(("walk", launch_bot(name, "meshbot", ["-meshAutoMode", "walk", "-meshWalkX", "310", "-meshReturnX", "-110", "-meshStopOnMigration", "-meshSeamPreload", "0"])))
         walk = wait_for_bot(bots[0][1], "walk", 240)
@@ -492,7 +756,7 @@ def run_scenario(name, rep):
         rep.check(count(bot_lines, r"Seam pre-load distance set to 0") >= 1, "the bot ran without the seam pre-load")
         rep.check(count(bot_lines, r"Seam: (pre-loaded|swapped)") == 0, "no pre-load or frame swap happened")
         # The kit's scene load ends with Resources.UnloadUnusedAssets(), which Unity logs; one per hop after the walk began.
-        walk_start = next((i for i, l in enumerate(bot_lines) if "Walking from" in l), 0)
+        walk_start = next((i for i, line in enumerate(bot_lines) if "Walking from" in line), 0)
         rep.check(count(bot_lines[walk_start:], r"Unloading \d+ unused Assets") >= 2, "the kit reloaded the scene at each crossing")
 
     elif name == "sleep":
@@ -504,7 +768,7 @@ def run_scenario(name, rep):
         # map's WarpPortal_E_to_W stands there and warps whoever spawns inside it to (-200, 1, 0) (DESIGN 0.55).
         db_reset((20, 0), (210, 0))
         request_play("stand", 20, 0, env={"MESH_SLEEP": "1", "MESH_SLEEP_RINGS": "1", "MESH_SLEEP_AFTER": "30"})
-        wait_status(lambda st: st.get("isPlaying") == "True", 60, "Play")
+        wait_play(60)
         time.sleep(25)
         c2_before = zone_lines("C2", start, day, MAP2)
         rep.check(count(c2_before, r"Own cell from channel id: C2") == 0, "C2 was not started at boot (asleep)")
@@ -514,9 +778,9 @@ def run_scenario(name, rep):
         rep.check("-> PASS" in walk and "migrations=2" in walk, f"bot: {walk[:120]}")
         e_lines, c2_lines = zone_lines("E", start, day), zone_lines("C2", start, day, MAP2)
         rep.check(count(c2_lines, r"Own cell from channel id: C2") >= 1, "C2 woke once the bot was on E")
-        woke = next((STAMP.search(l[:60]).group(2) for l in c2_lines if "Own cell from channel id: C2" in l), None)
-        entered_e = next((STAMP.search(l[:60]).group(2) for l in e_lines if "player registered meshbotChar" in l), None)
-        hop = next((STAMP.search(l[:60]).group(2) for l in e_lines if "Handoff START meshbotChar" in l), None)
+        woke = next((rigtools.stamp_of(line)[1] for line in c2_lines if "Own cell from channel id: C2" in line), None)
+        entered_e = next((rigtools.stamp_of(line)[1] for line in e_lines if "player registered meshbotChar" in line), None)
+        hop = next((rigtools.stamp_of(line)[1] for line in e_lines if "Handoff START meshbotChar" in line), None)
         rep.check(woke is not None and entered_e is not None and entered_e <= woke, f"C2 woke after the bot arrived on E (arrived {entered_e}, serving {woke})")
         rep.check(woke is not None and hop is not None and hms(hop) - hms(woke) >= 5, f"C2 was serving at least 5 s before the bot's crossing (serving {woke}, crossing {hop})")
         rep.check(count(e_lines, r"Handoff ACK meshbotChar by zone C2:.*promoted=") >= 1, "the crossing into the woken cell was acked")
@@ -526,11 +790,33 @@ def run_scenario(name, rep):
         rep.check(count(c2_lines, r"Sleeping: cell C2 has nobody near it") >= 1, "C2 went to sleep once nobody was near")
         rep.check(count(zone_lines("E", start, day), r"Sleeping: cell E") == 0, "E stayed up (in the tester's ring)")
 
+    elif name == "wake":
+        # The boundary tick's wake request (the safety net behind the awake rings): with no rings, C2 stays asleep while
+        # the bot is on E, so the first step past the seam finds no server for C2 and E asks the central to wake it.
+        # The bot walks 60 m into C2's ground so the leg outlasts C2's start-up (2-4 s) and the hop happens mid-walk.
+        # Before 0.71 the request threw inside the transport (no response handler registered) and was never sent.
+        db_reset((20, 0), (210, 0))
+        request_play("stand", 20, 0, env={"MESH_SLEEP": "1", "MESH_SLEEP_RINGS": "0", "MESH_SLEEP_AFTER": "300"})
+        wait_play(60)
+        time.sleep(25)
+        rep.check(count(zone_lines("C2", start, day, MAP2), r"Own cell from channel id: C2") == 0, "C2 was asleep before the bot came (no rings)")
+        bots.append(("walk", launch_bot(name, "meshbot", ["-meshAutoMode", "walk", "-meshWalkX", "360", "-meshReturnX", "-110", "-meshStopOnMigration"])))
+        walk = wait_for_bot(bots[0][1], "walk", 360)
+        rep.check("-> PASS" in walk and "migrations=2" in walk, f"bot: {walk[:120]}")
+        e_lines, c2_lines = zone_lines("E", start, day), zone_lines("C2", start, day, MAP2)
+        asked = next((line for line in e_lines if "Wake requested for sleeping cell C2" in line), None)
+        woke = next((line for line in c2_lines if "Own cell from channel id: C2" in line), None)
+        rep.check(asked is not None, "E asked the central to wake C2 when the bot crossed toward it")
+        rep.check(count(e_lines, r"Wake request for cell C2 (answered|refused|could not)") == 0, "the wake request was sent and accepted")
+        rep.check(asked is not None and woke is not None and rigtools.stamp_datetime(woke) >= rigtools.stamp_datetime(asked),
+                  "C2 started after the wake request")
+        rep.check(count(e_lines, r"Handoff ACK meshbotChar by zone C2:") >= 1, "the crossing into the woken cell was acked")
+
     elif name == "crash":
         # The destination dies on the handoff notice: rollback, client fallback, MapSpawn restart, re-registration.
         db_reset((86.5, 0), (0, 0))
         request_play("observe", 88, 0, env={"MESH_FAULT_DIE_ON_NOTICE": "E"})
-        wait_status(lambda st: st.get("isPlaying") == "True", 60, "Play")
+        wait_play(60)
         time.sleep(20)
         bots.append(("walk", launch_bot(name, "meshbot", ["-meshAutoMode", "walk", "-meshWalkX", "130", "-meshWalkZ", "0", "-meshPet"])))
         st = wait_status(lambda st: st.get("finished") == "True", 240, "the observer")
@@ -546,9 +832,9 @@ def run_scenario(name, rep):
         rep.check(count(c_lines, r"Handoff ACK .*promoted=") >= 1, "a later handoff to the restarted E was acked")
 
     elif name == "harvest":
-        db_reset((86.5, 62), (0, 0), drop_yield=True)
+        db_reset((86.5, 62), (0, 0))
         request_play("harvest", 99, 62, env={"MESH_NO_MONSTER_HANDOFF": "1"})
-        wait_status(lambda st: st.get("isPlaying") == "True", 60, "Play")
+        wait_play(60)
         st = wait_status(lambda st: st.get("finished") == "True", 240, "the harvester")
         rep.check("-> PASS" in st.get("result", "") and f"itemsGained=[{ITEM_YIELD}x" in st.get("result", ""), f"harvester: {st.get('result', '')[:140]}")
         c_lines, e_lines = zone_lines("C", start, day), zone_lines("E", start, day)
@@ -556,9 +842,9 @@ def run_scenario(name, rep):
         rep.check(count(c_lines, r"GiveItems applied") >= 1, "the yield reached the real character on C")
 
     elif name == "build":
-        db_reset((86.5, 66), (0, 0), building_items=3, clear_buildings=True)
+        db_reset((86.5, 66), (0, 0), clear_buildings=True)
         request_play("build", 99, 66, env={"MESH_NO_MONSTER_HANDOFF": "1"})
-        wait_status(lambda st: st.get("isPlaying") == "True", 60, "Play")
+        wait_play(60)
         st = wait_status(lambda st: st.get("finished") == "True", 240, "the builder")
         rep.check("-> PASS" in st.get("result", "") and "appeared=True" in st.get("result", ""), f"builder: {st.get('result', '')[:140]}")
         c_lines, e_lines = zone_lines("C", start, day), zone_lines("E", start, day)
@@ -569,10 +855,12 @@ def run_scenario(name, rep):
 
     elif name == "pvp":
         # A party member's ghost must not be attackable; the map's PvP mode must be Pvp for the stranger half,
-        # so this scenario only checks the ally refusal under the map's current rules.
+        # so this scenario only checks the ally refusal under the map's current rules. No monsters: the check is that
+        # the target was not hurt, and the bot stands in E's spawn area, where they would hurt it whatever the attacker
+        # does (a run on 2026-09-25 read targetHp 500->276 with every hostile cast refused and no hit forwarded).
         db_reset((86.5, 60), (0, 0))
-        request_play("pvp", 99, 60, env={"MESH_NO_MONSTER_HANDOFF": "1"})
-        wait_status(lambda st: st.get("isPlaying") == "True", 60, "Play")
+        request_play("pvp", 99, 60, env={"MESH_NO_MONSTER_HANDOFF": "1", "MESH_NO_MONSTERS": "1"})
+        wait_play(60)
         time.sleep(20)
         bots.append(("stand", launch_bot(name, "meshbot", ["-meshAutoMode", "stand", "-meshWalkX", "103", "-meshWalkZ", "60"])))
         st = wait_status(lambda st: st.get("finished") == "True", 300, "the attacker")
@@ -580,15 +868,45 @@ def run_scenario(name, rep):
         c_lines = zone_lines("C", start, day)
         rep.check(count(c_lines, r"Hit on ghost meshbotChar") == 0, "no hit on the party member's ghost was forwarded")
 
+    elif name == "dynidle":
+        # Dynamic cells, idle (DESIGN.md 0.72): the test map runs Dynamic with nothing to split or merge. Each of its
+        # cells says hello and applies the central's (empty) layout before a player registers, and a walk from C to E
+        # still hands off in place, which needs both cells' gates open. C2's map stays Static and applies nothing.
+        db_reset((86.5, 0), (0, 0))
+        request_play("observe", 88, 0, env={"MESH_CELL_MODE": f"{MAP}:Dynamic"})
+        wait_play(60)
+        time.sleep(20)
+        bots.append(("walk", launch_bot(name, "meshbot", ["-meshAutoMode", "walk", "-meshWalkX", "130", "-meshWalkZ", "0"])))
+        st = wait_status(lambda st: st.get("finished") == "True", 240, "the observer")
+        walk = wait_for_bot(bots[0][1], "walk", 240)
+        rep.check("-> PASS" in st.get("result", ""), f"observer: {st.get('result', '')[:120]}")
+        rep.check("-> PASS" in walk, f"bot: {walk[:120]}")
+        c_lines, e_lines = zone_lines("C", start, day), zone_lines("E", start, day)
+        rep.check(count(c_lines, r"Handoff ACK \S+ by zone E: .*promoted=True") >= 1, "E took the bot over in place (both gates open)")
+        for zone, lines in (("C", c_lines), ("E", e_lines)):
+            rep.check(count(lines, r"Layout gate open on ") == 1, f"{zone}: layout gate opened once")
+        rep.check(count(zone_lines("C2", start, day, MAP2), rigtools.LAYOUT_APPLIED.pattern) == 0, "C2 (Static map) applied no layout")
+
     else:
         raise ValueError(f"unknown scenario {name}")
 
-    grade_common(rep, start, day)
+    # The sleeping-cell scenarios leave cells asleep on purpose; every other scenario runs them all.
+    grade_common(rep, start, day, expect={"wake": {"C", "E", "C2"}}.get(name))
+    grade_layout(rep, start, day)
     for kind, log in bots:
         try:
             txt = open(log, encoding="utf-8", errors="replace").read()
             n = txt.count("Exception")
             rep.check(n == 0, f"bot log {os.path.basename(log)}: {n} exception lines")
+            # Nothing in the rig sets one; a puppet's steering speed that survived a promotion would (fixed in 0.72).
+            n = txt.count("Move speed override on the playing character")
+            rep.check(n == 0, f"bot log {os.path.basename(log)}: {n} move-speed overrides on the playing character")
+            # The kit's client read path (CE-13): a state whose length does not fit the message, and a state its
+            # reader failed on, each mean the client mis-read an entity's movement.
+            for text, what in (("invalid state length", "invalid state lengths"),
+                               ("error occurs while reading", "movement state read errors")):
+                n = txt.count(text)
+                rep.check(n == 0, f"bot log {os.path.basename(log)}: {n} {what}")
         except FileNotFoundError:
             rep.check(False, f"bot log {os.path.basename(log)} missing")
 
@@ -605,10 +923,13 @@ def wait_for_bot(log, kind, timeout):
 
 DEFAULT = ["pet", "party", "crash", "harvest", "build", "seam", "seamcold", "sleep"]
 TWO_HOST_SKIP = {
-    "sleep": "needs cells started on demand by the central, which asks the first map-spawn server it knows; the other "
-             "machine runs no spawner, so placement-aware waking has to come first",
+    "sleep": "needs cells started on demand by the central, which asks the spawner that serves the cell; the other "
+             "machine runs no spawner, so nothing can start its cell there",
+    "wake": "needs cells started on demand by the central (as sleep does); the other machine runs no spawner",
 }
-ALL = DEFAULT + ["pvp"]
+ALL = DEFAULT + ["pvp", "wake", "dynidle"]
+# A persisted remote cell outlives the Plays, so no scenario's environment reaches it.
+PERSIST_SKIP = {"dynidle": "runs the test map Dynamic through the environment, which a persisted remote cell never gets"}
 
 
 def main():
@@ -629,31 +950,92 @@ def main():
                     help="leave the remote cell running between scenarios instead of restarting it, so it has to "
                          "recover from this machine's Play stopping and starting on its own (cluster reconnect and "
                          "MeshMapNetworkManager.databaseReconnectSeconds)")
+    ap.add_argument("--refresh", action="store_true",
+                    help="make the editor import and compile changed scripts first (it only does so on focus)")
+    ap.add_argument("--package", action="store_true",
+                    help="build both .unitypackages (Build/Packages) in the open editor, after any tests and player build")
+    ap.add_argument("--build", action="store_true",
+                    help="rebuild the player (Build/Server) in the open editor before running")
+    ap.add_argument("--unit", action="store_true",
+                    help="run the add-on's EditMode tests in the open editor first; a failure stops the run")
+    ap.add_argument("--allow-stale-build", action="store_true",
+                    help="run even though the player build is older than the add-on's runtime sources")
     args = ap.parse_args()
     for kv in args.env:
         k, _, v = kv.partition("=")
         if k not in ENV_KEYS:
-            print(f"unknown env key {k}; known: {', '.join(ENV_KEYS)}"); return 2
+            print(f"unknown env key {k}; known: {', '.join(ENV_KEYS)}")
+            return 2
         EXTRA_ENV[k] = v
     if args.list:
-        print("\n".join(ALL)); return 0
+        print("\n".join(ALL))
+        return 0
     names = args.scenarios or DEFAULT
     for n in names:
         if n not in ALL:
-            print(f"unknown scenario {n}; known: {', '.join(ALL)}"); return 2
-    if not os.path.exists(EXE):
-        print(f"no player build at {EXE}"); return 2
+            print(f"unknown scenario {n}; known: {', '.join(ALL)}")
+            return 2
     if read_status().get("isPlaying") == "True":
-        print("the editor is already in Play mode; stop it first"); return 2
+        print("the editor is already in Play mode; stop it first")
+        return 2
+    try:
+        if args.refresh or args.build or args.unit or args.package:
+            st = refresh_editor()
+            if st.get("compileFailed") == "True":
+                print("the editor reports script compile errors; fix them first (see the editor console)")
+                return 2
+        if args.unit:
+            state, selected, passed, failed, failures = run_unit_tests()
+            print(f"=== EditMode tests: {state}, {selected} selected, {passed} passed, {failed} failed")
+            for failure in failures:
+                print(f"  [FAIL] {failure[:200]}")
+            if state != "done" or failed > 0:
+                return 1
+            if passed == 0:
+                print("  no test ran: the filter found none (moved to another assembly or namespace?)")
+                return 1
+        if args.build:
+            result = build_player()
+            print(f"=== player build: {result}")
+            if not result.startswith("ok"):
+                return 2
+        if args.package:
+            result = build_packages()
+            print(f"=== packages: {result}")
+            if not result.startswith("ok"):
+                return 2
+    except TimeoutError as ex:
+        print(f"the editor did not answer: {ex}; is it open on this project and not showing a modal dialog?")
+        return 3
+    if not args.scenarios and (args.unit or args.build or args.refresh or args.package):
+        return 0
+    if not os.path.exists(EXE):
+        print(f"no player build at {EXE}; run with --build")
+        return 2
+    if read_status().get("compileFailed") == "True":
+        print("the editor reports script compile errors; the servers it hosts would run stale code")
+        return 2
+    stale = [] if args.allow_stale_build else rigtools.build_staleness(ROOT, BUILD_MANIFEST)
+    if stale:
+        print("the player build does not match the working tree, so the cells and bots would run other code: "
+              + "; ".join(stale) + ". Run with --build (or --allow-stale-build to run anyway).")
+        return 2
+    problems = preflight()
+    for problem in problems:
+        print(f"cannot run: {problem}")
+    if problems:
+        return 2
 
     if args.remote_cells:
         REMOTE_CELLS[:] = [c.strip() for c in args.remote_cells.split(",") if c.strip()]
         known = {z for z, _ in ZONES}
         unknown = [c for c in REMOTE_CELLS if c not in known]
         if unknown:
-            print(f"unknown cell(s) {', '.join(unknown)}; known: {', '.join(sorted(known))}"); return 2
+            print(f"unknown cell(s) {', '.join(unknown)}; known: {', '.join(sorted(known))}")
+            return 2
         if len(REMOTE_CELLS) > 1:
-            print("only one remote cell is supported for now"); return 2
+            print("only one remote cell is supported for now")
+            return 2
         local = [z for z, _ in ZONES if z not in REMOTE_CELLS]
         EXTRA_ENV["MESH_SPAWN_CELLS"] = ",".join(local)
         skipped = [n for n in names if n in TWO_HOST_SKIP]
@@ -661,10 +1043,18 @@ def main():
             print(f"skipping {n}: {TWO_HOST_SKIP[n]}")
         names = [n for n in names if n not in TWO_HOST_SKIP]
         if not names:
-            print("nothing left to run"); return 2
+            print("nothing left to run")
+            return 2
         os.makedirs(REMOTE_LOGS, exist_ok=True)
         globals()["REMOTE_PORT"] = args.remote_port
         globals()["REMOTE_PERSIST"] = args.remote_persist
+        if args.remote_persist:
+            for n in [n for n in names if n in PERSIST_SKIP]:
+                print(f"skipping {n}: {PERSIST_SKIP[n]}")
+            names = [n for n in names if n not in PERSIST_SKIP]
+            if not names:
+                print("nothing left to run")
+                return 2
         how = ("left running across scenarios, recovering by itself" if args.remote_persist
                else "started with each scenario while the tester is held")
         print(f"two-machine run: this machine serves {', '.join(local)}; the other serves {', '.join(REMOTE_CELLS)}, {how}")
@@ -680,23 +1070,63 @@ def main():
 
     kill_bots()
     reports = []
-    for n in names:
-        rep = Report(n)
-        t0 = time.time()
-        print(f"=== {n}")
-        try:
-            run_scenario(n, rep)
-        except Exception as ex:  # a harness failure is a failed scenario, never a crash of the run
-            rep.check(False, f"harness: {ex}")
-        finally:
-            stop_play()
-        rep.notes.append(f"   {time.time() - t0:0.0f} s")
-        for ok, label in rep.checks:
-            print(f"  [{'ok' if ok else 'FAIL'}] {label}")
-        for note in rep.notes:
-            print(note)
-        reports.append(rep)
-        time.sleep(5)  # the zone processes exit with Play; give the ports a moment
+    registries = rigtools.assets_with_script(ASSETS, rigtools.REGISTRY_SCRIPT_GUID)
+    try:
+        registry_before = registry_state(registries)
+    except (OSError, RuntimeError) as ex:
+        print(f"cannot take the registry baseline: {ex}")
+        return 2
+    if registry_before[0]:
+        print("note: world registry asset(s) already differ from git before the run; each scenario is checked against "
+              "this state instead:\n  " + registry_before[0].replace("\n", "\n  "))
+    try:
+        for i, n in enumerate(names):
+            # Checked again before every scenario: a server run as a service that restarts on exit can take the ports back
+            # in the seconds between two Play sessions, and every scenario after that would fail without a cell logging.
+            taken = preflight()
+            if taken:
+                print(f"=== stopping before {n}: another server took the rig's ports")
+                for rest in names[i:]:
+                    rep = Report(rest)
+                    for problem in taken:
+                        rep.check(False, f"not run: {problem}")
+                    reports.append(rep)
+                for problem in taken:
+                    print(f"  {problem}")
+                break
+            rep = Report(n)
+            t0 = time.time()
+            print(f"=== {n}")
+            leftover = kit_process_count()
+            if leftover > 0:
+                kill_all_kit_processes()
+                rep.check(False, f"{leftover} rig process(es) were still running before the scenario (killed)")
+            try:
+                run_scenario(n, rep)
+            except Exception as ex:  # a harness failure is a failed scenario, never a crash of the run
+                rep.check(False, f"harness: {ex}")
+            finally:
+                survivors = stop_play()
+                rep.check(survivors == 0, f"{survivors} rig process(es) outlived Play (killed)")
+                try:
+                    rep.check(registry_state(registries) == registry_before, f"{len(registries)} registry asset(s) unchanged on disk")
+                except (OSError, RuntimeError) as ex:
+                    rep.check(False, f"registry assets: {ex}")
+            rep.notes.append(f"   {time.time() - t0:0.0f} s")
+            for ok, label in rep.checks:
+                print(f"  [{'ok' if ok else 'FAIL'}] {label}")
+            for note in rep.notes:
+                print(note)
+            reports.append(rep)
+            time.sleep(5)  # the zone processes exit with Play; give the ports a moment
+    except Exception as ex:  # outside a scenario's own try: the rig itself failed (PowerShell, the status file)
+        print(f"=== the run stopped: {ex}")
+        done = {rep.name for rep in reports}
+        for rest in names:
+            if rest not in done:
+                rep = Report(rest)
+                rep.check(False, f"not run: the run stopped ({ex})")
+                reports.append(rep)
     if REMOTE_CELLS:
         fetch_remote(force=True)   # one last copy so the logs left behind match what was graded
         print("stopping the remote cell:", remote("stop").strip())

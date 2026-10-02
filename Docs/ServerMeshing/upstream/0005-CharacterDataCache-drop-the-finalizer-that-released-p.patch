@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: vaughanb <brenden.vaughan@gmail.com>
+Date: Fri, 25 Sep 2026 12:00:00 -0600
+Subject: [PATCH 5/5] CharacterDataCache: drop the finalizer that released
+ pooled collections off the main thread
+
+~CharacterDataCache called CleanCacheData, which returns the cache's pooled
+dictionaries to UnityEngine.Pool's CollectionPool. Finalizers run on the
+garbage collector's finalizer thread, and those pools are static and not
+synchronised, so a release there can interleave with Get and Release on the
+main thread: Get can hand out null, and one collection can be handed out
+twice. Under load this shows up as a NullReferenceException inside the pool's
+release, "Collecton is null" errors while combining damages, and "Collection
+was modified" when two damage results turn out to be the same dictionary.
+
+A cache dropped without CleanCacheData now leaves its collections to the
+garbage collector instead of the pool; the pool only loses their reuse. The
+rest of the finalizer cleared lists the cache allocated itself, which the
+collector frees anyway. CleanCacheData is unchanged and still runs on the
+main thread when a character is re-cached.
+---
+ Core/Scripts/MemoryManagement/Caching/CharacterDataCache.cs | 13 -------------
+ 1 file changed, 13 deletions(-)
+
+diff --git a/Core/Scripts/MemoryManagement/Caching/CharacterDataCache.cs b/Core/Scripts/MemoryManagement/Caching/CharacterDataCache.cs
+index 48de187..f27d77e 100644
+--- a/Core/Scripts/MemoryManagement/Caching/CharacterDataCache.cs
++++ b/Core/Scripts/MemoryManagement/Caching/CharacterDataCache.cs
+@@ -108,19 +108,6 @@ namespace MultiplayerARPG
+             LeftHandWeaponAbilityIndexes = new Dictionary<string, int>();
+         }
+ 
+-        ~CharacterDataCache()
+-        {
+-            CleanCacheData();
+-            RightHandWeaponAbilities.Clear();
+-            RightHandWeaponAbilities = null;
+-            RightHandWeaponAbilityIndexes.Clear();
+-            RightHandWeaponAbilityIndexes = null;
+-            LeftHandWeaponAbilities.Clear();
+-            LeftHandWeaponAbilities = null;
+-            LeftHandWeaponAbilityIndexes.Clear();
+-            LeftHandWeaponAbilityIndexes = null;
+-        }
+-
+         private void CleanCacheData()
+         {
+             // Release buffs
+-- 
+2.53.0.windows.1
+

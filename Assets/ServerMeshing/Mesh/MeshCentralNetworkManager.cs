@@ -13,6 +13,9 @@
 // loop is also the supervisor for a crashed cell), and a cell that has been unwanted for `sleepAfterSeconds` is told
 // to exit. A player therefore never reaches a sleeping cell: the ring wakes it a full cell ahead (about 3 s to serve
 // on the rig against 10 s or more of travel).
+//
+// Dynamic cells (DESIGN.md 0.72): when the world has a Dynamic map, this server also runs the layout coordinator
+// (MeshLayoutCoordinator), which answers each cell's layout hello; with none, nothing of it runs.
 using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
 using LiteNetLib;
@@ -51,6 +54,7 @@ namespace MultiplayerARPG.MMO.Mesh
 
         protected override void Initialize()
         {
+            world = MeshLayoutOverride.Resolve(world);
             if (world != null)
             {
                 if (channels == null)
@@ -79,21 +83,137 @@ namespace MultiplayerARPG.MMO.Mesh
             // Registered whether or not cells sleep: a spawner advertises its cells as soon as it registers, which
             // can be long before anyone turns sleeping on, and an unhandled message is simply dropped.
             if (ClusterServer != null)
-                ClusterServer.RegisterMessageHandler(MeshClusterMsg.Serves, HandleServesMessage);
-            if (sleepCells && world != null && ClusterServer != null)
             {
+                ClusterServer.RegisterMessageHandler(MeshClusterMsg.Serves, HandleServesMessage);
+                ClusterServer.RegisterMessageHandler(MeshClusterMsg.LoadReport, HandleLoadReport);
+                // Registered whether or not a map is Dynamic here: a cell whose asset says otherwise still gets an
+                // answer (and a note), so its gate never waits for ever.
+                ClusterServer.RegisterMessageHandler(MeshClusterMsg.LayoutHello, HandleLayoutHello);
+                ClusterServer.RegisterMessageHandler(MeshClusterMsg.LayoutAck, HandleLayoutAck);
+                // Answered whether or not cells sleep: a cell asks whenever a neighbour it needs is not registered, and an
+                // unregistered request type makes the kit log an error for every one of them.
                 ClusterServer.RegisterRequestHandler<MeshWakeRequest, MeshWakeResponse>(MeshClusterMsg.Wake, HandleWakeRequest);
-                Logging.Log("Mesh", $"Sleeping cells ON: awake rings {awakeRings}, sleep after {sleepAfterSeconds:0} s; cells start on demand");
             }
+            if (sleepCells && world != null && ClusterServer != null)
+                Logging.Log("Mesh", $"Sleeping cells ON: awake rings {awakeRings}, sleep after {sleepAfterSeconds:0} s; cells start on demand");
         }
+
+#if NET || NETCOREAPP || ((UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE)
+        public override void OnStartServer()
+        {
+            base.OnStartServer();   // starts the cluster server, then awaits (the rest of the kit's start runs later)
+            if (world == null || !world.HasDynamicMap)
+                return;
+            if (ClusterServer == null || !ClusterServer.IsNetworkActive)
+            {
+                Logging.LogError("Mesh", "The cluster server did not start: no layout coordinator, so the cells of Dynamic maps stay gated");
+                return;
+            }
+            MeshCoordinatorStore store = new MeshCoordinatorStore(MeshCoordinatorStore.ResolvePath(world.dynamicSettings.coordinatorStorePath));
+            _coordinator = new MeshLayoutCoordinator(world, new MeshUnityClock(), new MeshClusterCoordinatorTransport(ClusterServer), store, new MeshKitLog());
+            _coordinator.Start();
+            _nextCoordinatorTick = 0f;
+        }
+
+        public override void OnStopServer()
+        {
+            _coordinator?.Stop();
+            _coordinator = null;
+            base.OnStopServer();
+        }
+#endif
+
+        private MeshLayoutCoordinator _coordinator;
+        private float _nextCoordinatorTick;
+
+        /// <summary>The layout coordinator, when the world has a Dynamic map and this process is the central.</summary>
+        public MeshLayoutCoordinator Coordinator => _coordinator;
 
         protected override void Update()
         {
             base.Update();
+            if (_coordinator != null && IsServer && Time.unscaledTime >= _nextCoordinatorTick)
+            {
+                _nextCoordinatorTick = Time.unscaledTime + 1f;
+                _coordinator.Tick();
+            }
+            if (loadSummarySeconds > 0f && Time.unscaledTime >= _nextLoadSummary && LoadBoard.Count > 0)
+            {
+                _nextLoadSummary = Time.unscaledTime + loadSummarySeconds;
+                Logging.Log("Mesh", "Cell load: " + LoadBoard.Summary(Time.unscaledTime, loadSummarySeconds));
+            }
             if (!sleepCells || world == null || ClusterServer == null || Time.unscaledTime < _nextTick)
                 return;
             _nextTick = Time.unscaledTime + awakeTickSeconds;
             AwakeTick();
+        }
+
+        [Header("Load reports")]
+        [Tooltip("Seconds between the central's one-line summary of every cell's latest load report. 0 = off.")]
+        public float loadSummarySeconds = 30f;
+        private float _nextLoadSummary;
+
+        /// <summary>LoadBoard holds every cell's latest load report (MeshLoadReportMessage).</summary>
+        public MeshLoadBoard LoadBoard { get; } = new MeshLoadBoard();
+
+        private void HandleLoadReport(MessageHandlerData messageHandler)
+        {
+            MeshLoadReportMessage report = new MeshLoadReportMessage();
+            try
+            {
+                report.Deserialize(messageHandler.Reader);
+            }
+            catch (System.Exception ex)
+            {
+                Logging.LogWarning("Mesh", $"Unreadable load report from connection {messageHandler.ConnectionId}: {ex.Message}");
+                return;
+            }
+            if (messageHandler.Reader.AvailableBytes != 0)
+            {
+                // A report that does not end where the packet does was written by another version of the message.
+                Logging.LogWarning("Mesh", $"Load report of cell {report.cellId} from connection {messageHandler.ConnectionId} has {messageHandler.Reader.AvailableBytes} unread bytes; dropped");
+                return;
+            }
+            if (!LoadBoard.Record(report, Time.unscaledTime))
+                Logging.LogWarning("Mesh", $"Load report without a cell id from connection {messageHandler.ConnectionId}; ignored");
+            else if (_coordinator != null && _coordinator.IsDynamicMap(report.mapId))
+                _coordinator.OnLoadReport(messageHandler.ConnectionId, report);
+        }
+
+        private void HandleLayoutHello(MessageHandlerData messageHandler)
+        {
+            if (!ReadWhole(messageHandler, "Layout hello", out MeshLayoutHelloMessage hello))
+                return;
+            if (_coordinator != null)
+            {
+                _coordinator.OnLayoutHello(messageHandler.ConnectionId, hello);
+                return;
+            }
+            // No Dynamic map here: answer with no runtime layout, so a cell that runs its map Dynamic is not gated for ever.
+            MeshLayoutMessage answer = new MeshLayoutMessage { kind = MeshLayoutKind.HelloAnswer, targetCellId = hello.cellId, targetIncarnation = hello.incarnation, snapshot = new MeshLayoutSnapshot() };
+            ClusterServer.SendPacket(messageHandler.ConnectionId, 0, DeliveryMethod.ReliableOrdered, MeshClusterMsg.Layout, writer => answer.Serialize(writer));
+            MeshCoordinatorNoteMessage note = new MeshCoordinatorNoteMessage
+            {
+                level = MeshNoteLevel.Warning, subjectCellId = hello.cellId, code = "mode-mismatch",
+                text = $"map {hello.mapId} is not Dynamic on the central (no layout coordinator runs); the cell was answered with no runtime layout",
+            };
+            ClusterServer.SendPacket(messageHandler.ConnectionId, 0, DeliveryMethod.ReliableOrdered, MeshClusterMsg.CoordinatorNote, writer => note.Serialize(writer));
+            Logging.LogWarning("Mesh", $"Layout hello from cell {hello.cellId} ({hello.mapId}) but no map is Dynamic here: answered with no runtime layout");
+        }
+
+        private void HandleLayoutAck(MessageHandlerData messageHandler)
+        {
+            if (!ReadWhole(messageHandler, "Layout ack", out MeshLayoutAckMessage ack))
+                return;
+            _coordinator?.OnLayoutAck(messageHandler.ConnectionId, ack);
+        }
+
+        private static bool ReadWhole<T>(MessageHandlerData messageHandler, string what, out T message) where T : LiteNetLib.Utils.INetSerializable, new()
+        {
+            if (MeshWholeMessage.TryRead(messageHandler.Reader, out message, out string error))
+                return true;
+            Logging.LogWarning("Mesh", $"{what} from connection {messageHandler.ConnectionId} dropped: {error}");
+            return false;
         }
 
         /// <summary>A cell's map server is registered with the cluster.</summary>
@@ -122,7 +242,7 @@ namespace MultiplayerARPG.MMO.Mesh
         }
 
         /// <summary>Which map-spawn server may start a given cell, from what each spawner advertised at registration.</summary>
-        private readonly Dictionary<string, long> _spawnerByCell = new Dictionary<string, long>();
+        private readonly Dictionary<string, long> _spawnerByCell = new Dictionary<string, long>(System.StringComparer.OrdinalIgnoreCase); // cell ids compare as the spawner's Serves does
 
         private void HandleServesMessage(MessageHandlerData messageHandler)
         {
@@ -140,13 +260,18 @@ namespace MultiplayerARPG.MMO.Mesh
         private UniTaskVoid HandleWakeRequest(RequestHandlerData requestHandler, MeshWakeRequest request, RequestProceedResultDelegate<MeshWakeResponse> result)
         {
             MeshCell cell = world != null ? world.GetCell(request.mapId, request.cellId) ?? world.GetCellById(request.cellId) : null;
+            if (!sleepCells)
+            {
+                result.Invoke(AckResponseCode.Success, new MeshWakeResponse { accepted = false, reason = MeshWakeRefusal.SleepingOff });
+                return default;
+            }
             if (cell != null)
             {
                 _wakeHolds[cell.id] = Time.unscaledTime + wakeHoldSeconds;
                 _nextTick = 0f;
                 Logging.Log("Mesh", $"Wake requested for cell {cell.id} ({cell.mapId}) by connection {requestHandler.ConnectionId}");
             }
-            result.Invoke(AckResponseCode.Success, new MeshWakeResponse { accepted = cell != null });
+            result.Invoke(AckResponseCode.Success, new MeshWakeResponse { accepted = cell != null, reason = cell != null ? MeshWakeRefusal.None : MeshWakeRefusal.UnknownCell });
             return default;
         }
 
@@ -224,26 +349,32 @@ namespace MultiplayerARPG.MMO.Mesh
             }
         }
 
+        /// <summary>
+        /// SpawnerFor is the map-spawn server to ask for a cell: the one that advertised it (for a dynamic cell, its base
+        /// cell's) while that one is still registered, else the first registered spawner, else -1.
+        /// </summary>
+        public static long SpawnerFor(MeshCell cell, IReadOnlyDictionary<string, long> spawnerByCell, ICollection<long> registered, out bool advertised)
+        {
+            advertised = false;
+            string key = cell.isDynamic ? cell.baseId : cell.id;
+            if (!string.IsNullOrEmpty(key) && spawnerByCell.TryGetValue(key, out long owner) && registered.Contains(owner))
+            {
+                advertised = true;
+                return owner;
+            }
+            foreach (long connectionId in registered)
+                return connectionId;
+            return -1;
+        }
+
         private void RequestStart(MeshCell cell, float now)
         {
-            // The spawner that advertised this cell, if any: asking a host that does not serve it means the cell
-            // never wakes, because that spawner refuses it. Falling back to the first known spawner keeps the
-            // single-host case, where every spawner serves everything, exactly as it was.
-            long spawnerConnectionId = -1;
-            if (_spawnerByCell.TryGetValue(cell.id, out long owner) && ClusterServer.MapSpawnServerPeers.ContainsKey(owner))
-            {
-                spawnerConnectionId = owner;
-            }
-            else
-            {
-                foreach (CentralServerPeerInfo spawner in ClusterServer.MapSpawnServerPeers.Values)
-                {
-                    spawnerConnectionId = spawner.connectionId;
-                    break;
-                }
-                if (spawnerConnectionId >= 0 && _spawnerByCell.Count > 0 && !_spawnRequested.ContainsKey(cell.id))
-                    Logging.LogWarning("Mesh", $"No spawner advertised cell {cell.id}; asking {spawnerConnectionId}, which may refuse it");
-            }
+            // The spawner that advertised this cell, if any: the kit's spawner starts whatever it is asked to, so
+            // asking a host that does not serve the cell starts it on the wrong machine. Falling back to the first
+            // known spawner keeps the single-host case, where every spawner serves everything, exactly as it was.
+            long spawnerConnectionId = SpawnerFor(cell, _spawnerByCell, ClusterServer.MapSpawnServerPeers.Keys, out bool advertised);
+            if (!advertised && spawnerConnectionId >= 0 && _spawnerByCell.Count > 0 && !_spawnRequested.ContainsKey(cell.id))
+                Logging.LogWarning("Mesh", $"No spawner advertised cell {cell.id}; asking {spawnerConnectionId}, which starts it on its own host");
             if (spawnerConnectionId < 0)
             {
                 if (!_spawnRequested.ContainsKey(cell.id))

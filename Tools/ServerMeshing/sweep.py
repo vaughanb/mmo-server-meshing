@@ -4,12 +4,16 @@ The question is not "does it pass" but "where does a crossing start to hurt", so
 numbers that describe one: the client's gap without a character, the handoff ack, the puppet steering error the
 neighbour measured, and whether anything threw.
 """
-import os, re, subprocess, sys, time
+import os
+import re
+import subprocess
+import sys
+import time
 
-ROOT = "D:/Game Development/mmo-server-meshing"
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "Tools", "ServerMeshing"))
 os.chdir(ROOT)
-import regress as r
+import regress as r  # noqa: E402 -- the harness folder goes on sys.path first
 
 PROFILES = ["off", "lag5", "loss05", "loss2", "loss5", "reorder", "jitter", "nasty"]
 SCENARIO = sys.argv[1] if len(sys.argv) > 1 else "pet"
@@ -47,7 +51,7 @@ def main():
             cmd += ["--impair", profile]
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
         out = (proc.stdout or "") + (proc.stderr or "")
-        print("\n".join(l for l in out.splitlines() if "[FAIL]" in l or "PASS" in l or "FAIL" in l)[:600], flush=True)
+        print("\n".join(line for line in out.splitlines() if "[FAIL]" in line or "PASS" in line or "FAIL" in line)[:600], flush=True)
 
         verdict = "PASS" if re.search(r"\b" + SCENARIO + r"\s+PASS", out) else "FAIL"
         checks = (re.search(r"\((\d+/\d+) checks\)", out) or [None, "?"])[1]

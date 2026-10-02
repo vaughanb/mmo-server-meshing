@@ -36,6 +36,12 @@ namespace MultiplayerARPG.MMO.Mesh
         public const ushort Sleep = 30010;   // central -> map server: exit when no player is on you
         public const ushort Wake = 30011;    // map server -> central (request): a cell I need is asleep
         public const ushort Serves = 30012;  // map-spawn server -> central: the cells this host is allowed to start
+        public const ushort LoadReport = 30013; // map server -> central: measured work, counts and where they stand (MeshLoadReportMessage)
+        public const ushort Layout = 30014;          // central -> map server: a layout snapshot (broadcast, staged, or the answer to a hello)
+        public const ushort LayoutHello = 30015;     // map server -> central: I am registered; this is the layout I hold
+        public const ushort LayoutAck = 30016;       // map server -> central: a layout applied or rejected
+        public const ushort Retire = 30017;          // central -> map server: your cell is gone; drain and exit
+        public const ushort CoordinatorNote = 30018; // central -> map server: a decision or refusal, for the cell's log
     }
 
     /// <summary>Central to a map server: nobody needs this cell; save and exit (ignored while a player is on it).</summary>
@@ -48,8 +54,9 @@ namespace MultiplayerARPG.MMO.Mesh
 
     /// <summary>
     /// A map-spawn server tells the central which cells it may start. Without this the central wakes a cell on the
-    /// first spawner it happens to know, which is always right with one host and a coin toss with two: the spawner
-    /// that receives the request refuses cells it does not serve, and the cell never wakes.
+    /// first spawner it happens to know, which is always right with one host and a coin toss with two: the kit's
+    /// spawner starts whatever it is asked to (it does not check its own list), so the cell starts on the wrong host
+    /// and serves from there.
     /// </summary>
     public struct MeshServesMessage : INetSerializable
     {
@@ -78,10 +85,19 @@ namespace MultiplayerARPG.MMO.Mesh
         public void Deserialize(NetDataReader reader) { cellId = reader.GetString(); mapId = reader.GetString(); }
     }
 
+    /// <summary>MeshWakeRefusal says why the central did not wake a cell.</summary>
+    public enum MeshWakeRefusal : byte
+    {
+        None = 0,
+        UnknownCell = 1,
+        SleepingOff = 2,
+    }
+
     public struct MeshWakeResponse : INetSerializable
     {
         public bool accepted;
-        public void Serialize(NetDataWriter writer) { writer.Put(accepted); }
-        public void Deserialize(NetDataReader reader) { accepted = reader.GetBool(); }
+        public MeshWakeRefusal reason;
+        public void Serialize(NetDataWriter writer) { writer.Put(accepted); writer.Put((byte)reason); }
+        public void Deserialize(NetDataReader reader) { accepted = reader.GetBool(); reason = (MeshWakeRefusal)reader.GetByte(); }
     }
 }

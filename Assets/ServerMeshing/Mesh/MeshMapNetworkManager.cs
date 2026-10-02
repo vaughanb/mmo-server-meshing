@@ -91,6 +91,43 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private bool _prevLoadOfflineScene;
         private ClientMigrationController _migration;
+        private MeshSendMeter _sendMeter;
+
+        protected override void Awake()
+        {
+            world = MeshLayoutOverride.Resolve(world); // rig: MESH_LAYOUT_OVERRIDE re-cuts maps for a test run
+            InstallSendMeter();
+            base.Awake();
+        }
+
+        /// <summary>
+        /// Rig toggle MESH_METER_SENDS (count or time): wraps the kit's transport factory in a metered one, so every
+        /// server send is counted for the Send window line. Unset, empty or off changes nothing and logs nothing.
+        /// </summary>
+        private void InstallSendMeter()
+        {
+            string value = System.Environment.GetEnvironmentVariable(MeshMeteredTransportFactory.EnvironmentKey);
+            if (!MeshMeteredTransportFactory.TryParseSetting(value, out bool meter, out bool timed, out string warning))
+            {
+                Logging.LogWarning("Mesh", warning);
+                return;
+            }
+            if (!meter)
+                return;
+            // Captured before the metered factory exists, or the kit's GetComponent fallback would find the wrapper itself.
+            BaseTransportFactory kit = TransportFactory;
+            if (kit == null)
+                kit = GetComponent<BaseTransportFactory>();
+            if (kit == null)
+                kit = null; // a missing component is a Unity fake null; the metered factory must see a real one
+            MeshMeteredTransportFactory metered = gameObject.AddComponent<MeshMeteredTransportFactory>();
+            metered.Inner = kit;
+            metered.Meter = new MeshSendMeter(System.Diagnostics.Stopwatch.Frequency);
+            metered.Timed = timed;
+            TransportFactory = metered;
+            _sendMeter = metered.Meter;
+            Logging.Log("Mesh", MeshMeteredTransportFactory.SettingLine(timed));
+        }
 
         private ClientMigrationController Migration
         {
@@ -589,6 +626,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (_clusterRegisterRetries > 0)
                     Logging.Log("Mesh", $"Cluster registration accepted after {_clusterRegisterRetries} retr{(_clusterRegisterRetries == 1 ? "y" : "ies")}");
                 _clusterRegisterRetries = 0;
+                SendLayoutHello();
                 return;
             }
             if (!IsServer)
@@ -632,9 +670,17 @@ namespace MultiplayerARPG.MMO.Mesh
             _nextDatabaseReconnect = 0f;
             _nextClusterConnectRetry = Time.unscaledTime + Mathf.Max(1f, clusterConnectRetrySeconds);
             if (ClusterClient != null)
+            {
                 ClusterClient.RegisterMessageHandler(MeshClusterMsg.Sleep, HandleSleepMessage);
-            if (ServerTransport is LiteNetLibManager.LiteNetLibTransport statsTransport && statsTransport.Server != null)
+                // A request needs its response type registered on the sending side, or the transport throws
+                // before anything is sent (TransportHandler.CreateAndWriteRequest).
+                ClusterClient.RegisterResponseHandler<MeshWakeRequest, MeshWakeResponse>(MeshClusterMsg.Wake);
+            }
+            LiteNetLibManager.LiteNetLibTransport statsTransport = MeshTransportUnwrap.Innermost<LiteNetLibManager.LiteNetLibTransport>(ServerTransport);
+            if (statsTransport != null && statsTransport.Server != null)
                 statsTransport.Server.EnableStatistics = true; // client traffic in the Mesh stats line
+            if (_sendMeter != null && !(ServerTransport is MeshMeteredTransport))
+                Logging.LogError("Mesh", $"Send meter error: {MeshMeteredTransportFactory.EnvironmentKey} asked for a send meter but the server transport is {(ServerTransport == null ? "none" : ServerTransport.GetType().Name)}, not the metered one (useWebSocket replaces the transport factory); the Send window lines of this run count nothing");
             // Test rig toggle: MESH_NO_MONSTER_HANDOFF=1 in the environment keeps monsters with their spawn cell even
             // when they chase across the line (forces cross-edge kills so loot ghosting can be exercised).
             if (System.Environment.GetEnvironmentVariable("MESH_NO_MONSTER_HANDOFF") == "1")
@@ -649,11 +695,17 @@ namespace MultiplayerARPG.MMO.Mesh
                 ghostLeadSeconds = leadSeconds;
                 Logging.Log("Mesh", $"MESH_GHOST_LEAD={leadEnv}: ghost steering lead set to {leadSeconds:0.##} s");
             }
+            ApplyBandOverride();
             GhostingOnStartServer();
+            LoadOnStartServer();
+            LayoutOnStartServer();
+            MeshExceptionTrace.Install();
         }
 
         public override void OnStopServer()
         {
+            MeshExceptionTrace.Uninstall();
+            LayoutOnStopServer();
             GhostingOnStopServer();
             _velocities.Clear();
             _handoffsInProgress.Clear();
@@ -744,8 +796,10 @@ namespace MultiplayerARPG.MMO.Mesh
                 ClusterConnectTick();
                 ClusterMirrorTick();
                 DatabaseConnectTick();
+                LayoutTick();
                 MeshBoundaryTick();
                 GhostingUpdate();
+                LoadTick();
             }
             else
             {
@@ -814,6 +868,8 @@ namespace MultiplayerARPG.MMO.Mesh
 
             if (!TryResolveOwnZone())
                 return;
+            if (IsLayoutGated)
+                return; // a Dynamic map's cell hands nobody out before it knows the layout
 
             // Collect first: the handoff unregisters the character, which would mutate the collection.
             _handoffCandidates.Clear();
@@ -831,7 +887,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 }
                 Vector3 pos = entity.EntityTransform.position;
                 TrackVelocity(entity.Id, pos, now);
-                if (world.OwnerOf(OwnCell, pos) == OwnCell)
+                if (MeshCell.Same(world.OwnerOf(OwnCell, pos), OwnCell))
                     continue;
                 // Hysteresis: only flip once clearly past the edge, so loitering on the line doesn't thrash.
                 if (-OwnCell.DistanceToEdge(pos) < handoffHysteresis)
@@ -855,7 +911,7 @@ namespace MultiplayerARPG.MMO.Mesh
         /// </summary>
         private async UniTaskVoid MeshHandoff(BasePlayerCharacterEntity entity, MeshCell zone)
         {
-            if (zone == null || zone == OwnCell)
+            if (zone == null || MeshCell.Same(zone, OwnCell))
                 return;
 
             string mapName = zone.mapId; // the destination's map: this logical map today, a neighbouring one once continents touch
@@ -1010,6 +1066,16 @@ namespace MultiplayerARPG.MMO.Mesh
         private void HandleSleepMessage(MessageHandlerData messageHandler)
         {
             MeshSleepMessage message = messageHandler.ReadMessage<MeshSleepMessage>();
+            if (!string.Equals(message.cellId, OwnZoneId, System.StringComparison.OrdinalIgnoreCase))
+            {
+                Logging.LogWarning("Mesh", $"Sleep message for cell {message.cellId} reached cell {OwnZoneId}; ignored");
+                return;
+            }
+            if (OwnCell != null && OwnCell.isDynamic)
+            {
+                Logging.Log("Mesh", $"Sleep ignored: cell {OwnZoneId} is a dynamic cell");
+                return;
+            }
             int players = 0;
             foreach (IPlayerCharacterData _ in ServerUserHandlers.GetPlayerCharacters()) players++;
             if (players > 0 || Players.Count > 0)
@@ -1027,8 +1093,20 @@ namespace MultiplayerARPG.MMO.Mesh
             if (cell == null || ClusterClient == null || !ClusterClient.IsAppRegistered || Time.unscaledTime < _nextWakeRequest)
                 return;
             _nextWakeRequest = Time.unscaledTime + 5f;
-            ClusterClient.SendRequest(MeshClusterMsg.Wake, new MeshWakeRequest { cellId = cell.id, mapId = cell.mapId });
-            Logging.Log("Mesh", $"Wake requested for sleeping cell {cell.id} ({cell.mapId})");
+            string cellId = cell.id;
+            bool sent = ClusterClient.SendRequest(MeshClusterMsg.Wake, new MeshWakeRequest { cellId = cell.id, mapId = cell.mapId },
+                (responseHandler, responseCode, response) =>
+                {
+                    if (responseCode != AckResponseCode.Success)
+                        Logging.LogWarning("Mesh", $"Wake request for cell {cellId} answered {responseCode}");
+                    else if (response is MeshWakeResponse wake && !wake.accepted && wake.reason == MeshWakeRefusal.UnknownCell)
+                        Logging.LogWarning("Mesh", $"Wake request for cell {cellId} refused: the central does not know that cell");
+                    // SleepingOff: every cell runs already, so the neighbour is simply not registered yet; nothing to do.
+                });
+            if (sent)
+                Logging.Log("Mesh", $"Wake requested for sleeping cell {cell.id} ({cell.mapId})");
+            else
+                Logging.LogWarning("Mesh", $"Wake request for cell {cell.id} could not be sent");
         }
 
     }

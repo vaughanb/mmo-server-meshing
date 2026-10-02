@@ -7,6 +7,7 @@
 // handler runs: the zone that owns the position when a server serves it, otherwise the nearest live cell of the same
 // map (any cell can host a character standing anywhere and hands it off by position once the right cell is back).
 // Maps that are not meshed keep the kit's routing untouched.
+using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
 using LiteNetLibManager;
 using UnityEngine;
@@ -31,6 +32,11 @@ namespace MultiplayerARPG.MMO.Mesh
 
         protected async UniTaskVoid HandleRequestSelectCharacterByPosition(RequestHandlerData requestHandler, RequestSelectCharacterMessage request, RequestProceedResultDelegate<ResponseSelectCharacterMessage> result)
         {
+            // With a Dynamic map the login routes by the central's registry, which holds the runtime layout (the login
+            // runs in the central's process); an all-Static world keeps its own, as it always has.
+            world = CentralNetworkManager is MeshCentralNetworkManager meshCentral && meshCentral.world != null && meshCentral.world.HasDynamicMap
+                ? meshCentral.world
+                : MeshLayoutOverride.Resolve(world);
             if (routeByPosition && world != null && !string.IsNullOrEmpty(request.characterId) && _userPeers.TryGetValue(requestHandler.ConnectionId, out CentralUserPeerInfo userPeerInfo))
             {
                 DatabaseApiResult<CharacterResp> characterResp = await DatabaseClient.GetCharacterAsync(new GetCharacterReq()
@@ -45,8 +51,8 @@ namespace MultiplayerARPG.MMO.Mesh
                     if (CentralNetworkManager is MeshCentralNetworkManager central && central.sleepCells)
                     {
                         // Sleeping cells: the owning cell serves the character; wake it first if it is asleep.
-                        MeshCell owner = world.CellAt(character.CurrentMapName, character.CurrentPosition);
-                        if (owner != null && !central.IsCellUp(owner))
+                        MeshCell owner = MeshLoginRouting.OwnerAt(world, character.CurrentMapName, character.CurrentPosition);
+                        if (owner != null && !owner.isDynamic && !central.IsCellUp(owner))
                         {
                             Logging.Log("Mesh", $"Login into sleeping cell {owner.id}: waking it for {character.CharacterName}");
                             bool up = await central.WakeAndWait(owner, 20f);
@@ -68,30 +74,21 @@ namespace MultiplayerARPG.MMO.Mesh
         private string RouteByPosition(PlayerCharacterData character)
         {
             string mapId = character.CurrentMapName;
-            MeshCell cell = world.CellAt(mapId, character.CurrentPosition);
-            if (cell != null && ClusterServer.MapServerPeersByKey.ContainsKey(PeerInfoExtensions.GetPeerInfoKey(cell.id, mapId)))
-                return cell.id;
-            // That cell is down: the nearest live cell of the map serves the character where it stands and hands it off
-            // by position as soon as the right cell is back.
-            string best = null;
-            int bestDistance = int.MaxValue;
+            List<string> live = new List<string>();
             foreach (CentralServerPeerInfo peer in ClusterServer.MapServerPeersByKey.Values)
             {
-                if (peer.peerType != CentralServerPeerType.MapServer || !string.Equals(peer.refId, mapId))
-                    continue;
-                MeshCell candidate = world.GetCell(mapId, peer.channelId);
-                if (candidate == null)
-                    continue;
-                int distance = cell != null ? Mathf.Max(Mathf.Abs(candidate.gridX - cell.gridX), Mathf.Abs(candidate.gridY - cell.gridY)) : 0;
-                if (distance < bestDistance)
-                {
-                    bestDistance = distance;
-                    best = candidate.id;
-                }
+                if (peer.peerType == CentralServerPeerType.MapServer && string.Equals(peer.refId, mapId))
+                    live.Add(peer.channelId);
             }
-            if (best != null)
-                Logging.LogWarning("Mesh", $"Login routing: no server for cell {(cell != null ? cell.id : "?")} of {mapId} ({character.CharacterName} at {(Vector3)character.CurrentPosition}); the nearest live cell {best} serves it");
-            return best;
+            // With the owner down, the nearest live cell of the map serves the character where it stands and hands it
+            // off by position as soon as the right cell is back.
+            MeshCell routed = MeshLoginRouting.Route(world, mapId, character.CurrentPosition, live, out bool fellBack);
+            if (fellBack)
+            {
+                MeshCell owner = MeshLoginRouting.OwnerAt(world, mapId, character.CurrentPosition);
+                Logging.LogWarning("Mesh", $"Login routing: no server for cell {(owner != null ? owner.id : "?")} of {mapId} ({character.CharacterName} at {(Vector3)character.CurrentPosition}); the nearest live cell {routed.id} serves it");
+            }
+            return routed?.id;
         }
 #endif
     }

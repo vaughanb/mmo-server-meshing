@@ -40,5 +40,15 @@ namespace MultiplayerARPG.MMO.Mesh
             MeshIdentity id = Get(entity);
             return id != null && id.IsGhost;
         }
+
+        /// <summary>BirthIncarnation returns the incarnation part of a birth-provenance id "{zone}:{incarnation}:{objectId}", or null for any other id (a player's character id).</summary>
+        public static string BirthIncarnation(string meshId)
+        {
+            if (string.IsNullOrEmpty(meshId))
+                return null;
+            int first = meshId.IndexOf(':');
+            int second = first >= 0 ? meshId.IndexOf(':', first + 1) : -1;
+            return second > first ? meshId.Substring(first + 1, second - first - 1) : null;
+        }
     }
 }

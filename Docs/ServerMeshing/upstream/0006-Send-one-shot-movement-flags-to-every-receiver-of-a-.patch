@@ -1,0 +1,263 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: vaughanb <brenden.vaughan@gmail.com>
+Date: Wed, 30 Sep 2026 20:39:19 -0600
+Subject: [PATCH 6/7] Send one-shot movement flags to every receiver of a tick
+
+The server send loops write each entity once per receiver, and
+WriteServerState and CreateMovementData cleared the jump, dash, teleport
+and still-move flags inside that write, so only the first player written
+in a tick received them. An owner written after another player never got
+its own IsTeleport and never confirmed it, so a same-map respawn in view
+of an earlier-joined player waited forever in WaitClientTeleportConfirm.
+
+The writes now only read the flags. Handlers with one-shot flags
+implement the new IEntityMovementServerStateFlags, and both send loops
+consume them once per tick, after the last player, through
+EntityMovementServerStateFlagsPass: a handler is recorded after each
+successful write, and a pass that throws leaves its flags for the next
+tick. NavMeshEntityMovement's consume also clears _sendingDash, which a
+server never cleared: after one dash every state carried IsDash and was
+sent reliably.
+
+OnTeleport now restarts interpolation at the destination, as the snap in
+ReadServerStateAtClient does. Without it a remote copy was drawn back to
+its last pre-teleport state on the next frame, and the server checked
+(and, while the character was dead, clamped) the owner's teleport
+confirmation against that stale state.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../BuiltInEntityMovementFunctions3D.cs       | 24 +++++++---
+ .../NavMeshEntityMovement.cs                  | 18 +++++--
+ .../Interfaces/IEntityMovementDataHandler.cs  | 48 +++++++++++++++++++
+ .../Networking/BaseGameNetworkManager.cs      | 10 ++++
+ 4 files changed, 90 insertions(+), 10 deletions(-)
+
+diff --git a/Core/Scripts/Gameplay/EntityMovementSystems/Implements/BuiltInEntityMovementFunctions3D.cs b/Core/Scripts/Gameplay/EntityMovementSystems/Implements/BuiltInEntityMovementFunctions3D.cs
+index ccc320ad4..64e487389 100644
+--- a/Core/Scripts/Gameplay/EntityMovementSystems/Implements/BuiltInEntityMovementFunctions3D.cs
++++ b/Core/Scripts/Gameplay/EntityMovementSystems/Implements/BuiltInEntityMovementFunctions3D.cs
+@@ -7,7 +7,7 @@ using UnityEngine.AI;
+ 
+ namespace MultiplayerARPG
+ {
+-    public partial class BuiltInEntityMovementFunctions3D : IEntityMovementDataHandler
++    public partial class BuiltInEntityMovementFunctions3D : IEntityMovementDataHandler, IEntityMovementServerStateFlags
+     {
+         private const int FORCE_GROUNDED_FRAMES_AFTER_TELEPORT = 3;
+         private const float MIN_DISTANCE_TO_SIMULATE_MOVEMENT = 0.01f;
+@@ -1325,10 +1325,8 @@ namespace MultiplayerARPG
+             movementData.shouldSendReliably = shouldSendReliably;
+             forceAppliers = _movementForceAppliers;
+ 
+-            _sendingJump = false;
+-            _sendingDash = false;
+-            _isTeleporting = false;
+-            _stillMoveAfterTeleport = false;
++            // Called once per receiver, so the one-shot flags stay
++            // set for every receiver of this tick; the send loop consumes them once (ConsumeServerStateFlags)
+ 
+             return movementData;
+         }
+@@ -1371,11 +1369,19 @@ namespace MultiplayerARPG
+             }
+ 
+             Entity.ServerWriteSyncTransform3D(_movementForceAppliers, writer);
++            // Called once per receiver, so the one-shot flags stay
++            // set for every receiver of this tick; the send loop consumes them once (ConsumeServerStateFlags)
++            return true;
++        }
++
++        // IEntityMovementServerStateFlags. The owner's teleport
++        // confirm (_isServerWaitingTeleportConfirm, _isClientConfirmingTeleport) is not a one-shot flag.
++        public void ConsumeServerStateFlags()
++        {
+             _sendingJump = false;
+             _sendingDash = false;
+             _isTeleporting = false;
+             _stillMoveAfterTeleport = false;
+-            return true;
+         }
+ 
+         public void ReadClientStateAtServer(long peerTimestamp, NetDataReader reader)
+@@ -1660,6 +1666,12 @@ namespace MultiplayerARPG
+                 _isClientConfirmingTeleport = true;
+             _lastTeleportFrame = Time.frameCount;
+             _previousPosition = EntityTransform.position;
++            // Restart interpolation at the destination, as the
++            // snap in ReadServerStateAtClient does. Otherwise UpdateInterpolate drags a remote copy back to its last
++            // pre-teleport state, and the server checks (and, while dead, clamps) the owner's confirmation against it.
++            _startInterpPosition = position;
++            _endInterpPosition = position;
++            _interpElapsedTime = 0f;
+         }
+ 
+         public bool CanPredictMovement()
+diff --git a/Core/Scripts/Gameplay/EntityMovementSystems/NavMeshEntityMovement.cs b/Core/Scripts/Gameplay/EntityMovementSystems/NavMeshEntityMovement.cs
+index 677eff857..fc067de26 100644
+--- a/Core/Scripts/Gameplay/EntityMovementSystems/NavMeshEntityMovement.cs
++++ b/Core/Scripts/Gameplay/EntityMovementSystems/NavMeshEntityMovement.cs
+@@ -10,7 +10,7 @@ using UnityEngine.AI;
+ namespace MultiplayerARPG
+ {
+     [RequireComponent(typeof(NavMeshAgent))]
+-    public class NavMeshEntityMovement : BaseNetworkedGameEntityComponent<BaseGameEntity>, IEntityMovementComponent, IEntityMovementDataHandler, IManagedUpdate
++    public class NavMeshEntityMovement : BaseNetworkedGameEntityComponent<BaseGameEntity>, IEntityMovementComponent, IEntityMovementDataHandler, IEntityMovementServerStateFlags, IManagedUpdate
+     {
+         protected const float MIN_MAGNITUDE_TO_DETERMINE_MOVING = 0.01f;
+         protected const float MIN_DISTANCE_TO_SIMULATE_MOVEMENT = 0.01f;
+@@ -592,8 +592,8 @@ namespace MultiplayerARPG
+             movementData.shouldSendReliably = shouldSendReliably;
+             forceAppliers = _movementForceAppliers;
+ 
+-            _isTeleporting = false;
+-            _stillMoveAfterTeleport = false;
++            // Called once per receiver, so the one-shot flags stay
++            // set for every receiver of this tick; the send loop consumes them once (ConsumeServerStateFlags)
+ 
+             return movementData;
+         }
+@@ -626,9 +626,19 @@ namespace MultiplayerARPG
+             }
+             // Sync transform from server to all clients (include owner client)
+             this.ServerWriteSyncTransform3D(_movementForceAppliers, writer);
++            // Called once per receiver, so the one-shot flags stay
++            // set for every receiver of this tick; the send loop consumes them once (ConsumeServerStateFlags)
++            return true;
++        }
++
++        // IEntityMovementServerStateFlags. Clears the one-shot flags the server writes send, including the dash
++        // flag, which a server never cleared before (after one dash, every state carried IsDash and went
++        // reliable).
++        public void ConsumeServerStateFlags()
++        {
++            _sendingDash = false;
+             _isTeleporting = false;
+             _stillMoveAfterTeleport = false;
+-            return true;
+         }
+ 
+         public void ReadClientStateAtServer(long peerTimestamp, NetDataReader reader)
+diff --git a/Core/Scripts/Gameplay/Interfaces/IEntityMovementDataHandler.cs b/Core/Scripts/Gameplay/Interfaces/IEntityMovementDataHandler.cs
+index 0937d249b..33ee64b2b 100644
+--- a/Core/Scripts/Gameplay/Interfaces/IEntityMovementDataHandler.cs
++++ b/Core/Scripts/Gameplay/Interfaces/IEntityMovementDataHandler.cs
+@@ -16,4 +16,52 @@ namespace MultiplayerARPG
+         bool WriteClientState(long writeTimestamp, NetDataWriter writer, out bool shouldSendReliably);
+         bool WriteServerState(long writeTimestamp, NetDataWriter writer,out bool shouldSendReliably);
+     }
++
++    // The one-shot jump, dash, teleport and still-move flags.
++    // The server send loops write each entity once per receiver, and the kit cleared these flags inside
++    // that write, so only the first player written in a tick got them. A data handler with such flags
++    // implements this: its writes only read them, and the loop consumes them once per tick.
++    public interface IEntityMovementServerStateFlags
++    {
++        /// <summary>
++        /// Clears the one-shot flags this tick's server writes carried. Called by the server send loop
++        /// once per tick, after its last player, on each handler it wrote; never from a write.
++        /// </summary>
++        void ConsumeServerStateFlags();
++    }
++
++    /// <summary>
++    /// The handlers one server send pass wrote. Begin, Record
++    /// after every successful write (a handler written to many players is kept once), ConsumeAll after
++    /// the last player. A handler written to no one keeps its flags for a later tick, so an owner still
++    /// gets its teleport, and so does a flag raised after the pass.
++    /// </summary>
++    public sealed class EntityMovementServerStateFlagsPass
++    {
++        private readonly HashSet<IEntityMovementServerStateFlags> _written = new HashSet<IEntityMovementServerStateFlags>();
++
++        public int RecordedCount => _written.Count;
++
++        /// <summary>
++        /// Starts a pass. Drops, unconsumed, what a pass that threw before ConsumeAll left behind, so
++        /// those flags go out again next tick (at least once, never lost).
++        /// </summary>
++        public void Begin()
++        {
++            _written.Clear();
++        }
++
++        public void Record(IEntityMovementDataHandler handler)
++        {
++            if (handler is IEntityMovementServerStateFlags flags)
++                _written.Add(flags);
++        }
++
++        public void ConsumeAll()
++        {
++            foreach (IEntityMovementServerStateFlags flags in _written)
++                flags.ConsumeServerStateFlags();
++            _written.Clear();
++        }
++    }
+ }
+diff --git a/Core/Scripts/Networking/BaseGameNetworkManager.cs b/Core/Scripts/Networking/BaseGameNetworkManager.cs
+index 82bf34bf3..4739a3aa0 100644
+--- a/Core/Scripts/Networking/BaseGameNetworkManager.cs
++++ b/Core/Scripts/Networking/BaseGameNetworkManager.cs
+@@ -107,6 +107,8 @@ namespace MultiplayerARPG
+         protected readonly ConcurrentDictionary<uint, UITextKeys> _clientReadyRequestResponseMessages = new ConcurrentDictionary<uint, UITextKeys>();
+         protected readonly ConcurrentDictionary<uint, IEntityMovementDataHandler> _entityMovementDataHandlers = new ConcurrentDictionary<uint, IEntityMovementDataHandler>();
+         public ConcurrentDictionary<uint, IEntityMovementDataHandler> EntityMovementDataHandlers => _entityMovementDataHandlers;
++        // The handlers this tick's send pass wrote; their one-shot flags are consumed after its last player
++        protected readonly EntityMovementServerStateFlagsPass _serverStateFlagsPass = new EntityMovementServerStateFlagsPass();
+ 
+         protected override void Awake()
+         {
+@@ -671,6 +673,8 @@ namespace MultiplayerARPG
+ 
+             int tempLastPosition;
+ 
++            // One-shot flags reach every player, then are consumed once
++            _serverStateFlagsPass.Begin();
+             foreach (KeyValuePair<long, LiteNetLibPlayer> playerKvp in Players)
+             {
+                 if (playerKvp.Key == ClientConnectionId)
+@@ -702,6 +706,7 @@ namespace MultiplayerARPG
+ 
+                     if (!dataHandler.WriteServerState(writeTimestamp, EntityMovementDataBuffers.StateDataWriter, out bool shouldSendReliably))
+                         continue;
++                    _serverStateFlagsPass.Record(dataHandler);
+                     // Increase data writing counter
+                     if (shouldSendReliably)
+                     {
+@@ -763,6 +768,7 @@ namespace MultiplayerARPG
+                     }
+                 }
+             }
++            _serverStateFlagsPass.ConsumeAll();
+         }
+         internal void SendServerEntityMovementStateJob(long writeTimestamp)
+         {
+@@ -783,6 +789,8 @@ namespace MultiplayerARPG
+             NativeList<MovementResult> movementEnttitiesDataResults;
+             NativeHashMap<uint, byte> ModesResults;
+ 
++            // One-shot flags reach every player, then are consumed once
++            _serverStateFlagsPass.Begin();
+             foreach (LiteNetLibPlayer player in Players.Values)
+             {
+                 //if (player.ConnectionId == ClientConnectionId)
+@@ -829,6 +837,7 @@ namespace MultiplayerARPG
+                         continue;
+ 
+                     MovementData movementData = dataHandler.CreateMovementData(out List<EntityMovementForceApplier> forceAppliers);
++                    _serverStateFlagsPass.Record(dataHandler);
+                     movementDatas[objectId] = movementData;
+                     forceApplyers[objectId] = forceAppliers;
+                 }
+@@ -942,6 +951,7 @@ namespace MultiplayerARPG
+ #endif
+                 }
+             }
++            _serverStateFlagsPass.ConsumeAll();
+         }
+ 
+         public virtual void InitPrefabs()
+-- 
+2.53.0.windows.1
+

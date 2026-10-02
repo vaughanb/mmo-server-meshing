@@ -1,0 +1,17 @@
+abload ab on BRENDOSERVER, AMD Ryzen AI 9 HX 370 w/ Radeon 890M (2026-09-25 14:53)
+=== static A/B, capped, load spread, band as configured (80 m), 4 repeat(s) (seeds 11..14), warmup 45s measure 60s
+--- 250 players, monsters all, repeat 1 (seed 11), grid (1/1): plan C:28,E:28,N:27,NE:27,NW:28,S:28,SE:28,SW:28,W:28
+    peak C 5.39 ms | SW 3.90 ms sat 0% own 28p/21m pup 33p/39m, S 4.33 ms sat 0% own 28p/36m pup 40p/69m, SE 3.28 ms sat 0% own 28p/22m pup 20p/37m, W 4.52 ms sat 0% own 28p/36m pup 44p/61m, C 5.39 ms sat 0% own 28p/56m pup 55p/101m, E 4.48 ms sat 0% own 28p/30m pup 45p/59m, NW 3.36 ms sat 0% own 28p/28m pup 25p/31m, N 4.31 ms sat 0% own 27p/37m pup 39p/65m, NE 3.16 ms sat 0% own 27p/18m pup 20p/47m | 14:54:48
+--- 250 players, monsters all, repeat 2 (seed 12), grid (1/1): plan C:28,E:28,N:27,NE:27,NW:28,S:28,SE:28,SW:28,W:28
+    peak C 4.97 ms | SW 3.40 ms sat 0% own 28p/27m pup 27p/38m, S 3.99 ms sat 0% own 28p/26m pup 36p/76m, SE 3.24 ms sat 0% own 28p/25m pup 25p/32m, W 4.23 ms sat 0% own 28p/42m pup 35p/62m, C 4.97 ms sat 0% own 28p/44m pup 50p/113m, E 4.09 ms sat 0% own 28p/34m pup 41p/53m, NW 3.25 ms sat 0% own 28p/20m pup 23p/39m, N 4.08 ms sat 0% own 27p/36m pup 41p/67m, NE 3.17 ms sat 0% own 27p/28m pup 25p/34m | 14:56:44
+--- 250 players, monsters all, repeat 3 (seed 13), grid (1/1): plan C:28,E:28,N:27,NE:27,NW:28,S:28,SE:28,SW:28,W:28
+    peak C 5.49 ms | SW 3.27 ms sat 0% own 28p/26m pup 22p/41m, S 4.35 ms sat 0% own 28p/35m pup 40p/67m, SE 3.54 ms sat 0% own 28p/26m pup 26p/32m, W 4.06 ms sat 0% own 28p/39m pup 31p/72m, C 5.49 ms sat 0% own 28p/43m pup 59p/110m, E 4.49 ms sat 0% own 28p/39m pup 43p/47m, NW 3.15 ms sat 0% own 28p/20m pup 19p/45m, N 4.61 ms sat 0% own 27p/31m pup 43p/67m, NE 3.75 ms sat 0% own 27p/25m pup 35p/36m | 14:58:41
+--- 250 players, monsters all, repeat 4 (seed 14), grid (1/1): plan C:28,E:28,N:27,NE:27,NW:28,S:28,SE:28,SW:28,W:28
+    peak C 5.58 ms | SW 3.69 ms sat 0% own 28p/26m pup 31p/32m, S 4.46 ms sat 0% own 28p/38m pup 46p/64m, SE 3.47 ms sat 0% own 28p/28m pup 28p/33m, W 4.29 ms sat 0% own 28p/33m pup 40p/67m, C 5.58 ms sat 1% own 28p/49m pup 61p/114m, E 4.55 ms sat 1% own 28p/26m pup 49p/67m, NW 3.16 ms sat 0% own 28p/24m pup 17p/42m, N 4.22 ms sat 0% own 27p/35m pup 38p/71m, NE 3.69 ms sat 0% own 27p/24m pup 32p/36m | 15:00:38
+
+players  mon    layout  runs   peak ms   range          cell means ms          sum ms   cores  owned p monsters sat %  probe
+250      all    grid    4/4    5.36      4.97-5.58      C=5.36                 36.24    6.2    250     284      1      Valid
+
+busiest cell over the coarse cell, per repeat (same seed, runs minutes apart); <= 0.75 everywhere is GO:
+  not measured: a halves cut would see about 0.8 crossings/s at 250 players (grid about 3.3/s), each a handoff
+no go/no-go: it needs both coarse and halves, with spread load

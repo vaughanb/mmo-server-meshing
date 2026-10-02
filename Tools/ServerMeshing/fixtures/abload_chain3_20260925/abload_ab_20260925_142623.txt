@@ -1,0 +1,23 @@
+abload ab on BRENDOSERVER, AMD Ryzen AI 9 HX 370 w/ Radeon 890M (2026-09-25 14:14)
+=== static A/B, capped, load spread, band 20.0, 3 repeat(s) (seeds 1..3), warmup 45s measure 60s
+--- 250 players, monsters all, repeat 1 (seed 1), coarse (1/2): plan C:250
+    peak C 13.74 ms | C 13.74 ms sat 12% own 250p/284m pup 0p/0m | 14:15:35
+--- 250 players, monsters all, repeat 1 (seed 1), halves (2/2): plan C:125,E:125
+    peak C 7.57 ms | C 7.57 ms sat 0% own 125p/140m pup 10p/15m, E 7.51 ms sat 0% own 125p/143m pup 8p/9m | 14:17:32
+--- 250 players, monsters all, repeat 2 (seed 2), halves (1/2): plan C:125,E:125
+    peak C 7.75 ms | C 7.75 ms sat 0% own 125p/142m pup 13p/23m, E 7.52 ms sat 0% own 125p/143m pup 6p/8m | 14:19:29
+--- 250 players, monsters all, repeat 2 (seed 2), coarse (2/2): plan C:250
+    peak C 12.95 ms | C 12.95 ms sat 3% own 250p/284m pup 0p/0m | 14:21:26
+--- 250 players, monsters all, repeat 3 (seed 3), coarse (1/2): plan C:250
+    peak C 12.16 ms | C 12.16 ms sat 1% own 250p/283m pup 0p/0m | 14:23:22
+--- 250 players, monsters all, repeat 3 (seed 3), halves (2/2): plan C:125,E:125
+    peak C 7.53 ms | C 7.53 ms sat 0% own 125p/140m pup 20p/16m, E 7.22 ms sat 0% own 125p/143m pup 9p/7m | 14:25:20
+
+players  mon    layout  runs   peak ms   range          cell means ms          sum ms   cores  owned p monsters sat %  probe
+250      all    coarse  3/3    12.95     12.16-13.74    C=12.95                12.95    2.0    250     284      12     Valid
+250      all    halves  3/3    7.62      7.53-7.75      C=7.62 E=7.42          15.03    2.5    250     284      0      Valid
+
+busiest cell over the coarse cell, per repeat (same seed, runs minutes apart); <= 0.75 everywhere is GO:
+  250 players, monsters all: halves/coarse = 0.55 0.60 0.62 (mean 0.59; busiest cell's mean over coarse's mean 0.59) -> GO
+  not measured: a halves cut would see about 0.8 crossings/s at 250 players (grid about 3.3/s), each a handoff
+go/no-go (halves, spread load, every point): GO

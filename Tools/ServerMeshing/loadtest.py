@@ -13,7 +13,11 @@ Mesh stats lines of C (loaded) and NE (idle) are averaged over a measurement win
 
 Usage: python Tools/ServerMeshing/loadtest.py [--steps 0,50,100,200,300,400,500] [--bots 3] [--warmup 45] [--measure 60]
 """
-import argparse, os, re, sys, time
+import argparse
+import os
+import re
+import sys
+import time
 sys.path.insert(0, os.path.dirname(__file__))
 import regress as r
 
@@ -27,7 +31,7 @@ def stats_rows(zone, map_id, start, end, day):
     for line in r.zone_lines(zone, start, day, map_id):
         if "Mesh stats" not in line:
             continue
-        m = r.STAMP.search(line[:60])
+        m = r.STAMP.search(line)
         if not m or m.group(2) > end:
             continue
         c = COST.search(line)
@@ -56,9 +60,11 @@ def main():
     args = ap.parse_args()
     steps = [int(x) for x in args.steps.split(",") if x.strip()]
     if not os.path.exists(r.EXE):
-        print(f"no player build at {r.EXE}"); return 2
+        print(f"no player build at {r.EXE}")
+        return 2
     if r.read_status().get("isPlaying") == "True":
-        print("the editor is already in Play mode; stop it first"); return 2
+        print("the editor is already in Play mode; stop it first")
+        return 2
     out = os.path.join(r.LOGS, f"loadtest_{time.strftime('%Y%m%d_%H%M%S')}.txt")
     results = []
     for n in steps:
@@ -69,7 +75,7 @@ def main():
         r.db_reset((20, 0), (30, 0))
         r.request_play("stand", 20, 0, env={"MESH_LOAD_PLAYERS": str(n) if n > 0 else "", "MESH_LOAD_CELL": args.cell, "MESH_LOAD_UNCAPPED": "" if args.capped else "1"})
         try:
-            r.wait_status(lambda st: st.get("isPlaying") == "True", 60, "Play")
+            r.wait_play(60)
             time.sleep(20)
             for i in range(args.bots):
                 r.launch_bot(f"load{n}", f"meshbot{i + 1}" if i > 0 else "meshbot", ["-meshAutoMode", "pace", "-meshWalkX", str(30 + 10 * i)])
@@ -79,10 +85,9 @@ def main():
             t_end = time.strftime("%H:%M:%S")
             loaded = stats_rows(args.cell, r.MAP, t_measure, t_end, day)
             idle = stats_rows("NE", r.MAP, t_measure, t_end, day)
-            spawned = r.count(r.zone_lines(args.cell, start, day), r"Load generator: spawned (\d+)")
-            spawn_line = [l for l in r.zone_lines(args.cell, start, day) if "Load generator: spawned" in l]
+            spawn_line = [line for line in r.zone_lines(args.cell, start, day) if "Load generator: spawned" in line]
             spawned_n = int(re.search(r"spawned (\d+)", spawn_line[0]).group(1)) if spawn_line else 0
-            exceptions = sum(1 for l in r.zone_lines(args.cell, start, day) if "Exception" in l)
+            exceptions = sum(1 for line in r.zone_lines(args.cell, start, day) if "Exception" in line)
             row = dict(n=n, spawned=spawned_n, windows=len(loaded), frame=mean(loaded, "frame"), fmax=max((x["fmax"] for x in loaded), default=float("nan")),
                        cpu=mean(loaded, "cpu"), ws=mean(loaded, "ws"), clients=mean(loaded, "clients"), cout=mean(loaded, "cout"), pkt=mean(loaded, "pkt"),
                        owned=mean(loaded, "owned"), ghosts=mean(loaded, "ghosts"), idle_cpu=mean(idle, "cpu"), idle_frame=mean(idle, "frame"), idle_ws=mean(idle, "ws"), exceptions=exceptions)

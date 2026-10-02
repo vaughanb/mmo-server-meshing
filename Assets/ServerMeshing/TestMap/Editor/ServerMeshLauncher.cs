@@ -112,13 +112,13 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             EditorGUILayout.Space(12);
 
             // Zone summary
-            if (world != null && world.CellsOf(mapName).Count > 0)
+            if (world != null && AssetCells().Count > 0)
             {
-                EditorGUILayout.LabelField($"Cells of {mapName}: {world.CellsOf(mapName).Count}", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField($"Cells of {mapName}: {AssetCells().Count}", EditorStyles.miniLabel);
                 EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-                for (int i = 0; i < world.CellsOf(mapName).Count; i++)
+                for (int i = 0; i < AssetCells().Count; i++)
                 {
-                    MeshCell zone = world.CellsOf(mapName)[i];
+                    MeshCell zone = AssetCells()[i];
                     EditorGUILayout.LabelField(
                         $"  [{zone.gridX},{zone.gridY}] {zone.id} → port {(DefaultBaseMapPort + i)}",
                         EditorStyles.miniLabel);
@@ -176,7 +176,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 return;
             }
 
-            if (world == null || world.CellsOf(mapName).Count == 0)
+            if (world == null || AssetCells().Count == 0)
             {
                 EditorUtility.DisplayDialog("Error", "The world registry is missing or has no cells for this map.", "OK");
                 return;
@@ -211,9 +211,9 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             // Launch map servers (filtered by zonesToLaunchCsv; empty = all)
             HashSet<string> zoneFilter = ParseZonesToLaunch();
             int launchedZones = 0;
-            for (int i = 0; i < world.CellsOf(mapName).Count; i++)
+            for (int i = 0; i < AssetCells().Count; i++)
             {
-                MeshCell zone = world.CellsOf(mapName)[i];
+                MeshCell zone = AssetCells()[i];
                 if (zoneFilter.Count > 0 && !zoneFilter.Contains(zone.id))
                     continue;
 
@@ -318,14 +318,14 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         /// </summary>
         private void GenerateConfigJson()
         {
-            if (world == null || world.CellsOf(mapName).Count == 0)
+            if (world == null || AssetCells().Count == 0)
             {
                 EditorUtility.DisplayDialog("Error", "The world registry is not assigned (or has no layout for this map).", "OK");
                 return;
             }
 
             var spawnMaps = new List<string>();
-            for (int i = 0; i < world.CellsOf(mapName).Count; i++)
+            for (int i = 0; i < AssetCells().Count; i++)
             {
                 spawnMaps.Add(mapName);
             }
@@ -348,9 +348,9 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
 
             // Also generate the per-zone launch commands as comments
             string fullContent = json + "\n\n// Per-zone launch commands:\n";
-            for (int i = 0; i < world.CellsOf(mapName).Count; i++)
+            for (int i = 0; i < AssetCells().Count; i++)
             {
-                MeshCell zone = world.CellsOf(mapName)[i];
+                MeshCell zone = AssetCells()[i];
                 fullContent += $"// Zone {zone.id}: -startMapServer -mapName {mapName} " +
                                $"-mapPort {(DefaultBaseMapPort + i)} -zoneX {zone.gridX} -zoneY {zone.gridY} -zoneId {zone.id}\n";
             }
@@ -372,7 +372,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         /// </summary>
         private void CopyLaunchCommands()
         {
-            if (world == null || world.CellsOf(mapName).Count == 0)
+            if (world == null || AssetCells().Count == 0)
             {
                 EditorUtility.DisplayDialog("Error", "The world registry is not assigned (or has no layout for this map).", "OK");
                 return;
@@ -398,9 +398,9 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             HashSet<string> zoneFilter = ParseZonesToLaunch();
             int launchedZones = 0;
             lines.Add("REM Map Servers");
-            for (int i = 0; i < world.CellsOf(mapName).Count; i++)
+            for (int i = 0; i < AssetCells().Count; i++)
             {
-                MeshCell zone = world.CellsOf(mapName)[i];
+                MeshCell zone = AssetCells()[i];
                 if (zoneFilter.Count > 0 && !zoneFilter.Contains(zone.id))
                     continue;
 
@@ -423,6 +423,20 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
 
             Debug.Log("[ServerMesh] Launch script copied to clipboard.");
             EditorUtility.DisplayDialog("Copied", "Launch script (.bat) copied to clipboard.", "OK");
+        }
+
+        /// <summary>The map's cells as the asset cuts them: a dynamic cell is started by the central's layout coordinator, never from here.</summary>
+        private List<MeshCell> AssetCells()
+        {
+            List<MeshCell> cells = new List<MeshCell>();
+            if (world == null)
+                return cells;
+            foreach (MeshCell cell in world.CellsOf(mapName))
+            {
+                if (!cell.isDynamic)
+                    cells.Add(cell);
+            }
+            return cells;
         }
 
         private void OnDestroy()

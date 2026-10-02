@@ -36,8 +36,8 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
     {
         // Release metadata. Version is the add-on version reported by the Addon Manager; UpdateDate drives its recency
         // filter and "New" badge, and is bumped by hand with the version rather than tracking the build clock.
-        public const string Version = "0.70.0";
-        public const string UpdateDate = "2026-09-18";
+        public const string Version = "0.72.0";
+        public const string UpdateDate = "2026-09-26";
 
         // Where the published packages will be fetched from. The Addon Manager downloads "packageUrl" verbatim, so this
         // has to point at wherever dist/ is finally hosted — change it here if these move to another repository.
@@ -120,7 +120,8 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             }
         }
 
-        private static string[] Build()
+        /// <summary>Build writes both packages and returns their paths (the menu, batch mode and the rig's package request).</summary>
+        internal static string[] Build()
         {
             string addOn = BuildAddOn();
             string rig = BuildTestRig();
@@ -202,26 +203,40 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         // count; a reference is any whole-word use of the name, which errs on the side of failing the build.
         private static void CheckStrayReferences(Addon addon)
         {
-            List<string> carried = new List<string>(addon.ExportPaths);
-            foreach (string guid in addon.Dependencies ?? new string[0])
-                foreach (Addon other in AllAddons)
-                    if (other.Guid == guid)
-                        carried.AddRange(other.ExportPaths);
-            bool Carried(string assetPath) => carried.Exists(p => assetPath == p || assetPath.StartsWith(p + "/"));
+            List<string> strays = FindStrayReferences(ReadAddOnScripts(), CarriedBy(addon));
+            if (strays.Count > 0)
+                throw new InvalidOperationException($"{addon.Name}: the package would not compile on its own:\n  " + string.Join("\n  ", strays));
+        }
 
-            string root = Path.Combine(ProjectRoot(), AddOnRoot.Replace('/', Path.DirectorySeparatorChar));
-            Regex declaration = new Regex(@"^\s*(?:(?:public|internal|private|protected|static|sealed|abstract|partial)\s+)*(?:class|struct|enum|interface)\s+([A-Za-z_]\w*)", RegexOptions.Multiline);
+        /// <summary>StrayReferencesOfEveryPackage is the check above over this project's tree, for every package, without building any.</summary>
+        internal static List<string> StrayReferencesOfEveryPackage()
+        {
+            List<KeyValuePair<string, string>> scripts = ReadAddOnScripts();
+            List<string> strays = new List<string>();
+            foreach (Addon addon in AllAddons)
+                foreach (string stray in FindStrayReferences(scripts, CarriedBy(addon)))
+                    strays.Add($"{addon.Name}: {stray}");
+            return strays;
+        }
+
+        /// <summary>
+        /// FindStrayReferences lists each use, in a script <paramref name="carried"/> ships, of a type declared in a script it
+        /// leaves behind. Scripts are (asset path, text).
+        /// </summary>
+        internal static List<string> FindStrayReferences(IEnumerable<KeyValuePair<string, string>> scripts, Func<string, bool> carried)
+        {
+            // A declaration is a class, struct, enum, interface or record (group 1) or a delegate (group 2), after any modifiers.
+            Regex declaration = new Regex(@"^\s*(?:(?:public|internal|private|protected|static|sealed|abstract|partial|readonly|ref|unsafe)\s+)*"
+                + @"(?:(?:record\s+(?:class\s+|struct\s+)?|class\s+|struct\s+|enum\s+|interface\s+)([A-Za-z_]\w*)|delegate\s+[^(){};=]+?\s+([A-Za-z_]\w*)\s*[(<])", RegexOptions.Multiline);
             Dictionary<string, string> leftBehind = new Dictionary<string, string>(); // type -> declaring asset path
             List<KeyValuePair<string, string>> shipped = new List<KeyValuePair<string, string>>(); // asset path, text
-            foreach (string file in Directory.GetFiles(root, "*.cs", SearchOption.AllDirectories))
+            foreach (KeyValuePair<string, string> script in scripts)
             {
-                string assetPath = AddOnRoot + "/" + file.Substring(root.Length).TrimStart(Path.DirectorySeparatorChar, '/').Replace('\\', '/');
-                string text = File.ReadAllText(file);
-                if (Carried(assetPath))
-                    shipped.Add(new KeyValuePair<string, string>(assetPath, text));
+                if (carried(script.Key))
+                    shipped.Add(script);
                 else
-                    foreach (Match m in declaration.Matches(text))
-                        leftBehind[m.Groups[1].Value] = assetPath;
+                    foreach (Match m in declaration.Matches(script.Value))
+                        leftBehind[m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value] = script.Key;
             }
 
             List<string> strays = new List<string>();
@@ -229,8 +244,31 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 foreach (KeyValuePair<string, string> type in leftBehind)
                     if (Regex.IsMatch(script.Value, $@"\b{Regex.Escape(type.Key)}\b"))
                         strays.Add($"{script.Key} uses {type.Key} ({type.Value})");
-            if (strays.Count > 0)
-                throw new InvalidOperationException($"{addon.Name}: the package would not compile on its own:\n  " + string.Join("\n  ", strays));
+            return strays;
+        }
+
+        /// <summary>Which asset paths a package ships: its own export paths and those of the packages it depends on.</summary>
+        private static Func<string, bool> CarriedBy(Addon addon)
+        {
+            List<string> carried = new List<string>(addon.ExportPaths);
+            foreach (string guid in addon.Dependencies ?? new string[0])
+                foreach (Addon other in AllAddons)
+                    if (other.Guid == guid)
+                        carried.AddRange(other.ExportPaths);
+            return assetPath => carried.Exists(p => assetPath == p || assetPath.StartsWith(p + "/"));
+        }
+
+        /// <summary>Every script under the add-on root, as (asset path, text).</summary>
+        private static List<KeyValuePair<string, string>> ReadAddOnScripts()
+        {
+            string root = Path.Combine(ProjectRoot(), AddOnRoot.Replace('/', Path.DirectorySeparatorChar));
+            List<KeyValuePair<string, string>> scripts = new List<KeyValuePair<string, string>>();
+            foreach (string file in Directory.GetFiles(root, "*.cs", SearchOption.AllDirectories))
+            {
+                string assetPath = AddOnRoot + "/" + file.Substring(root.Length).TrimStart(Path.DirectorySeparatorChar, '/').Replace('\\', '/');
+                scripts.Add(new KeyValuePair<string, string>(assetPath, File.ReadAllText(file)));
+            }
+            return scripts;
         }
 
         // package.json in the Addon Manager's field order. Hand-written rather than JsonUtility, which cannot express the

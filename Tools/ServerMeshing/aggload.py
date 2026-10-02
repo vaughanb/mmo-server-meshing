@@ -18,7 +18,11 @@ Mesh stats over a measurement window and adds the machine's totals beside them:
 
 Usage: python Tools/ServerMeshing/aggload.py [--steps 50,100,150,200,250] [--warmup 45] [--measure 60]
 """
-import argparse, os, re, subprocess, sys, time
+import argparse
+import os
+import re
+import sys
+import time
 sys.path.insert(0, os.path.dirname(__file__))
 import regress as r
 
@@ -33,7 +37,7 @@ def cell_rows(zone, map_id, start, end, day):
     for line in r.zone_lines(zone, start, day, map_id):
         if "Mesh stats" not in line:
             continue
-        m = r.STAMP.search(line[:60])
+        m = r.STAMP.search(line)
         if not m or not (start <= m.group(2) <= end):
             continue
         cost, players, link = COST.search(line), PLAYERS.search(line), LINK.search(line)
@@ -64,9 +68,11 @@ def main():
     steps = [int(x) for x in args.steps.split(",") if x.strip()]
 
     if not os.path.exists(r.EXE):
-        print(f"no player build at {r.EXE}"); return 2
+        print(f"no player build at {r.EXE}")
+        return 2
     if r.read_status().get("isPlaying") == "True":
-        print("the editor is already in Play mode; stop it first"); return 2
+        print("the editor is already in Play mode; stop it first")
+        return 2
 
     out_lines = [f"=== aggregate load, every cell on this machine ({time.strftime('%Y-%m-%d %H:%M')})", ""]
     header = (f"{'per cell':<9} {'total':<7} {'owned':<6} {'frame mean':<11} {'spread':<8} "
@@ -83,7 +89,7 @@ def main():
             if args.uncapped:
                 env["MESH_LOAD_UNCAPPED"] = "1"
             r.request_play("none", 0, 0, env=env)
-            r.wait_status(lambda st: st.get("isPlaying") == "True", 90, "Play")
+            r.wait_play(90)
             day = time.strftime("%Y-%m-%d")
             time.sleep(args.warmup)
             start_t = time.strftime("%H:%M:%S")

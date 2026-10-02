@@ -60,7 +60,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 return;
             }
             MeshCell owner = world.OwnerOf(_currentCell, pos);
-            if (owner == null || owner == _currentCell)
+            if (owner == null || MeshCell.Same(owner, _currentCell))
                 return;
             // Hysteresis: don't commit while the player is still within the deadband of the line.
             if (-_currentCell.DistanceToEdge(pos) < boundaryThreshold)

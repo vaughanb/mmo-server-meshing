@@ -1,0 +1,292 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: vaughanb <brenden.vaughan@gmail.com>
+Date: Wed, 30 Sep 2026 20:40:02 -0600
+Subject: [PATCH 7/7] Read entity states synchronously and resume at each
+ state's length
+
+HandleServerEntityStateAtClient re-seeked the reader only after a
+handler threw, so a handler that read fewer or more bytes than its state
+misread every state after it in the packet. Every kit reader was also
+async void, so its read exceptions never reached that catch.
+
+ReadServerEntityState reads one state through its handler and always
+leaves the reader at the state's start plus its length, whether the
+handler read fewer bytes, more, or threw. The five readers read their
+bytes synchronously and hand the apply, which may await a teleport
+preparer, to a fire-and-forget method that logs its own exceptions.
+
+Because every state now resumes at its length, a length that is negative
+or longer than the rest of the packet stops reading that packet with a
+warning: nothing after it can be framed, and a negative length would
+seek backwards.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../BuiltInEntityMovementFunctions3D.cs       | 23 ++++++++++-
+ .../NavMeshEntityMovement.cs                  | 23 ++++++++++-
+ .../RigidBodyEntityMovement2D.cs              | 23 ++++++++++-
+ .../BuiltInSimpleEntityMovementFunctions3D.cs | 19 ++++++++-
+ .../Simples/SimpleNavMeshEntityMovement.cs    | 19 ++++++++-
+ .../Networking/BaseGameNetworkManager.cs      | 41 +++++++++++++++----
+ 6 files changed, 134 insertions(+), 14 deletions(-)
+
+diff --git a/Core/Scripts/Gameplay/EntityMovementSystems/Implements/BuiltInEntityMovementFunctions3D.cs b/Core/Scripts/Gameplay/EntityMovementSystems/Implements/BuiltInEntityMovementFunctions3D.cs
+index 64e487389..7b43cce57 100644
+--- a/Core/Scripts/Gameplay/EntityMovementSystems/Implements/BuiltInEntityMovementFunctions3D.cs
++++ b/Core/Scripts/Gameplay/EntityMovementSystems/Implements/BuiltInEntityMovementFunctions3D.cs
+@@ -1397,9 +1397,30 @@ namespace MultiplayerARPG
+             }
+         }
+ 
+-        public async void ReadServerStateAtClient(long peerTimestamp, NetDataReader reader)
++        public void ReadServerStateAtClient(long peerTimestamp, NetDataReader reader)
+         {
++            // Every byte is read here, synchronously, so a read error reaches
++            // the kit's catch (BaseGameNetworkManager.ReadServerEntityState). The apply may await the teleport
++            // preparer, so it runs apart and logs its own exceptions: this reader was async void, whose exceptions
++            // never reached that catch.
+             reader.ClientReadSyncTransformMessage3D(out MovementState movementState, out ExtraMovementState extraMovementState, out Vector3 position, out float yAngle, out List<EntityMovementForceApplier> movementForceAppliers);
++            ApplyServerStateAtClientAndForget(peerTimestamp, movementState, extraMovementState, position, yAngle, movementForceAppliers);
++        }
++
++        private async void ApplyServerStateAtClientAndForget(long peerTimestamp, MovementState movementState, ExtraMovementState extraMovementState, Vector3 position, float yAngle, List<EntityMovementForceApplier> movementForceAppliers)
++        {
++            try
++            {
++                await ApplyServerStateAtClient(peerTimestamp, movementState, extraMovementState, position, yAngle, movementForceAppliers);
++            }
++            catch (System.Exception ex)
++            {
++                Logging.LogException(nameof(BuiltInEntityMovementFunctions3D), ex);
++            }
++        }
++
++        private async UniTask ApplyServerStateAtClient(long peerTimestamp, MovementState movementState, ExtraMovementState extraMovementState, Vector3 position, float yAngle, List<EntityMovementForceApplier> movementForceAppliers)
++        {
+             if (IsServer)
+             {
+                 // Don't read and apply transform, because it was done at server
+diff --git a/Core/Scripts/Gameplay/EntityMovementSystems/NavMeshEntityMovement.cs b/Core/Scripts/Gameplay/EntityMovementSystems/NavMeshEntityMovement.cs
+index fc067de26..2fce6e2eb 100644
+--- a/Core/Scripts/Gameplay/EntityMovementSystems/NavMeshEntityMovement.cs
++++ b/Core/Scripts/Gameplay/EntityMovementSystems/NavMeshEntityMovement.cs
+@@ -654,9 +654,30 @@ namespace MultiplayerARPG
+             }
+         }
+ 
+-        public async void ReadServerStateAtClient(long peerTimestamp, NetDataReader reader)
++        public void ReadServerStateAtClient(long peerTimestamp, NetDataReader reader)
+         {
++            // Every byte is read here, synchronously, so a read error reaches
++            // the kit's catch (BaseGameNetworkManager.ReadServerEntityState). The apply may await the teleport
++            // preparer, so it runs apart and logs its own exceptions: this reader was async void, whose exceptions
++            // never reached that catch.
+             reader.ClientReadSyncTransformMessage3D(out MovementState movementState, out ExtraMovementState extraMovementState, out Vector3 position, out float yAngle, out List<EntityMovementForceApplier> movementForceAppliers);
++            ApplyServerStateAtClientAndForget(peerTimestamp, movementState, extraMovementState, position, yAngle, movementForceAppliers);
++        }
++
++        private async void ApplyServerStateAtClientAndForget(long peerTimestamp, MovementState movementState, ExtraMovementState extraMovementState, Vector3 position, float yAngle, List<EntityMovementForceApplier> movementForceAppliers)
++        {
++            try
++            {
++                await ApplyServerStateAtClient(peerTimestamp, movementState, extraMovementState, position, yAngle, movementForceAppliers);
++            }
++            catch (System.Exception ex)
++            {
++                Logging.LogException(nameof(NavMeshEntityMovement), ex);
++            }
++        }
++
++        private async UniTask ApplyServerStateAtClient(long peerTimestamp, MovementState movementState, ExtraMovementState extraMovementState, Vector3 position, float yAngle, List<EntityMovementForceApplier> movementForceAppliers)
++        {
+             if (IsServer)
+             {
+                 // Don't read and apply transform, because it was done at server
+diff --git a/Core/Scripts/Gameplay/EntityMovementSystems/RigidBodyEntityMovement2D.cs b/Core/Scripts/Gameplay/EntityMovementSystems/RigidBodyEntityMovement2D.cs
+index c2cd7a8c3..1a9980a93 100644
+--- a/Core/Scripts/Gameplay/EntityMovementSystems/RigidBodyEntityMovement2D.cs
++++ b/Core/Scripts/Gameplay/EntityMovementSystems/RigidBodyEntityMovement2D.cs
+@@ -602,9 +602,30 @@ namespace MultiplayerARPG
+             }
+         }
+ 
+-        public async void ReadServerStateAtClient(long peerTimestamp, NetDataReader reader)
++        public void ReadServerStateAtClient(long peerTimestamp, NetDataReader reader)
+         {
++            // Every byte is read here, synchronously, so a read error reaches
++            // the kit's catch (BaseGameNetworkManager.ReadServerEntityState). The apply may await the teleport
++            // preparer, so it runs apart and logs its own exceptions: this reader was async void, whose exceptions
++            // never reached that catch.
+             reader.ClientReadSyncTransformMessage2D(out MovementState movementState, out ExtraMovementState extraMovementState, out Vector2 position, out DirectionVector2 direction2D, out List<EntityMovementForceApplier> movementForceAppliers);
++            ApplyServerStateAtClientAndForget(peerTimestamp, movementState, extraMovementState, position, direction2D, movementForceAppliers);
++        }
++
++        private async void ApplyServerStateAtClientAndForget(long peerTimestamp, MovementState movementState, ExtraMovementState extraMovementState, Vector2 position, DirectionVector2 direction2D, List<EntityMovementForceApplier> movementForceAppliers)
++        {
++            try
++            {
++                await ApplyServerStateAtClient(peerTimestamp, movementState, extraMovementState, position, direction2D, movementForceAppliers);
++            }
++            catch (System.Exception ex)
++            {
++                Logging.LogException(nameof(RigidBodyEntityMovement2D), ex);
++            }
++        }
++
++        private async UniTask ApplyServerStateAtClient(long peerTimestamp, MovementState movementState, ExtraMovementState extraMovementState, Vector2 position, DirectionVector2 direction2D, List<EntityMovementForceApplier> movementForceAppliers)
++        {
+             if (IsServer)
+             {
+                 // Don't read and apply transform, because it was done at server
+diff --git a/Core/Scripts/Gameplay/EntityMovementSystems/Simples/Implements/BuiltInSimpleEntityMovementFunctions3D.cs b/Core/Scripts/Gameplay/EntityMovementSystems/Simples/Implements/BuiltInSimpleEntityMovementFunctions3D.cs
+index a6ae05815..265f1408f 100644
+--- a/Core/Scripts/Gameplay/EntityMovementSystems/Simples/Implements/BuiltInSimpleEntityMovementFunctions3D.cs
++++ b/Core/Scripts/Gameplay/EntityMovementSystems/Simples/Implements/BuiltInSimpleEntityMovementFunctions3D.cs
+@@ -1159,8 +1159,11 @@ namespace MultiplayerARPG
+             }
+         }
+ 
+-        public async void ReadServerStateAtClient(long peerTimestamp, NetDataReader reader)
++        public void ReadServerStateAtClient(long peerTimestamp, NetDataReader reader)
+         {
++            // Read synchronously, so a read error reaches the kit's catch;
++            // the teleport's await moved to OnTeleportAndForget, which logs its own exceptions (this reader was
++            // async void, whose exceptions never reached that catch)
+             MovementTeleportState movementTeleportState = (MovementTeleportState)reader.GetByte();
+             if (movementTeleportState.Has(MovementTeleportState.Requesting))
+             {
+@@ -1171,11 +1174,23 @@ namespace MultiplayerARPG
+                 float rotation = Mathf.HalfToFloat(reader.GetPackedUShort());
+                 bool stillMoveAfterTeleport = movementTeleportState.Has(MovementTeleportState.StillMoveAfterTeleport);
+                 if (!IsServer)
+-                    await OnTeleport(position, Quaternion.Euler(0f, rotation, 0f), stillMoveAfterTeleport);
++                    OnTeleportAndForget(position, Quaternion.Euler(0f, rotation, 0f), stillMoveAfterTeleport);
+                 return;
+             }
+         }
+ 
++        private async void OnTeleportAndForget(Vector3 position, Quaternion rotation, bool stillMoveAfterTeleport)
++        {
++            try
++            {
++                await OnTeleport(position, rotation, stillMoveAfterTeleport);
++            }
++            catch (System.Exception ex)
++            {
++                Logging.LogException(nameof(BuiltInSimpleEntityMovementFunctions3D), ex);
++            }
++        }
++
+         protected async UniTask OnTeleport(Vector3 position, Quaternion rotation, bool stillMoveAfterTeleport)
+         {
+             if (Vector3.Distance(position, EntityTransform.position) <= MIN_DISTANCE_TO_TELEPORT)
+diff --git a/Core/Scripts/Gameplay/EntityMovementSystems/Simples/SimpleNavMeshEntityMovement.cs b/Core/Scripts/Gameplay/EntityMovementSystems/Simples/SimpleNavMeshEntityMovement.cs
+index 55f7dadfe..57b98c9ad 100644
+--- a/Core/Scripts/Gameplay/EntityMovementSystems/Simples/SimpleNavMeshEntityMovement.cs
++++ b/Core/Scripts/Gameplay/EntityMovementSystems/Simples/SimpleNavMeshEntityMovement.cs
+@@ -579,8 +579,11 @@ namespace MultiplayerARPG
+             }
+         }
+ 
+-        public async void ReadServerStateAtClient(long peerTimestamp, NetDataReader reader)
++        public void ReadServerStateAtClient(long peerTimestamp, NetDataReader reader)
+         {
++            // Read synchronously, so a read error reaches the kit's catch;
++            // the teleport's await moved to OnTeleportAndForget, which logs its own exceptions (this reader was
++            // async void, whose exceptions never reached that catch)
+             MovementTeleportState movementTeleportState = (MovementTeleportState)reader.GetByte();
+             if (movementTeleportState.Has(MovementTeleportState.Requesting))
+             {
+@@ -591,11 +594,23 @@ namespace MultiplayerARPG
+                 float rotation = Mathf.HalfToFloat(reader.GetPackedUShort());
+                 bool stillMoveAfterTeleport = movementTeleportState.Has(MovementTeleportState.StillMoveAfterTeleport);
+                 if (!IsServer)
+-                    await OnTeleport(position, Quaternion.Euler(0f, rotation, 0f), stillMoveAfterTeleport);
++                    OnTeleportAndForget(position, Quaternion.Euler(0f, rotation, 0f), stillMoveAfterTeleport);
+                 return;
+             }
+         }
+ 
++        private async void OnTeleportAndForget(Vector3 position, Quaternion rotation, bool stillMoveAfterTeleport)
++        {
++            try
++            {
++                await OnTeleport(position, rotation, stillMoveAfterTeleport);
++            }
++            catch (System.Exception ex)
++            {
++                Logging.LogException(nameof(SimpleNavMeshEntityMovement), ex);
++            }
++        }
++
+         public void TurnImmediately(float yAngle)
+         {
+             _yAngle = _targetYAngle = yAngle;
+diff --git a/Core/Scripts/Networking/BaseGameNetworkManager.cs b/Core/Scripts/Networking/BaseGameNetworkManager.cs
+index 4739a3aa0..61b1c39b9 100644
+--- a/Core/Scripts/Networking/BaseGameNetworkManager.cs
++++ b/Core/Scripts/Networking/BaseGameNetworkManager.cs
+@@ -598,6 +598,14 @@ namespace MultiplayerARPG
+                 uint objectId = reader.GetPackedUInt();
+                 int dataLength = reader.GetInt();
+                 int positionBeforeRead = reader.Position;
++                // Every state resumes at its length (ReadServerEntityState),
++                // so a length the packet can't hold leaves nothing after it to trust (a negative one would seek back
++                // on every state)
++                if (dataLength < 0 || dataLength > reader.AvailableBytes)
++                {
++                    if (LogWarn) Logging.LogWarning(LogTag, $"Unable to read entity movement states, invalid state length {dataLength}: {objectId}.");
++                    return;
++                }
+                 if (!_entityMovementDataHandlers.TryGetValue(objectId, out IEntityMovementDataHandler dataHandler))
+                 {
+                     if (LogWarn) Logging.LogWarning(LogTag, $"Unable to read entity movement state properly, entity movement not found: {objectId}.");
+@@ -606,19 +614,38 @@ namespace MultiplayerARPG
+                     continue;
+                 }
+ 
+-                try
+-                {
+-                    dataHandler.ReadServerStateAtClient(peerTimestamp, reader);
+-                }
+-                catch
++                // Resumes at the state's end after every read, not only after a throw
++                if (!ReadServerEntityState(dataHandler, peerTimestamp, reader, dataLength))
+                 {
+                     if (LogWarn) Logging.LogWarning(LogTag, $"Unable to read entity movement state properly, error occurs while reading: {objectId}.");
+-                    reader.SetPosition(positionBeforeRead);
+-                    reader.SkipBytes(dataLength);
+                 }
+             }
+         }
+ 
++        /// <summary>
++        /// Reads one server state through its handler and always leaves the reader <paramref name="dataLength"/>
++        /// bytes after where the state starts, whether the handler read fewer bytes, more, or threw. The reader
++        /// used to be re-seeked only after a throw, so a handler that misread its state misread every state
++        /// after it. False when the handler threw.
++        /// </summary>
++        public static bool ReadServerEntityState(IEntityMovementDataHandler dataHandler, long peerTimestamp, NetDataReader reader, int dataLength)
++        {
++            int positionBeforeRead = reader.Position;
++            try
++            {
++                dataHandler.ReadServerStateAtClient(peerTimestamp, reader);
++                return true;
++            }
++            catch
++            {
++                return false;
++            }
++            finally
++            {
++                reader.SetPosition(positionBeforeRead + dataLength);
++            }
++        }
++
+         internal void SendClientEntityMovmentState(long writeTimestamp)
+         {
+             if (IsServer)
+-- 
+2.53.0.windows.1
+

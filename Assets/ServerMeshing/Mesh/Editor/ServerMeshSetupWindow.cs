@@ -31,6 +31,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         private Vector2 _scroll;
         private readonly List<Check> _checks = new List<Check>();
         private static Dictionary<Type, MonoScript> s_scripts;
+        private SerializedObject _registryObject;
 
         private sealed class Check
         {
@@ -103,13 +104,15 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             }
             if (_registry != null)
             {
-                _registry.Rebuild();
+                if (!EditorApplication.isPlayingOrWillChangePlaymode)
+                    _registry.Rebuild(); // in Play the running servers' registry holds a runtime layout: leave it
                 EditorGUILayout.LabelField($"{_registry.maps.Count} map layout(s), {_registry.Cells.Count} cell(s)");
                 foreach (MeshMapLayout layout in _registry.maps)
                 {
                     if (layout == null) continue;
                     string shape = layout.IsExplicit ? $"{layout.cellRects.Length} explicit cells" : $"{layout.columns} x {layout.rows} cells of {layout.cellSize:0} m";
-                    EditorGUILayout.LabelField($"  {layout.mapId}: {shape}, origin {layout.worldOrigin}");
+                    string dynamicCells = layout.IsDynamic ? $", Dynamic (auto split {(layout.autoSplit ? "on" : "off")}, merge {(layout.autoMerge ? "on" : "off")})" : string.Empty;
+                    EditorGUILayout.LabelField($"  {layout.mapId}: {shape}, origin {layout.worldOrigin}{dynamicCells}");
                 }
             }
         }
@@ -127,7 +130,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button("Measure open scene"))
                 MeasureOpenScene();
-            using (new EditorGUI.DisabledScope(_registry == null || _mapInfo == null || !_hasBounds || _cellSize <= 0f))
+            using (new EditorGUI.DisabledScope(_registry == null || _mapInfo == null || !_hasBounds || _cellSize <= 0f || EditorApplication.isPlayingOrWillChangePlaymode))
             {
                 if (GUILayout.Button("Add / replace layout"))
                     AddLayout();
@@ -137,6 +140,48 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 EditorGUILayout.LabelField($"Scene bounds: x [{_bounds.min.x:0}, {_bounds.max.x:0}]  z [{_bounds.min.z:0}, {_bounds.max.z:0}]  ->  {Mathf.CeilToInt(_bounds.size.x / Mathf.Max(1f, _cellSize))} x {Mathf.CeilToInt(_bounds.size.z / Mathf.Max(1f, _cellSize))} cells");
             if (!string.IsNullOrEmpty(_layoutReport))
                 EditorGUILayout.HelpBox(_layoutReport, MessageType.Info);
+            DrawCellModes();
+        }
+
+        /// <summary>Each map's cell mode: Static (the cut is the cut) or Dynamic (the cut gives base cells the central may split).</summary>
+        private void DrawCellModes()
+        {
+            if (_registry == null || _registry.maps.Count == 0)
+                return;
+            if (_registryObject == null || _registryObject.targetObject != _registry)
+                _registryObject = new SerializedObject(_registry);
+            _registryObject.Update();
+            EditorGUILayout.Space(6);
+            EditorGUILayout.LabelField("Cell mode per map", EditorStyles.miniBoldLabel);
+            EditorGUILayout.HelpBox("Static: the cut above is the cut, as it always was. Dynamic: the cut gives the base cells; the central may split a busy one into more cells and merge them back, and every server of the map waits for the central's layout before handing anything over.", MessageType.None);
+            bool playing = EditorApplication.isPlayingOrWillChangePlaymode;
+            if (playing)
+                EditorGUILayout.HelpBox("The cell mode is read when the servers start; stop Play to change it.", MessageType.Info);
+            using (new EditorGUI.DisabledScope(playing))
+            {
+                bool anyDynamic = false;
+                SerializedProperty maps = _registryObject.FindProperty(nameof(MeshWorldRegistry.maps));
+                for (int i = 0; i < maps.arraySize; ++i)
+                {
+                    SerializedProperty layout = maps.GetArrayElementAtIndex(i);
+                    SerializedProperty cellMode = layout.FindPropertyRelative(nameof(MeshMapLayout.cellMode));
+                    string mapId = layout.FindPropertyRelative(nameof(MeshMapLayout.mapId)).stringValue;
+                    EditorGUILayout.PropertyField(cellMode, new GUIContent(string.IsNullOrEmpty(mapId) ? $"Map {i}" : mapId));
+                    if (cellMode.intValue != (int)MeshCellMode.Dynamic)
+                        continue;
+                    anyDynamic = true;
+                    EditorGUI.indentLevel++;
+                    EditorGUILayout.PropertyField(layout.FindPropertyRelative(nameof(MeshMapLayout.minCellSize)));
+                    EditorGUILayout.PropertyField(layout.FindPropertyRelative(nameof(MeshMapLayout.maxCellsPerBase)));
+                    EditorGUILayout.PropertyField(layout.FindPropertyRelative(nameof(MeshMapLayout.autoSplit)));
+                    EditorGUILayout.PropertyField(layout.FindPropertyRelative(nameof(MeshMapLayout.autoMerge)));
+                    EditorGUI.indentLevel--;
+                }
+                if (anyDynamic)
+                    EditorGUILayout.PropertyField(_registryObject.FindProperty(nameof(MeshWorldRegistry.dynamicSettings)), true);
+            }
+            if (_registryObject.ApplyModifiedProperties())
+                AssetDatabase.SaveAssetIfDirty(_registry);
         }
 
         private void MeasureOpenScene()
@@ -178,10 +223,17 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             };
             Undo.RecordObject(_registry, "Add map layout");
             int existing = _registry.maps.FindIndex(l => l != null && string.Equals(l.mapId, _mapInfo.Id));
-            if (existing >= 0) _registry.maps[existing] = layout; else _registry.maps.Add(layout);
+            if (existing >= 0)
+            {
+                layout.CopyModeFrom(_registry.maps[existing]); // a new cut keeps the map's cell mode
+                _registry.maps[existing] = layout;
+            }
+            else
+                _registry.maps.Add(layout);
             EditorUtility.SetDirty(_registry);
-            AssetDatabase.SaveAssets();
-            _registry.Rebuild();
+            AssetDatabase.SaveAssetIfDirty(_registry);
+            if (!EditorApplication.isPlayingOrWillChangePlaymode)
+                _registry.Rebuild();
             int cells = _registry.CellsOf(_mapInfo.Id).Count;
             _layoutReport = $"{_mapInfo.Id}: {columns} x {rows} = {cells} cells of {cell:0} m from ({gridOrigin.x:0}, {gridOrigin.z:0}); ids {prefix}-0-0 … {prefix}-{columns - 1}-{rows - 1}. " +
                             "A cell id is the channel id of the map server that serves it. To make some cells smaller than others, switch the layout to explicit rectangles in the inspector.";
@@ -192,14 +244,17 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         private void DrawValidatePanel()
         {
             EditorGUILayout.LabelField("3. Validate the wiring", EditorStyles.boldLabel);
-            if (GUILayout.Button("Validate"))
-                RunChecks();
+            using (new EditorGUI.DisabledScope(EditorApplication.isPlayingOrWillChangePlaymode)) // the checks rebuild the registry
+            {
+                if (GUILayout.Button("Validate"))
+                    RunChecks();
+            }
             foreach (Check check in _checks)
             {
                 EditorGUILayout.BeginHorizontal();
                 EditorGUILayout.LabelField(check.ok ? "OK" : "!!", GUILayout.Width(24));
                 EditorGUILayout.LabelField(check.text, EditorStyles.wordWrappedLabel);
-                if (!check.ok && check.fix != null && GUILayout.Button(check.fixLabel ?? "Fix", GUILayout.Width(120)))
+                if (!check.ok && check.fix != null && !EditorApplication.isPlayingOrWillChangePlaymode && GUILayout.Button(check.fixLabel ?? "Fix", GUILayout.Width(120)))
                 {
                     check.fix();
                     RunChecks();

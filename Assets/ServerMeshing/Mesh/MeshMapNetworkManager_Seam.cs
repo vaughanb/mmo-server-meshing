@@ -133,7 +133,7 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             if (!ReferenceEquals(_seam, seam))
             {
-                SceneManager.UnloadSceneAsync(seam.scene); // superseded while loading
+                _ = SceneManager.UnloadSceneAsync(seam.scene); // superseded while loading; nothing waits for the unload
                 return;
             }
             seam.scene.GetRootGameObjects(seam.roots);

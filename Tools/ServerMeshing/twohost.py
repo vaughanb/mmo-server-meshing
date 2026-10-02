@@ -12,7 +12,11 @@ A's side, and tells you what B should be doing.
 
 The cell the other machine owns is --remote (default E). A must not start it, which is what --cells controls.
 """
-import argparse, os, re, sys, time
+import argparse
+import os
+import re
+import sys
+import time
 sys.path.insert(0, os.path.dirname(__file__))
 import regress as r
 
@@ -49,7 +53,7 @@ def cmd_up(args):
     # The tester stands on C a little way from the C/E line, so B's cell has something of ours to ghost.
     r.db_reset((86.5, 0), (20, 0))
     r.request_play("stand", 86.5, 0, env={"MESH_SPAWN_CELLS": ",".join(args.cells)})
-    r.wait_status(lambda st: st.get("isPlaying") == "True", 60, "Play")
+    r.wait_play(60)
     print(f"Play started; this machine serves {', '.join(args.cells)} and must NOT start {args.remote}.")
 
     deadline = time.time() + 120
@@ -97,9 +101,8 @@ def cmd_walk(args):
     print("bot:", result[:160] if result else "(no result)")
     local = args.cells[0]
     lines = r.zone_lines(local, start, day)
-    remote_lines = []   # B's logs live on B; grade what this side can see
     sent = r.count(lines, r"Handoff SENT \S+ -> zone " + args.remote)
-    ack = [l for l in lines if re.search(r"Handoff ACK .* by zone " + args.remote, l)]
+    ack = [line for line in lines if re.search(r"Handoff ACK .* by zone " + args.remote, line)]
     back = r.count(lines, r"Arrival \S+ .*promoted in place|handoff arrival")
     ok = True
     def check(cond, label):
@@ -110,12 +113,12 @@ def cmd_walk(args):
     check(result and "migrations=2" in result, "it hopped twice (out and back)")
     check(sent >= 1, f"{local} handed the bot to {args.remote} on the other machine")
     check(len(ack) >= 1, f"{args.remote} acked the arrival")
-    for l in ack[:2]:
-        m = re.search(r"registered (\d+) ms after the notice, (\d+) ms after START \(promoted=(\w+)\)", l)
+    for line in ack[:2]:
+        m = re.search(r"registered (\d+) ms after the notice, (\d+) ms after START \(promoted=(\w+)\)", line)
         if m:
             print(f"        ack {m.group(2)} ms after START, promoted={m.group(3)}  (200-500 ms on one machine)")
     check(back >= 1, "the bot came back and was promoted here")
-    check(sum(1 for l in lines if "Exception" in l) == 0, f"{local}: no exceptions")
+    check(sum(1 for line in lines if "Exception" in line) == 0, f"{local}: no exceptions")
     for line in lines[::-1]:
         if "ghostSteer=" in line:
             m = re.search(r"ghostSteer=(\d+) samples, mean ([\d.]+) m, max ([\d.]+) m", line)
@@ -135,7 +138,8 @@ def cmd_status(args):
 
 
 def cmd_down(args):
-    r.stop_play(); r.kill_bots()
+    r.stop_play()
+    r.kill_bots()
     print("Play stopped, bots killed. Stop B's cell on the other machine.")
     return 0
 

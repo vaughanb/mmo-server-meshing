@@ -1,0 +1,18 @@
+abload ab on BRENDOSERVER, AMD Ryzen AI 9 HX 370 w/ Radeon 890M (2026-09-25 14:46)
+=== static A/B, capped, load 0,0,150, band as configured (80 m), 2 repeat(s) (seeds 1..2), warmup 45s measure 60s
+--- 250 players, monsters all, repeat 1 (seed 1), coarse (1/2): plan C:250
+    discarded: C spawned nothing, planned 250; C logged 2 exception line(s)
+--- 250 players, monsters all, repeat 1 (seed 1), halves (2/2): plan C:125,E:125
+    discarded: E spawned nothing, planned 125; E logged 2 exception line(s)
+--- 250 players, monsters all, repeat 2 (seed 2), halves (1/2): plan C:125,E:125
+    peak C 9.20 ms | C 9.20 ms sat 0% own 125p/145m pup 69p/28m, E 8.49 ms sat 0% own 125p/133m pup 46p/34m | 14:50:50
+--- 250 players, monsters all, repeat 2 (seed 2), coarse (2/2): plan C:250
+    discarded: C logged 2 exception line(s)
+
+players  mon    layout  runs   peak ms   range          cell means ms          sum ms   cores  owned p monsters sat %  probe
+250      all    coarse  0/2 (no data)
+250      all    halves  1/2    9.20      9.20-9.20      C=9.20 E=8.49          17.69    2.7    250     278      0      Valid
+
+busiest cell over the coarse cell, per repeat (same seed, runs minutes apart); <= 0.75 everywhere is GO:
+  250 players, monsters all: halves/coarse: no usable coarse run
+no go/no-go: it needs both coarse and halves, with spread load

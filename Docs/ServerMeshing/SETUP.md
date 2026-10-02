@@ -4,7 +4,7 @@ How to split a map into cells served by separate map servers, join maps into one
 The design and its measurements are in [DESIGN.md](DESIGN.md); this document is the operator's and developer's path.
 
 **Status:** everything below is exercised by the regression harness on the test rig (ten cells over two maps: a 3×3
-grid plus one cell across a seam; one machine, or two with one cell served from the other). Version 0.70.
+grid plus one cell across a seam; one machine, or two with one cell served from the other). Version 0.72.
 
 ---
 
@@ -73,14 +73,32 @@ The registry inspector lets you refine a layout afterwards:
   next to 1 km wilderness cells. Rectangles must not overlap (the validator reports overlaps and duplicate ids).
 - **Cell ids** (`cellIds`): explicit ids for a grid, row-major.
 
+Below the layout, panel 2 sets each map's **cell mode**:
+
+- **Static** (the default): the cut is the cut, exactly as before 0.72.
+- **Dynamic**: the cut gives the map's *base cells*, which the central may later split into more cells while they are
+  busy and merge back when they are quiet (the splitting itself is not in this version: a Dynamic map runs its base
+  cells as they are). Every server of a Dynamic map says hello to the central once registered and hands nothing over,
+  and routes no building, until the central answers with the layout; it logs `Layout gate open on …` when that
+  happens and warns every `layoutGateWarnSeconds` while it waits. Choose the mode before starting the servers: it is
+  read at start and the panel is disabled in Play.
+
 The band is not part of the layout: a cell's server streams the strip inside its own edge.
 
 The registry's own fields, for hand edits: `maps` (one layout per map), and per layout `mapId`, `worldOrigin` (where
 the map's origin sits in the shared world frame), `gridOrigin`, `cellSize`, `columns`, `rows`, `cellIdFormat` (the id
-pattern, `{0}`/`{1}` = column/row), the optional `cellRects` and `cellIds` above, and `touchTolerance` (how close two
-rectangles must come to count as neighbours across a seam, 0.01 m). Every mesh manager (`MeshMapNetworkManager`,
-`MeshLoginNetworkManager`, `MeshCentralNetworkManager`, `MeshMapSpawnNetworkManager`) carries a `world` reference to
-this asset; panel 3 assigns it.
+pattern: `{map}` = the map id, `{x}`/`{y}` = column/row), the optional `cellRects` and `cellIds` above, `cellMode`,
+and for Dynamic maps `minCellSize` (the narrowest a cut may leave a cell, never below the band; 0 = the registry's
+default), `maxCellsPerBase` (0 = the default), `autoSplit` and `autoMerge` (both off until automatic splitting
+exists). Registry-wide: `touchTolerance` (how close two rectangles must come to count as neighbours across a seam,
+0.5 m) and `dynamicSettings`, read only when a map is Dynamic: `bandWidth` (the band every process computes band
+neighbours with, and the narrowest cut; each map server logs an error if its own `ghostBandWidth` is wider),
+`defaultMinCellSize` (100 m), `defaultMaxCellsPerBase` (4), `layoutGateWarnSeconds` (10), `recoveryCeilingSeconds`
+(60: how long the central waits after a restart for the cells to say what layout they hold) and
+`coordinatorStorePath` (where the central keeps the layout it has sent; empty = `Temp/ServerMesh.Coordinator.json`
+under its working directory). Every mesh manager (`MeshMapNetworkManager`, `MeshLoginNetworkManager`,
+`MeshCentralNetworkManager`, `MeshMapSpawnNetworkManager`) carries a `world` reference to this asset; panel 3 assigns
+it.
 
 ### 4.3 Wire the prefabs
 
@@ -165,6 +183,7 @@ All on `MeshMapNetworkManager` (the map-manager prefab). Defaults are the values
 | `ghostSnapshotInterval` | 0.1 s | Snapshot rate for characters; `staticSnapshotInterval` (1 s) for drops, harvestables, buildings. |
 | `ghostLeadSeconds` | 0.1 s | Puppets are steered ahead by the owner's velocity so they do not trail by a snapshot. |
 | `ghostTeleportDistance`, `ghostStaleSeconds` | 4 m, 2 s | A puppet further off than this is teleported; one without snapshots is removed. |
+| `puppetMotion` | Steered | How a character puppet follows its owner. Steered: the kit's movement component walks it toward each snapshot (today's behaviour). Kinematic (measurement, Phase 0): its pose is set from the snapshots, extrapolated to now, and sent to clients in the kit's own movement bytes, and an unobserved puppet moves only when a snapshot arrives; pets and mounted puppets stay steered. `MESH_PUPPET_MOTION=steered\|kinematic` overrides it at server start. |
 | `ghostMonsters`, `ghostHarvestables`, `ghostBuildings`, `forwardGhostHits`, `handoffMonsters`, `ownSpawnAreasByZone` | on | What crosses the edge. Monsters chasing across the line are handed over by position; a spawn area only spawns inside its own cell. |
 | `partyMemberOnlineWindowSeconds` | 5 s | A party member on another cell counts as online when the kit's online table saw it within this long (the cluster relays every online player once a second). |
 | `linkAllZones` | on | Link to every cell of the map, not only neighbours (party shares and such reach any cell). |
@@ -173,6 +192,7 @@ All on `MeshMapNetworkManager` (the map-manager prefab). Defaults are the values
 | `meshLinkPortOffset` | 10000 | The server-to-server link listens on the map port plus this. |
 | `expectedMaxSpeed`, `meshStatsIntervalSeconds` | 8 m/s, 10 s | Band sizing check at start-up; the `Mesh stats` log line cadence. |
 | `databaseReconnectSeconds`, `databaseReconnectGraceSeconds`, `databaseDrainWaitSeconds` | 5 s, 15 s, 35 s | Re-open the **database** connection whenever this server has none: the kit opens it once at start-up and never again, so a map server that loses the database manager -- or starts before it exists -- runs on accepting players while every save fails. The grace period keeps the retry off the kit's own first attempt; the drain wait lets requests that were in flight expire before reconnecting clears their callbacks, then reconnects anyway and says how many it stranded. A process that *hosts* the database manager is left alone. |
+| `loadReportSeconds`, `occupancyBucketSize` | 5 s, 20 m | Every this many seconds the cell sends the central a **load report**: the work probe's window (main-thread work per frame without the frame limiter's wait, its p95, the share of frames that did not wait at all), what it owns and holds as puppets, and an occupancy grid of where they stand in buckets of this size. The central keeps the latest per cell and logs a one-line summary every `loadSummarySeconds` (30 s). 0 disables. |
 | `clusterConnectRetrySeconds` | 5 s | Re-open the cluster connection when the process could not open one at all. The kit handles every later failure by itself, but not this one: with no client socket it polls no events, so no disconnect is ever raised and the server runs on serving nobody. Matters when map servers can start before the central. 0 disables. |
 
 **Client**
@@ -193,8 +213,18 @@ subscribe), re-evaluated every `ghostWatchInterval` (0.5 s). `MeshLoginNetworkMa
 selected character to the cell that owns its saved position instead of the client's chosen channel.
 
 **Diagnostics:** `traceHandoffTiming` (on) writes one line per handoff step, ghost lag and replay; the `Mesh stats`
-line every 10 s reports players, owned and ghost counts, link traffic per neighbour, handoffs (mean/max ms), ghost
-steering error, frame time, CPU, memory and client send rate.
+line every 10 s reports players, owned and ghost counts, link traffic, handoffs (mean/max ms), ghost steering error,
+frame time, CPU, memory and client send rate, then the work probe (`work mean … p95 … max … wait … util … sat …
+probe=Valid|Unknown|Invalid|Uncapped`) and the link traffic per neighbour (`links E=… N(down)=…`). The stats line
+shows only the latest probe window; every window (every 5 s) is also logged on its own as `Work window 5.00 s: frames …
+work mean … budget … sat …% probe=… | owned players … monsters … | puppets players … monsters … | clients … cpu …%`,
+in invariant culture, which is what the load tools read. Right after it comes `Work ticks 5.00 s: …`, which splits the
+same frames by what ran in them: the kit's network ticks (20 Hz, stamped around the kit's server tick) against the
+frames without one, ticks expected and dropped, frames with 0, 1 and 2+ ticks, tick-frame and other-frame work
+(mean/p95/p99/max, 50 µs bins), the tick itself, physics steps per second, work ms/s, the budget the cell is modelled
+at, and gen-0 collections. With the rig's AOI timing on, the tick is also decomposed into sync+ping, the interest
+manager's scheduling and the movement send, AOI-pass frames are kept apart from the rest, and the interest manager's
+completion work outside the tick is counted as `late`; without it those fields read 0 (`parts 0`).
 
 ## 5a. How many players a cell holds
 
@@ -232,8 +262,11 @@ The band is what drives the neighbour cost, and it is wide relative to these cel
 fraction of a neighbour's players you have to hold, which is the lever to reach if ghosting dominates.
 
 **Do not read the `Mesh stats` frame mean as saturation on a capped cell.** The frame limiter delivers ~17.4 ms
-whatever the load, so a cell with nine milliseconds of headroom still reports above the 16.7 ms budget. Measure with
-`aggload.py --uncapped`, where frame time is the work per frame, and compare that against the tick budget.
+whatever the load, so a cell with nine milliseconds of headroom still reports above the 16.7 ms budget. Read the
+**work probe** instead (`work mean … util …` at the end of the line, DESIGN 0.71): it times the frame from the end of
+the limiter's wait to the start of the next one, so it is the work per frame on a capped cell, and `util` is that over
+the budget. `probe=Valid` means the process has been seen to wait at its cap, which proves the timing brackets the
+wait; `aggload.py --uncapped` remains as the older way to measure work.
 
 ## 6. The database
 
@@ -249,17 +282,99 @@ and, later, several hosts all reach one database, and SQLite is a single file on
 - **Schema.** Load the kit's `Assets/OpenMMORPG/MMO/SQLs/mysql_main.sql` into an empty database; the server applies its
   own migrations at start-up from there.
 - **The harness** reads the same config file and talks to the database with `pymysql`, so `pip install pymysql` once.
+- **Test accounts.** `python Tools/ServerMeshing/provision.py` creates what the scenarios play, with the editor out of
+  Play: accounts `meshtest` and `meshbot` (password `meshtest123`), each with one character (MeshTester2 and
+  meshbotChar) holding the test bow, the skill scroll stack, the pet and the mount (and, for MeshTester2, three
+  building items), both test skills, the kill quest, and party 1. `--check` reports what is missing without changing
+  anything. Every scenario puts the two characters back to this state first, so a scenario never depends on what the
+  previous one left behind.
+  It writes only those two accounts and their characters, and stops before touching anything if a fixture's name or
+  party 1 belongs to another account, so it can share a database with other work. `--create-schema NAME` creates an
+  empty database from the kit's `mysql_main.sql` (every migration included) for a rig that wants its own, `--remove`
+  takes the rig accounts out again, and `--database NAME` works on another database without touching the config.
+- **Where the editor starts cells from.** In the editor the kit's spawner starts every cell from the server prefab's
+  `overrideExePath`, an absolute path saved with the prefab. When that file does not exist on this machine (a clone
+  elsewhere, another drive), `MeshMapSpawnNetworkManager` starts them from this project's own player build,
+  `Build/Server/<product name>.exe`, and logs a warning naming both paths. The same goes for the prefab's
+  `publicAddress`, which every cell advertises to clients and to its neighbours' links: a private-network address
+  that no interface of this machine has is another computer on the LAN (the prefab was saved for a two-machine run
+  there), so cells started here advertise this machine's address on that subnet, or loopback, instead.
+- **Ports.** The rig's cluster uses the kit's defaults (central 7000, cluster 6010, map spawner 6001, database manager 6100,
+  login 7500, cells from 8000 with their links 10000 above). Another kit server on the same machine holding those ports makes the editor's
+  servers fail to bind with `Only one usage of each socket address`, and its login server then joins the *other*
+  cluster: the scenarios fail with no cell logging at all. `regress.py` and `abload.py` check the ports first and
+  refuse to start, naming the process that holds them; stop it for the run.
 
 ## 7. Verifying
 
-- **Harness:** `python Tools/ServerMeshing/regress.py` runs the nine scenarios (pet, party, crash, harvest, build,
-  seam, seamcold, sleep, pvp; the first five by default) on the rig and grades the logs; `--env KEY=VALUE` passes rig
-  toggles, `--remote-cells E` serves a cell from a second machine and `--impair` degrades the link to it
-  ([MULTIHOST.md](MULTIHOST.md) §8b, §8e).
+- **Harness:** `python Tools/ServerMeshing/regress.py` runs the ten scenarios (pet, party, crash, harvest, build,
+  seam, seamcold, sleep, pvp, wake; all but pvp and wake by default) on the rig and grades the logs of every cell that
+  logged, whatever its id; `--env KEY=VALUE` passes rig toggles, `--remote-cells E` serves a cell from a second machine
+  and `--impair` degrades the link to it ([MULTIHOST.md](MULTIHOST.md) §8b, §8e). It refuses to run on a player build
+  that does not match the working tree (the rig build records a SHA-1 of every player-side script and asset in
+  `Build/Server/rigbuild-manifest.txt`, and any change, addition or removal since then makes it stale), on an editor
+  with compile errors, and it fails a scenario when a cell that should have run logged nothing or when a rig process
+  outlives Play. Only processes of `Build/Server/kit-ce-project.exe` are ever killed.
+- **Driving the editor from the harness:** `--refresh` makes the open editor import and compile changed scripts (it
+  only does so when it has focus), `--unit` runs the add-on's EditMode tests (`Assets/ServerMeshing/Tests/Editor`)
+  there (it fails when none ran, and refuses while a scene has unsaved changes), `--build` rebuilds the player into
+  `Build/Server` (`Server Meshing ▸ Test Rig ▸ Build Player` does the same by hand). All three go through
+  `ServerMeshPlayRunner`'s request files in `Temp/`, so they work while the editor is in the background; an editor
+  that does not answer (a modal dialog, say) ends the run with exit code 3. `python -m unittest discover -s Tools/ServerMeshing -p "test_*.py"` tests the harness's own helpers and the
+  provisioner.
+- **Measuring cells:** `python Tools/ServerMeshing/abload.py probe` checks the work probe against a known burn on one
+  idle cell; `abload.py ab` puts the same synthetic load on the test ground cut as one 600 m cell, two 300 m halves
+  and the 3x3 grid, and prints how much the busiest cell gains from being cut, per repeat, with a go/no-go (DESIGN
+  0.71). Each run starts only the layout's cells, with no client logged in, and counts only when every cell started
+  once with the layout's rectangle, spawned its planned players, logged no exception and enough work windows (none
+  Invalid); repeats run the layouts in rotated order, and a saturated cell is left out of the verdict. The rig toggles
+  behind it: `MESH_LAYOUT_OVERRIDE` (re-cut a map for a run: `Map=C@minX,minZ,sizeX,sizeZ;E@…`), `MESH_LOAD_PLAN`
+  (synthetic players per cell: `C:150,E:150`; every cell then draws the same world placement and keeps its own share,
+  so a player present in two layouts stands at the same place in both), `MESH_LOAD_SEED` (that placement's seed),
+  `MESH_LOAD_AREA` (crowd them into a square `x,z,r`), `MESH_NO_MONSTERS=1`, `MESH_MONSTER_AREAS=all` (also switch on
+  the monster spawn areas the test maps save inactive, about 294 monsters, each on the cell that owns it; the
+  scenarios use the one area that is on), `MESH_SPAWN_CELLS` (which cells the spawner starts), `MESH_BAND` (ghost band
+  and visible range together), `MESH_PROBE_BURN_MS` (`[cell:]ms` of busy work per frame), and, on a bare player with
+  no rig at all, `MESH_PROBE_SELFTEST=0,5,10,24`.
+- **Measuring a tick (Phase 0):** the Work ticks line is always on; these rig toggles sharpen it (all unset = today):
+  `MESH_RATES=<fps>/<step>` sets the frame cap and physics step for every cell (`30/0.02` for a space server,
+  `60/0.03` is the demo's own; `u/<step>` or `u<fps>/<step>` uncaps and budgets the line at the kit's cap or at
+  `<fps>`), `MESH_UNCAPPED_CELLS=C,E` uncaps just those cells (budgeted at the MESH_RATES rate), `MESH_AOI_TIMING=1`
+  swaps in a timed copy of the kit's interest manager, `MESH_THREAD_CPU=1` logs `Threads window …` every 5 s (CPU per
+  thread class: main, LiteNetLib, jobs, unnamed, other, against the process total; under Unity's Mono, LiteNetLib's
+  threads carry no name and are counted as unnamed), `MESH_PROBE_BURN_TICK_MS=[cell:]ms` burns that long in every
+  kit tick (never together with `MESH_PROBE_BURN_MS`), and `MESH_WORK_BINS=1` adds a `Work bins …` line with every
+  non-empty bin. Their lines: `Rates: fps … | tick … Hz | physics … s | … | probe budget … ms | uncapped cells …`,
+  `AOI timing: installed …`, `Tick burn: … ms per tick on …`, `Thread CPU: sampling …`. The rig refuses to apply
+  rates inside the editor. `Tools/ServerMeshing/p0tools.py` parses all of these lines.
+- **Cheaper puppets (Phase 0):** `MESH_PUPPET_MOTION=kinematic` runs character puppets kinematic (see `puppetMotion`
+  above) and logs, next to the Mesh stats line, `Puppets window … kinematic N steered N | fallback mounted … summoned …
+  handler … grid … install … | snaps N | observed ticks N/s unobserved poses N/s | steer kinematic N mean … m p95 … m
+  max … m | steer steered N mean … m p95 … m max … m` (the steer figures are the distance from the pose each puppet
+  shows to its owner's arriving snapshot, kinematic and steered puppets apart; a kinematic pose is the snapshot
+  extrapolated to now plus a decaying offset, so it glides onto each new snapshot without trailing, and a watched
+  one is posed at every kit tick, right before the tick sends movement).
+  `MESH_LOAD_MOTION=steered|kinematic|inert` chooses how synthetic players move (kinematic: a transform walk with the kit's
+  movement component switched off once it has started; inert: spawned and standing), `MESH_LOAD_FIGHT=0` stops them
+  attacking, and `MESH_RIG_SERVER_ANIMATION=0|1` sets the kit's server-side animation on a cell.
+- **Dynamic cells on the rig:** `MESH_CELL_MODE=<map|all>:<Static|Dynamic>[,…]` sets maps' cell modes for a run
+  without touching the asset (`all` first, a map's own entry wins; e.g. `all:Dynamic`, or
+  `ServerMeshTestMap:Dynamic`), and `MESH_COORDINATOR_STORE` moves the central's store. `regress.py` deletes the store
+  before every scenario, grades every scenario's cells for the layout rules (a Dynamic map's cells apply the central's
+  layout once per process, before any player registers; a Static map's apply none; no cell splits, merges, retires or
+  warns at the layout gate), and checks after each Play that the registry asset is unchanged on disk. The `dynidle`
+  scenario runs the test map Dynamic with a walk from C to E; `--env MESH_CELL_MODE=all:Dynamic` runs any other
+  scenario that way.
+- **The play runner and the environment:** every Play request carries an id that the status file echoes as
+  `playSeq=` while that Play runs, so the harness never mistakes a Play an earlier, abandoned request started late for
+  its own; a stop that arrives while Play is starting is carried out once it has started. The environment variables a
+  request sets are put back as they were when Play ends, so a manual Play afterwards does not inherit a run's load.
 - **Capacity:** `python Tools/ServerMeshing/loadtest.py --steps 100,200,300` puts synthetic players on one cell and
   prints work per frame, CPU, memory and per-client send rate (DESIGN 0.53 has the reference table).
 - **In the logs:** `Own cell from channel id: …` (the cell resolved its rectangle), `Neighbour zone X linked`,
-  `Handoff START / SENT / ACK`, `Ghost spawned …`, `Waking cell … / … told to sleep`, and `Mesh stats`.
+  `Handoff START / SENT / ACK`, `Ghost spawned …`, `Waking cell … / … told to sleep`, and `Mesh stats`; on a Dynamic
+  map also `LayoutHello sent`, `Layout <incarnation>/<version> applied: <cell> owns …` and `Layout gate open on …`,
+  and any `Coordinator: <code>: …` note the central sent that cell.
 
 ## 8. Known behaviours and limits
 
@@ -271,7 +386,9 @@ and, later, several hosts all reach one database, and SQLite is a single file on
   not by the mesh: 500 people in one place is a kit AOI/update-rate question.
 - **Warp portals or spawn points exactly on a login position** do what they do in the kit: a character that stands up
   inside a portal trigger is warped. Not a mesh issue, but easy to trip over on a test map.
-- **Dynamic split/merge of cells at runtime** is not implemented; sleeping cells on a fine grid cover the sandbox case.
+- **Dynamic split/merge of cells at runtime** is being built: a map can be set Dynamic, and its servers already take
+  their layout from the central, but nothing splits or merges yet. Sleeping cells on a fine grid cover the sandbox
+  case meanwhile.
 - **One shared world frame per registry**: two maps meant to touch must be placed by their world origins; the
   registry does not derive placement from content.
 
@@ -301,6 +418,9 @@ hand-written `README.md` and `screenshot.png`; `Addons/README.md` has the rebuil
   the kit's demo (the enemy prefab, default weapon item and type), so it needs `BaseDemo` present, and it declares the
   add-on as a dependency. The harnesses assume the repository layout (`Tools/ServerMeshing/`, `Build/Server/`,
   `Config/`), so copy them there rather than running them from inside `Assets`.
+
+From a script, `python Tools/ServerMeshing/regress.py --package` asks the open editor to build both (a package
+request to the play runner, outside Play).
 
 Each package carries an empty, extensionless file named after the add-on's guid; the Addon Manager uses it to spot an
 installed add-on, so the guid never changes once published. Version, update date, guids and descriptions live in

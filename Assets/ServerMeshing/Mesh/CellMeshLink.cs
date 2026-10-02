@@ -335,12 +335,16 @@ namespace MultiplayerARPG.MMO.Mesh
         public void Deserialize(NetDataReader reader) { characterId = reader.GetString(); userId = reader.GetString(); }
     }
 
-    /// <summary>Sent by a MeshLinkClient right after connecting so the server knows which zone is talking.</summary>
+    /// <summary>
+    /// Sent by a MeshLinkClient right after connecting so the server knows which zone is talking, and which process
+    /// of it: a different incarnation from the same zone means the neighbour restarted and forgot everything it held.
+    /// </summary>
     public struct MeshHelloMessage : INetSerializable
     {
         public string zoneId;
-        public void Serialize(NetDataWriter writer) { writer.Put(zoneId); }
-        public void Deserialize(NetDataReader reader) { zoneId = reader.GetString(); }
+        public string incarnation;
+        public void Serialize(NetDataWriter writer) { writer.Put(zoneId); writer.Put(incarnation ?? string.Empty); }
+        public void Deserialize(NetDataReader reader) { zoneId = reader.GetString(); incarnation = reader.GetString(); }
     }
 
     /// <summary>One authoritative snapshot of an entity that lives in the sender's border band.</summary>
@@ -488,7 +492,7 @@ namespace MultiplayerARPG.MMO.Mesh
         private void HandleHello(MessageHandlerData messageHandler)
         {
             MeshHelloMessage msg = messageHandler.ReadMessage<MeshHelloMessage>();
-            _manager.OnMeshNeighbourHello(messageHandler.ConnectionId, msg.zoneId);
+            _manager.OnMeshNeighbourHello(messageHandler.ConnectionId, msg.zoneId, msg.incarnation);
         }
 
         private void HandleGhostSnapshot(MessageHandlerData messageHandler)
@@ -500,7 +504,7 @@ namespace MultiplayerARPG.MMO.Mesh
         private void HandleGhostRemove(MessageHandlerData messageHandler)
         {
             GhostRemoveMessage msg = messageHandler.ReadMessage<GhostRemoveMessage>();
-            _manager.OnGhostRemove(msg.characterId);
+            _manager.OnGhostRemove(messageHandler.ConnectionId, msg.characterId);
         }
 
         private void HandleHandoffNotice(MessageHandlerData messageHandler)
@@ -601,6 +605,8 @@ namespace MultiplayerARPG.MMO.Mesh
 
         public string TargetZoneId { get; }
         public bool IsConnected { get; private set; }
+        /// <summary>The link has been up at least once since it was created: the neighbour was reachable from here.</summary>
+        public bool EverConnected { get; private set; }
         public float LastConnectAttempt { get; private set; } = -999f;
         /// <summary>Seconds this link has been up (0 while down).</summary>
         public float ConnectedFor => IsConnected ? Time.unscaledTime - _connectedSince : 0f;
@@ -669,9 +675,10 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 case ENetworkEvent.ConnectEvent:
                     IsConnected = true;
+                    EverConnected = true;
                     _connectedSince = Time.unscaledTime;
                     Logging.Log(LogTag, "Connected to neighbour");
-                    SendPacket(0, DeliveryMethod.ReliableOrdered, MeshLinkMessageTypes.Hello, writer => new MeshHelloMessage { zoneId = _manager.OwnZoneId }.Serialize(writer));
+                    SendPacket(0, DeliveryMethod.ReliableOrdered, MeshLinkMessageTypes.Hello, writer => new MeshHelloMessage { zoneId = _manager.OwnZoneId, incarnation = _manager.CellIncarnation }.Serialize(writer));
                     break;
                 case ENetworkEvent.DataEvent:
                     ReadPacket(-1, eventData.reader);

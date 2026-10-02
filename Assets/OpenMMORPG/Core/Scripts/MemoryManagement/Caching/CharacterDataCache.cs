@@ -108,18 +108,9 @@ namespace MultiplayerARPG
             LeftHandWeaponAbilityIndexes = new Dictionary<string, int>();
         }
 
-        ~CharacterDataCache()
-        {
-            CleanCacheData();
-            RightHandWeaponAbilities.Clear();
-            RightHandWeaponAbilities = null;
-            RightHandWeaponAbilityIndexes.Clear();
-            RightHandWeaponAbilityIndexes = null;
-            LeftHandWeaponAbilities.Clear();
-            LeftHandWeaponAbilities = null;
-            LeftHandWeaponAbilityIndexes.Clear();
-            LeftHandWeaponAbilityIndexes = null;
-        }
+        // MESH-EDIT: CE-11 — no finalizer. It ran CleanCacheData on the GC finalizer thread, releasing into the static,
+        // unsynchronised UnityEngine.Pool pools while the main thread used them (null and duplicate hand-outs). A dropped
+        // cache's collections are now ordinary garbage. See Docs/ServerMeshing/DESIGN.md §17
 
         private void CleanCacheData()
         {
