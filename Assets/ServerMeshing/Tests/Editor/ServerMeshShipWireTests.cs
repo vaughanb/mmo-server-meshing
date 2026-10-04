@@ -8,7 +8,7 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
 {
     public class ServerMeshShipWireTests
     {
-        private const string Compact28Golden = "A9 07 96 00 00 1F FF FF A0 86 01 FF 03 08 60 F4 01 00 00 06 FF 00 00 F4 01 00 00 03";
+        private const string Compact28Golden = "0B 07 00 00 C0 3F 00 00 10 C0 00 00 7A 44 FF 03 08 60 00 49 00 00 00 C5 00 10 00 83";
 
         private static string Hex(NetDataWriter writer) => BitConverter.ToString(writer.CopyData()).Replace("-", " ");
 
@@ -46,21 +46,33 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             }
         }
 
-        private static IEnumerable<TestCaseData> HeaderFieldCases()
+        private static IEnumerable<TestCaseData> HeaderByteThrowCases()
         {
-            yield return new TestCaseData(ServerMeshShipWireKind.Header56, (ServerMeshShipAuthority)3, (byte)0, "Authority").SetName("WriteHeader56_Authority3_ThrowsNamingAuthority");
-            yield return new TestCaseData(ServerMeshShipWireKind.Header56, (ServerMeshShipAuthority)9, (byte)0, "Authority").SetName("WriteHeader56_Authority9_ThrowsNamingAuthority");
-            yield return new TestCaseData(ServerMeshShipWireKind.Header56, ServerMeshShipAuthority.Parked, (byte)8, "FlightState").SetName("WriteHeader56_FlightState8_ThrowsNamingFlightState");
-            yield return new TestCaseData(ServerMeshShipWireKind.Compact28, (ServerMeshShipAuthority)3, (byte)0, "Authority").SetName("WriteCompact28_Authority3_ThrowsNamingAuthority");
-            yield return new TestCaseData(ServerMeshShipWireKind.Compact28, ServerMeshShipAuthority.OwnerMirror, (byte)8, "FlightState").SetName("WriteCompact28_FlightState8_ThrowsNamingFlightState");
+            yield return new TestCaseData((byte)4, (byte)0, "mode").SetName("HeaderByte_Mode4_ThrowsNamingMode");
+            yield return new TestCaseData((byte)255, (byte)0, "mode").SetName("HeaderByte_Mode255_ThrowsNamingMode");
+            yield return new TestCaseData((byte)0, (byte)8, "FlightState").SetName("HeaderByte_FlightState8_ThrowsNamingFlightState");
+            yield return new TestCaseData((byte)3, (byte)255, "FlightState").SetName("HeaderByte_FlightState255_ThrowsNamingFlightState");
         }
 
-        [TestCaseSource(nameof(HeaderFieldCases))]
-        public void Write_HeaderFieldOutOfRange_ThrowsNamingTheFieldAndWritesNothing(ServerMeshShipWireKind kind, ServerMeshShipAuthority authority, byte flightState, string field)
+        [TestCaseSource(nameof(HeaderByteThrowCases))]
+        public void HeaderByte_FieldOutOfRange_ThrowsNamingIt(byte mode, byte flightState, string field)
+        {
+            ArgumentOutOfRangeException thrown = Assert.Throws<ArgumentOutOfRangeException>(() => ServerMeshShipWire.HeaderByte(mode, flightState));
+
+            Assert.That(thrown.ParamName, Is.EqualTo(field));
+        }
+
+        private static IEnumerable<TestCaseData> FlightStateCases()
+        {
+            yield return new TestCaseData(ServerMeshShipWireKind.Header56).SetName("WriteHeader56_FlightState8_ThrowsNamingFlightStateAndWritesNothing");
+            yield return new TestCaseData(ServerMeshShipWireKind.Compact28).SetName("WriteCompact28_FlightState8_ThrowsNamingFlightStateAndWritesNothing");
+        }
+
+        [TestCaseSource(nameof(FlightStateCases))]
+        public void Write_FlightStateOutOfRange_ThrowsNamingItAndWritesNothing(ServerMeshShipWireKind kind)
         {
             ServerMeshShipSample sample = MeshSyncGoldenFixture.Sample();
-            sample.Authority = authority;
-            sample.FlightState = flightState;
+            sample.FlightState = 8;
             NetDataWriter writer = new NetDataWriter();
 
             ArgumentOutOfRangeException thrown = Assert.Throws<ArgumentOutOfRangeException>(() =>
@@ -71,7 +83,7 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
                     ServerMeshShipWire.WriteCompact28(writer, sample);
             });
 
-            Assert.That(thrown.ParamName, Is.EqualTo(field));
+            Assert.That(thrown.ParamName, Is.EqualTo("FlightState"));
             Assert.That(writer.Length, Is.EqualTo(0));
         }
 
@@ -113,24 +125,17 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
         public void Read_TooFewBytes_ThrowsNamingTheReaderAndReadsNothing(ServerMeshShipWireKind kind, int available)
         {
             byte[] data = new byte[available];
+            byte mode = kind == ServerMeshShipWireKind.Compact28 ? ServerMeshShipWire.ModeCompact : ServerMeshShipWire.ModeBubble;
             for (int i = 0; i < data.Length; ++i)
-                data[i] = 0x11;
+                data[i] = (byte)(0x10 | mode);
             NetDataReader reader = new NetDataReader(data);
 
             ArgumentOutOfRangeException thrown = Assert.Throws<ArgumentOutOfRangeException>(() => ReadAs(kind, reader, out _));
+            ArgumentOutOfRangeException dispatched = Assert.Throws<ArgumentOutOfRangeException>(() => ServerMeshShipWire.Read(reader, kind, out _));
 
             Assert.That(thrown.ParamName, Is.EqualTo("reader"));
+            Assert.That(dispatched.ParamName, Is.EqualTo("reader"));
             Assert.That(reader.AvailableBytes, Is.EqualTo(available));
-        }
-
-        [Test]
-        public void Read_EmptyReaderForAHeaderedWire_ThrowsNamingTheReader()
-        {
-            NetDataReader reader = new NetDataReader(new byte[0]);
-
-            ArgumentOutOfRangeException thrown = Assert.Throws<ArgumentOutOfRangeException>(() => ServerMeshShipWire.Read(reader, ServerMeshShipWireKind.Header56, out _));
-
-            Assert.That(thrown.ParamName, Is.EqualTo("reader"));
         }
 
         [Test]
@@ -141,21 +146,65 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             Assert.That(thrown.ParamName, Is.EqualTo("reader"));
         }
 
+        private static IEnumerable<TestCaseData> UnreadModeCases()
+        {
+            foreach (ServerMeshShipWireKind configured in new[] { ServerMeshShipWireKind.Header56, ServerMeshShipWireKind.Compact28 })
+            {
+                yield return new TestCaseData(configured, (byte)0x01).SetName($"Read_{configured}Configured_Mode1_ThrowsNamingTheReaderAndReadsNothing");
+                yield return new TestCaseData(configured, (byte)0x02).SetName($"Read_{configured}Configured_Mode2_ThrowsNamingTheReaderAndReadsNothing");
+                yield return new TestCaseData(configured, (byte)0xE9).SetName($"Read_{configured}Configured_Mode1WithReservedBits_ThrowsNamingTheReaderAndReadsNothing");
+            }
+        }
+
+        [TestCaseSource(nameof(UnreadModeCases))]
+        public void Read_Mode1Or2_ThrowsNamingTheReaderAndReadsNothing(ServerMeshShipWireKind configured, byte header)
+        {
+            byte[] data = new byte[ServerMeshShipWire.Header56Bytes];
+            data[0] = header;
+            NetDataReader reader = new NetDataReader(data);
+
+            ArgumentOutOfRangeException thrown = Assert.Throws<ArgumentOutOfRangeException>(() => ServerMeshShipWire.Read(reader, configured, out _));
+
+            Assert.That(thrown.ParamName, Is.EqualTo("reader"));
+            Assert.That(reader.AvailableBytes, Is.EqualTo(ServerMeshShipWire.Header56Bytes));
+        }
+
+        private static IEnumerable<TestCaseData> WrongModeCases()
+        {
+            yield return new TestCaseData(ServerMeshShipWireKind.Header56, ServerMeshShipWireKind.Compact28).SetName("ReadHeader56_ACompactRecord_ThrowsNamingTheReaderAndReadsNothing");
+            yield return new TestCaseData(ServerMeshShipWireKind.Compact28, ServerMeshShipWireKind.Header56).SetName("ReadCompact28_AHeader56Record_ThrowsNamingTheReaderAndReadsNothing");
+        }
+
+        [TestCaseSource(nameof(WrongModeCases))]
+        public void Read_ARecordOfAnotherMode_ThrowsNamingTheReaderAndReadsNothing(ServerMeshShipWireKind readAs, ServerMeshShipWireKind written)
+        {
+            NetDataWriter writer = Written(written, MeshSyncGoldenFixture.Sample(true));
+            writer.Put(new byte[ServerMeshShipWire.Header56Bytes]);
+            NetDataReader reader = new NetDataReader(writer.CopyData());
+            int before = reader.AvailableBytes;
+
+            ArgumentOutOfRangeException thrown = Assert.Throws<ArgumentOutOfRangeException>(() => ReadAs(readAs, reader, out _));
+
+            Assert.That(thrown.ParamName, Is.EqualTo("reader"));
+            Assert.That(reader.AvailableBytes, Is.EqualTo(before));
+        }
+
         private static IEnumerable<TestCaseData> CompactRefusalCases()
         {
-            yield return new TestCaseData(new Vector3(83886.08f, 0f, 0f), Vector3.zero, Quaternion.identity).SetName("WriteCompact28_XBeyondTheLimit_Refuses");
-            yield return new TestCaseData(new Vector3(0f, -83886.08f, 0f), Vector3.zero, Quaternion.identity).SetName("WriteCompact28_YBeyondTheNegativeLimit_Refuses");
-            yield return new TestCaseData(new Vector3(0f, 0f, 1e6f), Vector3.zero, Quaternion.identity).SetName("WriteCompact28_ZFarBeyondTheLimit_Refuses");
-            yield return new TestCaseData(new Vector3(float.NaN, 0f, 0f), Vector3.zero, Quaternion.identity).SetName("WriteCompact28_NaNPosition_Refuses");
-            yield return new TestCaseData(new Vector3(0f, float.PositiveInfinity, 0f), Vector3.zero, Quaternion.identity).SetName("WriteCompact28_InfinitePosition_Refuses");
-            yield return new TestCaseData(Vector3.zero, new Vector3(0f, float.NaN, 0f), Quaternion.identity).SetName("WriteCompact28_NaNVelocity_Refuses");
-            yield return new TestCaseData(Vector3.zero, Vector3.zero, new Quaternion(float.NaN, 0f, 0f, 1f)).SetName("WriteCompact28_NaNRotation_Refuses");
+            yield return new TestCaseData(new Vector3(float.NaN, 0f, 0f), Vector3.zero, Vector3.zero, Quaternion.identity).SetName("WriteCompact28_NaNPosition_Refuses");
+            yield return new TestCaseData(new Vector3(0f, float.PositiveInfinity, 0f), Vector3.zero, Vector3.zero, Quaternion.identity).SetName("WriteCompact28_InfinitePosition_Refuses");
+            yield return new TestCaseData(Vector3.zero, new Vector3(0f, float.NaN, 0f), Vector3.zero, Quaternion.identity).SetName("WriteCompact28_NaNVelocity_Refuses");
+            yield return new TestCaseData(Vector3.zero, new Vector3(0f, 0f, float.NegativeInfinity), Vector3.zero, Quaternion.identity).SetName("WriteCompact28_InfiniteVelocity_Refuses");
+            yield return new TestCaseData(Vector3.zero, Vector3.zero, new Vector3(float.NaN, 0f, 0f), Quaternion.identity).SetName("WriteCompact28_NaNAngularVelocity_Refuses");
+            yield return new TestCaseData(Vector3.zero, Vector3.zero, new Vector3(0f, float.PositiveInfinity, 0f), Quaternion.identity).SetName("WriteCompact28_InfiniteAngularVelocity_Refuses");
+            yield return new TestCaseData(Vector3.zero, Vector3.zero, Vector3.zero, new Quaternion(float.NaN, 0f, 0f, 1f)).SetName("WriteCompact28_NaNRotation_Refuses");
+            yield return new TestCaseData(Vector3.zero, Vector3.zero, Vector3.zero, new Quaternion(0f, 0f, float.PositiveInfinity, 1f)).SetName("WriteCompact28_InfiniteRotation_Refuses");
         }
 
         [TestCaseSource(nameof(CompactRefusalCases))]
-        public void WriteCompact28_UnencodableSample_ReturnsFalseAndWritesNothing(Vector3 position, Vector3 velocity, Quaternion rotation)
+        public void WriteCompact28_NonFiniteField_ReturnsFalseAndWritesNothing(Vector3 position, Vector3 velocity, Vector3 angular, Quaternion rotation)
         {
-            ServerMeshShipSample sample = new ServerMeshShipSample { Position = position, Velocity = velocity, Rotation = rotation };
+            ServerMeshShipSample sample = new ServerMeshShipSample { Position = position, Velocity = velocity, AngularVelocity = angular, Rotation = rotation };
             NetDataWriter writer = new NetDataWriter();
             writer.Put((byte)0xEE);
 
@@ -166,11 +215,14 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
         }
 
         [Test]
-        public void WriteCompact28_PositionAtTheLimit_IsWritten()
+        public void WriteCompact28_FarPosition_IsWrittenExactly()
         {
-            ServerMeshShipSample sample = new ServerMeshShipSample { Position = new Vector3(83886.07f, -83886.07f, 0f), Rotation = Quaternion.identity };
+            ServerMeshShipSample sample = new ServerMeshShipSample { Position = new Vector3(1e6f, -83886.08f, 0.001f), Rotation = Quaternion.identity };
+            NetDataReader reader = new NetDataReader(Written(ServerMeshShipWireKind.Compact28, sample).CopyData());
 
-            Assert.That(ServerMeshShipWire.WriteCompact28(new NetDataWriter(), sample), Is.True);
+            ServerMeshShipWire.ReadCompact28(reader, out ServerMeshShipSample read);
+
+            Assert.That(read.Position, Is.EqualTo(sample.Position));
         }
 
         [Test]
@@ -189,6 +241,24 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
 
             Assert.That(Hex(writer), Is.EqualTo(MeshSyncGoldenFixture.Header56));
             Assert.That(writer.Length, Is.EqualTo(ServerMeshShipWire.Header56Bytes));
+        }
+
+        private static IEnumerable<TestCaseData> SpaceHeaderRowCases()
+        {
+            yield return new TestCaseData(MeshSyncGoldenFixture.LowCruiseFlightState, (byte)1, MeshSyncGoldenFixture.HeaderBubbleLowCruiseEpoch1).SetName("WriteHeader56_BubbleLowCruiseEpoch1_Is0801");
+            yield return new TestCaseData(MeshSyncGoldenFixture.LandedFlightState, (byte)0xFF, MeshSyncGoldenFixture.HeaderBubbleLandedEpochFF).SetName("WriteHeader56_BubbleLandedEpochFF_Is10FF");
+        }
+
+        [TestCaseSource(nameof(SpaceHeaderRowCases))]
+        public void WriteHeader56_SpaceHeaderRows_AreByteExact(byte flightState, byte epoch, string header)
+        {
+            ServerMeshShipSample sample = MeshSyncGoldenFixture.Sample();
+            sample.FlightState = flightState;
+            sample.Epoch = epoch;
+
+            NetDataWriter writer = Written(ServerMeshShipWireKind.Header56, sample);
+
+            Assert.That(Hex(writer), Is.EqualTo(header + " " + MeshSyncGoldenFixture.Legacy54));
         }
 
         [Test, Ignore("compact layout is rig-only until the space team decides")]
@@ -267,7 +337,6 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
                 AngularVelocity = new Vector3(0.01f, -1.2f, 3f),
                 Forward = true,
                 TeleportByte = 250,
-                Authority = ServerMeshShipAuthority.Parked,
                 FlightState = 7,
                 Epoch = 255,
             };
@@ -276,39 +345,49 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             ReadAs(kind, reader, out ServerMeshShipSample read);
 
             Assert.That(read.Position, Is.EqualTo(sample.Position));
-            Assert.That(read.Rotation.x, Is.EqualTo(sample.Rotation.x));
-            Assert.That(read.Rotation.y, Is.EqualTo(sample.Rotation.y));
-            Assert.That(read.Rotation.z, Is.EqualTo(sample.Rotation.z));
-            Assert.That(read.Rotation.w, Is.EqualTo(sample.Rotation.w));
+            Assert.That(read.Rotation, Is.EqualTo(sample.Rotation));
             Assert.That(read.Velocity, Is.EqualTo(sample.Velocity));
             Assert.That(read.AngularVelocity, Is.EqualTo(sample.AngularVelocity));
             Assert.That(read.Forward, Is.True);
             Assert.That(read.TeleportByte, Is.EqualTo(250));
             Assert.That(read.Compact, Is.False);
             bool header = kind == ServerMeshShipWireKind.Header56;
-            Assert.That(read.Authority, Is.EqualTo(header ? ServerMeshShipAuthority.Parked : ServerMeshShipAuthority.OwnerMirror));
             Assert.That(read.FlightState, Is.EqualTo(header ? 7 : 0));
             Assert.That(read.Epoch, Is.EqualTo(header ? 255 : 0));
         }
 
         [Test]
+        public void ReadHeader56_ReservedBits_AreIgnored()
+        {
+            byte[] data = Written(ServerMeshShipWireKind.Header56, MeshSyncGoldenFixture.Sample(true)).CopyData();
+            data[0] |= 0xE0;
+
+            ServerMeshShipWire.Read(new NetDataReader(data), ServerMeshShipWireKind.Header56, out ServerMeshShipSample read);
+
+            Assert.That(read.FlightState, Is.EqualTo(MeshSyncGoldenFixture.HeaderFlightState));
+            Assert.That(read.Epoch, Is.EqualTo(MeshSyncGoldenFixture.HeaderEpoch));
+            Assert.That(read.Compact, Is.False);
+        }
+
+        [Test]
         public void Compact28_RoundTripsWithinTheQuantisation()
         {
-            System.Random random = new System.Random(20261003);
+            const float AngularTolerance = ServerMeshShipWire.CompactAngularFullScale / 127f;
+            System.Random random = new System.Random(20261004);
             for (int i = 0; i < 500; ++i)
             {
                 Quaternion rotation = new Quaternion(Signed(random), Signed(random), Signed(random), Signed(random));
                 float length = Mathf.Sqrt(rotation.x * rotation.x + rotation.y * rotation.y + rotation.z * rotation.z + rotation.w * rotation.w);
                 rotation = new Quaternion(rotation.x / length, rotation.y / length, rotation.z / length, rotation.w / length);
+                float speed = i % 5 == 0 ? 0.01f : 600f;
                 ServerMeshShipSample sample = new ServerMeshShipSample
                 {
-                    Position = new Vector3(Signed(random) * 1000f, Signed(random) * 1000f, Signed(random) * 1000f),
+                    Position = new Vector3(Signed(random) * 1e5f, Signed(random) * 1000f, Signed(random) * 1e5f),
                     Rotation = rotation,
-                    Velocity = new Vector3(Signed(random) * 600f, Signed(random) * 600f, Signed(random) * 600f),
-                    AngularVelocity = new Vector3(Signed(random) * 30f, Signed(random) * 30f, Signed(random) * 30f),
+                    Velocity = new Vector3(Signed(random) * speed, Signed(random) * speed, Signed(random) * speed),
+                    AngularVelocity = new Vector3(Signed(random) * 4f, Signed(random) * 4f, Signed(random) * 4f),
                     Forward = i % 2 == 0,
                     TeleportByte = (byte)i,
-                    Authority = (ServerMeshShipAuthority)(i % 3),
                     FlightState = (byte)(i % 8),
                     Epoch = (byte)(i * 7),
                 };
@@ -316,18 +395,20 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
 
                 ServerMeshShipWire.ReadCompact28(reader, out ServerMeshShipSample read);
 
-                Assert.That(Vector3.Distance(read.Position, sample.Position), Is.LessThanOrEqualTo(Mathf.Sqrt(3f) * 0.0051f), $"sample {i} position");
-                AssertEachWithin(read.Position, sample.Position, 0.0051f, $"sample {i} position");
-                AssertEachWithin(read.Velocity, sample.Velocity, 0.01f + 1e-4f, $"sample {i} velocity");
-                AssertEachWithin(read.AngularVelocity, sample.AngularVelocity, 0.0005f + 1e-6f, $"sample {i} angular velocity");
+                Assert.That(read.Position, Is.EqualTo(sample.Position), $"sample {i} position");
+                AssertVelocityWithin(read.Velocity.x, sample.Velocity.x, $"sample {i} velocity x");
+                AssertVelocityWithin(read.Velocity.y, sample.Velocity.y, $"sample {i} velocity y");
+                AssertVelocityWithin(read.Velocity.z, sample.Velocity.z, $"sample {i} velocity z");
+                AssertEachWithin(read.AngularVelocity, sample.AngularVelocity, AngularTolerance, $"sample {i} angular velocity");
                 float dot = Mathf.Abs(Quaternion.Dot(read.Rotation, sample.Rotation));
                 Assert.That(1f - dot, Is.LessThanOrEqualTo(0.002f), $"sample {i} rotation");
+                Assert.That(Quaternion.Dot(read.Rotation, read.Rotation), Is.EqualTo(1f).Within(1e-5f), $"sample {i} rotation normalised");
                 Assert.That(read.Forward, Is.EqualTo(sample.Forward));
-                Assert.That(read.TeleportByte, Is.EqualTo(sample.TeleportByte));
-                Assert.That(read.Authority, Is.EqualTo(sample.Authority));
+                Assert.That(read.TeleportByte, Is.EqualTo(sample.TeleportByte & 0x7F));
                 Assert.That(read.FlightState, Is.EqualTo(sample.FlightState));
                 Assert.That(read.Epoch, Is.EqualTo(sample.Epoch));
                 Assert.That(read.Compact, Is.True);
+                Assert.That(reader.AvailableBytes, Is.EqualTo(0));
             }
         }
 
@@ -337,40 +418,28 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             ServerMeshShipSample sample = new ServerMeshShipSample
             {
                 Rotation = Quaternion.identity,
-                Velocity = new Vector3(1000f, -1000f, 0f),
+                Velocity = new Vector3(1e5f, -1e5f, 70000f),
                 AngularVelocity = new Vector3(0f, 40f, -40f),
             };
             NetDataReader reader = new NetDataReader(Written(ServerMeshShipWireKind.Compact28, sample).CopyData());
 
             ServerMeshShipWire.ReadCompact28(reader, out ServerMeshShipSample read);
 
-            AssertEachWithin(read.Velocity, new Vector3(655.34f, -655.34f, 0f), 1e-3f, "velocity");
-            AssertEachWithin(read.AngularVelocity, new Vector3(0f, 32.767f, -32.767f), 1e-4f, "angular velocity");
-        }
-
-        [Test]
-        public void Compact28_DecodedRotation_IsNormalised()
-        {
-            ServerMeshShipSample sample = new ServerMeshShipSample { Rotation = new Quaternion(0.2f, 0.4f, -0.1f, 0.8888f) };
-            NetDataReader reader = new NetDataReader(Written(ServerMeshShipWireKind.Compact28, sample).CopyData());
-
-            ServerMeshShipWire.ReadCompact28(reader, out ServerMeshShipSample read);
-
-            float length = Mathf.Sqrt(read.Rotation.x * read.Rotation.x + read.Rotation.y * read.Rotation.y + read.Rotation.z * read.Rotation.z + read.Rotation.w * read.Rotation.w);
-            Assert.That(length, Is.EqualTo(1f).Within(1e-5f));
+            Assert.That(read.Velocity, Is.EqualTo(new Vector3(ServerMeshShipWire.HalfMax, -ServerMeshShipWire.HalfMax, ServerMeshShipWire.HalfMax)));
+            AssertEachWithin(read.AngularVelocity, new Vector3(0f, 4f, -4f), 1e-5f, "angular velocity");
         }
 
         private static IEnumerable<TestCaseData> DispatchCases()
         {
-            yield return new TestCaseData(ServerMeshShipWireKind.Header56, ServerMeshShipWireKind.Header56).SetName("Read_Header56Configured_FullRecord_Reads56");
-            yield return new TestCaseData(ServerMeshShipWireKind.Header56, ServerMeshShipWireKind.Compact28).SetName("Read_Header56Configured_CompactRecord_Reads28");
-            yield return new TestCaseData(ServerMeshShipWireKind.Compact28, ServerMeshShipWireKind.Header56).SetName("Read_Compact28Configured_FullRecord_Reads56");
-            yield return new TestCaseData(ServerMeshShipWireKind.Compact28, ServerMeshShipWireKind.Compact28).SetName("Read_Compact28Configured_CompactRecord_Reads28");
+            yield return new TestCaseData(ServerMeshShipWireKind.Header56, ServerMeshShipWireKind.Header56).SetName("Read_Header56Configured_Mode0Record_Reads56");
+            yield return new TestCaseData(ServerMeshShipWireKind.Header56, ServerMeshShipWireKind.Compact28).SetName("Read_Header56Configured_Mode3Record_Reads28");
+            yield return new TestCaseData(ServerMeshShipWireKind.Compact28, ServerMeshShipWireKind.Header56).SetName("Read_Compact28Configured_Mode0Record_Reads56");
+            yield return new TestCaseData(ServerMeshShipWireKind.Compact28, ServerMeshShipWireKind.Compact28).SetName("Read_Compact28Configured_Mode3Record_Reads28");
             yield return new TestCaseData(ServerMeshShipWireKind.Legacy54, ServerMeshShipWireKind.Legacy54).SetName("Read_Legacy54Configured_Reads54");
         }
 
         [TestCaseSource(nameof(DispatchCases))]
-        public void Read_TellsTheRecordByItsCompactBit(ServerMeshShipWireKind configured, ServerMeshShipWireKind written)
+        public void Read_TellsTheRecordByItsMode(ServerMeshShipWireKind configured, ServerMeshShipWireKind written)
         {
             NetDataWriter writer = Written(written, MeshSyncGoldenFixture.Sample(true));
             writer.Put((byte)0xAB);
@@ -385,20 +454,35 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
 
         private static IEnumerable<TestCaseData> HeaderByteCases()
         {
-            yield return new TestCaseData(ServerMeshShipAuthority.OwnerMirror, (byte)0, false, false, (byte)0x00).SetName("HeaderByte_AllZero_IsZero");
-            yield return new TestCaseData(ServerMeshShipAuthority.ServerAI, (byte)2, false, false, (byte)0x09).SetName("HeaderByte_ServerAIFlightState2_Is09");
-            yield return new TestCaseData(ServerMeshShipAuthority.Parked, (byte)7, false, false, (byte)0x1E).SetName("HeaderByte_ParkedFlightState7_Is1E");
-            yield return new TestCaseData(ServerMeshShipAuthority.ServerAI, (byte)2, true, true, (byte)0xA9).SetName("HeaderByte_CompactForward_SetsBits7And5");
-            yield return new TestCaseData(ServerMeshShipAuthority.OwnerMirror, (byte)0, true, false, (byte)0x80).SetName("HeaderByte_CompactOnly_IsTheCompactBit");
+            yield return new TestCaseData((byte)0, (byte)0, (byte)0x00).SetName("HeaderByte_BubbleCombat_Is00");
+            yield return new TestCaseData((byte)0, (byte)1, (byte)0x04).SetName("HeaderByte_BubbleSpooling_Is04");
+            yield return new TestCaseData((byte)0, (byte)2, (byte)0x08).SetName("HeaderByte_BubbleLowCruise_Is08");
+            yield return new TestCaseData((byte)0, (byte)3, (byte)0x0C).SetName("HeaderByte_BubbleBraking_Is0C");
+            yield return new TestCaseData((byte)0, (byte)4, (byte)0x10).SetName("HeaderByte_BubbleLanded_Is10");
+            yield return new TestCaseData((byte)1, (byte)0, (byte)0x01).SetName("HeaderByte_SupercruiseCombat_Is01");
+            yield return new TestCaseData((byte)1, (byte)3, (byte)0x0D).SetName("HeaderByte_SupercruiseBraking_Is0D");
+            yield return new TestCaseData((byte)2, (byte)4, (byte)0x12).SetName("HeaderByte_FrameChangeLanded_Is12");
+            yield return new TestCaseData((byte)3, (byte)2, (byte)0x0B).SetName("HeaderByte_CompactLowCruise_Is0B");
+            yield return new TestCaseData((byte)3, (byte)7, (byte)0x1F).SetName("HeaderByte_CompactFlightState7_Is1F");
         }
 
         [TestCaseSource(nameof(HeaderByteCases))]
-        public void HeaderByte_ComposesTheBits(ServerMeshShipAuthority authority, byte flightState, bool compact, bool forward, byte expected)
+        public void HeaderByte_ComposesTheBits(byte mode, byte flightState, byte expected)
         {
-            Assert.That(ServerMeshShipWire.HeaderByte(authority, flightState, compact, forward), Is.EqualTo(expected));
+            byte header = ServerMeshShipWire.HeaderByte(mode, flightState);
+
+            Assert.That(header, Is.EqualTo(expected));
+            Assert.That(ServerMeshShipWire.ModeOf(header), Is.EqualTo(mode));
+            Assert.That(ServerMeshShipWire.ModeOf((byte)(header | 0xE0)), Is.EqualTo(mode));
         }
 
         private static float Signed(System.Random random) => (float)(random.NextDouble() * 2d - 1d);
+
+        private static void AssertVelocityWithin(float actual, float expected, string what)
+        {
+            float tolerance = Math.Max(Math.Abs(expected) / 1024f, 1e-3f);
+            Assert.That(actual, Is.EqualTo(expected).Within(tolerance), what);
+        }
 
         private static void AssertEachWithin(Vector3 actual, Vector3 expected, float tolerance, string what)
         {

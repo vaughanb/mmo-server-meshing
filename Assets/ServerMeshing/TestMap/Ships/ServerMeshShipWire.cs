@@ -1,6 +1,7 @@
 // Server Meshing test rig — the stand-in ship's record codecs (Phase 0 step 7, MESH_SHIP_WIRE). Legacy54 is the
-// layout of the space game's ShipMovementComponent record at commit 1a3a58d9 (read there, not copied); Header56 adds
-// the space team's agreed two-byte header (bit order ours until they confirm); Compact28 is rig-only.
+// layout of the space game's ShipMovementComponent record at commit 1a3a58d9 (read there, not copied); Header56 is its
+// ShipWire header at commit c2eb4154 (mode 0, Bubble) and the 54; Compact28 is our reading of their proposed mode 3
+// (step 7b decision 2; rig-only until their golden pins it).
 using System;
 using LiteNetLib.Utils;
 using LiteNetLibManager;
@@ -11,11 +12,12 @@ namespace MultiplayerARPG.MMO.Mesh
     /// <summary>
     /// ServerMeshShipWire writes and reads the three stand-in ship records. Legacy54: position 3 floats, rotation 4 raw
     /// floats x, y, z, w, velocity 3 floats, angular velocity 3 floats, the movement state as a packed uint (0 or 1, one
-    /// byte) and the teleport byte. Header56: byte 0 = authority (bits 0-1) | flight state (bits 2-4) &lt;&lt; 2, byte 1 =
-    /// epoch, then the 54. Compact28: byte 0 = authority | flight state &lt;&lt; 2 | forward &lt;&lt; 5 | 1 &lt;&lt; 7, byte 1 =
-    /// epoch, position 3 x signed 24-bit centimetres, rotation smallest-three in 4 bytes, velocity 3 x int16 at
-    /// 0.02 m/s, angular velocity 3 x int16 at 0.001 rad/s, the teleport byte. Writers only append; readers check the
-    /// bytes left before reading anything.
+    /// byte) and the teleport byte. The header is the space game's: byte 0 = wire mode (bits 0-1) | flight state (bits
+    /// 2-4) &lt;&lt; 2, bits 5-7 written 0 and ignored on read; byte 1 = epoch. Header56: the header with mode 0, then the
+    /// 54. Compact28: the header with mode 3, position 3 float32, rotation smallest-three in 4 bytes, velocity 3 IEEE
+    /// halves, angular velocity 3 signed bytes at CompactAngularFullScale / 127 rad/s, and a state byte = teleport
+    /// sequence low 7 bits | forward &lt;&lt; 7. Writers only append; readers check the bytes left and the mode before
+    /// reading anything.
     /// </summary>
     public static class ServerMeshShipWire
     {
@@ -28,27 +30,26 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>Compact28Bytes is the length of a compact28 record.</summary>
         public const int Compact28Bytes = 28;
 
-        /// <summary>CompactBit is byte 0's bit 7, set only in a compact28 record.</summary>
-        public const byte CompactBit = 0x80;
+        /// <summary>ModeBubble is the wire mode of a full record (the space game's Bubble, mode 0).</summary>
+        public const byte ModeBubble = 0;
 
-        /// <summary>ForwardBit is byte 0's bit 5 in a compact28 record: the movement state.</summary>
-        public const byte ForwardBit = 0x20;
+        /// <summary>ModeCompact is the wire mode of a compact28 record (the space game's proposed mode 3).</summary>
+        public const byte ModeCompact = 3;
 
-        /// <summary>CompactPositionLimit is the largest position component in metres a compact28 record holds (2^23 - 1 cm).</summary>
-        public const float CompactPositionLimit = 83886.07f;
+        /// <summary>CompactAngularFullScale is the angular velocity in rad/s a compact28 signed byte of 127 stands for.</summary>
+        public const float CompactAngularFullScale = 4f;
 
-        /// <summary>CompactVelocityStep is a compact28 velocity unit in m/s.</summary>
-        public const float CompactVelocityStep = 0.02f;
+        /// <summary>HalfMax is the largest finite IEEE half; compact28 velocity components are clamped to plus or minus it.</summary>
+        public const float HalfMax = 65504f;
 
-        /// <summary>CompactAngularStep is a compact28 angular velocity unit in rad/s.</summary>
-        public const float CompactAngularStep = 0.001f;
-
-        private const int MaxCentimetres = 8388607;
-        private const int MaxShort = 32767;
         private const int ComponentMax = 1023;
         private const double SmallestThreeRange = 0.70710678118654752;
-        private const int MaxAuthority = 2;
+        private const int MaxMode = 3;
         private const int MaxFlightState = 7;
+        private const byte ModeMask = 0x03;
+        private const byte SequenceMask = 0x7F;
+        private const byte ForwardFlag = 0x80;
+        private const float AngularStep = CompactAngularFullScale / 127f;
 
         /// <summary>SizeOf is the record length of <paramref name="kind"/>; an undefined kind throws naming it.</summary>
         public static int SizeOf(ServerMeshShipWireKind kind)
@@ -63,23 +64,20 @@ namespace MultiplayerARPG.MMO.Mesh
         }
 
         /// <summary>
-        /// HeaderByte composes byte 0: authority in bits 0-1, the flight state in bits 2-4, <paramref name="forward"/> in
-        /// bit 5 (meaningful in compact28 only; header56 passes false) and <paramref name="compact"/> in bit 7. An
-        /// authority above 2 throws naming Authority, a flight state above 7 throws naming FlightState.
+        /// HeaderByte composes header byte 0: <paramref name="mode"/> in bits 0-1 and <paramref name="flightState"/> in
+        /// bits 2-4, bits 5-7 zero. A mode above 3 throws naming mode, a flight state above 7 throws naming FlightState.
         /// </summary>
-        public static byte HeaderByte(ServerMeshShipAuthority a, byte flightState, bool compact, bool forward)
+        public static byte HeaderByte(byte mode, byte flightState)
         {
-            if ((byte)a > MaxAuthority)
-                throw new ArgumentOutOfRangeException(nameof(ServerMeshShipSample.Authority), a, "the ship authority must be 0, 1 or 2 (3 is reserved)");
+            if (mode > MaxMode)
+                throw new ArgumentOutOfRangeException(nameof(mode), mode, "the wire mode must fit 2 bits (0 to 3)");
             if (flightState > MaxFlightState)
                 throw new ArgumentOutOfRangeException(nameof(ServerMeshShipSample.FlightState), flightState, "the flight state must fit 3 bits (0 to 7)");
-            int value = (byte)a | flightState << 2;
-            if (forward)
-                value |= ForwardBit;
-            if (compact)
-                value |= CompactBit;
-            return (byte)value;
+            return (byte)(mode | flightState << 2);
         }
+
+        /// <summary>ModeOf is the wire mode in header byte <paramref name="headerByte"/> (bits 0-1).</summary>
+        public static byte ModeOf(byte headerByte) => (byte)(headerByte & ModeMask);
 
         /// <summary>WriteLegacy54 appends the 54-byte record of <paramref name="sample"/>; a null writer throws naming it.</summary>
         public static void WriteLegacy54(NetDataWriter writer, in ServerMeshShipSample sample)
@@ -90,46 +88,45 @@ namespace MultiplayerARPG.MMO.Mesh
         }
 
         /// <summary>
-        /// WriteHeader56 appends the header (authority, flight state, epoch) and the 54 bytes; a null writer throws naming
-        /// it, a bad authority or flight state as HeaderByte says, before anything is written.
+        /// WriteHeader56 appends the header (mode 0, flight state, epoch) and the 54 bytes; a null writer throws naming it,
+        /// a flight state above 7 as HeaderByte says, before anything is written.
         /// </summary>
         public static void WriteHeader56(NetDataWriter writer, in ServerMeshShipSample sample)
         {
             if (writer == null)
                 throw new ArgumentNullException(nameof(writer));
-            byte header = HeaderByte(sample.Authority, sample.FlightState, false, false);
+            byte header = HeaderByte(ModeBubble, sample.FlightState);
             writer.Put(header);
             writer.Put(sample.Epoch);
             WriteBody(writer, sample);
         }
 
         /// <summary>
-        /// WriteCompact28 appends the 28-byte compact record and returns true; it returns false, writing nothing, for a
-        /// position component beyond CompactPositionLimit or any non-finite field. Velocities beyond the int16 range are
-        /// clamped. Throws as WriteHeader56 does.
+        /// WriteCompact28 appends the 28-byte compact record (mode 3) and returns true; it returns false, writing nothing,
+        /// only when a position, rotation, velocity or angular velocity component is not finite. Velocity components are
+        /// clamped to plus or minus HalfMax, angular velocity components to plus or minus CompactAngularFullScale. Throws as
+        /// WriteHeader56 does.
         /// </summary>
         public static bool WriteCompact28(NetDataWriter writer, in ServerMeshShipSample sample)
         {
             if (writer == null)
                 throw new ArgumentNullException(nameof(writer));
-            byte header = HeaderByte(sample.Authority, sample.FlightState, true, sample.Forward);
-            if (!TryCentimetres(sample.Position.x, out int x) || !TryCentimetres(sample.Position.y, out int y) || !TryCentimetres(sample.Position.z, out int z))
-                return false;
-            if (!IsFinite(sample.Velocity) || !IsFinite(sample.AngularVelocity) || !TryPackRotation(sample.Rotation, out uint rotation))
+            byte header = HeaderByte(ModeCompact, sample.FlightState);
+            if (!IsFinite(sample.Position) || !IsFinite(sample.Velocity) || !IsFinite(sample.AngularVelocity) || !TryPackRotation(sample.Rotation, out uint rotation))
                 return false;
             writer.Put(header);
             writer.Put(sample.Epoch);
-            PutInt24(writer, x);
-            PutInt24(writer, y);
-            PutInt24(writer, z);
+            writer.Put(sample.Position.x);
+            writer.Put(sample.Position.y);
+            writer.Put(sample.Position.z);
             writer.Put(rotation);
-            writer.Put(Quantise(sample.Velocity.x, CompactVelocityStep));
-            writer.Put(Quantise(sample.Velocity.y, CompactVelocityStep));
-            writer.Put(Quantise(sample.Velocity.z, CompactVelocityStep));
-            writer.Put(Quantise(sample.AngularVelocity.x, CompactAngularStep));
-            writer.Put(Quantise(sample.AngularVelocity.y, CompactAngularStep));
-            writer.Put(Quantise(sample.AngularVelocity.z, CompactAngularStep));
-            writer.Put(sample.TeleportByte);
+            writer.Put(Half(sample.Velocity.x));
+            writer.Put(Half(sample.Velocity.y));
+            writer.Put(Half(sample.Velocity.z));
+            writer.Put(Angular(sample.AngularVelocity.x));
+            writer.Put(Angular(sample.AngularVelocity.y));
+            writer.Put(Angular(sample.AngularVelocity.z));
+            writer.Put((byte)((sample.TeleportByte & SequenceMask) | (sample.Forward ? ForwardFlag : 0)));
             return true;
         }
 
@@ -141,45 +138,54 @@ namespace MultiplayerARPG.MMO.Mesh
             ReadBody(reader, ref sample);
         }
 
-        /// <summary>ReadHeader56 reads a 56-byte record; fewer bytes left throws naming reader before anything is read.</summary>
+        /// <summary>
+        /// ReadHeader56 reads a 56-byte mode 0 record; fewer bytes left, or a header whose mode is not 0, throws naming
+        /// reader before anything is read.
+        /// </summary>
         public static void ReadHeader56(NetDataReader reader, out ServerMeshShipSample sample)
         {
             Require(reader, Header56Bytes, "header56");
+            RequireMode(reader, ModeBubble, "header56");
             sample = default;
             byte header = reader.GetByte();
-            sample.Authority = (ServerMeshShipAuthority)(header & 0x03);
-            sample.FlightState = (byte)((header >> 2) & 0x07);
+            sample.FlightState = (byte)((header >> 2) & MaxFlightState);
             sample.Epoch = reader.GetByte();
             ReadBody(reader, ref sample);
         }
 
         /// <summary>
-        /// ReadCompact28 reads a 28-byte compact record (the rotation renormalised); fewer bytes left throws naming reader
-        /// before anything is read.
+        /// ReadCompact28 reads a 28-byte mode 3 record (the rotation renormalised; Compact true; TeleportByte the 7-bit
+        /// sequence; Forward from the state byte's bit 7); fewer bytes left, or a header whose mode is not 3, throws naming
+        /// reader before anything is read.
         /// </summary>
         public static void ReadCompact28(NetDataReader reader, out ServerMeshShipSample sample)
         {
             Require(reader, Compact28Bytes, "compact28");
+            RequireMode(reader, ModeCompact, "compact28");
             sample = default;
             byte header = reader.GetByte();
-            sample.Authority = (ServerMeshShipAuthority)(header & 0x03);
-            sample.FlightState = (byte)((header >> 2) & 0x07);
-            sample.Forward = (header & ForwardBit) != 0;
+            sample.FlightState = (byte)((header >> 2) & MaxFlightState);
             sample.Compact = true;
             sample.Epoch = reader.GetByte();
-            float x = GetInt24(reader) / 100f;
-            float y = GetInt24(reader) / 100f;
-            float z = GetInt24(reader) / 100f;
-            sample.Position = new Vector3(x, y, z);
+            sample.Position = new Vector3(reader.GetFloat(), reader.GetFloat(), reader.GetFloat());
             sample.Rotation = UnpackRotation(reader.GetUInt());
-            sample.Velocity = new Vector3(reader.GetShort() * CompactVelocityStep, reader.GetShort() * CompactVelocityStep, reader.GetShort() * CompactVelocityStep);
-            sample.AngularVelocity = new Vector3(reader.GetShort() * CompactAngularStep, reader.GetShort() * CompactAngularStep, reader.GetShort() * CompactAngularStep);
-            sample.TeleportByte = reader.GetByte();
+            float vx = Mathf.HalfToFloat(reader.GetUShort());
+            float vy = Mathf.HalfToFloat(reader.GetUShort());
+            float vz = Mathf.HalfToFloat(reader.GetUShort());
+            sample.Velocity = new Vector3(vx, vy, vz);
+            float ax = reader.GetSByte() * AngularStep;
+            float ay = reader.GetSByte() * AngularStep;
+            float az = reader.GetSByte() * AngularStep;
+            sample.AngularVelocity = new Vector3(ax, ay, az);
+            byte state = reader.GetByte();
+            sample.TeleportByte = (byte)(state & SequenceMask);
+            sample.Forward = (state & ForwardFlag) != 0;
         }
 
         /// <summary>
         /// Read reads one record of a ship configured with <paramref name="configured"/>: 54 bytes for legacy54; otherwise
-        /// it peeks byte 0 and reads 28 bytes when the compact bit is set, else 56. Too few bytes throw naming reader.
+        /// it peeks header byte 0 and reads 56 bytes for mode 0 or 28 for mode 3. Modes 1 and 2, or too few bytes, throw
+        /// naming reader before anything is read.
         /// </summary>
         public static void Read(NetDataReader reader, ServerMeshShipWireKind configured, out ServerMeshShipSample sample)
         {
@@ -189,10 +195,13 @@ namespace MultiplayerARPG.MMO.Mesh
                 return;
             }
             Require(reader, 1, "ship");
-            if ((reader.PeekByte() & CompactBit) != 0)
+            byte mode = ModeOf(reader.PeekByte());
+            if (mode == ModeBubble)
+                ReadHeader56(reader, out sample);
+            else if (mode == ModeCompact)
                 ReadCompact28(reader, out sample);
             else
-                ReadHeader56(reader, out sample);
+                throw new ArgumentOutOfRangeException(nameof(reader), mode, $"a ship record of wire mode {mode} is not read in Phase 0 (only modes 0 and 3)");
         }
 
         private static void WriteBody(NetDataWriter writer, in ServerMeshShipSample sample)
@@ -232,35 +241,22 @@ namespace MultiplayerARPG.MMO.Mesh
                 throw new ArgumentOutOfRangeException(nameof(reader), reader.AvailableBytes, $"a {layout} record needs {bytes} bytes and the reader has {reader.AvailableBytes} left");
         }
 
-        private static bool TryCentimetres(float metres, out int centimetres)
+        private static void RequireMode(NetDataReader reader, byte expected, string layout)
         {
-            centimetres = 0;
-            if (float.IsNaN(metres) || float.IsInfinity(metres))
-                return false;
-            double value = Math.Round(metres * 100d);
-            if (value > MaxCentimetres || value < -MaxCentimetres)
-                return false;
-            centimetres = (int)value;
-            return true;
+            byte mode = ModeOf(reader.PeekByte());
+            if (mode != expected)
+                throw new ArgumentOutOfRangeException(nameof(reader), mode, $"a {layout} record has wire mode {expected} and the reader's record has mode {mode}");
         }
 
-        private static void PutInt24(NetDataWriter writer, int value)
+        private static ushort Half(float value)
         {
-            writer.Put((byte)(value & 0xFF));
-            writer.Put((byte)((value >> 8) & 0xFF));
-            writer.Put((byte)((value >> 16) & 0xFF));
+            return Mathf.FloatToHalf(Math.Max(-HalfMax, Math.Min(HalfMax, value)));
         }
 
-        private static int GetInt24(NetDataReader reader)
+        private static sbyte Angular(float value)
         {
-            int value = reader.GetByte() | reader.GetByte() << 8 | reader.GetByte() << 16;
-            return (value & 0x800000) != 0 ? value | unchecked((int)0xFF000000) : value;
-        }
-
-        private static short Quantise(float value, float step)
-        {
-            double units = Math.Round(value / (double)step);
-            return (short)Math.Max(-MaxShort, Math.Min(MaxShort, units));
+            double units = Math.Round(value / (double)AngularStep, MidpointRounding.AwayFromZero);
+            return (sbyte)Math.Max(-127d, Math.Min(127d, units));
         }
 
         private static bool TryPackRotation(Quaternion rotation, out uint packed)

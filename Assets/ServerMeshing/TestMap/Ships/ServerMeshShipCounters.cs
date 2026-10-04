@@ -18,6 +18,15 @@ namespace MultiplayerARPG.MMO.Mesh
         public readonly List<float> Speeds = new List<float>(1024);
         /// <summary>PatrolSpeeds is the sampled speeds of AI ships that were patrolling, in m/s.</summary>
         public readonly List<float> PatrolSpeeds = new List<float>(1024);
+        /// <summary>MirrorAgeCapacity is the most mirror age samples a window keeps (the lists never grow past it).</summary>
+        public const int MirrorAgeCapacity = 8192;
+        /// <summary>
+        /// MirrorAges is, per frame in which a ship with an in-process feed had a record written, that record's server
+        /// write timestamp minus the ship's last feed timestamp, in ms.
+        /// </summary>
+        public readonly List<long> MirrorAges = new List<long>(MirrorAgeCapacity);
+        /// <summary>MirrorFrames is, per sample of MirrorAges, the frames since that ship's last feed.</summary>
+        public readonly List<int> MirrorFrames = new List<int>(MirrorAgeCapacity);
 
         /// <summary>Ships is every live stand-in ship on this server at the window's end.</summary>
         public int Ships;
@@ -37,6 +46,8 @@ namespace MultiplayerARPG.MMO.Mesh
         public int Outside;
         /// <summary>NotInSlot is the ships whose kit movement handler is not their ServerMeshShipMovement.</summary>
         public int NotInSlot;
+        /// <summary>Pending is the ships whose teleport is unacknowledged at the window's end.</summary>
+        public int Pending;
         /// <summary>Scans is the pilots' target scans.</summary>
         public long Scans;
         /// <summary>Casts is the pilots' avoidance sphere casts.</summary>
@@ -57,7 +68,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public long Uploads;
         /// <summary>Stale is the client states dropped while their acknowledged teleport lagged the ship's.</summary>
         public long Stale;
-        /// <summary>Bad is the client states dropped as short or compact-flagged.</summary>
+        /// <summary>Bad is the client states dropped as short or with a wire mode other than 0.</summary>
         public long Bad;
         /// <summary>PilotMs is the pilots' time in milliseconds.</summary>
         public double PilotMs;
@@ -75,7 +86,10 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             Speeds.Clear();
             PatrolSpeeds.Clear();
-            Ships = Ai = Mirror = Parked = Phantom = Pilots = Seated = Outside = NotInSlot = 0;
+            MirrorAges.Clear();
+            MirrorFrames.Clear();
+            Ships = Ai = Mirror = Parked = Phantom = Pilots = Seated = Outside = NotInSlot = Pending = 0;
+
             Scans = Casts = Shots = Bolts = Hits = Respawns = ShieldWrites = RpcSends = Uploads = Stale = Bad = 0;
             PilotMs = EngineMs = CombatMs = BoltMs = MirrorMs = 0;
         }

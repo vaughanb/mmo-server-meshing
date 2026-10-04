@@ -1,5 +1,6 @@
 """Phase 0 step 7 rig acceptance: ship stand-ins, in-process puppets, sync/RPC load and the scale factor
-(step7_design.md "Acceptance", runs 2-9; run 1 runs through regress.py in the rig chain, run 10 is the unit gates).
+(step7_design.md "Acceptance", runs 2-9, with step7b_design.md "Acceptance" applied; run 1 runs through regress.py in
+the rig chain, run 10 is the unit gates).
 "Coarse C" is one 600 m cell with no monsters; "space rates" add MESH_RATES=30/0.02. No editor client in any run.
 
   sizes     run 2: scale 1, 20 ship phantoms, 30 parked load ships, meter count, record sizes on; arms legacy54,
@@ -10,19 +11,28 @@
             every window whose direct held, direct 50, errors 0 dropped 0; Send 119 records = Sender u + r within
             +-0.5 % over the span; refusals <= 50 in the first window and 0 after; Ships notInSlot 0
   bots      run 4: 40 mirror and 10 parked load ships, MESH_RIG_SHIPS=1, bot meshbot standing at (0, 0); arms scale 0.5
-            legacy54, header56, compact28 (sender on, far, R0 1 m), header56 with MESH_SHIP_MIRROR_VELOCITY=real
+            legacy54, header56, compact28 (sender on, far, R0 1 m), header56 with MESH_SHIP_MIRROR_VELOCITY=zero
             (reported), and scale 0.03 header56 with MESH_LOAD_AREA=0,0,30. Every measured Bot ships window: seen >= 45,
-            path p99 <= 0.5 x scale m and max <= 1.0 x scale m, parked max <= 0.001 m (0.01 m for compact28),
-            badLength 0, unknownPath 0; the bot log free of the registration and decode faults; lag p50 reported
-  ai        run 5: scale 0.03, 100 AI ships, 180 s, instantiate then pooled: ships 100 in every window, patrol p50
-            1.504 m/s +-5 % (1.600 means force-after-damping: stop), speed max <= 3.84 m/s, outside 0 in >= 90 % of
-            windows, shots/bolts/hits > 0, bolts = 2 x shots +-1 %, pooled gc0 <= instantiate gc0
+            path p99 <= 0.5 x scale m and max <= 1.0 x scale m, parked max <= 0.001 m (compact28's positions are
+            float32 too), badLength 0, unknownPath 0; the bot log free of the registration and decode faults; lag p50
+            reported per window beside the Ships window's mirror age frames K, "investigate" when the lag's steps do
+            not coincide with K's (step 7b decision 9), and against [0, 60] ms at 60 fps
+  ai        run 5: scale 0.03, 100 AI ships, 180 s; classes enemy (default) and wave (MESH_SHIP_AI_PREFAB=wave), each
+            instantiate then pooled: ships 100 in every window, speed max within 2 % of the class's full-thrust
+            terminal (enemy 2.820, wave 3.760 m/s), outside 0 in >= 90 % of windows, shots/bolts/hits > 0, bolts = 2 x
+            shots +-1 %; per class, the patrol p50 over the windows with patrol n > 0 of both arms in [0.54, 0.4 x
+            terminal x 1.05] ("not measured" below 5 such windows) and pooled gc0 <= instantiate gc0 + 2; respawns and
+            pending reported per window
+  reliable  step 7b: 100 enemy AI ships for 180 s (they kill each other) with 8 ship phantoms subscribing, meter count;
+            MESH_SHIP_SELF_ACK 0 (default, the space game's rule) and 1: ships respawn in both, under 0 respawned ships
+            stay pending and reliable records flow, under 1 pending stays at most 1; the self-ack saving reported
   pilots    run 6: run 5 at 20 ships with pilots, sender on, meter count, record sizes: pilots 20 seated 20, ships 20,
             Sender kit >= 20 and direct 20, the sizes show the ship length and another (the pilots'); then with 4 ship
             phantoms too: seated stays 20
-  g1s       run 7: 64 ship phantoms and 64 AI ships at scale 0.03, meter count; arms MESH_SHIP_MIRROR_VELOCITY zero and
-            real: every phantom bound, uploads/s within +-10 % of 1280, Ships uploads + stale + bad within +-2 % of the
-            Phantom windows' uploads over the span, bad 0, stale <= 2 x respawns; t119 bytes per record reported
+  g1s       run 7: 64 ship phantoms and 64 AI ships at scale 0.03, meter count; arms mirror velocity real (default)
+            and zero (MESH_SHIP_MIRROR_VELOCITY=zero): every phantom bound, uploads/s within +-10 % of 1280, Ships uploads + stale + bad within +-2 % of the Phantom
+            windows' uploads over the span, bad 0, stale <= 2 x respawns; t119 bytes per record, Send 119 reliable
+            records per second (records ro) and pending at the end reported
   feeder    run 8: MESH_PUPPET_FEEDER ship:200@20 and character:200@20, each without and with MESH_SENDER=on:
             snapshots/s within +-2 % of 4000, ship gc0 0, Sender direct 200 with the sender; us/snapshot reported
   syncload  run 9: run 7 (zero) plus MESH_SYNC_LOAD=dirty:100,rpc:200: writes/s +-1 % of 2000, rpc/s +-1 % of 200,
@@ -51,6 +61,7 @@ import p0sender  # noqa: E402
 import p0ships  # noqa: E402
 import regress as r  # noqa: E402
 import rigrun  # noqa: E402
+import accept_step7_lag  # noqa: E402 -- beside this script
 
 WARMUP, MEASURE, AI_MEASURE = 45, 60, 180
 COARSE = {"MESH_LAYOUT_OVERRIDE": "ServerMeshTestMap=C@-300,-300,600,600", "MESH_SPAWN_CELLS": "C",
@@ -69,14 +80,22 @@ BAD = ("Exception", "Ships error:", "Feeder error:", "Sync load error:", "Bot sh
 BOT_BAD = ("is not registered", "Unable to spawn object", "invalid state length", "error occurs while reading",
            "Exception", "Bot ships error:")
 RPC_TYPE = 2                              # LiteNetLibManager GameMsgTypes.RPC
+AI_SCALE = 0.03
+# Full-thrust terminal speed per AI class, (F/drag - F dt)/mass at dt 0.02 (step 7b decision 4): enemy (Ship_Enemy,
+# F 300) 94.0 m/s, wave (Ship_AI, F 400) 125.33 m/s; F/drag (100 and 133.33) would mean force after damping.
+TERMINAL = {"enemy": 94.0 * AI_SCALE, "wave": 125.33 * AI_SCALE}               # 2.820 and 3.760 m/s
+AFTER_DAMPING = {"enemy": 100.0 * AI_SCALE, "wave": 133.33 * AI_SCALE}
+AI_PREFAB_ENV = {"enemy": {}, "wave": {"MESH_SHIP_AI_PREFAB": "wave"}}
 # The space AI patrols by chasing a point that circles 400 m x scale at 0.05 rad/s (ShipAIPilot.cs:243-249), so its
-# speed lies between that point's 20 m/s and the 40 % throttle terminal 50.13 m/s, x scale 0.03: never a steady cruise.
-PATROL_LOW = 0.05 * 400 * 0.03 * 0.9      # 0.54 m/s
-PATROL_HIGH = 0.4 * 125.33 * 0.03 * 1.05  # 1.58 m/s
-TERMINAL = 125.33 * 0.03                  # 3.76 m/s: full-thrust terminal speed, (F/drag - F dt)/mass at scale 0.03
+# speed lies between that point's 20 m/s and the 40 % throttle terminal, x scale 0.03: never a steady cruise. A sanity
+# range only (A's first run read about 0.69 x the 40 % terminal).
+PATROL_LOW = 0.05 * 400 * AI_SCALE * 0.9  # 0.54 m/s
+PATROL_HIGH = {name: 0.4 * terminal * 1.05 for name, terminal in TERMINAL.items()}   # 1.184 and 1.58 m/s
+PATROL_MIN_WINDOWS = 5                    # fewer windows with patrol n > 0 than this: "patrol not measured"
+GC0_POOLED_SLACK = 2                      # pooled gc0 may exceed instantiate gc0 by this much (both are reported)
 OUTSIDE_SHARE, OUTSIDE_RUN = 0.05, 6      # at most 5 % of the AI in the inset margin; none there over 6 windows (30 s)
 GC0_PER_MINUTE = 1                        # the process's own gen-0 rate in every run here, feeder or not
-GROUPS = ("sizes", "once", "bots", "ai", "pilots", "g1s", "feeder", "syncload")
+GROUPS = ("sizes", "once", "bots", "ai", "reliable", "pilots", "g1s", "feeder", "syncload")
 
 
 def windowed(rows, start, end):
@@ -144,14 +163,20 @@ def run_window_with_bots(env, warmup, measure, rep, bots, bot_args):
     return play_start, start, end, logs
 
 
+def utc(local):
+    """A naive local time (rigrun.now, a log stamp) as an aware UTC time."""
+    return local.astimezone(datetime.timezone.utc)
+
+
 def read_bot_log(path, start, end):
     """A bot's Bot ships windows timed inside [start, end] and its fault counts. Bot ships lines carry no time, so each
-    takes the UTC time of the Bot net window logged before it (both every 5 s); one with none before it is warm-up."""
+    takes the UTC time of the Bot net window logged before it (both every 5 s), kept as "at"; one with none before it
+    is warm-up."""
     if not os.path.exists(path):
         return {"exists": False, "ships": [], "all": [], "bad": {mark: 0 for mark in BOT_BAD}}
     with open(path, encoding="utf-8", errors="replace") as f:
         lines = f.read().splitlines()
-    lo, hi = start.astimezone(datetime.timezone.utc), end.astimezone(datetime.timezone.utc)
+    lo, hi = utc(start), utc(end)
     at, timed, every = None, [], []
     for line in lines:
         net = p0phantom.parse_bot_net_window(line)
@@ -162,7 +187,7 @@ def read_bot_log(path, start, end):
         if ships:
             every.append(ships)
             if at is not None and lo <= at <= hi:
-                timed.append(ships)
+                timed.append(dict(ships, at=at))
     return {"exists": True, "ships": timed, "all": every,
             "bad": {mark: sum(mark in line for line in lines) for mark in BOT_BAD}}
 
@@ -211,6 +236,14 @@ def longest_run(values):
 
 def within_pct(value, expected, limit):
     return value == value and expected and abs(value - expected) / abs(expected) * 100 <= limit
+
+
+def reliable_per_s(send):
+    """Send 119 reliable records per second over the span: records ro summed over the Send windows that carry the
+    records group, over every Send window's seconds."""
+    seconds = total(send, "seconds")
+    ro = sum(s["records"]["ro"] for s in send if s["records"])
+    return ro / seconds if seconds else float("nan")
 
 
 # ------------------------------------------------------------------ the runner
@@ -297,7 +330,7 @@ class Acceptance:
         arms = (("0.5 legacy54", 0.5, {"MESH_SHIP_WIRE": "legacy54"}),
                 ("0.5 header56", 0.5, {"MESH_SHIP_WIRE": "header56"}),
                 ("0.5 compact28", 0.5, COMPACT),
-                ("0.5 header56 real velocity", 0.5, {"MESH_SHIP_WIRE": "header56", "MESH_SHIP_MIRROR_VELOCITY": "real"}),
+                ("0.5 header56 zero velocity", 0.5, {"MESH_SHIP_WIRE": "header56", "MESH_SHIP_MIRROR_VELOCITY": "zero"}),
                 ("0.03 header56", 0.03, {"MESH_SHIP_WIRE": "header56", "MESH_LOAD_AREA": "0,0,30"}))
         for label, scale, extra in arms:
             env = dict(BOT_BASE, **p0ships.scaled_env(scale))
@@ -317,14 +350,16 @@ class Acceptance:
             self.check(bool(w) and all(x["path_p99"] <= 0.5 * scale and x["path_max"] <= 1.0 * scale for x in w),
                        f"{label}: path p99 <= {0.5 * scale:g} m and max <= {1.0 * scale:g} m "
                        f"({[(x['path_p99'], x['path_max']) for x in w][:4]})")
-            parked = 0.01 if "compact28" in label else 0.001
+            parked = 0.001
             self.check(bool(w) and all(x["parked_max"] <= parked for x in w),
                        f"{label}: parked max <= {parked:g} m ({[x['parked_max'] for x in w][:4]})")
             self.check(bool(w) and all(x["bad_length"] == 0 and x["unknown_path"] == 0 for x in w),
                        f"{label}: badLength 0 and unknownPath 0")
-            lag = [x["lag_p50_ms"] for x in w]
-            note = "" if scale != 0.5 or not lag or 20 <= statistics.median(lag) <= 60 else " (outside 20-60 ms: investigate)"
-            self.rep.note(f"    reported: {label} lag p50 {lag} ms{note}")
+            self.lag_report(label, w, got["ships"])
+
+    def lag_report(self, label, bot_windows, ships_windows):
+        """Step 7b decision 9 (accept_step7_lag.grade_lag): checks the lag steps against the mirror age K steps."""
+        accept_step7_lag.grade_lag(label, bot_windows, ships_windows, utc, self.check, self.rep.note)
 
     def ai_run(self, ships, extra, measure=AI_MEASURE):
         env = dict(SPACE, **p0ships.scaled_env(0.03), MESH_LOAD_SHIPS=f"C:{ships}:ai")
@@ -332,23 +367,25 @@ class Acceptance:
         return run(env, self.rep, measure)
 
     def ai(self):
-        self.rep.note("--- ai (run 5): scale 0.03, 100 AI ships, 180 s, instantiate then pooled")
-        gc0 = {}
+        self.rep.note("--- ai (run 5): scale 0.03, 100 AI ships, 180 s; enemy and wave, each instantiate then pooled")
+        for ship_class in ("enemy", "wave"):
+            self.ai_class(ship_class)
+
+    def ai_class(self, ship_class):
+        gc0, patrolled = {}, []
+        terminal = TERMINAL[ship_class]
         for mode in ("instantiate", "pooled"):
-            got = self.ai_run(100, {"MESH_SHIP_PROJECTILES": mode})
-            label = f"ai {mode}"
+            got = self.ai_run(100, dict(AI_PREFAB_ENV[ship_class], MESH_SHIP_PROJECTILES=mode))
+            label = f"ai {ship_class} {mode}"
             self.common(got, label)
             w = got["ships"]
             self.check(bool(w) and all(x["ships"] == 100 and x["ai"] == 100 for x in w),
                        f"{label}: ships 100 in every window ({sorted({x['ships'] for x in w})})")
-            patrol = statistics.median(x["patrol_p50"] for x in w) if w else float("nan")
-            self.check(PATROL_LOW <= patrol <= PATROL_HIGH,
-                       f"{label}: patrol p50 {patrol:.3f} m/s between the patrol point's {PATROL_LOW:.2f} and the 40 % "
-                       f"throttle terminal {PATROL_HIGH:.2f}")
+            patrolled += [x for x in w if (x["patrol_n"] or 0) > 0 and x["patrol_p50"] is not None]
             top = max((x["speed_max"] for x in w), default=0.0)
-            self.check(within_pct(top, TERMINAL, 2),
-                       f"{label}: speed max {top:.2f} m/s within 2 % of the full-thrust terminal {TERMINAL:.2f} "
-                       f"({TERMINAL * 133.33 / 125.33:.2f} would mean force after damping)")
+            self.check(within_pct(top, terminal, 2),
+                       f"{label}: speed max {top:.3f} m/s within 2 % of the {ship_class} full-thrust terminal "
+                       f"{terminal:.3f} ({AFTER_DAMPING[ship_class]:.3f} would mean force after damping)")
             outside = [x["outside"] for x in w]
             self.check(bool(w) and max(outside) <= OUTSIDE_SHARE * 100 and longest_run(outside) <= OUTSIDE_RUN,
                        f"{label}: outside <= {OUTSIDE_SHARE * 100:.0f} and back to 0 within {OUTSIDE_RUN} windows "
@@ -362,9 +399,22 @@ class Acceptance:
                           f"{mean(x['engine_ms_per_s'] for x in w):.2f} combat {mean(x['combat_ms_per_s'] for x in w):.2f} "
                           f"bolts {mean(x['bolts_ms_per_s'] for x in w):.2f}; scans/s {total(w, 'scans') / seconds:.0f} "
                           f"(2 x AI = 200), casts/s {total(w, 'casts') / seconds:.0f} (~30 x AI = 3000); gc0 {gc0[mode]}")
+            self.rep.note(f"    reported: {label} respawns per window {[x['respawns'] for x in w]}, pending per window "
+                          f"{[x['pending'] for x in w]}")
+        high = PATROL_HIGH[ship_class]
+        if len(patrolled) < PATROL_MIN_WINDOWS:
+            self.rep.note(f"    reported: ai {ship_class} patrol not measured ({len(patrolled)} windows with patrol "
+                          f"n > 0 over both arms, need {PATROL_MIN_WINDOWS})")
+        else:
+            patrol = statistics.median(x["patrol_p50"] for x in patrolled)
+            self.check(PATROL_LOW <= patrol <= high,
+                       f"ai {ship_class}: patrol p50 {patrol:.3f} m/s over {len(patrolled)} windows with patrol n > 0 "
+                       f"in [{PATROL_LOW:.2f}, {high:.3f}] (the patrol point's speed to 1.05 x the 40 % throttle "
+                       f"terminal)")
         if len(gc0) == 2:
-            self.check(gc0["pooled"] <= gc0["instantiate"],
-                       f"ai: pooled gc0 {gc0['pooled']} <= instantiate gc0 {gc0['instantiate']}")
+            self.check(gc0["pooled"] <= gc0["instantiate"] + GC0_POOLED_SLACK,
+                       f"ai {ship_class}: pooled gc0 {gc0['pooled']} <= instantiate gc0 {gc0['instantiate']} + "
+                       f"{GC0_POOLED_SLACK}")
 
     def pilots(self):
         self.rep.note("--- pilots (run 6): 20 AI ships with pilots, sender on, meter count, record sizes")
@@ -403,16 +453,50 @@ class Acceptance:
 
     def g1s(self):
         self.rep.note("--- g1s (run 7): 64 ship phantoms and 64 AI ships at scale 0.03, meter count")
-        bytes_per_record = {}
-        for arm in ("zero", "real"):
-            got = run(dict(G1S, MESH_SHIP_MIRROR_VELOCITY=arm), self.rep)
+        bytes_per_record, reliable = {}, {}
+        for arm, extra in (("real", {}), ("zero", {"MESH_SHIP_MIRROR_VELOCITY": "zero"})):
+            got = run(dict(G1S, **extra), self.rep)
             label = f"g1s {arm}"
             self.common(got, label)
             self.g1s_checks(label, got)
             groups = [g for g in (type_group(s, 119) for s in got["send"]) if g]
             records = sum(records_of(s) for s in got["send"])
             bytes_per_record[arm] = sum(g["bytes"] for g in groups) / records if records else float("nan")
+            reliable[arm] = reliable_per_s(got["send"])
+            pending = got["ships"][-1]["pending"] if got["ships"] else None
+            self.rep.note(f"    reported: {label} Send 119 reliable records {reliable[arm]:.1f}/s (records ro); "
+                          f"pending at the end {pending}")
         self.rep.note(f"    reported: t119 bytes per record {bytes_per_record} (sizes identical by design)")
+
+    def reliable(self):
+        """Step 7b decision 3: what the space game's reliable-forever rule costs. g1s's AI ships are hit but never
+        destroyed in a minute (hull + shield 4,000 against 50 per hit), so this runs the ai group's 100 enemy ships for
+        180 s, where they kill each other and respawn, with 8 ship phantoms subscribing and the meter counting."""
+        self.rep.note("--- reliable (step 7b): 100 enemy AI ships, 180 s, 8 ship phantoms, meter count; selfAck 0 and 1")
+        per_s, respawned = {}, {}
+        for arm, extra in (("selfAck 0", {}), ("selfAck 1", {"MESH_SHIP_SELF_ACK": "1"})):
+            got = self.ai_run(100, dict(extra, MESH_PHANTOM="virtual:8:ship:C", MESH_METER_SENDS="count",
+                                        MESH_SHIP_PROJECTILES="pooled"))
+            label = f"reliable {arm}"
+            self.common(got, label)
+            w = got["ships"]
+            respawned[arm] = total(w, "respawns")
+            per_s[arm] = reliable_per_s(got["send"])
+            pending = [x["pending"] for x in w]
+            self.check(respawned[arm] > 0, f"{label}: AI ships respawned ({respawned[arm]})")
+            if arm == "selfAck 0":
+                self.check(bool(pending) and pending[-1] > 0 and per_s[arm] > 0,
+                           f"{label}: respawned ships stay pending ({pending[-1] if pending else None} at the end) and "
+                           f"send reliable records ({per_s[arm]:.1f}/s)")
+            else:
+                self.check(bool(pending) and max(pending) <= 1,
+                           f"{label}: the self-ack clears every teleport (pending at most {max(pending, default=None)})")
+            self.rep.note(f"    reported: {label} Send 119 reliable records {per_s[arm]:.1f}/s (records ro); respawns "
+                          f"{respawned[arm]}; pending per window {pending}")
+        saving = per_s["selfAck 0"] - per_s["selfAck 1"]
+        share = saving / per_s["selfAck 0"] * 100 if per_s["selfAck 0"] else float("nan")
+        self.rep.note(f"    reported: the self-ack saves {saving:.1f} reliable records/s ({share:.0f} % of selfAck 0's "
+                      f"{per_s['selfAck 0']:.1f}/s), for 8 subscribers")
 
     def g1s_checks(self, label, got):
         ph, w = got["phantom"], got["ships"]

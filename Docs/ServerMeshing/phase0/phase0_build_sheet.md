@@ -256,6 +256,8 @@ This work was read-only. I created, edited, moved or deleted nothing in either r
 | `MESH_SHIP_WIRE` | legacy54 \| header56 \| compact28 | 7 |
 | `MESH_SHIP_SCALE` | factor | 7 |
 | `MESH_SHIP_PROJECTILES` | instantiate \| pooled | 7 |
+| `MESH_SHIP_SELF_ACK` | 0 \| 1 (default 0: only an owner acknowledges a teleport) | 7b |
+| `MESH_SHIP_AI_PREFAB` | enemy \| wave (default enemy: Ship_Enemy numbers) | 7b |
 | `MESH_SHIP_PARK_SLEEP` | 0 \| 1 | 7 |
 | `MESH_SHIP_JUMP_SECONDS` | s | 7 |
 | `MESH_RIG_SHIPS` | 1 (bots register the prefab) | 7 |

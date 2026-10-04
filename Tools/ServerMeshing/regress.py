@@ -92,10 +92,11 @@ ENV_KEYS = ["MESH_NO_MONSTER_HANDOFF", "MESH_FAULT_DIE_ON_NOTICE", "MESH_GHOST_L
             "MESH_SENDER_SPREAD", "MESH_SENDER_XZ", "MESH_SENDER_CLASSIFY_BUILDS", "MESH_SENDER_PACKET_BYTES",
             "MESH_CE12_CHECK",
             # Phase 0 step 7 (p0tools.ENV_REGISTRY via p0ships): load ships and their pilots, the ship wire, scale,
-            # projectiles and mirror velocities, ship-aware bots, the puppet feeder, sync load and record sizes
+            # projectiles and mirror velocities, ship-aware bots, the puppet feeder, sync load and record sizes;
+            # step 7b's teleport self-ack and AI ship class
             "MESH_LOAD_SHIPS", "MESH_LOAD_SHIP_PILOTS", "MESH_SHIP_WIRE", "MESH_SHIP_SCALE", "MESH_SHIP_PROJECTILES",
             "MESH_SHIP_MIRROR_VELOCITY", "MESH_RIG_SHIPS", "MESH_PUPPET_FEEDER", "MESH_SYNC_LOAD",
-            "MESH_METER_RECORD_SIZES"]
+            "MESH_METER_RECORD_SIZES", "MESH_SHIP_SELF_ACK", "MESH_SHIP_AI_PREFAB"]
 EXTRA_ENV = {}   # --env KEY=VALUE from the command line, applied to every Play request of the run
 
 # Two-machine runs (--remote-cells): the named cells are served by the other machine, started and read over SSH by

@@ -263,7 +263,8 @@ class EnvRegistryTests(unittest.TestCase):
                                                      "MESH_SHIP_WIRE", "MESH_SHIP_SCALE", "MESH_SHIP_PROJECTILES",
                                                      "MESH_SHIP_MIRROR_VELOCITY", "MESH_RIG_SHIPS",
                                                      "MESH_PUPPET_FEEDER", "MESH_SYNC_LOAD",
-                                                     "MESH_METER_RECORD_SIZES"})
+                                                     "MESH_METER_RECORD_SIZES", "MESH_SHIP_SELF_ACK",
+                                                     "MESH_SHIP_AI_PREFAB"})
 
     def test_the_dropped_keys_read_after_was(self):
         cases = {
@@ -289,7 +290,7 @@ class EnvRegistryTests(unittest.TestCase):
 
     def test_registry_pending_and_dropped_keys_are_section_0_16(self):
         registry, pending, dropped = set(p0tools.ENV_REGISTRY), set(p0tools.PENDING_KEYS), set(p0tools.DROPPED_KEYS)
-        self.assertEqual((len(registry), len(pending), len(dropped)), (40, 6, 3))
+        self.assertEqual((len(registry), len(pending), len(dropped)), (42, 6, 3))
         self.assertEqual(registry | pending | dropped, SECTION_0_16_KEYS)
         self.assertEqual(registry & pending, set())
         self.assertEqual(registry & dropped, set())
@@ -311,8 +312,9 @@ class EnvRegistryTests(unittest.TestCase):
                 self.assertRegex(meaning, r"^stage 0[bc], step \d$")
 
 
-# The build sheet's §0.16, listed literally, with step 5's AREA, STAND and FIGHT and step 7's MESH_METER_RECORD_SIZES and
-# MESH_SHIP_MIRROR_VELOCITY: 15 Mesh/ keys and 34 TestMap/ keys.
+# The build sheet's §0.16, listed literally (step 7b's MESH_SHIP_SELF_ACK and MESH_SHIP_AI_PREFAB included), with step
+# 5's AREA, STAND and FIGHT and step 7's MESH_METER_RECORD_SIZES and MESH_SHIP_MIRROR_VELOCITY: 15 Mesh/ keys and 36
+# TestMap/ keys.
 SECTION_0_16_KEYS = {
     "MESH_PUPPET_MOTION", "MESH_WORK_BINS", "MESH_METER_SENDS", "MESH_SENDER", "MESH_SENDER_SOURCES",
     "MESH_SENDER_TIERS", "MESH_SENDER_R0", "MESH_SENDER_COMPACT", "MESH_SENDER_SPREAD", "MESH_SENDER_XZ",
@@ -324,7 +326,7 @@ SECTION_0_16_KEYS = {
     "MESH_SHIP_WIRE", "MESH_SHIP_SCALE", "MESH_SHIP_PROJECTILES", "MESH_SHIP_PARK_SLEEP", "MESH_SHIP_JUMP_SECONDS",
     "MESH_RIG_SHIPS", "MESH_PUPPET_FEEDER", "MESH_SYNC_LOAD", "MESH_PREWARM", "MESH_DB_BURST", "MESH_SPACES",
     "MESH_PHANTOM_AREA", "MESH_PHANTOM_STAND", "MESH_PHANTOM_FIGHT", "MESH_METER_RECORD_SIZES",
-    "MESH_SHIP_MIRROR_VELOCITY"}
+    "MESH_SHIP_MIRROR_VELOCITY", "MESH_SHIP_SELF_ACK", "MESH_SHIP_AI_PREFAB"}
 
 BINS_SAMPLE = ("Work bins 5.00 s: tick 49:96 60:4 over:0 | nonaoi 49:95 over:0 | other 10:50 over:0 "
                "| kit 16:100 over:0 | send 12:100 over:0")

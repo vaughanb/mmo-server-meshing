@@ -41,8 +41,18 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
         public void Constructor_NullScale_ThrowsNamingIt()
         {
             ArgumentNullException thrown = Assert.Throws<ArgumentNullException>(() => new ServerMeshShipEngine(null));
+            ArgumentNullException withClass = Assert.Throws<ArgumentNullException>(() => new ServerMeshShipEngine(null, ServerMeshShipClass.Enemy));
 
             Assert.That(thrown.ParamName, Is.EqualTo("scale"));
+            Assert.That(withClass.ParamName, Is.EqualTo("scale"));
+        }
+
+        [Test]
+        public void Constructor_DefaultClass_ThrowsNamingIt()
+        {
+            ArgumentOutOfRangeException thrown = Assert.Throws<ArgumentOutOfRangeException>(() => new ServerMeshShipEngine(new ServerMeshShipScale(1f), default(ServerMeshShipClass)));
+
+            Assert.That(thrown.ParamName, Is.EqualTo("shipClass"));
         }
 
         [TestCase(0f)]
@@ -62,12 +72,51 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             yield return new TestCaseData(400f * 0.03f, 0.02f, 3.760f).SetName("TerminalSpeed_SpaceRatesAtScale0_03_Is3_760");
             yield return new TestCaseData(400f, 0.03f, 121.333f).SetName("TerminalSpeed_RigStep_Is121_333");
             yield return new TestCaseData(800f, 0.02f, 250.667f).SetName("TerminalSpeed_Boost_Is250_667");
+            yield return new TestCaseData(300f, 0.02f, 94.000f).SetName("TerminalSpeed_EnemyRates_Is94_000");
+            yield return new TestCaseData(600f, 0.02f, 188.000f).SetName("TerminalSpeed_EnemyBoost_Is188_000");
         }
 
         [TestCaseSource(nameof(TerminalCases))]
         public void TerminalSpeed_SpaceFormula(float force, float dt, float expected)
         {
             Assert.That(ServerMeshShipEngine.TerminalSpeed(force, 3f, dt, 1f), Is.EqualTo(expected).Within(0.001f));
+        }
+
+        private static IEnumerable<TestCaseData> ClassTopSpeedCases()
+        {
+            yield return new TestCaseData(ServerMeshShipClass.Base, 3.760f, 7.520f).SetName("TopSpeed_BaseAtScale0_03_Is3_760");
+            yield return new TestCaseData(ServerMeshShipClass.Enemy, 2.820f, 5.640f).SetName("TopSpeed_EnemyAtScale0_03_Is2_820");
+        }
+
+        [TestCaseSource(nameof(ClassTopSpeedCases))]
+        public void TopSpeed_IsTheTerminalSpeedOfTheClassForceScaled(ServerMeshShipClass shipClass, float top, float boosted)
+        {
+            ServerMeshShipEngine engine = new ServerMeshShipEngine(new ServerMeshShipScale(0.03f), shipClass);
+
+            Assert.That(engine.ShipClass.Name, Is.EqualTo(shipClass.Name));
+            Assert.That(engine.TopSpeed(0.02f, false), Is.EqualTo(top).Within(0.001f));
+            Assert.That(engine.TopSpeed(0.02f, true), Is.EqualTo(boosted).Within(0.001f));
+        }
+
+        [Test]
+        public void Constructor_OneArgument_IsTheBaseClass()
+        {
+            ServerMeshShipEngine engine = new ServerMeshShipEngine(new ServerMeshShipScale(1f));
+
+            Assert.That(engine.ShipClass.Name, Is.EqualTo(ServerMeshShipClass.Base.Name));
+        }
+
+        [Test]
+        public void Step_EnemyClass_UsesItsTorquesAndScaledForce()
+        {
+            ServerMeshShipEngine engine = new ServerMeshShipEngine(new ServerMeshShipScale(0.03f), ServerMeshShipClass.Enemy);
+
+            for (int i = 0; i < 1000; ++i)
+                engine.Step(Vector3.zero, Vector3.forward, false, 0f, 0.02f, out _, out _);
+            engine.Step(new Vector3(1f, -1f, 1f), Vector3.forward, false, 0f, 0.02f, out Vector3 torque, out Vector3 force);
+
+            Assert.That(force.z, Is.EqualTo(300f * 0.03f).Within(1e-3f));
+            Assert.That(torque, Is.EqualTo(new Vector3(8f, -8f, 10f)));
         }
 
         [TestCase(0.02f)]

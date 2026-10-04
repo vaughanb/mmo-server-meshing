@@ -1,7 +1,7 @@
 // Server Meshing test rig — the stand-in ship's movement, sender part (Phase 0 step 7): the record it writes for the kit
 // and for the state sender, the registration retry, and the release hook. Modelled on the space game's
-// ShipMovementComponent.WriteServerState at commit 1a3a58d9 (read there, not copied): no rest or dirty suppression,
-// reliable while a teleport is unacknowledged.
+// ShipMovementComponent.WriteServerState at commits 1a3a58d9 and c2eb4154 (read there, not copied): no rest or dirty
+// suppression, reliable (and never compact) while a teleport is unacknowledged.
 using System.Collections.Generic;
 using LiteNetLib.Utils;
 using MultiplayerARPG.MMO.Mesh.Sync;
@@ -12,6 +12,7 @@ namespace MultiplayerARPG.MMO.Mesh
     public sealed partial class ServerMeshShipMovement
     {
         private const float RestSpeedSquared = 1e-6f;
+        private const byte RigFlightState = 0;
 
         private static readonly List<EntityMovementForceApplier> s_noForceAppliers = new List<EntityMovementForceApplier>(0);
 
@@ -24,8 +25,8 @@ namespace MultiplayerARPG.MMO.Mesh
         /// </summary>
         public bool SentBySender { get; private set; }
 
-        /// <summary>DiscreteVersion packs the teleport sequence, the authority and the epoch (see PackDiscreteVersion).</summary>
-        public uint DiscreteVersion => PackDiscreteVersion(_teleportSequence, AuthorityOf(), _epoch);
+        /// <summary>DiscreteVersion packs the teleport sequence, the flight state (0 in the rig) and the epoch (see PackDiscreteVersion).</summary>
+        public uint DiscreteVersion => PackDiscreteVersion(_teleportSequence, RigFlightState, _epoch);
 
         /// <summary>IsAtRest is true for a parked ship whose rigidbody is still.</summary>
         public bool IsAtRest => AuthorityOf() == ServerMeshShipAuthority.Parked && _rigidbody != null && _rigidbody.linearVelocity.sqrMagnitude < RestSpeedSquared;
@@ -52,7 +53,10 @@ namespace MultiplayerARPG.MMO.Mesh
             return WriteState(writeTimestamp, writer, out shouldSendReliably);
         }
 
-        /// <summary>WriteState appends the Full record whatever SentBySender says; it changes no state.</summary>
+        /// <summary>
+        /// WriteState appends the Full record (header mode 0) whatever SentBySender says; it changes no ship state, and adds
+        /// the record's mirror age to the Ships window when the ship has an in-process feed (MarkFeed).
+        /// </summary>
         public bool WriteState(long sampleTimestamp, NetDataWriter writer, out bool sendReliably)
         {
             BuildSample(out ServerMeshShipSample sample);
@@ -61,16 +65,32 @@ namespace MultiplayerARPG.MMO.Mesh
             else
                 ServerMeshShipWire.WriteHeader56(writer, in sample);
             sendReliably = _teleportSequence != _ackedSequence;
+            CountMirrorAge(sampleTimestamp);
             return true;
         }
 
-        /// <summary>WriteCompactState appends compact28 only under that wire; false otherwise, or out of range, so the fan-out sends Full.</summary>
+        /// <summary>
+        /// WriteCompactState appends compact28 (mode 3) only under that wire and while no teleport is unacknowledged (a
+        /// pending teleport is never quantised); false otherwise, or for a non-finite field, so the fan-out sends Full.
+        /// </summary>
         public bool WriteCompactState(long sampleTimestamp, NetDataWriter writer)
         {
-            if (_wire != ServerMeshShipWireKind.Compact28)
+            if (!CompactAllowed(_wire, _teleportSequence, _ackedSequence))
                 return false;
             BuildSample(out ServerMeshShipSample sample);
-            return ServerMeshShipWire.WriteCompact28(writer, in sample);
+            if (!ServerMeshShipWire.WriteCompact28(writer, in sample))
+                return false;
+            CountMirrorAge(sampleTimestamp);
+            return true;
+        }
+
+        /// <summary>
+        /// CompactAllowed is true when a compact record may be written: the wire is compact28 and the teleport
+        /// <paramref name="sequence"/> equals the <paramref name="acknowledged"/> one.
+        /// </summary>
+        public static bool CompactAllowed(ServerMeshShipWireKind wire, byte sequence, byte acknowledged)
+        {
+            return wire == ServerMeshShipWireKind.Compact28 && sequence == acknowledged;
         }
 
         /// <summary>CreateMovementData is the pose with no force appliers (only the kit's grid path asks, which the rig never enables).</summary>
@@ -94,12 +114,12 @@ namespace MultiplayerARPG.MMO.Mesh
         }
 
         /// <summary>
-        /// PackDiscreteVersion is teleportSequence | authority &lt;&lt; 8 | epoch &lt;&lt; 16: every observer must see the next
-        /// sample after a teleport, an authority change or a respawn.
+        /// PackDiscreteVersion is teleportSequence | flightState &lt;&lt; 8 | epoch &lt;&lt; 16: every observer must see the
+        /// next sample after a teleport, a flight state change or an epoch change.
         /// </summary>
-        public static uint PackDiscreteVersion(byte teleportSequence, ServerMeshShipAuthority authority, byte epoch)
+        public static uint PackDiscreteVersion(byte teleportSequence, byte flightState, byte epoch)
         {
-            return teleportSequence | (uint)authority << 8 | (uint)epoch << 16;
+            return teleportSequence | (uint)flightState << 8 | (uint)epoch << 16;
         }
 
         /// <summary>
@@ -122,6 +142,23 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private ServerMeshShipAuthority AuthorityOf() => _ship != null ? _ship.Authority : ServerMeshShipAuthority.OwnerMirror;
 
+        private void CountMirrorAge(long writeTimestamp)
+        {
+            // One sample per ship per frame: the kit writes a record per subscriber and the sender writes Full and
+            // compact, but a send pass is one frame, so its records all carry the same age. Capped at the lists'
+            // preallocated size so the send path never grows them.
+            if (!_hasFeed || _lastAgeFrame == Time.frameCount)
+                return;
+            ServerMeshShipCounters counters = ServerMeshShipCounters.Current;
+            if (counters.MirrorAges.Count >= ServerMeshShipCounters.MirrorAgeCapacity)
+                return;
+            _lastAgeFrame = Time.frameCount;
+            counters.MirrorAges.Add(writeTimestamp - _feedTimestamp);
+            counters.MirrorFrames.Add(Time.frameCount - _feedFrame);
+        }
+
+        private int _lastAgeFrame = -1;
+
         private void BuildSample(out ServerMeshShipSample sample)
         {
             ServerMeshShipAuthority authority = AuthorityOf();
@@ -138,8 +175,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 AngularVelocity = angular,
                 Forward = authority == ServerMeshShipAuthority.OwnerMirror ? _netForward : _moveIntent.sqrMagnitude > 0.0001f,
                 TeleportByte = _teleportSequence,
-                Authority = authority,
-                FlightState = 0,
+                FlightState = RigFlightState,
+
                 Epoch = _epoch,
                 Compact = false,
             };

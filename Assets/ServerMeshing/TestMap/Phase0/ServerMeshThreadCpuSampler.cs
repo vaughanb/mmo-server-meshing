@@ -22,7 +22,7 @@ namespace MultiplayerARPG.MMO.Mesh
     /// never logs and never touches Unity; each kind of Win32 failure is described once in the queue it was given, for
     /// the main thread to log. Windows only.
     /// </summary>
-    public sealed class ServerMeshThreadCpuSampler : IDisposable
+    public sealed partial class ServerMeshThreadCpuSampler : IDisposable
     {
         /// <summary>CalibrationSpins is how many busy spins one calibration attempt times.</summary>
         public const int CalibrationSpins = 5;
@@ -33,8 +33,14 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>CalibrationAttempts is how many sets of spins calibration tries before it falls back to scheduler ticks.</summary>
         public const int CalibrationAttempts = 4;
 
-        /// <summary>SpinAgreement is how far, as a fraction, a spin may read below the fastest one for a calibration to hold.</summary>
+        /// <summary>SpinAgreement is how far, as a fraction, a spin may read below the fastest one and still agree with it.</summary>
         public const double SpinAgreement = 0.02;
+
+        /// <summary>
+        /// SpinQuorum is how many spins, from any attempts, must agree with the fastest one (within
+        /// <see cref="SpinAgreement"/>) for a calibration to hold; a set of fewer spins needs all of them.
+        /// </summary>
+        public const int SpinQuorum = 3;
 
         /// <summary>DescriptionSnapshots is how many snapshots, from the one that finds a thread, read its description while it is empty.</summary>
         public const int DescriptionSnapshots = 3;
@@ -132,38 +138,6 @@ namespace MultiplayerARPG.MMO.Mesh
         public double CyclesPerSecond { get; private set; }
 
         /// <summary>
-        /// CycleRateFromSpins is the cycle rate a set of busy spins measured, spin i having used
-        /// <paramref name="spinCycles"/>[i] cycles of the spinning thread in <paramref name="spinSeconds"/>[i] of wall time.
-        /// It is the fastest spin's rate, since a spin the thread was preempted in reads low, and it holds only when every
-        /// spin reads within <see cref="SpinAgreement"/> of it; otherwise, or when a spin has no cycles or no time, it is 0.
-        /// </summary>
-        public static double CycleRateFromSpins(long[] spinCycles, double[] spinSeconds)
-        {
-            if (spinCycles == null)
-                throw new ArgumentNullException(nameof(spinCycles));
-            if (spinSeconds == null)
-                throw new ArgumentNullException(nameof(spinSeconds));
-            if (spinCycles.Length == 0)
-                throw new ArgumentOutOfRangeException(nameof(spinCycles), spinCycles.Length, "at least one spin is needed");
-            if (spinSeconds.Length != spinCycles.Length)
-                throw new ArgumentOutOfRangeException(nameof(spinSeconds), spinSeconds.Length, "one wall time per spin is needed");
-            double fastest = 0.0;
-            for (int i = 0; i < spinCycles.Length; ++i)
-            {
-                if (spinCycles[i] <= 0 || !(spinSeconds[i] > 0.0) || double.IsInfinity(spinSeconds[i]))
-                    return 0.0;
-                fastest = Math.Max(fastest, spinCycles[i] / spinSeconds[i]);
-            }
-            double slowestAllowed = fastest * (1.0 - SpinAgreement);
-            for (int i = 0; i < spinCycles.Length; ++i)
-            {
-                if (spinCycles[i] / spinSeconds[i] < slowestAllowed)
-                    return 0.0;
-            }
-            return fastest;
-        }
-
-        /// <summary>
         /// ProbePreStartNames starts a short-lived thread named before Start, exactly as LiteNetLib names its LogicThread
         /// and ReceiveThread, and records in <see cref="NamesPreStart"/> whether that name reaches its Windows description.
         /// </summary>
@@ -208,62 +182,6 @@ namespace MultiplayerARPG.MMO.Mesh
                     Report(ref _reportedProbe, FormattableString.Invariant($"Thread CPU: the name probe thread did not end within {ProbeTimeoutMs} ms"));
                 }
             }
-        }
-
-        /// <summary>
-        /// CalibrateCycleClock measures the rate CPU cycle counts advance at by timing <see cref="CalibrationSpins"/> busy
-        /// spins of <see cref="CalibrationSpinMs"/> ms on the calling thread (the sampler thread), up to
-        /// <see cref="CalibrationAttempts"/> times until the spins agree (<see cref="CycleRateFromSpins"/>); the thread
-        /// runs at highest priority meanwhile (about 100 ms), then gets its own back. It returns true and counts cycles
-        /// from then on, or reports why and returns false, leaving the sampler on scheduler ticks. Call it before the
-        /// first <see cref="Sample"/>: a window cannot mix the two.
-        /// </summary>
-        public bool CalibrateCycleClock()
-        {
-            if (_disposed)
-                throw new ObjectDisposedException(nameof(ServerMeshThreadCpuSampler));
-            if (_pass > 0)
-                throw new InvalidOperationException("the cycle clock is calibrated before the first pass, so no window mixes cycles and ticks");
-            IntPtr self = ServerMeshThreadCpuNative.GetCurrentThread();
-            long spinTicks = Stopwatch.Frequency * CalibrationSpinMs / 1000;
-            long[] cycles = new long[CalibrationSpins];
-            double[] seconds = new double[CalibrationSpins];
-            double slowest = double.MaxValue;
-            double fastest = 0.0;
-            Thread current = Thread.CurrentThread;
-            ThreadPriority priority = current.Priority;
-            // On a saturated machine normal-priority threads preempt every spin by a similar share, and spins that agree
-            // on a rate that low would pass; above them, the spins run whole and read the true rate.
-            current.Priority = ThreadPriority.Highest;
-            try
-            {
-                for (int attempt = 0; attempt < CalibrationAttempts; ++attempt)
-                {
-                    if (attempt > 0)
-                        Thread.Sleep(CalibrationPauseMs);
-                    for (int i = 0; i < CalibrationSpins; ++i)
-                    {
-                        if (!TimeSpin(self, spinTicks, out cycles[i], out seconds[i]))
-                            return false;
-                        double rate = seconds[i] > 0.0 ? cycles[i] / seconds[i] : 0.0;
-                        slowest = Math.Min(slowest, rate);
-                        fastest = Math.Max(fastest, rate);
-                    }
-                    double agreed = CycleRateFromSpins(cycles, seconds);
-                    if (agreed > 0.0)
-                    {
-                        CyclesPerSecond = agreed;
-                        _countsPerMs = agreed / MsPerSecond;
-                        return true;
-                    }
-                }
-            }
-            finally
-            {
-                current.Priority = priority;
-            }
-            Report(ref _reportedCalibration, FormattableString.Invariant($"Thread CPU: the cycle clock calibration disagreed in {CalibrationAttempts} attempts of {CalibrationSpins} spins, which read {Math.Max(0.0, slowest) / HzPerGHz:0.000} to {fastest / HzPerGHz:0.000} GHz, more than {SpinAgreement * 100.0:0}% apart; CPU is counted in scheduler ticks, clock ticks"));
-            return false;
         }
 
         /// <summary>
@@ -317,36 +235,6 @@ namespace MultiplayerARPG.MMO.Mesh
             foreach (KeyValuePair<uint, ServerMeshWatchedThread> kv in _threads)
                 CloseReported(kv.Value.handle, kv.Key);
             _threads.Clear();
-        }
-
-        private bool TimeSpin(IntPtr self, long spinTicks, out long cycles, out double seconds)
-        {
-            cycles = 0;
-            seconds = 0.0;
-            long start = Stopwatch.GetTimestamp();
-            if (!ServerMeshThreadCpuNative.QueryThreadCycleTime(self, out long before))
-            {
-                ReportCalibrationRead();
-                return false;
-            }
-            long until = start + spinTicks;
-            while (Stopwatch.GetTimestamp() < until)
-            {
-            }
-            if (!ServerMeshThreadCpuNative.QueryThreadCycleTime(self, out long after))
-            {
-                ReportCalibrationRead();
-                return false;
-            }
-            long end = Stopwatch.GetTimestamp();
-            cycles = after - before;
-            seconds = (end - start) / (double)Stopwatch.Frequency;
-            return true;
-        }
-
-        private void ReportCalibrationRead()
-        {
-            Report(ref _reportedCalibration, FormattableString.Invariant($"Thread CPU: QueryThreadCycleTime failed with Win32 error {Marshal.GetLastWin32Error()} on the sampler thread; CPU is counted in scheduler ticks, clock ticks"));
         }
 
         // Returns true when the whole snapshot was walked; then threads it did not list have exited.

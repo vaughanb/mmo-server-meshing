@@ -55,6 +55,13 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
         }
 
         [Test]
+        public void Respawn_LeavesTheEpoch_NothingOnTheServerAdvancesIt()
+        {
+            Assert.That(typeof(ServerMeshShipMovement).GetMethod("AdvanceEpoch"), Is.Null, "the space epoch stays 0 in Phase 0, so a respawn only teleports");
+            Assert.That(typeof(ServerMeshShipMovement).GetProperty(nameof(ServerMeshShipMovement.Epoch)).CanWrite, Is.False);
+        }
+
+        [Test]
         public void RateAllows_EnforcesTheFireInterval()
         {
             Assert.That(ServerMeshShipCombat.RateAllows(1.1, 1.0, ServerMeshShipCombat.FireIntervalSeconds), Is.False);

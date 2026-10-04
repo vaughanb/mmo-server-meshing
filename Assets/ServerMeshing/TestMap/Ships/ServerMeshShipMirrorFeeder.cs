@@ -11,9 +11,10 @@ namespace MultiplayerARPG.MMO.Mesh
 {
     /// <summary>
     /// ServerMeshShipMirrorFeeder feeds every load mirror ship once per 1/20 s of unscaled time: its path at server time
-    /// becomes an OwnerMirror sample acknowledging the ship's current teleport sequence, written as an upload of the
-    /// configured wire (header56 under compact28: uploads are never compact) into one reused writer and read back through
-    /// one reused reader. No allocation per feed.
+    /// becomes a sample acknowledging the ship's current teleport sequence, written as an upload of the configured wire
+    /// (header56, mode 0, under compact28: uploads are never compact) into one reused writer and read back through one
+    /// reused reader; each feed's timestamp and frame are marked on the ship for the Ships window's mirror age. No
+    /// allocation per feed.
     /// </summary>
     public sealed class ServerMeshShipMirrorFeeder : MonoBehaviour
     {
@@ -72,7 +73,6 @@ namespace MultiplayerARPG.MMO.Mesh
                     AngularVelocity = angular,
                     Forward = true,
                     TeleportByte = movement.TeleportSequence,
-                    Authority = ServerMeshShipAuthority.OwnerMirror,
                     FlightState = 0,
                     Epoch = movement.Epoch,
                     Compact = false,
@@ -84,6 +84,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     ServerMeshShipWire.WriteHeader56(_writer, in sample);
                 _reader.SetSource(_writer);
                 movement.ReadClientStateAtServer(timestamp, _reader);
+                movement.MarkFeed(timestamp, Time.frameCount);
             }
             ServerMeshShipCounters.Current.MirrorMs += (System.Diagnostics.Stopwatch.GetTimestamp() - started) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
         }

@@ -46,7 +46,6 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
                 AngularVelocity = new Vector3(0f, 0.5f, 0f),
                 Forward = true,
                 TeleportByte = 3,
-                Authority = ServerMeshShipAuthority.OwnerMirror,
                 FlightState = 1,
                 Epoch = 7,
             };
@@ -279,13 +278,13 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
         }
 
         [Test]
-        public void DiscreteVersion_PacksTheSamplesSequenceAuthorityAndEpoch()
+        public void DiscreteVersion_PacksTheSamplesSequenceFlightStateAndEpoch()
         {
             ServerMeshShipPuppetBody body = NewBody();
             ServerMeshShipSample sample = Sample(Vector3.zero, Vector3.zero);
             body.Accept(in sample, 0);
 
-            Assert.That(body.DiscreteVersion, Is.EqualTo(3u | 0u << 8 | 7u << 16));
+            Assert.That(body.DiscreteVersion, Is.EqualTo(3u | 1u << 8 | 7u << 16));
             Assert.That(body.ConnectionId, Is.EqualTo(-1));
         }
     }

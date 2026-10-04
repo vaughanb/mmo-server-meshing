@@ -22,7 +22,26 @@ SHIPS_FIELDS = {
     "seated": 0, "outside": 0, "not_in_slot": 0, "speed_p50": 1.5, "speed_max": 3.76, "patrol_p50": 1.5,
     "scans": 500, "casts": 7500, "shots": 300, "bolts": 600, "hits": 40, "respawns": 0, "shield_writes": 1500,
     "rpc_sends": 2400, "uploads": 0, "stale": 0, "bad": 0, "pilot_ms_per_s": 0.4, "engine_ms_per_s": 0.3,
-    "combat_ms_per_s": 0.2, "bolts_ms_per_s": 0.9, "mirror_ms_per_s": 0.0, "gc0": 1}
+    "combat_ms_per_s": 0.2, "bolts_ms_per_s": 0.9, "mirror_ms_per_s": 0.0, "gc0": 1, "pending": None, "patrol_n": None,
+    "mirror_age_n": None, "mirror_age_ms": None, "mirror_age_frames": None}
+# Step 7b's form of the same window: pending, a patrol count and the mirror feed age.
+SHIPS_7B_SAMPLE = (
+    "Ships window 5.00 s: cell C ships 50 ai 50 mirror 0 parked 0 phantom 0 pilots 0 seated 0 outside 0 notInSlot 0 "
+    "pending 3 | speed p50 1.50 max 2.82 patrol n 120 p50 1.05 m/s | scans 500 casts 7500 shots 300 bolts 600 hits 40 "
+    "respawns 3 | shield writes 1500 | rpcSends 2400 | uploads 0 stale 0 bad 0 "
+    "| ms/s pilot 0.40 engine 0.30 combat 0.20 bolts 0.90 mirror 0.00 | mirror age n 40 p50 16.7 ms frames 1 | gc0 1")
+SHIPS_7B_FIELDS = dict(SHIPS_FIELDS, pending=3, speed_max=2.82, patrol_n=120, patrol_p50=1.05, respawns=3,
+                       mirror_age_n=40, mirror_age_ms=16.7, mirror_age_frames=1)
+SHIPS_7B_EMPTY = (SHIPS_7B_SAMPLE.replace("patrol n 120 p50 1.05", "patrol n 0 p50 none")
+                  .replace("mirror age n 40 p50 16.7 ms frames 1", "mirror age n 0 p50 none ms frames none"))
+SHIPS_7B_EMPTY_FIELDS = dict(SHIPS_7B_FIELDS, patrol_n=0, patrol_p50=None, mirror_age_n=0, mirror_age_ms=None,
+                             mirror_age_frames=None)
+SETTINGS_SAMPLE = ("Ships: cell C ai 50 mirror 0 parked 0 pilots 0 | wire header56 scale 0.03 projectiles instantiate "
+                   "mirrorVelocity real selfAck 0 aiPrefab enemy | area none | prefab hash -12345678")
+SETTINGS_FIELDS = {"cell": "C", "ai": 50, "mirror": 0, "parked": 0, "pilots": 0, "wire": "header56", "scale": "0.03",
+                   "projectiles": "instantiate", "mirror_velocity": "real", "self_ack": 0, "ai_prefab": "enemy",
+                   "area": "none", "prefab_hash": -12345678}
+SETTINGS_7_SAMPLE = SETTINGS_SAMPLE.replace(" selfAck 0 aiPrefab enemy", "").replace("Velocity real", "Velocity zero")
 FEEDER_SAMPLE = ("Feeder window 5.00 s: ship 200 observed 0 | snapshots 20000 "
                  "| ms/s encode 0.30 decode 0.40 accept 0.50 pose 1.20 total 2.40 | us/snapshot 0.120 | gc0 0")
 FEEDER_FIELDS = {"seconds": 5.0, "kind": "ship", "puppets": 200, "observed": 0, "snapshots": 20000,
@@ -40,7 +59,7 @@ BOT_FIELDS = {"seconds": 5.0, "seen": 48, "records": 4800, "pathed": 3840, "park
               "lag_p50_ms": 32, "parked_max": 0.0, "unknown_path": 0, "bad_length": 0}
 MOVED = {"MESH_LOAD_SHIPS", "MESH_LOAD_SHIP_PILOTS", "MESH_SHIP_WIRE", "MESH_SHIP_SCALE", "MESH_SHIP_PROJECTILES",
          "MESH_RIG_SHIPS", "MESH_PUPPET_FEEDER", "MESH_SYNC_LOAD"}
-ADDED = {"MESH_METER_RECORD_SIZES", "MESH_SHIP_MIRROR_VELOCITY"}
+ADDED = {"MESH_METER_RECORD_SIZES", "MESH_SHIP_MIRROR_VELOCITY", "MESH_SHIP_SELF_ACK", "MESH_SHIP_AI_PREFAB"}
 
 
 class WindowParserTests(unittest.TestCase):
@@ -52,7 +71,28 @@ class WindowParserTests(unittest.TestCase):
             "a negative speed": (SHIPS_SAMPLE.replace("max 3.76", "max -3.76"), None),
             "text after gc0": (SHIPS_SAMPLE + " | extra 1", None),
             "no bad": (SHIPS_SAMPLE.replace(" bad 0", ""), None),
+            "an old patrol of none": (SHIPS_SAMPLE.replace("patrol p50 1.50", "patrol p50 none"), None),
+            "a patrol count with none": (SHIPS_7B_SAMPLE.replace("p50 1.05", "p50 none"), None),
+            "no patrol count with a speed": (SHIPS_7B_SAMPLE.replace("patrol n 120 p50 1.05", "patrol n 0 p50 1.05"),
+                                             None),
+            "a fractional patrol count": (SHIPS_7B_SAMPLE.replace("patrol n 120", "patrol n 1.5"), None),
+            "a negative pending": (SHIPS_7B_SAMPLE.replace("pending 3", "pending -3"), None),
+            "pending after the speeds": (
+                SHIPS_7B_SAMPLE.replace(" pending 3", "").replace(" m/s |", " m/s pending 3 |"), None),
+            "mirror age with none and a count": (
+                SHIPS_7B_SAMPLE.replace("p50 16.7 ms frames 1", "p50 none ms frames 1"), None),
+            "mirror age of none frames": (SHIPS_7B_SAMPLE.replace("frames 1", "frames none"), None),
+            "no mirror age and speeds": (SHIPS_7B_EMPTY.replace("frames none", "frames 1"), None),
+            "mirror age without frames": (SHIPS_7B_SAMPLE.replace(" frames 1", ""), None),
+            "mirror age after gc0": (SHIPS_SAMPLE + " | mirror age n 40 p50 16.7 ms frames 1", None),
             "a sample": (SHIPS_SAMPLE, dict(SHIPS_FIELDS, end=None)),
+            "a step 7b sample": (SHIPS_7B_SAMPLE, dict(SHIPS_7B_FIELDS, end=None)),
+            "a step 7b log line": (stamped(SHIPS_7B_SAMPLE), dict(SHIPS_7B_FIELDS, end=END)),
+            "a step 7b window with no patrol or mirror": (SHIPS_7B_EMPTY, dict(SHIPS_7B_EMPTY_FIELDS, end=None)),
+            "fractional frames": (SHIPS_7B_SAMPLE.replace("frames 1", "frames 1.5"),
+                                  dict(SHIPS_7B_FIELDS, mirror_age_frames=1.5, end=None)),
+            "only pending": (SHIPS_SAMPLE.replace("notInSlot 0", "notInSlot 0 pending 0"),
+                             dict(SHIPS_FIELDS, pending=0, end=None)),
             "a log line": (stamped(SHIPS_SAMPLE), dict(SHIPS_FIELDS, end=END)),
             "trailing whitespace": (SHIPS_SAMPLE + "\r\n", dict(SHIPS_FIELDS, end=None)),
             "a named cell": (SHIPS_SAMPLE.replace("cell C ", "cell NE "), dict(SHIPS_FIELDS, cell="NE", end=None)),
@@ -60,6 +100,29 @@ class WindowParserTests(unittest.TestCase):
         for name, (line, expected) in cases.items():
             with self.subTest(name):
                 self.assertEqual(p0ships.parse_ships_window(line), expected)
+
+    def test_parse_ships_settings(self):
+        cases = {
+            "a ships window": (SHIPS_SAMPLE, None),
+            "self-ack without the prefab": (SETTINGS_SAMPLE.replace(" aiPrefab enemy", ""), None),
+            "a self-ack of 2": (SETTINGS_SAMPLE.replace("selfAck 0", "selfAck 2"), None),
+            "an unknown prefab": (SETTINGS_SAMPLE.replace("aiPrefab enemy", "aiPrefab boss"), None),
+            "the keys before mirrorVelocity": (SETTINGS_SAMPLE.replace(" mirrorVelocity real selfAck 0 aiPrefab enemy",
+                                                                       " selfAck 0 aiPrefab enemy mirrorVelocity real"),
+                                               None),
+            "text after the hash": (SETTINGS_SAMPLE + " x", None),
+            "a sample": (SETTINGS_SAMPLE, dict(SETTINGS_FIELDS, end=None)),
+            "a log line with wave and self-ack": (stamped(SETTINGS_SAMPLE.replace("selfAck 0 aiPrefab enemy",
+                                                                                  "selfAck 1 aiPrefab wave")),
+                                                  dict(SETTINGS_FIELDS, self_ack=1, ai_prefab="wave", end=END)),
+            "a step 7 line": (SETTINGS_7_SAMPLE, dict(SETTINGS_FIELDS, mirror_velocity="zero", self_ack=None,
+                                                      ai_prefab=None, end=None)),
+            "an area": (SETTINGS_SAMPLE.replace("area none", "area -30,-30,30.5,30"),
+                        dict(SETTINGS_FIELDS, area="-30,-30,30.5,30", end=None)),
+        }
+        for name, (line, expected) in cases.items():
+            with self.subTest(name):
+                self.assertEqual(p0ships.parse_ships_settings(line), expected)
 
     def test_parse_feeder_window(self):
         cases = {
@@ -105,11 +168,12 @@ class WindowParserTests(unittest.TestCase):
 
     def test_counts_are_int_and_the_rest_float(self):
         for parse, sample, ints in ((p0ships.parse_ships_window, SHIPS_SAMPLE, None),
+                                    (p0ships.parse_ships_window, SHIPS_7B_SAMPLE, None),
                                     (p0ships.parse_feeder_window, FEEDER_SAMPLE, p0ships.FEEDER_WINDOW_INTS),
                                     (p0ships.parse_sync_load_window, SYNC_SAMPLE, p0ships.SYNC_LOAD_WINDOW_INTS),
                                     (p0ships.parse_bot_ships, BOT_SAMPLE, p0ships.BOT_SHIPS_INTS)):
             for name, value in parse(sample).items():
-                if name in ("end", "cell", "kind"):
+                if name in ("end", "cell", "kind") or (value is None and name in p0ships.SHIPS_WINDOW_OPTIONAL):
                     continue
                 with self.subTest(f"{parse.__name__} {name}"):
                     is_int = name not in p0ships.SHIPS_WINDOW_FLOATS if ints is None else name in ints
@@ -267,7 +331,7 @@ class RunnerTests(unittest.TestCase):
 
 
 class RegistryTests(unittest.TestCase):
-    def test_the_ten_step_7_keys(self):
+    def test_the_twelve_step_7_keys(self):
         self.assertEqual(set(p0ships.STEP7_REGISTRY), MOVED | ADDED)
         for key, meaning in p0ships.STEP7_REGISTRY.items():
             with self.subTest(key):

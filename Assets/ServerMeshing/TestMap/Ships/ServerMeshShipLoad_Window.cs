@@ -85,6 +85,8 @@ namespace MultiplayerARPG.MMO.Mesh
                     counters.Outside++;
                 if (!slots.TryGetKitHandler(ship.ObjectId, out IEntityMovementDataHandler kit) || !ReferenceEquals(kit, ship.ShipMovement))
                     counters.NotInSlot++;
+                if (ship.ShipMovement.TeleportPending)
+                    counters.Pending++;
             }
             CountPilots(out counters.Pilots, out counters.Seated);
         }
@@ -108,16 +110,18 @@ namespace MultiplayerARPG.MMO.Mesh
 
         /// <summary>
         /// SettingLine is the load's setting line: its cell's planned AI, mirror and parked ships and pilots, the wire, scale,
-        /// projectile mode and mirror velocity rule, the area (minX,minZ,maxX,maxZ or none) and the prefab hash.
+        /// projectile mode, mirror velocity rule, self-acknowledgement (0 or 1) and AI prefab (enemy, or wave for
+        /// <paramref name="waveAi"/>), the area (minX,minZ,maxX,maxZ or none) and the prefab hash.
         /// </summary>
         public static string SettingLine(string cell, int ai, int mirror, int parked, int pilots, ServerMeshShipWireKind wire, ServerMeshShipScale scale,
-            bool pooled, bool realMirrorVelocity, bool hasArea, Rect area, int prefabHash)
+            bool pooled, bool realMirrorVelocity, bool selfAck, bool waveAi, bool hasArea, Rect area, int prefabHash)
         {
-            StringBuilder b = new StringBuilder(192);
+            StringBuilder b = new StringBuilder(224);
             b.Append("Ships: cell ").Append(Printable(cell)).Append(" ai ").Append(Count(ai)).Append(" mirror ").Append(Count(mirror));
             b.Append(" parked ").Append(Count(parked)).Append(" pilots ").Append(Count(pilots));
             b.Append(" | wire ").Append(WireName(wire)).Append(" scale ").Append(ScaleText(scale));
             b.Append(" projectiles ").Append(pooled ? "pooled" : "instantiate").Append(" mirrorVelocity ").Append(realMirrorVelocity ? "real" : "zero");
+            b.Append(" selfAck ").Append(selfAck ? "1" : "0").Append(" aiPrefab ").Append(waveAi ? "wave" : "enemy");
             b.Append(" | area ");
             if (hasArea)
                 b.Append(Metres(area.xMin)).Append(',').Append(Metres(area.yMin)).Append(',').Append(Metres(area.xMax)).Append(',').Append(Metres(area.yMax));
@@ -128,8 +132,9 @@ namespace MultiplayerARPG.MMO.Mesh
         }
 
         /// <summary>
-        /// WindowLine is the Ships window line: every field always printed, zeros when empty, rates 0 when the window has no
-        /// length, no NaN or negatives, invariant and without braces. It sorts the counters' speed lists in place.
+        /// WindowLine is the Ships window line: every field always printed, zeros when empty (the patrol and mirror age
+        /// percentiles print "none" when they have no sample), rates 0 when the window has no length, no NaN or negatives,
+        /// invariant and without braces. It sorts the counters' sample lists in place.
         /// </summary>
         public static string WindowLine(double seconds, string cell, ServerMeshShipCounters c, long gc0)
         {
@@ -138,15 +143,18 @@ namespace MultiplayerARPG.MMO.Mesh
             double s = seconds > 0 && !double.IsInfinity(seconds) ? seconds : 0;
             c.Speeds.Sort();
             c.PatrolSpeeds.Sort();
-            StringBuilder b = new StringBuilder(512);
+            c.MirrorAges.Sort();
+            c.MirrorFrames.Sort();
+            StringBuilder b = new StringBuilder(640);
             b.Append("Ships window ").Append(Fixed(s, "0.00")).Append(" s: cell ").Append(Printable(cell));
             b.Append(" ships ").Append(Count(c.Ships)).Append(" ai ").Append(Count(c.Ai)).Append(" mirror ").Append(Count(c.Mirror));
             b.Append(" parked ").Append(Count(c.Parked)).Append(" phantom ").Append(Count(c.Phantom));
             b.Append(" pilots ").Append(Count(c.Pilots)).Append(" seated ").Append(Count(c.Seated));
-            b.Append(" outside ").Append(Count(c.Outside)).Append(" notInSlot ").Append(Count(c.NotInSlot));
+            b.Append(" outside ").Append(Count(c.Outside)).Append(" notInSlot ").Append(Count(c.NotInSlot)).Append(" pending ").Append(Count(c.Pending));
             b.Append(" | speed p50 ").Append(Fixed(ServerMeshPhantomWindow.Percentile(c.Speeds, 0.5), "0.00"));
             b.Append(" max ").Append(Fixed(c.Speeds.Count > 0 ? c.Speeds[c.Speeds.Count - 1] : 0f, "0.00"));
-            b.Append(" patrol p50 ").Append(Fixed(ServerMeshPhantomWindow.Percentile(c.PatrolSpeeds, 0.5), "0.00")).Append(" m/s");
+            b.Append(" patrol n ").Append(Count(c.PatrolSpeeds.Count)).Append(" p50 ");
+            b.Append(c.PatrolSpeeds.Count > 0 ? Fixed(ServerMeshPhantomWindow.Percentile(c.PatrolSpeeds, 0.5), "0.00") : "none").Append(" m/s");
             b.Append(" | scans ").Append(Count(c.Scans)).Append(" casts ").Append(Count(c.Casts)).Append(" shots ").Append(Count(c.Shots));
             b.Append(" bolts ").Append(Count(c.Bolts)).Append(" hits ").Append(Count(c.Hits)).Append(" respawns ").Append(Count(c.Respawns));
             b.Append(" | shield writes ").Append(Count(c.ShieldWrites));
@@ -155,7 +163,18 @@ namespace MultiplayerARPG.MMO.Mesh
             b.Append(" | ms/s pilot ").Append(Fixed(Rate(c.PilotMs, s), "0.00")).Append(" engine ").Append(Fixed(Rate(c.EngineMs, s), "0.00"));
             b.Append(" combat ").Append(Fixed(Rate(c.CombatMs, s), "0.00")).Append(" bolts ").Append(Fixed(Rate(c.BoltMs, s), "0.00"));
             b.Append(" mirror ").Append(Fixed(Rate(c.MirrorMs, s), "0.00"));
+            b.Append(" | mirror age n ").Append(Count(c.MirrorAges.Count));
+            if (c.MirrorAges.Count > 0)
+            {
+                b.Append(" p50 ").Append(Fixed(ServerMeshPhantomWindow.Percentile(c.MirrorAges, 0.5), "0.0"));
+                b.Append(" ms frames ").Append(Count(ServerMeshPhantomWindow.Percentile(c.MirrorFrames, 0.5)));
+            }
+            else
+            {
+                b.Append(" p50 none ms frames none");
+            }
             b.Append(" | gc0 ").Append(Count(gc0));
+
             return b.ToString();
         }
 

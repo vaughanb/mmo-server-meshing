@@ -1,7 +1,8 @@
 // Server Meshing test rig — every stand-in ship key in one resolver (Phase 0 step 7): MESH_LOAD_SHIPS,
-// MESH_LOAD_SHIP_PILOTS, MESH_SHIP_WIRE, MESH_SHIP_SCALE, MESH_SHIP_PROJECTILES, MESH_SHIP_MIRROR_VELOCITY and
-// MESH_RIG_SHIPS, plus the bot argument -meshRigShips. Default off: with no ship key nothing else is read. The ship they
-// configure is modelled on the space game at commit 1a3a58d9.
+// MESH_LOAD_SHIP_PILOTS, MESH_SHIP_WIRE, MESH_SHIP_SCALE, MESH_SHIP_PROJECTILES, MESH_SHIP_MIRROR_VELOCITY,
+// MESH_RIG_SHIPS and (step 7b) MESH_SHIP_SELF_ACK and MESH_SHIP_AI_PREFAB, plus the bot argument -meshRigShips. Default
+// off: with no ship key nothing else is read. The ship they configure is modelled on the space game at commits 1a3a58d9
+// and c2eb4154.
 using System;
 using System.Globalization;
 using UnityEngine;
@@ -10,7 +11,7 @@ namespace MultiplayerARPG.MMO.Mesh
 {
     /// <summary>
     /// ServerMeshShipSettings is a process's resolved ship settings. AnyShipKey is false when no ship key is set (none of
-    /// the seven ship keys, no MESH_PHANTOM of kind ship, no MESH_PUPPET_FEEDER of kind ship); the other properties then
+    /// the nine ship keys, no MESH_PHANTOM of kind ship, no MESH_PUPPET_FEEDER of kind ship); the other properties then
     /// hold their defaults and nothing else was read.
     /// </summary>
     public sealed class ServerMeshShipSettings
@@ -25,10 +26,17 @@ namespace MultiplayerARPG.MMO.Mesh
         public const string ScaleKey = "MESH_SHIP_SCALE";
         /// <summary>ProjectilesKey is how server bolts live: instantiate (the default) or pooled.</summary>
         public const string ProjectilesKey = "MESH_SHIP_PROJECTILES";
-        /// <summary>MirrorVelocityKey is what an owner mirror's records carry as velocities: zero (the default) or real.</summary>
+        /// <summary>MirrorVelocityKey is what an owner mirror's records carry as velocities: real (the default) or zero.</summary>
         public const string MirrorVelocityKey = "MESH_SHIP_MIRROR_VELOCITY";
         /// <summary>RigShipsKey makes the runner pass the bot argument: 1.</summary>
         public const string RigShipsKey = "MESH_RIG_SHIPS";
+        /// <summary>
+        /// SelfAckKey is how an unowned ship's teleport is acknowledged: 0 (the default, the space game's rule: only an
+        /// owner's upload acknowledges) or 1 (step 7's two-tick self-acknowledgement).
+        /// </summary>
+        public const string SelfAckKey = "MESH_SHIP_SELF_ACK";
+        /// <summary>AiPrefabKey is the class of ServerAI load ships: enemy (the default, Ship_Enemy) or wave (Ship_AI, the Base numbers).</summary>
+        public const string AiPrefabKey = "MESH_SHIP_AI_PREFAB";
         /// <summary>BotArgument is the bot's command-line argument: &lt;wire&gt;:&lt;seed&gt;:&lt;scale&gt;.</summary>
         public const string BotArgument = "-meshRigShips";
         /// <summary>SeedKey is the load generator's seed, read once a ship key is set (default 12345).</summary>
@@ -42,12 +50,13 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>DefaultSeed is the seed when MESH_LOAD_SEED is unset.</summary>
         public const int DefaultSeed = 12345;
 
-        private static readonly string[] ShipKeys = { LoadKey, PilotsKey, WireKey, ScaleKey, ProjectilesKey, MirrorVelocityKey, RigShipsKey };
+        private static readonly string[] ShipKeys = { LoadKey, PilotsKey, WireKey, ScaleKey, ProjectilesKey, MirrorVelocityKey, RigShipsKey, SelfAckKey, AiPrefabKey };
 
         private ServerMeshShipSettings()
         {
             Wire = ServerMeshShipWireKind.Legacy54;
             Scale = new ServerMeshShipScale(1f);
+            RealMirrorVelocity = true;
             Seed = DefaultSeed;
         }
 
@@ -69,11 +78,23 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>PooledProjectiles is true for pooled bolts with RaycastNonAlloc, false for the space game's instantiated bolts.</summary>
         public bool PooledProjectiles { get; private set; }
 
-        /// <summary>RealMirrorVelocity is true when owner mirrors send the last upload's velocities instead of zeros.</summary>
+        /// <summary>
+        /// RealMirrorVelocity is true (the default) when owner mirrors send the last upload's velocities, false for
+        /// MESH_SHIP_MIRROR_VELOCITY=zero.
+        /// </summary>
         public bool RealMirrorVelocity { get; private set; }
 
         /// <summary>RigShips is true when MESH_RIG_SHIPS=1.</summary>
         public bool RigShips { get; private set; }
+
+        /// <summary>SelfAck is true when MESH_SHIP_SELF_ACK=1: an unowned ship acknowledges its own teleport after two ticks.</summary>
+        public bool SelfAck { get; private set; }
+
+        /// <summary>WaveAi is true when MESH_SHIP_AI_PREFAB=wave: ServerAI load ships take the Base class (Ship_AI).</summary>
+        public bool WaveAi { get; private set; }
+
+        /// <summary>AiClass is the class of ServerAI load ships: Base under WaveAi, else Enemy. Every other ship is Base.</summary>
+        public ServerMeshShipClass AiClass => WaveAi ? ServerMeshShipClass.Base : ServerMeshShipClass.Enemy;
 
         /// <summary>Seed is the path and pilot seed (MESH_LOAD_SEED, default 12345).</summary>
         public int Seed { get; private set; }
@@ -118,12 +139,18 @@ namespace MultiplayerARPG.MMO.Mesh
             if (!TryParseSwitch(read(ProjectilesKey), "instantiate", "pooled", out bool pooled))
                 return Fail(out error, $"{ProjectilesKey}={Clean(read(ProjectilesKey))} is not instantiate or pooled");
             settings.PooledProjectiles = pooled;
-            if (!TryParseSwitch(read(MirrorVelocityKey), "zero", "real", out bool real))
-                return Fail(out error, $"{MirrorVelocityKey}={Clean(read(MirrorVelocityKey))} is not zero or real");
-            settings.RealMirrorVelocity = real;
+            if (!TryParseSwitch(read(MirrorVelocityKey), "real", "zero", out bool zero))
+                return Fail(out error, $"{MirrorVelocityKey}={Clean(read(MirrorVelocityKey))} is not real or zero");
+            settings.RealMirrorVelocity = !zero;
             if (!TryParseSwitch(read(RigShipsKey), "0", "1", out bool rigShips))
                 return Fail(out error, $"{RigShipsKey}={Clean(read(RigShipsKey))} is not 0 or 1");
             settings.RigShips = rigShips;
+            if (!TryParseSwitch(read(SelfAckKey), "0", "1", out bool selfAck))
+                return Fail(out error, $"{SelfAckKey}={Clean(read(SelfAckKey))} is not 0 or 1");
+            settings.SelfAck = selfAck;
+            if (!TryParseSwitch(read(AiPrefabKey), "enemy", "wave", out bool wave))
+                return Fail(out error, $"{AiPrefabKey}={Clean(read(AiPrefabKey))} is not enemy or wave");
+            settings.WaveAi = wave;
             if (!TryParseSeed(read(SeedKey), out int seed))
                 return Fail(out error, $"{SeedKey}={Clean(read(SeedKey))} is not a whole number");
             settings.Seed = seed;

@@ -1,7 +1,7 @@
 // Server Meshing test rig — the stand-in ship's combat (Phase 0 step 7), modelled on the space game's
-// ShipCombatComponent at commit 1a3a58d9 (read there, not copied): a shield sync field recharged every frame, a
-// destroyed flag, the hull as the kit's CurrentHp, [AllRpc] fire and impact calls, two bolts per server shot, and a
-// 10 s respawn. The eight load fields exist for ServerMeshSyncLoad only and never change otherwise.
+// ShipCombatComponent at commits 1a3a58d9 and c2eb4154 (read there, not copied): a shield sync field recharged every
+// frame, a destroyed flag, the hull as the kit's CurrentHp, [AllRpc] fire and impact calls, two bolts per server shot,
+// and a 10 s respawn. The eight load fields exist for ServerMeshSyncLoad only and never change otherwise.
 using System;
 using System.Collections.Generic;
 using LiteNetLibManager;
@@ -12,8 +12,8 @@ namespace MultiplayerARPG.MMO.Mesh
     /// <summary>
     /// ServerMeshShipCombat owns the ship's damage on the server: TakeShipDamage takes the shield first and the rest off
     /// the hull; at hull 0 the ship is destroyed and comes back 10 s later with full hull and shield, teleported to its
-    /// spawn point with the next epoch (its pilot stays seated). ServerFire is the AI's gun. Every RPC it sends adds the
-    /// sends it expects to the Ships window's rpcSends.
+    /// spawn point (its pilot stays seated); the epoch stays 0, as the space game's does in Phase 0. ServerFire is the
+    /// AI's gun. Every RPC it sends adds the sends it expects to the Ships window's rpcSends.
     /// </summary>
     public sealed class ServerMeshShipCombat : LiteNetLibBehaviour
     {
@@ -141,10 +141,7 @@ namespace MultiplayerARPG.MMO.Mesh
             shield.Value = ShieldCapacity;
             counters.ShieldWrites++;
             if (_movement != null && _ship != null)
-            {
                 _movement.TeleportShip(_ship.SpawnPoint, _ship.SpawnRotation);
-                _movement.AdvanceEpoch();
-            }
             destroyed.Value = false;
             counters.Respawns++;
         }

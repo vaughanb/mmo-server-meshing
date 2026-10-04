@@ -1,5 +1,6 @@
 // Server Meshing add-on — rig phantom ship payload (Phase 0 step 7): a mirror ship's upload, the space game's ShipMovementComponent
-// client record (space repo 1a3a58d9, SMC:329-344) in legacy54 or the header56 layout, written by hand for the phantom.
+// client record (space repo 1a3a58d9, SMC:329-344) in legacy54 or the header56 layout (c2eb4154's header, mode 0),
+// written by hand for the phantom.
 using LiteNetLib.Utils;
 using UnityEngine;
 
@@ -7,9 +8,10 @@ namespace MultiplayerARPG.MMO.Mesh
 {
     /// <summary>
     /// ServerMeshPhantomShipPayload writes a ship phantom's upload: legacy54 (54 B) for legacy54, else header56 (56 B,
-    /// authority OwnerMirror; compact records are a far-observer encoding and are never uploaded). Ships upload every
-    /// tick, moving or not, and never reliably. The pose's Sequence is the acknowledged teleport sequence; a teleport
-    /// confirm writes the pose's position (the server's destination) at rest: zero velocities and movement state None.
+    /// wire mode 0, so byte 0 is the flight state shifted by 2; compact records are a far-observer encoding and are never
+    /// uploaded). Ships upload every tick, moving or not, and never reliably. The pose's Sequence is the acknowledged
+    /// teleport sequence; a teleport confirm writes the pose's position (the server's destination) at rest: zero
+    /// velocities and movement state None.
     /// </summary>
     public sealed class ServerMeshPhantomShipPayload : IServerMeshPhantomPayload
     {
@@ -38,7 +40,6 @@ namespace MultiplayerARPG.MMO.Mesh
                 AngularVelocity = teleport ? Vector3.zero : pose.AngularVelocity,
                 Forward = !teleport && pose.Forward,
                 TeleportByte = pose.Sequence,
-                Authority = ServerMeshShipAuthority.OwnerMirror,
                 FlightState = pose.FlightState,
                 Epoch = pose.Epoch,
                 Compact = false,

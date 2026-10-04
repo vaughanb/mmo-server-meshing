@@ -1,8 +1,9 @@
-"""Phase 0 step 7 instrument helpers: the ten step 7 keys' meanings, parsers for the Ships, Feeder, Sync load and Bot
-ships lines, mirrors of the ship grammars, the bot argument and the runner's scale. Pure: nothing here reads files or
-the environment, and it imports nothing from this folder (p0tools merges STEP7_REGISTRY into its registry).
+"""Phase 0 step 7 instrument helpers: the twelve step 7 keys' meanings, parsers for the Ships, Feeder, Sync load and
+Bot ships lines, mirrors of the ship grammars, the bot argument and the runner's scale. Pure: nothing here reads files
+or the environment, and it imports nothing from this folder (p0tools merges STEP7_REGISTRY into its registry).
 
     p0ships.parse_ships_window(line)        # the "Ships window" line a map server logs under any ship key, else None
+    p0ships.parse_ships_settings(line)      # the "Ships:" settings line a map server logs once per load cell
     p0ships.parse_feeder_window(line)       # the "Feeder window" line (MESH_PUPPET_FEEDER)
     p0ships.parse_sync_load_window(line)    # the "Sync load window" line (MESH_SYNC_LOAD)
     p0ships.parse_bot_ships(line)           # the "Bot ships" line a bot logs with -meshRigShips
@@ -33,7 +34,7 @@ BOT_ARGUMENT = "-meshRigShips"
 VISIBLE_RANGE_M = 2000.0   # a ship's visible range at scale 1, and the R0 scaled_env scales by default
 PACKED_UINT_LIMITS = (240, 2287, 67823, 16777215)   # the last value a packed uint of 1, 2, 3 and 4 bytes holds
 
-# The ten keys step 7 moves out of PENDING_KEYS or adds (decisions 3, 9, 12 and section Y).
+# The twelve keys step 7 moves out of PENDING_KEYS or adds (decisions 3, 9, 12 and section Y; step 7b decisions 3, 4).
 STEP7_REGISTRY = {
     "MESH_LOAD_SHIPS": "<cell>:<n>:<ai|mirror|parked>[,...]: load ships per cell, n 1 to 2000, one group per (cell, "
                        "authority); placed in MESH_LOAD_AREA within the cell when it is set",
@@ -43,8 +44,11 @@ STEP7_REGISTRY = {
     "MESH_SHIP_SCALE": "0.001 to 10: the factor on every ship distance, speed and size (default 1)",
     "MESH_SHIP_PROJECTILES": "instantiate or pooled: how server bolts are made and cast (default instantiate, as the "
                              "space game does)",
-    "MESH_SHIP_MIRROR_VELOCITY": "zero or real: what a mirror ship's server record says about velocity (default zero, "
-                                 "as the space game's kinematic mirror does)",
+    "MESH_SHIP_MIRROR_VELOCITY": "real or zero: what a mirror ship's server record says about velocity (default real, "
+                                 "the last upload's velocities, as the space game's mirror does since 9b1d69a1)",
+    "MESH_SHIP_SELF_ACK": "0 (default: an unowned ship stays reliable after a server teleport until an owner acks, as "
+                          "the space game) | 1 (the rig acks its own teleport after two logic ticks)",
+    "MESH_SHIP_AI_PREFAB": "enemy (default: Ship_Enemy numbers) | wave (Ship_AI numbers)",
     "MESH_RIG_SHIPS": "1: bots get -meshRigShips <wire>:<seed>:<scale> and check ship records against their paths",
     "MESH_PUPPET_FEEDER": "<ship|character>:<N>@<Hz>: N in-process puppets fed snapshots at Hz (N 1 to 2000, Hz 1 to 60)",
     "MESH_SYNC_LOAD": "dirty:<D>,rpc:<R>: D load-ship sync fields written per tick and R RpcFired calls per second",
@@ -55,15 +59,28 @@ STEP7_REGISTRY = {
 SHIPS_WINDOW = re.compile(
     rf"Ships window (?P<seconds>{NUM}) s: cell (?P<cell>\S+) ships (?P<ships>\d+) ai (?P<ai>\d+) "
     rf"mirror (?P<mirror>\d+) parked (?P<parked>\d+) phantom (?P<phantom>\d+) pilots (?P<pilots>\d+) "
-    rf"seated (?P<seated>\d+) outside (?P<outside>\d+) notInSlot (?P<not_in_slot>\d+) "
-    rf"\| speed p50 (?P<speed_p50>{NUM}) max (?P<speed_max>{NUM}) patrol p50 (?P<patrol_p50>{NUM}) m/s "
+    rf"seated (?P<seated>\d+) outside (?P<outside>\d+) notInSlot (?P<not_in_slot>\d+)(?: pending (?P<pending>\d+))? "
+    rf"\| speed p50 (?P<speed_p50>{NUM}) max (?P<speed_max>{NUM}) "
+    rf"patrol(?: n (?P<patrol_n>\d+))? p50 (?P<patrol_p50>{NUM}|none) m/s "
     rf"\| scans (?P<scans>\d+) casts (?P<casts>\d+) shots (?P<shots>\d+) bolts (?P<bolts>\d+) hits (?P<hits>\d+) "
     rf"respawns (?P<respawns>\d+) \| shield writes (?P<shield_writes>\d+) \| rpcSends (?P<rpc_sends>\d+) "
     rf"\| uploads (?P<uploads>\d+) stale (?P<stale>\d+) bad (?P<bad>\d+) "
     rf"\| ms/s pilot (?P<pilot_ms_per_s>{NUM}) engine (?P<engine_ms_per_s>{NUM}) combat (?P<combat_ms_per_s>{NUM}) "
-    rf"bolts (?P<bolts_ms_per_s>{NUM}) mirror (?P<mirror_ms_per_s>{NUM}) \| gc0 (?P<gc0>\d+)$")
+    rf"bolts (?P<bolts_ms_per_s>{NUM}) mirror (?P<mirror_ms_per_s>{NUM}) "
+    rf"(?:\| mirror age n (?P<mirror_age_n>\d+) p50 (?P<mirror_age_ms>{NUM}|none) ms "
+    rf"frames (?P<mirror_age_frames>\d+(?:\.\d+)?|none) )?\| gc0 (?P<gc0>\d+)$")
 SHIPS_WINDOW_FLOATS = {"seconds", "speed_p50", "speed_max", "patrol_p50", "pilot_ms_per_s", "engine_ms_per_s",
-                       "combat_ms_per_s", "bolts_ms_per_s", "mirror_ms_per_s"}
+                       "combat_ms_per_s", "bolts_ms_per_s", "mirror_ms_per_s", "mirror_age_ms"}
+# Step 7b's fields; a step 7 line has none of them and parses with each None.
+SHIPS_WINDOW_OPTIONAL = {"pending", "patrol_n", "mirror_age_n", "mirror_age_ms", "mirror_age_frames"}
+
+SHIPS_SETTINGS = re.compile(
+    r"Ships: cell (?P<cell>\S+) ai (?P<ai>\d+) mirror (?P<mirror>\d+) parked (?P<parked>\d+) pilots (?P<pilots>\d+) "
+    r"\| wire (?P<wire>legacy54|header56|compact28) scale (?P<scale>\S+) "
+    r"projectiles (?P<projectiles>instantiate|pooled) mirrorVelocity (?P<mirror_velocity>real|zero)"
+    r"(?: selfAck (?P<self_ack>[01]) aiPrefab (?P<ai_prefab>enemy|wave))? "
+    r"\| area (?P<area>\S+) \| prefab hash (?P<prefab_hash>-?\d+)$")
+SHIPS_SETTINGS_INTS = {"ai", "mirror", "parked", "pilots", "self_ack", "prefab_hash"}
 
 FEEDER_WINDOW = re.compile(
     rf"Feeder window (?P<seconds>{NUM}) s: (?P<kind>ship|character) (?P<puppets>\d+) observed (?P<observed>\d+) "
@@ -110,14 +127,44 @@ def _parse(pattern, line, convert):
     return fields
 
 
+def _ships_value(name, text):
+    if text is None or text == "none":
+        return None
+    if name == "cell":
+        return text
+    if name in SHIPS_WINDOW_FLOATS or (name == "mirror_age_frames" and "." in text):
+        return float(text)
+    return int(text)
+
+
 def parse_ships_window(line):
     """The Ships window line, else None: "end"; "seconds"; "cell"; the gauges "ships", "ai", "mirror", "parked",
-    "phantom", "pilots", "seated", "outside", "not_in_slot"; "speed_p50", "speed_max", "patrol_p50" (m/s); the counts
-    "scans", "casts", "shots", "bolts", "hits", "respawns", "shield_writes", "rpc_sends", "uploads", "stale", "bad";
-    "pilot_ms_per_s", "engine_ms_per_s", "combat_ms_per_s", "bolts_ms_per_s", "mirror_ms_per_s"; "gc0". Counts are
-    int, the rest float; nothing may follow gc0."""
-    return _parse(SHIPS_WINDOW, line, lambda name, text: text if name == "cell" else
-                  float(text) if name in SHIPS_WINDOW_FLOATS else int(text))
+    "phantom", "pilots", "seated", "outside", "not_in_slot", "pending" (ships with an unacknowledged teleport at the
+    window's end); "speed_p50", "speed_max" (m/s); "patrol_n" (the patrol speeds sampled) and "patrol_p50" (m/s, None
+    when n is 0); the counts "scans", "casts", "shots", "bolts", "hits", "respawns", "shield_writes", "rpc_sends",
+    "uploads", "stale", "bad"; "pilot_ms_per_s", "engine_ms_per_s", "combat_ms_per_s", "bolts_ms_per_s",
+    "mirror_ms_per_s"; the mirror feed age "mirror_age_n", "mirror_age_ms" (p50, ms) and "mirror_age_frames" (p50,
+    int, float when printed with a fraction), the last two None when n is 0; "gc0". Counts are int, the rest float;
+    nothing may follow gc0. A step 7 line (no pending, "patrol p50 X m/s", no mirror age) parses with the step 7b fields
+    None; "none" goes with n 0 and only there, else the line is refused."""
+    fields = _parse(SHIPS_WINDOW, line, _ships_value)
+    if fields is None:
+        return None
+    patrol_n = fields["patrol_n"]
+    if (fields["patrol_p50"] is None) != (patrol_n == 0):
+        return None
+    age_n = fields["mirror_age_n"]
+    if age_n is not None and any((fields[k] is None) != (age_n == 0) for k in ("mirror_age_ms", "mirror_age_frames")):
+        return None
+    return fields
+
+
+def parse_ships_settings(line):
+    """The Ships settings line ("Ships: cell ..."), else None: "end"; "cell"; "ai", "mirror", "parked", "pilots";
+    "wire"; "scale" (the text as printed); "projectiles"; "mirror_velocity"; "self_ack" (0 or 1) and "ai_prefab"
+    ("enemy" or "wave"), both None on a step 7 line; "area" (text, "none" when unset); "prefab_hash" (int)."""
+    return _parse(SHIPS_SETTINGS, line, lambda name, text: None if text is None else
+                  int(text) if name in SHIPS_SETTINGS_INTS else text)
 
 
 def parse_feeder_window(line):

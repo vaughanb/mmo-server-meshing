@@ -200,7 +200,7 @@ namespace MultiplayerARPG.MMO.Mesh
             CountGroups(mesh.OwnZoneId, out int ai, out int mirror, out int parked);
             int pilots = _settings.Pilots ? ai + mirror + parked : 0;
             Logging.Log("Mesh", SettingLine(mesh.OwnZoneId, ai, mirror, parked, pilots, _settings.Wire, _settings.Scale, _settings.PooledProjectiles,
-                _settings.RealMirrorVelocity, _settings.HasArea, _settings.Area, _prefab.Identity.HashAssetId));
+                _settings.RealMirrorVelocity, _settings.SelfAck, _settings.WaveAi, _settings.HasArea, _settings.Area, _prefab.Identity.HashAssetId));
             StartWindow();
             if (ai + mirror + parked > 0)
                 SpawnLoad(mesh.OwnZoneId);
@@ -306,13 +306,23 @@ namespace MultiplayerARPG.MMO.Mesh
                 Logging.LogError("Mesh", $"Ships error: cell {_mesh.OwnZoneId}: no ship instance for prefab hash {_prefab.Identity.HashAssetId}; no more load ships spawned");
                 return null;
             }
-            ship.Configure(authority, team, pathIndex, centre, _settings.Scale, _settings);
+            ship.Configure(authority, team, pathIndex, centre, _settings.Scale, _settings, ClassFor(authority, _settings.AiClass));
             _mesh.Assets.NetworkSpawn(identity);
             _loadShips.Add(ship);
             return ship;
         }
 
+        /// <summary>
+        /// ClassFor is the class a load ship of <paramref name="authority"/> takes: <paramref name="aiClass"/> (MESH_SHIP_AI_PREFAB)
+        /// for a ServerAI ship, Base for every other.
+        /// </summary>
+        public static ServerMeshShipClass ClassFor(ServerMeshShipAuthority authority, ServerMeshShipClass aiClass)
+        {
+            return authority == ServerMeshShipAuthority.ServerAI ? aiClass : ServerMeshShipClass.Base;
+        }
+
         private void OnObjectSpawn(LiteNetLibIdentity identity)
+
         {
             if (identity == null)
                 return;

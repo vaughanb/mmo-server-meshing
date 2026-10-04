@@ -36,6 +36,10 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             yield return new TestCaseData(ServerMeshShipSettings.ProjectilesKey, "laser").SetName("TryResolve_JunkProjectiles_FailsNamingTheKey");
             yield return new TestCaseData(ServerMeshShipSettings.MirrorVelocityKey, "fast").SetName("TryResolve_JunkMirrorVelocity_FailsNamingTheKey");
             yield return new TestCaseData(ServerMeshShipSettings.RigShipsKey, "yes").SetName("TryResolve_JunkRigShips_FailsNamingTheKey");
+            yield return new TestCaseData(ServerMeshShipSettings.SelfAckKey, "2").SetName("TryResolve_JunkSelfAck_FailsNamingTheKey");
+            yield return new TestCaseData(ServerMeshShipSettings.SelfAckKey, "on").SetName("TryResolve_WordSelfAck_FailsNamingTheKey");
+            yield return new TestCaseData(ServerMeshShipSettings.AiPrefabKey, "base").SetName("TryResolve_JunkAiPrefab_FailsNamingTheKey");
+            yield return new TestCaseData(ServerMeshShipSettings.AiPrefabKey, "Ship_Enemy").SetName("TryResolve_PrefabNameAiPrefab_FailsNamingTheKey");
             yield return new TestCaseData(ServerMeshShipSettings.SeedKey, "abc").SetName("TryResolve_JunkSeedWithAShipKey_FailsNamingTheKey");
             yield return new TestCaseData(ServerMeshShipSettings.AreaKey, "1,2").SetName("TryResolve_JunkAreaWithAShipKey_FailsNamingTheKey");
             yield return new TestCaseData(ServerMeshShipSettings.AreaKey, "0,0,-5").SetName("TryResolve_NegativeAreaWithAShipKey_FailsNamingTheKey");
@@ -78,10 +82,48 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             Assert.That(settings.Wire, Is.EqualTo(ServerMeshShipWireKind.Legacy54));
             Assert.That(settings.Scale.Factor, Is.EqualTo(1f));
             Assert.That(settings.PooledProjectiles, Is.False);
-            Assert.That(settings.RealMirrorVelocity, Is.False);
+            Assert.That(settings.RealMirrorVelocity, Is.True);
             Assert.That(settings.RigShips, Is.False);
+            Assert.That(settings.SelfAck, Is.False);
+            Assert.That(settings.WaveAi, Is.False);
+            Assert.That(settings.AiClass.Name, Is.EqualTo(ServerMeshShipClass.Enemy.Name));
             Assert.That(settings.Seed, Is.EqualTo(12345));
             Assert.That(settings.HasArea, Is.False);
+        }
+
+        [Test]
+        public void TryResolve_AShipKeyAlone_KeepsTheStep7bDefaults()
+        {
+            ServerMeshShipSettings settings = ServerMeshShipSettings.TryResolve(Env(ServerMeshShipSettings.WireKey, "header56"), out string error);
+
+            Assert.That(error, Is.Null);
+            Assert.That(settings.AnyShipKey, Is.True);
+            Assert.That(settings.RealMirrorVelocity, Is.True);
+            Assert.That(settings.SelfAck, Is.False);
+            Assert.That(settings.WaveAi, Is.False);
+            Assert.That(settings.AiClass.Name, Is.EqualTo(ServerMeshShipClass.Enemy.Name));
+        }
+
+        private static IEnumerable<TestCaseData> SwitchCases()
+        {
+            yield return new TestCaseData(ServerMeshShipSettings.MirrorVelocityKey, "ZERO", false, false, false).SetName("TryResolve_MirrorVelocityZero_IsNotReal");
+            yield return new TestCaseData(ServerMeshShipSettings.MirrorVelocityKey, "real", true, false, false).SetName("TryResolve_MirrorVelocityReal_IsReal");
+            yield return new TestCaseData(ServerMeshShipSettings.SelfAckKey, "1", true, true, false).SetName("TryResolve_SelfAck1_SelfAcks");
+            yield return new TestCaseData(ServerMeshShipSettings.SelfAckKey, " 0 ", true, false, false).SetName("TryResolve_SelfAck0_DoesNot");
+            yield return new TestCaseData(ServerMeshShipSettings.AiPrefabKey, "Wave", true, false, true).SetName("TryResolve_AiPrefabWaveAnyCase_IsWave");
+            yield return new TestCaseData(ServerMeshShipSettings.AiPrefabKey, "ENEMY", true, false, false).SetName("TryResolve_AiPrefabEnemyAnyCase_IsEnemy");
+        }
+
+        [TestCaseSource(nameof(SwitchCases))]
+        public void TryResolve_Switches(string key, string value, bool real, bool selfAck, bool wave)
+        {
+            ServerMeshShipSettings settings = ServerMeshShipSettings.TryResolve(Env(key, value), out string error);
+
+            Assert.That(error, Is.Null);
+            Assert.That(settings.RealMirrorVelocity, Is.EqualTo(real));
+            Assert.That(settings.SelfAck, Is.EqualTo(selfAck));
+            Assert.That(settings.WaveAi, Is.EqualTo(wave));
+            Assert.That(settings.AiClass.Name, Is.EqualTo(wave ? ServerMeshShipClass.Base.Name : ServerMeshShipClass.Enemy.Name));
         }
 
         [Test]
@@ -125,6 +167,8 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             yield return new TestCaseData("MESH_PUPPET_FEEDER", "character:10@20", false).SetName("AnyShipKey_FeederKindCharacter_IsFalse");
             yield return new TestCaseData(ServerMeshShipSettings.ScaleKey, "1", true).SetName("AnyShipKey_ScaleAlone_IsTrue");
             yield return new TestCaseData(ServerMeshShipSettings.RigShipsKey, "1", true).SetName("AnyShipKey_RigShipsAlone_IsTrue");
+            yield return new TestCaseData(ServerMeshShipSettings.SelfAckKey, "0", true).SetName("AnyShipKey_SelfAckAlone_IsTrue");
+            yield return new TestCaseData(ServerMeshShipSettings.AiPrefabKey, "enemy", true).SetName("AnyShipKey_AiPrefabAlone_IsTrue");
             yield return new TestCaseData(ServerMeshShipSettings.LoadKey, "   ", false).SetName("AnyShipKey_BlankLoad_IsFalse");
         }
 

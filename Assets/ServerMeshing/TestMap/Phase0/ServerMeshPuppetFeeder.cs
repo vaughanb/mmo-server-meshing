@@ -222,7 +222,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     Logging.LogError("Mesh", $"Feeder error: no ship instance for prefab hash {hash}; no more puppets spawned");
                     return;
                 }
-                ship.Configure(ServerMeshShipAuthority.OwnerMirror, i % 2, index, centre, scale, settings);
+                ship.Configure(ServerMeshShipAuthority.OwnerMirror, i % 2, index, centre, scale, settings, ServerMeshShipClass.Base);
                 _mesh.Assets.NetworkSpawn(identity);
                 ship.ShipMovement.PuppetHeld = true;
                 ServerMeshShipPuppetBody body = new ServerMeshShipPuppetBody(identity.ObjectId, identity, ship.transform, settings.Wire, scale);
@@ -344,7 +344,6 @@ namespace MultiplayerARPG.MMO.Mesh
                 Velocity = velocity,
                 AngularVelocity = angular,
                 Forward = true,
-                Authority = ServerMeshShipAuthority.OwnerMirror,
             };
             _writer.Reset();
             ServerMeshShipWire.WriteHeader56(_writer, in sample);

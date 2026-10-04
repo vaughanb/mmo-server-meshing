@@ -1,5 +1,5 @@
 // Server Meshing test rig — one stand-in ship state as its records carry it (Phase 0 step 7). The fields follow the
-// space game's ShipMovementComponent record at commit 1a3a58d9, plus the rig's header fields.
+// space game's ShipMovementComponent record at commits 1a3a58d9 and c2eb4154, plus its header fields.
 using UnityEngine;
 
 namespace MultiplayerARPG.MMO.Mesh
@@ -25,11 +25,11 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>Forward is the movement state: true for forward thrust, false for none.</summary>
         public bool Forward;
 
-        /// <summary>TeleportByte is the teleport sequence from the server, or the acknowledged one in an upload.</summary>
+        /// <summary>
+        /// TeleportByte is the teleport sequence from the server, or the acknowledged one in an upload; read from a
+        /// compact28 record it holds the sequence's low 7 bits only.
+        /// </summary>
         public byte TeleportByte;
-
-        /// <summary>Authority is who simulates the ship (header56 and compact28 only).</summary>
-        public ServerMeshShipAuthority Authority;
 
         /// <summary>FlightState is a 3-bit flight state, 0 to 7 (header56 and compact28 only).</summary>
         public byte FlightState;

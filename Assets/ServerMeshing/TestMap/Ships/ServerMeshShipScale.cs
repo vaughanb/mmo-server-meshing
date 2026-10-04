@@ -1,5 +1,6 @@
 // Server Meshing test rig — the stand-in ship's scale factor (Phase 0 step 7, MESH_SHIP_SCALE): every distance and
-// speed of the space game's ship (read at commit 1a3a58d9) times one factor; rates, timers, torques and bytes unscaled.
+// speed of the space game's ship (read at commits 1a3a58d9 and c2eb4154) times one factor; rates, timers and bytes
+// unscaled. Drags, torques and hull live in ServerMeshShipClass (step 7b).
 using System;
 using System.Globalization;
 using UnityEngine;
@@ -27,12 +28,6 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>RespawnSeconds is how long a destroyed load ship waits before it respawns by teleport.</summary>
         public const float RespawnSeconds = 10f;
 
-        /// <summary>LinearDrag is the rigidbody's linear damping.</summary>
-        public const float LinearDrag = 3f;
-
-        /// <summary>AngularDrag is the rigidbody's angular damping.</summary>
-        public const float AngularDrag = 8f;
-
         /// <summary>SteeringGain is the P gain from yaw and pitch error to steering input.</summary>
         public const float SteeringGain = 2.5f;
 
@@ -54,9 +49,6 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>ReturnThrottle is the throttle while steering back into the cell rectangle (rig only).</summary>
         public const float ReturnThrottle = 0.7f;
 
-        /// <summary>Hull is the hull's hit points.</summary>
-        public const int Hull = 2500;
-
         /// <summary>Shield is the shield's capacity.</summary>
         public const float Shield = 2500f;
 
@@ -71,9 +63,6 @@ namespace MultiplayerARPG.MMO.Mesh
 
         /// <summary>AimErrorDegrees is an AI pilot's largest aim error.</summary>
         public const float AimErrorDegrees = 2.5f;
-
-        /// <summary>SteeringTorques is the largest angular acceleration per axis (pitch, yaw, roll), ForceMode.Acceleration.</summary>
-        public static readonly Vector3 SteeringTorques = new Vector3(23f, 23f, 30f);
 
         private static readonly Vector3 BaseColliderSize = new Vector3(8.4f, 3f, 11.9f);
         private static readonly Vector3 BaseColliderCenter = new Vector3(0f, 0.4f, 3.4f);
@@ -151,11 +140,11 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>SnapDistance is the observer snap distance: 50 m scaled.</summary>
         public float SnapDistance => 50f * Factor;
 
-        /// <summary>Force is the engine's thrust per axis: 400 scaled.</summary>
-        public float Force => 400f * Factor;
+        /// <summary>Force is the Base class's thrust per axis scaled: 400 times the factor (other classes: ServerMeshShipEngine).</summary>
+        public float Force => ServerMeshShipClass.Base.Force * Factor;
 
-        /// <summary>BoostForce is the engine's boosted thrust per axis: 800 scaled.</summary>
-        public float BoostForce => 800f * Factor;
+        /// <summary>BoostForce is the Base class's boosted thrust scaled: 800 times the factor (other classes: ServerMeshShipEngine).</summary>
+        public float BoostForce => ServerMeshShipClass.Base.BoostForce * Factor;
 
         /// <summary>PathSemiMajorMin is the shortest flight-path semi-major axis: 200 m scaled.</summary>
         public float PathSemiMajorMin => 200f * Factor;

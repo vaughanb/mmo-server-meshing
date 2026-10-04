@@ -75,6 +75,8 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             yield return RejectCase(() => ServerMeshThreadCpuSampler.CycleRateFromSpins(oneSpin, null), typeof(ArgumentNullException), "spinSeconds", "CycleRate_NullSeconds_Throws");
             yield return RejectCase(() => ServerMeshThreadCpuSampler.CycleRateFromSpins(new long[0], new double[0]), typeof(ArgumentOutOfRangeException), "spinCycles", "CycleRate_NoSpins_Throws");
             yield return RejectCase(() => ServerMeshThreadCpuSampler.CycleRateFromSpins(oneSpin, new[] { SpinSeconds, SpinSeconds }), typeof(ArgumentOutOfRangeException), "spinSeconds", "CycleRate_MoreTimesThanSpins_Throws");
+            yield return RejectCase(() => ServerMeshThreadCpuSampler.CalibrationDisagreement(null, oneSecond), typeof(ArgumentNullException), "spinCycles", "Disagreement_NullCycles_Throws");
+            yield return RejectCase(() => ServerMeshThreadCpuSampler.CalibrationDisagreement(new long[0], new double[0]), typeof(ArgumentOutOfRangeException), "spinCycles", "Disagreement_NoSpins_Throws");
         }
 
         [TestCaseSource(nameof(RejectCases))]
@@ -95,8 +97,14 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             yield return new TestCaseData(new[] { c, c, c }, new[] { s, 0.0, s }, 0.0).SetName("CycleRate_SpinWithoutTime_IsZero");
             yield return new TestCaseData(new[] { c, c, c }, new[] { s, double.NaN, s }, 0.0).SetName("CycleRate_SpinWithNaNTime_IsZero");
             yield return new TestCaseData(new[] { c, c, c }, new[] { s, double.PositiveInfinity, s }, 0.0).SetName("CycleRate_SpinWithInfiniteTime_IsZero");
-            yield return new TestCaseData(new[] { c, c, c, c, c * 2 / 3 }, new[] { s, s, s, s, s }, 0.0).SetName("CycleRate_OnePreemptedSpin_IsZero");
+            yield return new TestCaseData(new[] { c, c, c }, new[] { s, double.Epsilon, s }, 0.0).SetName("CycleRate_SpinWithInfiniteRate_IsZero");
+            yield return new TestCaseData(new[] { c, c, c, c, c }, new[] { s, s, double.NaN, s, s }, 0.0).SetName("CycleRate_QuorumWithANaNSpin_IsZero");
+            yield return new TestCaseData(new[] { c, c * 990 / 1000, c / 2, c * 2 / 3, c / 5 }, new[] { s, s, s, s, s }, 0.0).SetName("CycleRate_TwoOfFiveAgreeing_IsZero");
             yield return new TestCaseData(new[] { c, c * 975 / 1000 }, new[] { s, s }, 0.0).SetName("CycleRate_SpinsTwoAndAHalfPercentApart_IsZero");
+            yield return new TestCaseData(new[] { c, c * 975 / 1000, c * 975 / 1000 }, new[] { s, s, s }, 0.0).SetName("CycleRate_ThreeSpinsOnlyTheFastestAgreeing_IsZero");
+            yield return new TestCaseData(new[] { c, c, c, c, c * 2 / 3 }, new[] { s, s, s, s, s }, 2.994e9).SetName("CycleRate_OnePreemptedSpin_HoldsAtTheFastest");
+            yield return new TestCaseData(new[] { c / 5, c, c * 2 / 3, c * 985 / 1000, c * 990 / 1000 }, new[] { s, s, s, s, s }, 2.994e9).SetName("CycleRate_ThreeAgreeingTwoLow_HoldsAtTheFastest");
+            yield return new TestCaseData(new[] { c / 6, c / 3, c * 990 / 1000, c / 2, c / 6, c, c / 4, c / 5, c / 3, c / 2, c / 6, c / 3, c * 985 / 1000, c / 2, c / 6, c / 3, c / 4, c / 5, c / 3, c / 2 }, new double[20] { s, s, s, s, s, s, s, s, s, s, s, s, s, s, s, s, s, s, s, s }, 2.994e9).SetName("CycleRate_ThreeOfTwentyAgreeingAcrossAttempts_HoldsAtTheFastest");
             yield return new TestCaseData(new[] { c }, new[] { s }, 2.994e9).SetName("CycleRate_OneSpin_IsItsRate");
             yield return new TestCaseData(new[] { c * 985 / 1000, c, c * 990 / 1000 }, new[] { s, s, s }, 2.994e9).SetName("CycleRate_SpinsWithinTwoPercent_IsTheFastest");
             yield return new TestCaseData(new[] { c, c / 2 }, new[] { s, s / 2 }, 2.994e9).SetName("CycleRate_SpinsOfDifferentLengths_CompareRates");
@@ -106,6 +114,23 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
         public void CycleRate(long[] spinCycles, double[] spinSeconds, double expected)
         {
             Assert.That(ServerMeshThreadCpuSampler.CycleRateFromSpins(spinCycles, spinSeconds), Is.EqualTo(expected).Within(1.0));
+        }
+
+        private static IEnumerable<TestCaseData> DisagreementCases()
+        {
+            const long c = SpinCyclesAt2994MHz;
+            const double s = SpinSeconds;
+            yield return new TestCaseData(new[] { c, c * 990 / 1000, c / 2, c * 2 / 3, c / 5 }, new[] { s, s, s, s, s }, "Thread CPU: the cycle clock calibration found 2 of 5 spins within 2% of the fastest (2.994 GHz), need 3; CPU is counted in scheduler ticks, clock ticks").SetName("Disagreement_TwoOfFive_NamesCountsRateAndQuorum");
+            yield return new TestCaseData(new[] { c, c * 975 / 1000 }, new[] { s, s }, "Thread CPU: the cycle clock calibration found 1 of 2 spins within 2% of the fastest (2.994 GHz), need 2; CPU is counted in scheduler ticks, clock ticks").SetName("Disagreement_TwoSpins_NeedsBoth");
+            yield return new TestCaseData(new[] { c, c, c, 0L }, new[] { s, s, s, s }, "Thread CPU: the cycle clock calibration had a spin with no cycles, no time or a rate that is not finite (3 of 4 spins within 2% of the fastest); CPU is counted in scheduler ticks, clock ticks").SetName("Disagreement_InvalidSpin_SaysSo");
+        }
+
+        [TestCaseSource(nameof(DisagreementCases))]
+        [SetCulture("de-DE")]
+        public void Disagreement(long[] spinCycles, double[] spinSeconds, string expected)
+        {
+            Assert.That(ServerMeshThreadCpuSampler.CycleRateFromSpins(spinCycles, spinSeconds), Is.EqualTo(0.0));
+            Assert.That(ServerMeshThreadCpuSampler.CalibrationDisagreement(spinCycles, spinSeconds), Is.EqualTo(expected));
         }
 
         [Test]

@@ -1,7 +1,7 @@
 // Server Meshing test rig — the stand-in ship's movement and state handler (Phase 0 step 7), modelled on the space
-// game's ShipMovementComponent at commit 1a3a58d9 (read there, not copied): the kit handler for its object, a rigidbody
-// simulated only where the ship is not a mirror, observer smoothing with velocity extrapolation, the teleport sequence
-// and its acknowledgement, and the record codecs of ServerMeshShipWire. The sender side is in _Sender.cs.
+// game's ShipMovementComponent at commits 1a3a58d9 and c2eb4154 (read there, not copied): the kit handler for its
+// object, a rigidbody simulated only where the ship is not a mirror, observer smoothing with velocity extrapolation, the
+// teleport sequence and its acknowledgement, and the record codecs of ServerMeshShipWire. The sender side is in _Sender.cs.
 using System;
 using System.Collections.Generic;
 using LiteNetLib.Utils;
@@ -36,11 +36,15 @@ namespace MultiplayerARPG.MMO.Mesh
         private ServerMeshShipWireKind _wire = ServerMeshShipWireKind.Legacy54;
         private ServerMeshShipScale _scale;
         private bool _realMirrorVelocity;
+        private bool _selfAck;
         private byte _teleportSequence;
         private byte _ackedSequence;
         private byte _clientSequence;
         private byte _epoch;
         private uint _teleportTick;
+        private bool _hasFeed;
+        private long _feedTimestamp;
+        private int _feedFrame;
         private bool _hasNet;
         private Vector3 _netPosition;
         private Quaternion _netRotation = Quaternion.identity;
@@ -61,8 +65,14 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>AcknowledgedSequence is the last teleport sequence the owner (or the server, for its own ships) acknowledged.</summary>
         public byte AcknowledgedSequence => _ackedSequence;
 
-        /// <summary>Epoch goes up by one at every respawn and rides in the header56 and compact28 records.</summary>
+        /// <summary>
+        /// Epoch rides in the header56 and compact28 records: 0 on the server (the space game never advances it in Phase 0),
+        /// the last record's on a client.
+        /// </summary>
         public byte Epoch => _epoch;
+
+        /// <summary>TeleportPending is true on the server while the teleport sequence is unacknowledged.</summary>
+        public bool TeleportPending => _teleportSequence != _ackedSequence;
 
         /// <summary>Wire is the record variant this peer writes and reads.</summary>
         public ServerMeshShipWireKind Wire => _wire;
@@ -86,8 +96,6 @@ namespace MultiplayerARPG.MMO.Mesh
             if (_rigidbody != null)
             {
                 _rigidbody.useGravity = false;
-                _rigidbody.linearDamping = ServerMeshShipEngine.LinearDrag;
-                _rigidbody.angularDamping = ServerMeshShipEngine.AngularDrag;
                 _rigidbody.interpolation = RigidbodyInterpolation.None;
                 _rigidbody.isKinematic = true;
             }
@@ -100,8 +108,16 @@ namespace MultiplayerARPG.MMO.Mesh
             ServerMeshShipSettings settings = _ship != null && _ship.IsConfigured ? _ship.Settings : ServerMeshShipLoad.Active;
             _wire = settings != null ? settings.Wire : ServerMeshShipWireKind.Legacy54;
             _scale = _ship != null && _ship.Scale != null ? _ship.Scale : settings != null ? settings.Scale : new ServerMeshShipScale(1f);
-            _realMirrorVelocity = settings != null && settings.RealMirrorVelocity;
-            _engine = new ServerMeshShipEngine(_scale);
+            _realMirrorVelocity = settings == null || settings.RealMirrorVelocity;
+            _selfAck = settings != null && settings.SelfAck;
+            // A pooled instance does not re-run Awake: the class's damping is applied at every spawn.
+            ServerMeshShipClass shipClass = _ship != null ? _ship.ShipClass : ServerMeshShipClass.Base;
+            if (_rigidbody != null)
+            {
+                _rigidbody.linearDamping = shipClass.LinearDrag;
+                _rigidbody.angularDamping = shipClass.AngularDrag;
+            }
+            _engine = new ServerMeshShipEngine(_scale, shipClass);
             if (Manager is BaseGameNetworkManager manager)
             {
                 manager.EntityMovementDataHandlers.TryRemove(ObjectId, out _);
@@ -129,6 +145,9 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             _teleportSequence = _ackedSequence = _clientSequence = _epoch = 0;
             _teleportTick = 0;
+            _hasFeed = false;
+            _feedTimestamp = 0;
+            _feedFrame = 0;
             _hasNet = false;
             _netVelocity = _netAngularVelocity = Vector3.zero;
             _netForward = false;
@@ -182,10 +201,15 @@ namespace MultiplayerARPG.MMO.Mesh
                 _engine.Reset();
         }
 
-        /// <summary>AdvanceEpoch raises the epoch by one (a respawn).</summary>
-        public void AdvanceEpoch()
+        /// <summary>
+        /// MarkFeed records an in-process owner feed on the server: <paramref name="peerTimestamp"/> is the timestamp the feed
+        /// passed to ReadClientStateAtServer and <paramref name="frame"/> its Time.frameCount, for the Ships window's mirror age.
+        /// </summary>
+        public void MarkFeed(long peerTimestamp, int frame)
         {
-            unchecked { _epoch++; }
+            _hasFeed = true;
+            _feedTimestamp = peerTimestamp;
+            _feedFrame = frame;
         }
 
         private void Update()
@@ -197,7 +221,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 return;
             if (IsServer)
             {
-                if (SelfAckDue(ConnectionId < 0, _teleportSequence, _ackedSequence, Manager.LocalTick, _teleportTick))
+                if (SelfAckDue(_selfAck, ConnectionId < 0, _teleportSequence, _ackedSequence, Manager.LocalTick, _teleportTick))
                     _ackedSequence = _teleportSequence;
                 RetryRegistration();
             }
@@ -248,7 +272,7 @@ namespace MultiplayerARPG.MMO.Mesh
 
         /// <summary>
         /// ReadClientStateAtServer applies an owner's upload and never throws (the kit's upload path has no catch): fewer
-        /// bytes than the upload size, or a compact-flagged header, counts bad and is dropped; otherwise it stores the
+        /// bytes than the upload size, or a header whose wire mode is not 0, counts bad and is dropped; otherwise it stores the
         /// acknowledged sequence, drops the state while that lags the teleport sequence (stale), and else caches it and sets
         /// the transform directly.
         /// </summary>
@@ -289,27 +313,40 @@ namespace MultiplayerARPG.MMO.Mesh
         }
 
         /// <summary>
-        /// ReadServerStateAtClient decodes one record of the configured wire. A record the reader has too few bytes left for
-        /// is counted by the bot watch and skipped (the kit resumes at the record's end); a new teleport sequence, or the
-        /// first record, snaps at once; anything else is cached for the observer smoothing. The watch gets every decoded record.
+        /// ReadServerStateAtClient decodes one record of the configured wire and never throws on a record's content. A record
+        /// of a wire mode the client does not read (1 or 2), or one the reader has too few bytes left for, is counted by the
+        /// bot watch as a bad length and skipped (the kit resumes at the record's end). The first record, or a new teleport
+        /// sequence, snaps at once: a mode 0 record compares all 8 bits; a compact one compares the low 7
+        /// (CompactSequenceDiffers) and advances the client's sequence by their difference (AdvanceToCompactSequence).
+        /// Anything else is cached for the observer smoothing. The watch gets every decoded record.
         /// </summary>
         public void ReadServerStateAtClient(long peerTimestamp, NetDataReader reader)
         {
             ServerMeshShipWatch watch = ServerMeshShipWatch.Instance;
             int available = reader.AvailableBytes;
             int need = ClientRecordSize(_wire, available, available > 0 ? reader.PeekByte() : (byte)0);
-            if (available < need)
+            if (need == 0 || available < need)
             {
                 if (watch != null)
                     watch.CountBadLength();
                 return;
             }
             ServerMeshShipWire.Read(reader, _wire, out ServerMeshShipSample sample);
-            if (!_hasNet || sample.TeleportByte != _clientSequence)
+            bool snap;
+            if (sample.Compact)
             {
-                _clientSequence = sample.TeleportByte;
-                transform.SetPositionAndRotation(sample.Position, sample.Rotation);
+                snap = !_hasNet || CompactSequenceDiffers(_clientSequence, sample.TeleportByte);
+                if (snap)
+                    _clientSequence = AdvanceToCompactSequence(_clientSequence, sample.TeleportByte);
             }
+            else
+            {
+                snap = !_hasNet || sample.TeleportByte != _clientSequence;
+                if (snap)
+                    _clientSequence = sample.TeleportByte;
+            }
+            if (snap)
+                transform.SetPositionAndRotation(sample.Position, sample.Rotation);
             _netPosition = sample.Position;
             _netRotation = sample.Rotation;
             _netVelocity = sample.Velocity;
@@ -355,13 +392,28 @@ namespace MultiplayerARPG.MMO.Mesh
         public static bool IsStaleUpload(byte acknowledged, byte teleportSequence) => acknowledged != teleportSequence;
 
         /// <summary>
-        /// SelfAckDue is true when a server-owned ship should acknowledge its own teleport: the sequence is unacknowledged
-        /// and the logic tick has advanced by SelfAckTicks since the teleport, so a full send pass carried it reliably.
+        /// SelfAckDue is true when a server-owned ship should acknowledge its own teleport: only while <paramref name="enabled"/>
+        /// (MESH_SHIP_SELF_ACK=1; by default only an owner's upload acknowledges, as in the space game), the sequence is
+        /// unacknowledged and the logic tick has advanced by SelfAckTicks since the teleport, so a full send pass carried it
+        /// reliably.
         /// </summary>
-        public static bool SelfAckDue(bool serverOwned, byte sequence, byte acknowledged, uint nowTick, uint teleportTick)
+        public static bool SelfAckDue(bool enabled, bool serverOwned, byte sequence, byte acknowledged, uint nowTick, uint teleportTick)
         {
-            return serverOwned && sequence != acknowledged && unchecked(nowTick - teleportTick) >= SelfAckTicks;
+            return enabled && serverOwned && sequence != acknowledged && unchecked(nowTick - teleportTick) >= SelfAckTicks;
         }
+
+        /// <summary>
+        /// CompactSequenceDiffers is true when a compact record's 7-bit teleport sequence <paramref name="sequence7"/> is not
+        /// the low 7 bits of the client's sequence <paramref name="current"/>.
+        /// </summary>
+        public static bool CompactSequenceDiffers(byte current, byte sequence7) => (current & 0x7F) != sequence7;
+
+        /// <summary>
+        /// AdvanceToCompactSequence is the client's sequence after a compact record carrying <paramref name="sequence7"/>:
+        /// <paramref name="current"/> moved forward by the 7-bit difference, so its low 7 bits equal the record's and the
+        /// reliable mode 0 record of the same teleport, if a compact record overtook it, finds nothing new to snap to.
+        /// </summary>
+        public static byte AdvanceToCompactSequence(byte current, byte sequence7) => unchecked((byte)(current + ((sequence7 - current) & 0x7F)));
 
         /// <summary>UploadSize is the bytes an upload must carry: 54 under legacy54, else 56 (uploads are never compact).</summary>
         public static int UploadSize(ServerMeshShipWireKind wire)
@@ -371,27 +423,32 @@ namespace MultiplayerARPG.MMO.Mesh
 
         /// <summary>
         /// IsUploadReadable is false for an upload with fewer than UploadSize bytes, or, under header56 and compact28, one
-        /// whose header byte carries the compact bit. A legacy54 record has no header, so its first byte is never tested.
+        /// whose header byte's wire mode is not 0 (Bubble). A legacy54 record has no header, so its first byte is never tested.
         /// </summary>
         public static bool IsUploadReadable(ServerMeshShipWireKind wire, int availableBytes, byte firstByte)
         {
             if (availableBytes < UploadSize(wire))
                 return false;
-            return wire == ServerMeshShipWireKind.Legacy54 || (firstByte & ServerMeshShipWire.CompactBit) == 0;
+            return wire == ServerMeshShipWireKind.Legacy54 || ServerMeshShipWire.ModeOf(firstByte) == ServerMeshShipWire.ModeBubble;
         }
 
         /// <summary>
-        /// ClientRecordSize is the bytes a record of <paramref name="wire"/> needs on a client: 54 under legacy54; else 28
-        /// when the header byte carries the compact bit and 56 when it does not (56 when nothing is left to peek).
+        /// ClientRecordSize is the bytes a record of <paramref name="wire"/> needs on a client: 54 under legacy54; else, by
+        /// the header byte's wire mode, 56 for mode 0, 28 for mode 3 and 0 for modes 1 and 2, which a client does not read
+        /// (56 when nothing is left to peek).
         /// </summary>
         public static int ClientRecordSize(ServerMeshShipWireKind wire, int availableBytes, byte firstByte)
         {
             if (wire == ServerMeshShipWireKind.Legacy54)
                 return ServerMeshShipWire.Legacy54Bytes;
-            if (availableBytes > 0 && (firstByte & ServerMeshShipWire.CompactBit) != 0)
-                return ServerMeshShipWire.Compact28Bytes;
-            return ServerMeshShipWire.Header56Bytes;
+            if (availableBytes <= 0)
+                return ServerMeshShipWire.Header56Bytes;
+            int mode = ServerMeshShipWire.ModeOf(firstByte);
+            if (mode == ServerMeshShipWire.ModeBubble)
+                return ServerMeshShipWire.Header56Bytes;
+            return mode == ServerMeshShipWire.ModeCompact ? ServerMeshShipWire.Compact28Bytes : 0;
         }
+
 
         /// <summary>
         /// SteeringInputs is the space ship's P-steering toward <paramref name="lookDirection"/>: (pitch, yaw, roll), the

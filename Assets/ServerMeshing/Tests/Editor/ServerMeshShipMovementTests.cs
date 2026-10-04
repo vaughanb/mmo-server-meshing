@@ -62,18 +62,20 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
 
         private static IEnumerable<TestCaseData> SelfAckCases()
         {
-            yield return new TestCaseData(false, (byte)1, (byte)0, 10u, 5u, false).SetName("SelfAckDue_OwnedByAClient_Never");
-            yield return new TestCaseData(true, (byte)1, (byte)1, 10u, 5u, false).SetName("SelfAckDue_AlreadyAcknowledged_No");
-            yield return new TestCaseData(true, (byte)1, (byte)0, 5u, 5u, false).SetName("SelfAckDue_SameTick_No");
-            yield return new TestCaseData(true, (byte)1, (byte)0, 6u, 5u, false).SetName("SelfAckDue_OneTickLater_No");
-            yield return new TestCaseData(true, (byte)1, (byte)0, 7u, 5u, true).SetName("SelfAckDue_TwoTicksLater_Yes");
-            yield return new TestCaseData(true, (byte)1, (byte)0, 1u, uint.MaxValue, true).SetName("SelfAckDue_TickWraps_Yes");
+            yield return new TestCaseData(false, true, (byte)1, (byte)0, 10u, 5u, false).SetName("SelfAckDue_Disabled_NeverAcks");
+            yield return new TestCaseData(false, true, (byte)1, (byte)0, 1u, uint.MaxValue, false).SetName("SelfAckDue_DisabledAcrossTheTickWrap_NeverAcks");
+            yield return new TestCaseData(true, false, (byte)1, (byte)0, 10u, 5u, false).SetName("SelfAckDue_OwnedByAClient_Never");
+            yield return new TestCaseData(true, true, (byte)1, (byte)1, 10u, 5u, false).SetName("SelfAckDue_AlreadyAcknowledged_No");
+            yield return new TestCaseData(true, true, (byte)1, (byte)0, 5u, 5u, false).SetName("SelfAckDue_SameTick_No");
+            yield return new TestCaseData(true, true, (byte)1, (byte)0, 6u, 5u, false).SetName("SelfAckDue_OneTickLater_No");
+            yield return new TestCaseData(true, true, (byte)1, (byte)0, 7u, 5u, true).SetName("SelfAckDue_TwoTicksLater_Yes");
+            yield return new TestCaseData(true, true, (byte)1, (byte)0, 1u, uint.MaxValue, true).SetName("SelfAckDue_TickWraps_Yes");
         }
 
         [TestCaseSource(nameof(SelfAckCases))]
-        public void SelfAckDue(bool serverOwned, byte sequence, byte acknowledged, uint nowTick, uint teleportTick, bool expected)
+        public void SelfAckDue(bool enabled, bool serverOwned, byte sequence, byte acknowledged, uint nowTick, uint teleportTick, bool expected)
         {
-            Assert.That(ServerMeshShipMovement.SelfAckDue(serverOwned, sequence, acknowledged, nowTick, teleportTick), Is.EqualTo(expected));
+            Assert.That(ServerMeshShipMovement.SelfAckDue(enabled, serverOwned, sequence, acknowledged, nowTick, teleportTick), Is.EqualTo(expected));
         }
 
         private static IEnumerable<TestCaseData> UploadCases()
@@ -82,14 +84,18 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             yield return new TestCaseData(ServerMeshShipWireKind.Legacy54, 53, (byte)0, false).SetName("IsUploadReadable_Legacy54Short_Bad");
             yield return new TestCaseData(ServerMeshShipWireKind.Header56, 55, (byte)0, false).SetName("IsUploadReadable_Header56Short_Bad");
             yield return new TestCaseData(ServerMeshShipWireKind.Header56, 54, (byte)0, false).SetName("IsUploadReadable_Header56GivenALegacyRecord_Bad");
-            yield return new TestCaseData(ServerMeshShipWireKind.Header56, 56, (byte)0x80, false).SetName("IsUploadReadable_Header56CompactFlagged_Bad");
-            yield return new TestCaseData(ServerMeshShipWireKind.Compact28, 56, (byte)0x81, false).SetName("IsUploadReadable_Compact28CompactFlagged_Bad");
-            yield return new TestCaseData(ServerMeshShipWireKind.Compact28, 28, (byte)0x80, false).SetName("IsUploadReadable_Compact28Short_Bad");
+            yield return new TestCaseData(ServerMeshShipWireKind.Header56, 56, (byte)0x09, false).SetName("IsUploadReadable_Header56Mode1FlightState2_Bad");
+            yield return new TestCaseData(ServerMeshShipWireKind.Header56, 60, (byte)0x01, false).SetName("IsUploadReadable_Header56LongerMode1_Bad");
+            yield return new TestCaseData(ServerMeshShipWireKind.Header56, 56, (byte)0x02, false).SetName("IsUploadReadable_Header56Mode2_Bad");
+            yield return new TestCaseData(ServerMeshShipWireKind.Compact28, 56, (byte)0x03, false).SetName("IsUploadReadable_Compact28Mode3Upload_Bad");
+            yield return new TestCaseData(ServerMeshShipWireKind.Compact28, 56, (byte)0x81, false).SetName("IsUploadReadable_Compact28Mode1_Bad");
+            yield return new TestCaseData(ServerMeshShipWireKind.Compact28, 28, (byte)0x00, false).SetName("IsUploadReadable_Compact28Short_Bad");
             yield return new TestCaseData(ServerMeshShipWireKind.Legacy54, 54, (byte)0, true).SetName("IsUploadReadable_Legacy54Exact_Read");
-            yield return new TestCaseData(ServerMeshShipWireKind.Legacy54, 54, (byte)0x80, true).SetName("IsUploadReadable_Legacy54HighFirstByte_Read");
-            yield return new TestCaseData(ServerMeshShipWireKind.Header56, 56, (byte)0x09, true).SetName("IsUploadReadable_Header56Exact_Read");
+            yield return new TestCaseData(ServerMeshShipWireKind.Legacy54, 54, (byte)0x03, true).SetName("IsUploadReadable_Legacy54FirstByteNeverTested_Read");
+            yield return new TestCaseData(ServerMeshShipWireKind.Header56, 56, (byte)0x08, true).SetName("IsUploadReadable_Header56Mode0FlightState2_Read");
+            yield return new TestCaseData(ServerMeshShipWireKind.Header56, 56, (byte)0xE0, true).SetName("IsUploadReadable_Header56Bits5To7Ignored_Read");
             yield return new TestCaseData(ServerMeshShipWireKind.Compact28, 56, (byte)0x00, true).SetName("IsUploadReadable_Compact28FullUpload_Read");
-            yield return new TestCaseData(ServerMeshShipWireKind.Header56, 60, (byte)0x01, true).SetName("IsUploadReadable_Header56Longer_Read");
+            yield return new TestCaseData(ServerMeshShipWireKind.Header56, 60, (byte)0x10, true).SetName("IsUploadReadable_Header56Longer_Read");
         }
 
         [TestCaseSource(nameof(UploadCases))]
@@ -108,11 +114,15 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
 
         private static IEnumerable<TestCaseData> ClientSizeCases()
         {
-            yield return new TestCaseData(ServerMeshShipWireKind.Legacy54, 54, (byte)0x80, 54).SetName("ClientRecordSize_Legacy54_Always54");
-            yield return new TestCaseData(ServerMeshShipWireKind.Header56, 56, (byte)0x09, 56).SetName("ClientRecordSize_Header56Full_56");
-            yield return new TestCaseData(ServerMeshShipWireKind.Compact28, 56, (byte)0x09, 56).SetName("ClientRecordSize_Compact28Full_56");
-            yield return new TestCaseData(ServerMeshShipWireKind.Compact28, 28, (byte)0x89, 28).SetName("ClientRecordSize_Compact28CompactBit_28");
-            yield return new TestCaseData(ServerMeshShipWireKind.Header56, 0, (byte)0x80, 56).SetName("ClientRecordSize_NothingLeft_56");
+            yield return new TestCaseData(ServerMeshShipWireKind.Header56, 56, (byte)0x09, 0).SetName("ClientRecordSize_Header56Mode1_ZeroSoSkippedAsBadLength");
+            yield return new TestCaseData(ServerMeshShipWireKind.Compact28, 56, (byte)0x09, 0).SetName("ClientRecordSize_Compact28Mode1_ZeroSoSkippedAsBadLength");
+            yield return new TestCaseData(ServerMeshShipWireKind.Compact28, 56, (byte)0x02, 0).SetName("ClientRecordSize_Mode2_ZeroSoSkippedAsBadLength");
+            yield return new TestCaseData(ServerMeshShipWireKind.Legacy54, 54, (byte)0x03, 54).SetName("ClientRecordSize_Legacy54_Always54");
+            yield return new TestCaseData(ServerMeshShipWireKind.Header56, 56, (byte)0x08, 56).SetName("ClientRecordSize_Header56Mode0_56");
+            yield return new TestCaseData(ServerMeshShipWireKind.Header56, 56, (byte)0xE0, 56).SetName("ClientRecordSize_Bits5To7Ignored_56");
+            yield return new TestCaseData(ServerMeshShipWireKind.Compact28, 56, (byte)0x08, 56).SetName("ClientRecordSize_Compact28Mode0_56");
+            yield return new TestCaseData(ServerMeshShipWireKind.Compact28, 28, (byte)0x0B, 28).SetName("ClientRecordSize_Compact28Mode3_28");
+            yield return new TestCaseData(ServerMeshShipWireKind.Header56, 0, (byte)0x09, 56).SetName("ClientRecordSize_NothingLeft_56");
         }
 
         [TestCaseSource(nameof(ClientSizeCases))]
@@ -122,12 +132,86 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
         }
 
         [Test]
-        public void PackDiscreteVersion_PacksSequenceAuthorityAndEpoch()
+        public void PackDiscreteVersion_PacksSequenceFlightStateAndEpoch()
         {
-            Assert.That(ServerMeshShipMovement.PackDiscreteVersion(3, ServerMeshShipAuthority.Parked, 7), Is.EqualTo(3u | 2u << 8 | 7u << 16));
-            Assert.That(ServerMeshShipMovement.PackDiscreteVersion(255, ServerMeshShipAuthority.ServerAI, 255), Is.EqualTo(0x00FF01FFu));
-            Assert.That(ServerMeshShipMovement.PackDiscreteVersion(0, ServerMeshShipAuthority.OwnerMirror, 0), Is.EqualTo(0u));
+            Assert.That(ServerMeshShipMovement.PackDiscreteVersion(3, 2, 7), Is.EqualTo(3u | 2u << 8 | 7u << 16));
+            Assert.That(ServerMeshShipMovement.PackDiscreteVersion(255, 7, 255), Is.EqualTo(0x00FF07FFu));
+            Assert.That(ServerMeshShipMovement.PackDiscreteVersion(0, 0, 0), Is.EqualTo(0u));
         }
+
+        private static IEnumerable<TestCaseData> CompactAllowedCases()
+        {
+            yield return new TestCaseData(ServerMeshShipWireKind.Compact28, (byte)1, (byte)0, false).SetName("CompactAllowed_TeleportPending_Refused");
+            yield return new TestCaseData(ServerMeshShipWireKind.Compact28, (byte)0, (byte)255, false).SetName("CompactAllowed_PendingAcrossTheWrap_Refused");
+            yield return new TestCaseData(ServerMeshShipWireKind.Header56, (byte)0, (byte)0, false).SetName("CompactAllowed_Header56_Refused");
+            yield return new TestCaseData(ServerMeshShipWireKind.Legacy54, (byte)0, (byte)0, false).SetName("CompactAllowed_Legacy54_Refused");
+            yield return new TestCaseData(ServerMeshShipWireKind.Compact28, (byte)4, (byte)4, true).SetName("CompactAllowed_Compact28Acknowledged_Allowed");
+        }
+
+        [TestCaseSource(nameof(CompactAllowedCases))]
+        public void CompactAllowed(ServerMeshShipWireKind wire, byte sequence, byte acknowledged, bool expected)
+        {
+            Assert.That(ServerMeshShipMovement.CompactAllowed(wire, sequence, acknowledged), Is.EqualTo(expected));
+        }
+
+        private static IEnumerable<TestCaseData> CompactDiffersCases()
+        {
+            yield return new TestCaseData((byte)5, (byte)6, true).SetName("CompactSequenceDiffers_NextSequence_Differs");
+            yield return new TestCaseData((byte)0x00, (byte)0x7F, true).SetName("CompactSequenceDiffers_SevenBitWrapBehind_Differs");
+            yield return new TestCaseData((byte)5, (byte)5, false).SetName("CompactSequenceDiffers_Same_Equal");
+            yield return new TestCaseData((byte)0x85, (byte)0x05, false).SetName("CompactSequenceDiffers_HighBitIgnored_Equal");
+            yield return new TestCaseData((byte)0xFF, (byte)0x7F, false).SetName("CompactSequenceDiffers_AtTheTop_Equal");
+        }
+
+        [TestCaseSource(nameof(CompactDiffersCases))]
+        public void CompactSequenceDiffers(byte current, byte sequence7, bool expected)
+        {
+            Assert.That(ServerMeshShipMovement.CompactSequenceDiffers(current, sequence7), Is.EqualTo(expected));
+        }
+
+        private static IEnumerable<TestCaseData> CompactAdvanceCases()
+        {
+            yield return new TestCaseData((byte)5, (byte)5, (byte)5).SetName("AdvanceToCompactSequence_Same_Unchanged");
+            yield return new TestCaseData((byte)5, (byte)6, (byte)6).SetName("AdvanceToCompactSequence_Next_OneUp");
+            yield return new TestCaseData((byte)0x7F, (byte)0x00, (byte)0x80).SetName("AdvanceToCompactSequence_SevenBitWrap_CarriesIntoBit7");
+            yield return new TestCaseData((byte)0xFF, (byte)0x00, (byte)0x00).SetName("AdvanceToCompactSequence_EightBitWrap_Zero");
+            yield return new TestCaseData((byte)0x85, (byte)0x07, (byte)0x87).SetName("AdvanceToCompactSequence_HighBitKept_TwoUp");
+            yield return new TestCaseData((byte)3, (byte)1, (byte)0x81).SetName("AdvanceToCompactSequence_Behind_MovesForwardOnly");
+        }
+
+        [TestCaseSource(nameof(CompactAdvanceCases))]
+        public void AdvanceToCompactSequence(byte current, byte sequence7, byte expected)
+        {
+            Assert.That(ServerMeshShipMovement.AdvanceToCompactSequence(current, sequence7), Is.EqualTo(expected));
+        }
+
+        [Test]
+        public void AdvanceToCompactSequence_EveryPair_LowSevenBitsMatchTheRecord()
+        {
+            for (int current = 0; current < 256; ++current)
+            {
+                for (int sequence7 = 0; sequence7 < 128; ++sequence7)
+                {
+                    byte next = ServerMeshShipMovement.AdvanceToCompactSequence((byte)current, (byte)sequence7);
+                    Assert.That(ServerMeshShipMovement.CompactSequenceDiffers(next, (byte)sequence7), Is.False, $"current {current} sequence {sequence7}");
+                    Assert.That((next - current) & 0xFF, Is.LessThan(128), $"current {current} sequence {sequence7}");
+                }
+            }
+        }
+
+        [Test]
+        public void CompactRecordOvertakesTheReliableTeleport_TheFullRecordThenFindsNothingNew()
+        {
+            byte client = 127;
+            byte teleport = 128;
+            byte sequence7 = (byte)(teleport & 0x7F);
+
+            Assert.That(ServerMeshShipMovement.CompactSequenceDiffers(client, sequence7), Is.True);
+            client = ServerMeshShipMovement.AdvanceToCompactSequence(client, sequence7);
+
+            Assert.That(client, Is.EqualTo(teleport), "the reliable mode 0 record that follows compares all 8 bits and does not snap again");
+        }
+
 
         private static IEnumerable<TestCaseData> VelocityCases()
         {

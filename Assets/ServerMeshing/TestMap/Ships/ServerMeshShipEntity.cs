@@ -1,6 +1,7 @@
 // Server Meshing test rig — the stand-in ship entity (Phase 0 step 7), modelled on the space game's ShipEntity and
-// Ship.prefab at commit 1a3a58d9 (read there, not copied): a one-seat VehicleEntity whose hull is the kit's CurrentHp,
-// with a fixed scaled visible range, spawn-only flight-path fields, and registration with the kit under a ship key only.
+// Ship.prefab at commit 1a3a58d9 and Ship_Enemy.prefab at c2eb4154 (read there, not copied): a one-seat VehicleEntity
+// whose hull is the kit's CurrentHp, filled from its ship class, with a fixed scaled visible range, spawn-only
+// flight-path fields, and registration with the kit under a ship key only.
 using System;
 using LiteNetLibManager;
 using UnityEngine;
@@ -9,14 +10,14 @@ namespace MultiplayerARPG.MMO.Mesh
 {
     /// <summary>
     /// ServerMeshShipEntity is the stand-in ship: one seat, canBeAttacked false (kit damage never reaches it; ship combat
-    /// owns the hull), hp 2,500 in the prefab. Configure sets it up on the server before NetworkSpawn. It never overrides
+    /// owns the hull, whose size is the ship class's). Configure sets it up on the server before NetworkSpawn. It never overrides
     /// NeedsServerUpdateWhenUnobserved: its movement, pilot and combat run on their own Unity updates, as the space ship's do.
     /// </summary>
     public class ServerMeshShipEntity : VehicleEntity
     {
         /// <summary>PrefabRefPath is the Resources path of the ServerMeshShipPrefabRef asset.</summary>
         public const string PrefabRefPath = "ServerMeshShipPrefabRef";
-        /// <summary>DefaultHull is the hull when the prefab's hp is not set (the space Ship.prefab's 2,500).</summary>
+        /// <summary>DefaultHull is the hp the prefab builder writes (the space Ship.prefab's 2,500); the hull comes from ShipClass.</summary>
         public const int DefaultHull = 2500;
         /// <summary>BarrelOffset is the right barrel's local position at scale 1; the left one mirrors x.</summary>
         public static readonly Vector3 BarrelOffset = new Vector3(2f, 0f, 6f);
@@ -53,6 +54,9 @@ namespace MultiplayerARPG.MMO.Mesh
 
         /// <summary>Settings is the settings Configure gave the ship (null until then).</summary>
         public ServerMeshShipSettings Settings { get; private set; }
+
+        /// <summary>ShipClass is the class Configure gave the ship: its forces, drags, torques and hull (Base until then).</summary>
+        public ServerMeshShipClass ShipClass { get; private set; } = ServerMeshShipClass.Base;
 
         /// <summary>IsConfigured is true once Configure ran on this instance.</summary>
         public bool IsConfigured { get; private set; }
@@ -96,15 +100,8 @@ namespace MultiplayerARPG.MMO.Mesh
             }
         }
 
-        /// <summary>HullMax is the full hull: the prefab's hp at the ship's level, DefaultHull when that is not positive.</summary>
-        public int HullMax
-        {
-            get
-            {
-                int amount = hp.GetAmount(Level <= 0 ? 1 : Level);
-                return amount > 0 ? amount : DefaultHull;
-            }
-        }
+        /// <summary>HullMax is the full hull: the ship class's Hull (the prefab's hp is not read).</summary>
+        public int HullMax => ShipClass.Hull;
 
         /// <summary>DriverObjectId is the object id in the driver seat, 0 when it is empty.</summary>
         public uint DriverObjectId => passengerIds.Count > 0 ? passengerIds[0] : 0;
@@ -126,10 +123,12 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>
         /// Configure sets the ship up on the server before NetworkSpawn: its authority, team, flight path index and centre
         /// (spawn data: a value set before spawn travels in the spawn message and never goes dirty), the scaled visible
-        /// range, collider and barrels, and enables the pilot only for ServerAI. It throws, naming the field, for authority 3
-        /// or above, a team outside 0..1, an index below −2, or a null scale or settings.
+        /// range, collider and barrels, the ship class (<paramref name="shipClass"/>: its engine, damping and hull), and
+        /// enables the pilot only for ServerAI. It throws, naming the field, for authority 3 or above, a team outside 0..1,
+        /// an index below −2, or a null scale or settings.
         /// </summary>
-        public void Configure(ServerMeshShipAuthority authority, int team, int flightPathIndex, Vector3 centre, ServerMeshShipScale scale, ServerMeshShipSettings settings)
+        public void Configure(ServerMeshShipAuthority authority, int team, int flightPathIndex, Vector3 centre, ServerMeshShipScale scale, ServerMeshShipSettings settings,
+            ServerMeshShipClass shipClass)
         {
             if ((byte)authority > (byte)ServerMeshShipAuthority.Parked)
                 throw new ArgumentOutOfRangeException(nameof(authority), authority, "ship authority must be OwnerMirror, ServerAI or Parked");
@@ -141,10 +140,13 @@ namespace MultiplayerARPG.MMO.Mesh
                 throw new ArgumentNullException(nameof(scale));
             if (settings == null)
                 throw new ArgumentNullException(nameof(settings));
+            if (shipClass.Name == null)
+                throw new ArgumentOutOfRangeException(nameof(shipClass), "the ship class is empty (default); pass ServerMeshShipClass.Base or Enemy");
             Authority = authority;
             Team = team;
             Scale = scale;
             Settings = settings;
+            ShipClass = shipClass;
             IsConfigured = true;
             flightPath.Value = flightPathIndex;
             pathCentre.Value = centre;
@@ -176,6 +178,7 @@ namespace MultiplayerARPG.MMO.Mesh
             Team = 0;
             Scale = null;
             Settings = null;
+            ShipClass = ServerMeshShipClass.Base;
             IsConfigured = false;
             ServerMeshShipPilot pilot = ShipPilot;
             if (pilot != null)

@@ -117,7 +117,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 _log.Error($"Phantoms error: cell {_cell}: phantom ship {slot.index}: the ship prefab instance has no ship entity");
                 return false;
             }
-            ship.Configure(ServerMeshShipAuthority.OwnerMirror, slot.index % 2, pathIndex, centre, _shipScale, _shipSettings);
+            ship.Configure(ServerMeshShipAuthority.OwnerMirror, slot.index % 2, pathIndex, centre, _shipScale, _shipSettings, ServerMeshShipClass.Base);
             mesh.Assets.NetworkSpawn(identity, 0, slot.connectionId);
             slot.ship = ship;
             slot.identity = identity;

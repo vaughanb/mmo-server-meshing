@@ -118,8 +118,8 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             root.AddComponent<ServerMeshShipCombat>();
             Rigidbody body = root.AddComponent<Rigidbody>();
             body.mass = 1f;
-            body.linearDamping = ServerMeshShipEngine.LinearDrag;
-            body.angularDamping = ServerMeshShipEngine.AngularDrag;
+            body.linearDamping = ServerMeshShipClass.Base.LinearDrag;
+            body.angularDamping = ServerMeshShipClass.Base.AngularDrag;
             body.useGravity = false;
             body.interpolation = RigidbodyInterpolation.None;
             body.collisionDetectionMode = CollisionDetectionMode.Discrete;

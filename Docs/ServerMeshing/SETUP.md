@@ -399,14 +399,23 @@ and, later, several hosts all reach one database, and SQLite is a single file on
   respawn by teleport 10 s after being destroyed, `mirror` ships fly a seeded flight path fed in-process through
   their own upload reader at 20 Hz, `parked` ships sit 20 m plus 3 m scaled above the path plane),
   `MESH_LOAD_SHIP_PILOTS=0|1` (default 0; 1 seats a server pilot character in each load ship, never in a phantom
-  ship), `MESH_SHIP_WIRE=legacy54|header56|compact28` (default legacy54: the space game's record; header56 adds a
-  two-byte authority, flight state and epoch header; compact28 is a rig-only 28-byte record for far observers sent
-  by the state sender with `MESH_SENDER_COMPACT=far`, whose Full record is header56), `MESH_SHIP_SCALE` (0.001 to
+  ship), `MESH_SHIP_WIRE=legacy54|header56|compact28` (default legacy54: the space game's 54-byte record; header56
+  is the space game's two-byte header before it, byte 0 the wire mode in bits 0-1 and the flight state in bits 2-4
+  (the rig always writes mode 0, flight state 0) and byte 1 the epoch (0, as in the game; respawns leave it), with
+  authority no longer on the wire; compact28 is the space game's mode 3, 28 bytes: header, float32 position,
+  smallest-three rotation, half-float velocity, int8 angular velocity at 4/127 rad/s and a state byte, for far
+  observers sent by the state sender with `MESH_SENDER_COMPACT=far`, never while a teleport is unacknowledged, whose
+  Full record is header56), `MESH_SHIP_SCALE` (0.001 to
   10, default 1: every distance and speed of the ship times this factor; rates, timers, torques and bytes never scale,
   and the runner scales `MESH_SENDER_R0` itself), `MESH_SHIP_PROJECTILES=instantiate|pooled` (default instantiate: the
   space game's server bolts, each instantiated and casting `RaycastAll` every frame; pooled reuses bolts with
-  `RaycastNonAlloc`), `MESH_SHIP_MIRROR_VELOCITY=zero|real` (default zero: a player ship's server mirror sends zero
-  velocities as the space game's does; real sends the last upload's), `MESH_RIG_SHIPS=1` (the runner passes the bot
+  `RaycastNonAlloc`), `MESH_SHIP_MIRROR_VELOCITY=real|zero` (default real: a player ship's server mirror sends the
+  last upload's velocities, as the space game's does since 9b1d69a1; zero sends zeros), `MESH_SHIP_SELF_ACK=0|1`
+  (default 0: an unowned ship stays reliable after a server teleport until an owner acknowledges it, as in the space
+  game, so a respawned AI ship stays reliable and never compact; 1: the rig acknowledges its own teleport after two
+  logic ticks), `MESH_SHIP_AI_PREFAB=enemy|wave` (default enemy: AI load ships take Ship_Enemy's numbers, force
+  300, angular drag 8, torques 8/8/10, hull 1,500, terminal 94 m/s at scale 1; wave takes Ship_AI's, which are
+  Ship.prefab's, the numbers every other ship uses), `MESH_RIG_SHIPS=1` (the runner passes the bot
   argument), `MESH_PUPPET_FEEDER=<ship|character>:<N>@<Hz>` (N untracked in-process puppets, 1 to 2000, fed at 1 to
   60 Hz) and `MESH_SYNC_LOAD=dirty:<D>,rpc:<R>` (D sync-field writes per kit tick, 0 to 10,000, and R RPCs per second,
   0 to 100,000, over the cell's load ships, which it needs). `MESH_PHANTOM=<route>:<n>:ship:<cell>` binds ship
@@ -418,10 +427,14 @@ and, later, several hosts all reach one database, and SQLite is a single file on
   and scale texts verbatim, so server and bot parse the same numbers) and check every ship record against its flight
   path; a sink started with `-meshPhantomSinkSizes 1` (`remoteb.py sink-start --sink-sizes`) adds the sizes group to
   its Sink window. The lines: `Ships: cell C ai 50 mirror 0 parked 0 pilots 0 | wire header56 scale 0.03 projectiles
-  instantiate mirrorVelocity zero | area none | prefab hash N` once and, beside Mesh stats, `Ships window 5.00 s: cell
-  C ships N ai N mirror N parked N phantom N pilots N seated N outside N notInSlot N | speed p50 … max … patrol p50 …
-  m/s | scans N casts N shots N bolts N hits N respawns N | shield writes N | rpcSends N | uploads N stale N bad N |
-  ms/s pilot … engine … combat … bolts … mirror … | gc0 N`; `Feeder: ship 200 @ 20 Hz on cell C` and `Feeder window
+  instantiate mirrorVelocity real selfAck 0 aiPrefab enemy | area none | prefab hash N` once and, beside Mesh stats,
+  `Ships window 5.00 s: cell C ships N ai N mirror N parked N phantom N pilots N seated N outside N notInSlot N
+  pending N | speed p50 … max … patrol n N p50 … m/s | scans N casts N shots N bolts N hits N respawns N | shield
+  writes N | rpcSends N | uploads N stale N bad N | ms/s pilot … engine … combat … bolts … mirror … | mirror age n N
+  p50 … ms frames K | gc0 N` (pending: ships with an unacknowledged teleport at the window's end; patrol n: the
+  patrol speeds sampled, p50 `none` when n is 0; mirror age, rig only: a mirror record's write time minus its last
+  feed's time and K the frames since that feed, both `none` when n is 0); `Feeder: ship 200 @ 20 Hz on cell C` and
+  `Feeder window
   5.00 s: ship N observed N | snapshots N | ms/s encode … decode … accept … pose … total … | us/snapshot … | gc0 N`;
   `Sync load: dirty 100/tick rpc 200/s over 50 ships` and `Sync load window 5.00 s: ships N | writes N rpc N rpcSends
   N | ms/s write … rpc … | alloc … B/rpc gc0 N`; on bots `Bot ships 5.00 s: seen N records N pathed N parked N

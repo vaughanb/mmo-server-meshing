@@ -235,7 +235,7 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
         }
 
         [Test]
-        public void ShipPayload_Header56_HeaderIsOwnerMirror_AndRoundTrips()
+        public void ShipPayload_Header56_HeaderIsModeZero_AndRoundTrips()
         {
             ServerMeshPhantomShipPayload payload = new ServerMeshPhantomShipPayload(ServerMeshShipWireKind.Header56);
             NetDataWriter writer = new NetDataWriter();
@@ -246,9 +246,10 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
 
             ServerMeshShipWire.ReadHeader56(reader, out ServerMeshShipSample sample);
 
-            Assert.That(writer.Data[0] & 0x03, Is.EqualTo((int)ServerMeshShipAuthority.OwnerMirror));
-            Assert.That(writer.Data[0] & ServerMeshShipWire.CompactBit, Is.EqualTo(0));
-            Assert.That(sample.Authority, Is.EqualTo(ServerMeshShipAuthority.OwnerMirror));
+            Assert.That(writer.Data[0], Is.EqualTo(0x00), "mode 0 (Bubble), flight state 0");
+            Assert.That(writer.Data[1], Is.EqualTo(0x00), "epoch 0");
+            Assert.That(sample.FlightState, Is.EqualTo(0));
+            Assert.That(sample.Compact, Is.False);
             Assert.That(sample.Position, Is.EqualTo(pose.Position));
             Assert.That(sample.Rotation, Is.EqualTo(pose.Rotation));
             Assert.That(sample.Velocity, Is.EqualTo(pose.Velocity));

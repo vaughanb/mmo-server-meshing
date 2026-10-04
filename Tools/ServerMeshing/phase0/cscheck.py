@@ -15,21 +15,25 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 
 OUT = os.environ.get("CSCHECK_OUT") or os.path.join(ROOT, "Temp", "cscheck-out")
 # CSC_DLL overrides; otherwise the newest installed .NET SDK's Roslyn (string order: fine within one major).
 CSC = os.environ.get("CSC_DLL") or max(glob.glob(r"C:\Program Files\dotnet\sdk\*\Roslyn\bincore\csc.dll"), default="")
-NS = {"m": "http://schemas.microsoft.com/developer/msbuild/2003"}
-
-
 def parse(csproj):
+    """Unity writes the csproj either with the MSBuild 2003 namespace or SDK-style without one: strip it either way."""
     tree = ET.parse(os.path.join(ROOT, csproj))
     r = tree.getroot()
-    compiles = [c.get("Include") for c in r.iterfind(".//m:Compile", NS)]
-    refs = [h.text for h in r.iterfind(".//m:Reference/m:HintPath", NS)]
-    projrefs = [p.get("Include") for p in r.iterfind(".//m:ProjectReference", NS)]
-    analyzers = [a.get("Include") for a in r.iterfind(".//m:Analyzer", NS)]
+    for el in r.iter():
+        if isinstance(el.tag, str) and el.tag.startswith("{"):
+            el.tag = el.tag.split("}", 1)[1]
+    compiles = [c.get("Include") for c in r.iterfind(".//Compile")]
+    refs = [h.text for h in r.iterfind(".//Reference/HintPath")]
+    projrefs = [p.get("Include") for p in r.iterfind(".//ProjectReference")]
+    analyzers = [a.get("Include") for a in r.iterfind(".//Analyzer")]
     defines = ""
-    for pg in r.iterfind(".//m:PropertyGroup", NS):
-        d = pg.find("m:DefineConstants", NS)
-        if d is not None:
+    for pg in r.iterfind(".//PropertyGroup"):
+        d = pg.find("DefineConstants")
+        if d is not None and d.text:
             defines = d.text
+    if not compiles or not defines:
+        raise SystemExit(f"{csproj}: found {len(compiles)} sources and {'some' if defines else 'no'} defines; "
+                         "the csproj layout is not one this script reads")
     return compiles, refs, projrefs, analyzers, defines
 
 

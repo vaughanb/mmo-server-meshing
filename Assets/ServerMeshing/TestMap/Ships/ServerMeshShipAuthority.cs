@@ -1,8 +1,11 @@
 // Server Meshing test rig — who simulates a stand-in ship (Phase 0 step 7). Modelled by reading the space game at
-// commit 1a3a58d9, where authority is implicit (owner client, or the server with or without an AI pilot).
+// commits 1a3a58d9 and c2eb4154, where authority is implicit (owner client, or the server with or without an AI pilot).
 namespace MultiplayerARPG.MMO.Mesh
 {
-    /// <summary>ServerMeshShipAuthority is who simulates a stand-in ship; the values are the header56 authority bits (3 is reserved).</summary>
+    /// <summary>
+    /// ServerMeshShipAuthority is who simulates a stand-in ship: a rig property of the ship (its load group, the window
+    /// counters), never on the wire since step 7b, where header byte 0 carries the space game's wire mode instead.
+    /// </summary>
     public enum ServerMeshShipAuthority : byte
     {
         /// <summary>OwnerMirror is a ship its owner simulates; the server holds a kinematic mirror fed by uploads.</summary>

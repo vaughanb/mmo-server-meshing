@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using NUnit.Framework;
-using UnityEngine;
 
 namespace MultiplayerARPG.MMO.Mesh.Tests
 {
@@ -76,8 +75,8 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
                 ("ProjectileSpeed", s => s.ProjectileSpeed, 800f),
                 ("ProjectileRange", s => s.ProjectileRange, 1000f),
                 ("SnapDistance", s => s.SnapDistance, 50f),
-                ("Force", s => s.Force, 400f),
-                ("BoostForce", s => s.BoostForce, 800f),
+                ("ForceOfTheBaseClass", s => s.Force, 400f),
+                ("BoostForceOfTheBaseClass", s => s.BoostForce, 800f),
                 ("PathSemiMajorMin", s => s.PathSemiMajorMin, 200f),
                 ("PathSemiMajorMax", s => s.PathSemiMajorMax, 280f),
                 ("PathSpeedMin", s => s.PathSpeedMin, 50f),
@@ -115,9 +114,6 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             Assert.That(ServerMeshShipScale.FireIntervalSeconds, Is.EqualTo(0.175f));
             Assert.That(ServerMeshShipScale.ScanIntervalSeconds, Is.EqualTo(0.5f));
             Assert.That(ServerMeshShipScale.RespawnSeconds, Is.EqualTo(10f));
-            Assert.That(ServerMeshShipScale.SteeringTorques, Is.EqualTo(new Vector3(23f, 23f, 30f)));
-            Assert.That(ServerMeshShipScale.LinearDrag, Is.EqualTo(3f));
-            Assert.That(ServerMeshShipScale.AngularDrag, Is.EqualTo(8f));
             Assert.That(ServerMeshShipScale.SteeringGain, Is.EqualTo(2.5f));
             Assert.That(ServerMeshShipScale.RollLevelGain, Is.EqualTo(0.6f));
             Assert.That(ServerMeshShipScale.ObserverLerpSpeed, Is.EqualTo(10f));
@@ -125,13 +121,22 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             Assert.That(ServerMeshShipScale.PatrolThrottle, Is.EqualTo(0.4f));
             Assert.That(ServerMeshShipScale.AvoidThrottle, Is.EqualTo(0.7f));
             Assert.That(ServerMeshShipScale.ReturnThrottle, Is.EqualTo(0.7f));
-            Assert.That(ServerMeshShipScale.Hull, Is.EqualTo(2500));
             Assert.That(ServerMeshShipScale.Shield, Is.EqualTo(2500f));
             Assert.That(ServerMeshShipScale.ShieldRechargeRate, Is.EqualTo(100f));
             Assert.That(ServerMeshShipScale.ShieldRechargeDelaySeconds, Is.EqualTo(2f));
             Assert.That(ServerMeshShipScale.BoltDamage, Is.EqualTo(50));
             Assert.That(ServerMeshShipScale.AimErrorDegrees, Is.EqualTo(2.5f));
             Assert.That(ServerMeshShipFlightPath.AltitudeMetres, Is.EqualTo(60f));
+        }
+
+        [TestCase(0.03f)]
+        [TestCase(1f)]
+        public void Forces_AreTheBaseClassTimesTheFactor(float factor)
+        {
+            ServerMeshShipScale scale = new ServerMeshShipScale(factor);
+
+            Assert.That(scale.Force, Is.EqualTo(ServerMeshShipClass.Base.Force * factor));
+            Assert.That(scale.BoostForce, Is.EqualTo(ServerMeshShipClass.Base.BoostForce * factor));
         }
     }
 }

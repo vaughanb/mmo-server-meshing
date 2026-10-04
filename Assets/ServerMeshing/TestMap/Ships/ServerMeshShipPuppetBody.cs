@@ -60,8 +60,8 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>Identity is the puppet ship's identity.</summary>
         public LiteNetLibIdentity Identity => _identity;
 
-        /// <summary>DiscreteVersion packs the last sample's teleport byte, authority and epoch.</summary>
-        public uint DiscreteVersion => ServerMeshShipMovement.PackDiscreteVersion(_sample.TeleportByte, _sample.Authority, _sample.Epoch);
+        /// <summary>DiscreteVersion packs the last sample's teleport byte, flight state and epoch.</summary>
+        public uint DiscreteVersion => ServerMeshShipMovement.PackDiscreteVersion(_sample.TeleportByte, _sample.FlightState, _sample.Epoch);
 
         /// <summary>IsAtRest is true when the last sample's velocity is under 0.001 m/s.</summary>
         public bool IsAtRest => _sample.Velocity.sqrMagnitude < RestSpeedSquared;
@@ -187,7 +187,7 @@ namespace MultiplayerARPG.MMO.Mesh
 
         /// <summary>
         /// Posed is the record the body writes: the transform's position and rotation with the last sample's velocities,
-        /// forward flag, teleport byte, authority, flight state and epoch.
+        /// forward flag, teleport byte, flight state and epoch.
         /// </summary>
         public void Posed(out ServerMeshShipSample posed)
         {

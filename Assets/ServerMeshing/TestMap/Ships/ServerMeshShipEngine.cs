@@ -1,5 +1,6 @@
-// Server Meshing test rig — the stand-in ship's engine (Phase 0 step 7): the space game's ShipEngine at commit
-// 1a3a58d9 (read there, not copied) as a plain class. The movement component applies its output in FixedUpdate.
+// Server Meshing test rig — the stand-in ship's engine (Phase 0 step 7): the space game's ShipEngine at commits
+// 1a3a58d9 and c2eb4154 (read there, not copied) as a plain class, its numbers from a ship class (step 7b). The movement
+// component applies its output in FixedUpdate.
 using System;
 using UnityEngine;
 
@@ -7,24 +8,13 @@ namespace MultiplayerARPG.MMO.Mesh
 {
     /// <summary>
     /// ServerMeshShipEngine turns a pilot's steering and thrust inputs into a relative torque (ForceMode.Acceleration,
-    /// never scaled) and a relative force (scaled thrust) for one physics step. Steering authority falls linearly from
-    /// 1 at rest to 0.8 at top speed, or is 0.5 while boosting; the applied force chases its target at ResponseSpeed per
-    /// second. Boost is forward boost: it raises the forward thrust to BoostForce.
+    /// the class's torques, never scaled) and a relative force (the class's thrust times the scale factor) for one physics
+    /// step. Steering authority falls linearly from 1 at rest to 0.8 at top speed, or is 0.5 while boosting; the applied
+    /// force chases its target at ResponseSpeed per second. Boost is forward boost: it raises the forward thrust to the
+    /// class's scaled BoostForce.
     /// </summary>
     public sealed class ServerMeshShipEngine
     {
-        /// <summary>Force is the unscaled thrust per ship-local axis.</summary>
-        public const float Force = 400f;
-
-        /// <summary>BoostForce is the unscaled boosted forward thrust.</summary>
-        public const float BoostForce = 800f;
-
-        /// <summary>LinearDrag is the rigidbody's linear damping.</summary>
-        public const float LinearDrag = 3f;
-
-        /// <summary>AngularDrag is the rigidbody's angular damping.</summary>
-        public const float AngularDrag = 8f;
-
         /// <summary>ResponseSpeed is how fast the applied force chases its target, per second.</summary>
         public const float ResponseSpeed = 6f;
 
@@ -40,17 +30,33 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>Mass is the rigidbody's mass the engine assumes for its top speed.</summary>
         public const float Mass = 1f;
 
-        /// <summary>SteeringTorques is the largest angular acceleration per axis: pitch, yaw, roll.</summary>
-        public static readonly Vector3 SteeringTorques = new Vector3(23f, 23f, 30f);
-
-        private readonly ServerMeshShipScale _scale;
+        private readonly float _force;
+        private readonly float _boostForce;
         private Vector3 _forces;
 
-        /// <summary>ServerMeshShipEngine creates an engine at <paramref name="scale"/>; a null scale throws naming it.</summary>
+        /// <summary>ServerMeshShipEngine creates a Base-class engine at <paramref name="scale"/>; a null scale throws naming it.</summary>
         public ServerMeshShipEngine(ServerMeshShipScale scale)
+            : this(scale, ServerMeshShipClass.Base)
         {
-            _scale = scale ?? throw new ArgumentNullException(nameof(scale));
         }
+
+        /// <summary>
+        /// ServerMeshShipEngine creates an engine of <paramref name="shipClass"/> at <paramref name="scale"/>; a null scale
+        /// throws ArgumentNullException naming it, a default (unnamed) class ArgumentOutOfRangeException naming it.
+        /// </summary>
+        public ServerMeshShipEngine(ServerMeshShipScale scale, ServerMeshShipClass shipClass)
+        {
+            if (scale == null)
+                throw new ArgumentNullException(nameof(scale));
+            if (shipClass.Name == null)
+                throw new ArgumentOutOfRangeException(nameof(shipClass), "a default ship class has no numbers; use ServerMeshShipClass.Base or Enemy");
+            ShipClass = shipClass;
+            _force = shipClass.Force * scale.Factor;
+            _boostForce = shipClass.BoostForce * scale.Factor;
+        }
+
+        /// <summary>ShipClass is the class whose force, drag and torques the engine uses.</summary>
+        public ServerMeshShipClass ShipClass { get; }
 
         /// <summary>
         /// Step computes one physics step: <paramref name="steer"/> and <paramref name="move"/> are clamped to -1..1 per
@@ -72,11 +78,11 @@ namespace MultiplayerARPG.MMO.Mesh
                 float amount = top > 0.0001f ? Mathf.Clamp01(speed / top) : 0f;
                 multiplier = Mathf.Lerp(SteeringAtRest, SteeringAtTopSpeed, amount);
             }
-            relativeTorque = multiplier * Vector3.Scale(Clamp(steer), SteeringTorques);
+            relativeTorque = multiplier * Vector3.Scale(Clamp(steer), ShipClass.SteeringTorques);
 
-            Vector3 target = Clamp(move) * _scale.Force;
+            Vector3 target = Clamp(move) * _force;
             if (boost)
-                target.z = Mathf.Max(target.z, _scale.BoostForce);
+                target.z = Mathf.Max(target.z, _boostForce);
             _forces = Vector3.Lerp(_forces, target, ResponseSpeed * fixedDeltaTime);
             relativeForce = _forces;
         }
@@ -87,10 +93,13 @@ namespace MultiplayerARPG.MMO.Mesh
             _forces = Vector3.zero;
         }
 
-        /// <summary>TopSpeed is the terminal speed of the scaled thrust, boosted or not, at <paramref name="fixedDeltaTime"/>.</summary>
+        /// <summary>
+        /// TopSpeed is the terminal speed of the class's scaled thrust, boosted or not, under the class's linear drag at
+        /// <paramref name="fixedDeltaTime"/>.
+        /// </summary>
         public float TopSpeed(float fixedDeltaTime, bool boost)
         {
-            return TerminalSpeed(boost ? _scale.BoostForce : _scale.Force, LinearDrag, fixedDeltaTime, Mass);
+            return TerminalSpeed(boost ? _boostForce : _force, ShipClass.LinearDrag, fixedDeltaTime, Mass);
         }
 
         /// <summary>
