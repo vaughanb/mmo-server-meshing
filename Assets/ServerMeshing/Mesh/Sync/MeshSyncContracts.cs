@@ -40,6 +40,20 @@ namespace MultiplayerARPG.MMO.Mesh.Sync
         bool WriteCompactState(long sampleTimestamp, NetDataWriter writer);
     }
 
+    /// <summary>
+    /// IMeshSenderOwnedSource is a direct source that is also the kit's movement handler for its object, so it writes
+    /// nothing to the kit while the sender holds it.
+    /// </summary>
+    public interface IMeshSenderOwnedSource : IMeshStateSource
+    {
+        /// <summary>
+        /// OnSenderReleased runs, on the main thread, whenever the sender lets go of the source without an Unregister call
+        /// (server stop, object destroyed, dropped by the fan-out); the source then goes back to being written by the kit.
+        /// It only clears the source's own state and never calls the registry.
+        /// </summary>
+        void OnSenderReleased();
+    }
+
     /// <summary>IMeshStateRegistry is the sender's registration surface on the network manager's GameObject.</summary>
     public interface IMeshStateRegistry
     {
@@ -96,7 +110,10 @@ namespace MultiplayerARPG.MMO.Mesh.Sync
     /// <summary>MeshSendRate is one observer's routine rate for one source.</summary>
     public readonly struct MeshSendRate
     {
-        /// <summary>Withhold sends nothing at all, not even urgent, reliable or first-send records.</summary>
+        /// <summary>
+        /// Withhold sends nothing to an observer that does not own the source, not even urgent, reliable or first-send
+        /// records, so that pair loses one-shots for good; the sender treats Withhold on an owner pair as Hz 0.
+        /// </summary>
         public static readonly MeshSendRate Withhold = new MeshSendRate(0, 0, MeshStateVariant.Full, true);
 
         /// <summary>MeshSendRate creates a Full-variant rate.</summary>

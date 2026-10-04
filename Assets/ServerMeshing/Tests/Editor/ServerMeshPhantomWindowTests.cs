@@ -196,5 +196,52 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
 
             Assert.That(line, Is.EqualTo("Bot net window 0.00 s: in 0.0 kB/s 0 pkt/s out 0.0 kB/s 0 pkt/s | hops 0 | rtt 0 ms | players seen 0 | at 2026-01-02T03:04:05Z"));
         }
+
+        private const string FullLineWithViewErr = "Phantom window 5.00 s: bound virtual 200 sink 0 ready 200 filler 2 eyeSeen 0 | step 0/0 target 200 | vmove n 20 mean 100.0 p95 100 min 99 | uploads 4000.0/s | posErr n 100 p50 0.50 p95 0.95 max 1.00 m | viewErr n 20 p50 0.10 p95 0.19 max 0.20 m | down n 4 mean 25.0 p95 40.0 max 40.0 kB/s | swallowed ru 0 0 seq 0 0 ro 1000 56000 rs 0 0 u 60000 56000000 other 0 0 | frames 150 rig feeder 1.20 binder 0.10 sampler 0.05 ms/s 0.045 ms/frame";
+
+        [Test]
+        public void ToLine_ViewErrSamplesWithoutShowViewErr_PrintTheStepFiveLine()
+        {
+            ServerMeshPhantomWindow window = FullWindow();
+            window.AddViewErr(3f);
+
+            Assert.That(window.ToLine(), Is.EqualTo(FullLine));
+            Assert.That(window.ViewErrSamples, Is.EqualTo(1));
+        }
+
+        [Test]
+        [SetCulture("de-DE")]
+        public void ToLine_ShowViewErr_AddsTheGroupAfterPosErr()
+        {
+            ServerMeshPhantomWindow window = FullWindow();
+            window.ShowViewErr = true;
+            for (int i = 20; i >= 1; --i)
+                window.AddViewErr(i / 100f);
+
+            string line = window.ToLine();
+
+            Assert.That(line, Is.EqualTo(FullLineWithViewErr));
+            AssertPrintable(line);
+        }
+
+        [Test]
+        public void ToLine_ShowViewErrWithNoSamples_PrintsZeros()
+        {
+            ServerMeshPhantomWindow window = new ServerMeshPhantomWindow { ShowViewErr = true };
+
+            Assert.That(window.ToLine(), Does.Contain("| posErr n 0 p50 0.00 p95 0.00 max 0.00 m | viewErr n 0 p50 0.00 p95 0.00 max 0.00 m | down n 0"));
+        }
+
+        [Test]
+        public void Reset_EmptiesViewErrAndKeepsShowViewErr()
+        {
+            ServerMeshPhantomWindow window = new ServerMeshPhantomWindow { ShowViewErr = true };
+            window.AddViewErr(1f);
+
+            window.Reset();
+
+            Assert.That(window.ViewErrSamples, Is.EqualTo(0));
+            Assert.That(window.ShowViewErr, Is.True);
+        }
     }
 }

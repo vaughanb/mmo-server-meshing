@@ -84,7 +84,18 @@ ENV_KEYS = ["MESH_NO_MONSTER_HANDOFF", "MESH_FAULT_DIE_ON_NOTICE", "MESH_GHOST_L
             # shares that stand and fight
             "MESH_METER_SENDS", "MESH_PHANTOM", "MESH_PHANTOM_VIEW", "MESH_PHANTOM_ARRIVAL_PER_S",
             "MESH_PHANTOM_UPLOAD_HZ", "MESH_PHANTOM_PAYLOAD", "MESH_PHANTOM_STEPS", "MESH_PHANTOM_AREA",
-            "MESH_PHANTOM_STAND", "MESH_PHANTOM_FIGHT"]
+            "MESH_PHANTOM_STAND", "MESH_PHANTOM_FIGHT",
+            # Phase 0 step 6 (p0tools.ENV_REGISTRY): the state sender (measure or on) with its sources, tiers, tier
+            # radius, compact far records, spreading, X/Z distances, re-classification period and packet cap, and the
+            # CE-12 check
+            "MESH_SENDER", "MESH_SENDER_SOURCES", "MESH_SENDER_TIERS", "MESH_SENDER_R0", "MESH_SENDER_COMPACT",
+            "MESH_SENDER_SPREAD", "MESH_SENDER_XZ", "MESH_SENDER_CLASSIFY_BUILDS", "MESH_SENDER_PACKET_BYTES",
+            "MESH_CE12_CHECK",
+            # Phase 0 step 7 (p0tools.ENV_REGISTRY via p0ships): load ships and their pilots, the ship wire, scale,
+            # projectiles and mirror velocities, ship-aware bots, the puppet feeder, sync load and record sizes
+            "MESH_LOAD_SHIPS", "MESH_LOAD_SHIP_PILOTS", "MESH_SHIP_WIRE", "MESH_SHIP_SCALE", "MESH_SHIP_PROJECTILES",
+            "MESH_SHIP_MIRROR_VELOCITY", "MESH_RIG_SHIPS", "MESH_PUPPET_FEEDER", "MESH_SYNC_LOAD",
+            "MESH_METER_RECORD_SIZES"]
 EXTRA_ENV = {}   # --env KEY=VALUE from the command line, applied to every Play request of the run
 
 # Two-machine runs (--remote-cells): the named cells are served by the other machine, started and read over SSH by
@@ -128,14 +139,42 @@ def read_status():
     return rigtools.read_status_file(STATUS)
 
 
-def wait_status(pred, timeout, what):
+# The play runner rewrites its status every second while the editor ticks. A domain reload (every Play entry) stops the
+# ticks, so a status older than this means the editor is busy rather than idle.
+STATUS_STALE_S = 5
+# How much longer a Play wait may run while the editor is busy, on top of its own timeout. Domain reloads slow down over
+# a long editor session (5-10 s fresh, 30-46 s after a day of scenarios), which once tipped a 60 s wait over.
+PLAY_BUSY_CAP_S = 120
+# A Play start slower than this is reported: the editor has slowed down and wants a restart.
+SLOW_PLAY_START_S = 45
+
+
+def status_age():
+    """Seconds since the play runner last wrote its status; None when it never has (no editor running the runner)."""
+    try:
+        return time.time() - os.path.getmtime(STATUS)
+    except FileNotFoundError:
+        return None
+
+
+def wait_status(pred, timeout, what, busy_cap=0):
+    """Wait for a status the predicate accepts. While the editor is busy (its status gone stale) the deadline moves
+    with the clock, by at most busy_cap seconds in all, so a slow reload is not mistaken for a runner that ignored us."""
     end = time.time() + timeout
-    while time.time() < end:
+    hard = end + busy_cap
+    last = time.time()
+    while True:
         st = read_status()
         if pred(st):
             return st
+        now = time.time()
+        age = status_age() if busy_cap else None
+        if age is not None and age > STATUS_STALE_S:
+            end = min(hard, end + (now - last))
+        last = now
+        if now >= end:
+            raise TimeoutError(f"timed out waiting for {what}")
         time.sleep(2)
-    raise TimeoutError(f"timed out waiting for {what}")
 
 
 def ps(script):
@@ -244,7 +283,13 @@ def request_play(mode, walk_x, walk_z, pet=False, mount=False, env=None, enabled
 def wait_play(timeout):
     """Wait until the Play of the last request_play is running: not merely any Play, which could be one that an earlier,
     abandoned request started late, with that request's environment."""
-    return wait_status(lambda st: st.get("isPlaying") == "True" and st.get("playSeq") == _play_seq, timeout, "Play")
+    t0 = time.time()
+    st = wait_status(lambda st: st.get("isPlaying") == "True" and st.get("playSeq") == _play_seq, timeout, "Play",
+                     busy_cap=PLAY_BUSY_CAP_S)
+    took = time.time() - t0
+    if took > SLOW_PLAY_START_S:
+        print(f"  ! Play took {took:.0f} s to start: the editor's domain reloads have slowed, restart the editor")
+    return st
 
 
 def play_still_running():

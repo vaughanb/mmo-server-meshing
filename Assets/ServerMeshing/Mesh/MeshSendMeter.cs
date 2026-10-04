@@ -15,7 +15,7 @@ namespace MultiplayerARPG.MMO.Mesh
     /// state is touched only on the thread that built it; a call from another thread counts in OffThread and changes
     /// no other total.
     /// </summary>
-    public sealed class MeshSendMeter
+    public sealed partial class MeshSendMeter
     {
         /// <summary>TypeSlots is how many distinct message types one window keeps apart; later types count in other.</summary>
         public const int TypeSlots = 64;
@@ -38,6 +38,8 @@ namespace MultiplayerARPG.MMO.Mesh
         private readonly long[] _channelCalls = new long[ChannelSlots + 1];
         private long _otherCalls, _otherBytes, _otherTicks;
         private long _refused, _tooBigCalls, _tooBigBytes;
+        private readonly long[] _entityStateRecords = new long[DeliverySlots + 1];
+        private long _entityStateUnreadable;
         private int _offThread;
 
         /// <summary>
@@ -100,6 +102,80 @@ namespace MultiplayerARPG.MMO.Mesh
         public static bool TryReadMessageType(byte[] data, int length, out ushort type, out int typeBytes)
         {
             return TryReadMessageType(data, 0, length, out type, out typeBytes);
+        }
+
+        /// <summary>
+        /// TryReadEntityStateCount reads the record count of an EntityState packet from data[offset..end), which starts at
+        /// the packed message type: it skips the type and the two packed ints of the timestamp, then reads the
+        /// little-endian int32 count. It fails on null data, an out-of-range span, truncation, a packed-int lead byte of
+        /// 252 or more (a zigzagged int never needs it) and a negative count.
+        /// </summary>
+        public static bool TryReadEntityStateCount(byte[] data, int offset, int end, out int count)
+        {
+            count = 0;
+            if (!TryReadMessageType(data, offset, end, out _, out int typeBytes))
+                return false;
+            int position = offset + typeBytes;
+            for (int part = 0; part < 2; ++part)
+            {
+                if (position >= end)
+                    return false;
+                int length = PackedIntLength(data[position]);
+                if (length == 0 || end - position < length)
+                    return false;
+                position += length;
+            }
+            if (end - position < 4)
+                return false;
+            int value = data[position] | (data[position + 1] << 8) | (data[position + 2] << 16) | (data[position + 3] << 24);
+            if (value < 0)
+                return false;
+            count = value;
+            return true;
+        }
+
+        private static int PackedIntLength(int lead)
+        {
+            if (lead < 241)
+                return 1;
+            if (lead <= 248)
+                return 2;
+            if (lead == 249)
+                return 3;
+            if (lead == 250)
+                return 4;
+            if (lead == 251)
+                return 5;
+            return 0;
+        }
+
+        /// <summary>
+        /// RecordEntityStateRecords adds <paramref name="records"/> EntityState records sent with
+        /// <paramref name="deliveryMethod"/> (an undefined value counts in other). Called from another thread it counts
+        /// only in OffThread, as Record does.
+        /// </summary>
+        public void RecordEntityStateRecords(DeliveryMethod deliveryMethod, int records)
+        {
+            if (Environment.CurrentManagedThreadId != _ownerThreadId)
+            {
+                Interlocked.Increment(ref _offThread);
+                return;
+            }
+            _entityStateRecords[DeliveryIndex(deliveryMethod)] += records;
+        }
+
+        /// <summary>
+        /// RecordEntityStateUnreadable counts one EntityState send whose record count could not be read. Called from
+        /// another thread it counts only in OffThread.
+        /// </summary>
+        public void RecordEntityStateUnreadable()
+        {
+            if (Environment.CurrentManagedThreadId != _ownerThreadId)
+            {
+                Interlocked.Increment(ref _offThread);
+                return;
+            }
+            _entityStateUnreadable++;
         }
 
         /// <summary>
@@ -187,7 +263,9 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             MeshSendWindow window = new MeshSendWindow(seconds, _ticksPerSecond, types, calls, bytes, ticks,
                 _otherCalls, _otherBytes, _otherTicks, (long[])_deliveryCalls.Clone(), (long[])_deliveryBytes.Clone(),
-                (long[])_channelCalls.Clone(), _refused, _tooBigCalls, _tooBigBytes, Interlocked.Exchange(ref _offThread, 0));
+                (long[])_channelCalls.Clone(), _refused, _tooBigCalls, _tooBigBytes, Interlocked.Exchange(ref _offThread, 0),
+                (long[])_entityStateRecords.Clone(), _entityStateUnreadable);
+            window.RecordSizes = TakeRecordSizes();
             Array.Clear(_used, 0, TypeSlots);
             Array.Clear(_types, 0, TypeSlots);
             Array.Clear(_typeCalls, 0, TypeSlots);
@@ -196,6 +274,8 @@ namespace MultiplayerARPG.MMO.Mesh
             Array.Clear(_deliveryCalls, 0, _deliveryCalls.Length);
             Array.Clear(_deliveryBytes, 0, _deliveryBytes.Length);
             Array.Clear(_channelCalls, 0, _channelCalls.Length);
+            Array.Clear(_entityStateRecords, 0, _entityStateRecords.Length);
+            _entityStateUnreadable = 0;
             _otherCalls = _otherBytes = _otherTicks = 0;
             _refused = _tooBigCalls = _tooBigBytes = 0;
             return window;
@@ -253,7 +333,7 @@ namespace MultiplayerARPG.MMO.Mesh
     /// method and channel, plus the refused, too-big and off-thread counts. Calls and bytes include refused sends and
     /// exclude too-big ones.
     /// </summary>
-    public sealed class MeshSendWindow
+    public sealed partial class MeshSendWindow
     {
         /// <summary>LineTypeGroups is how many message types ToLine names, by bytes; the rest join its other group.</summary>
         public const int LineTypeGroups = 6;
@@ -267,10 +347,11 @@ namespace MultiplayerARPG.MMO.Mesh
         private readonly long[] _deliveryCalls;
         private readonly long[] _deliveryBytes;
         private readonly long[] _channelCalls;
+        private readonly long[] _entityStateRecords;
 
         internal MeshSendWindow(double seconds, long ticksPerSecond, ushort[] types, long[] calls, long[] bytes, long[] ticks,
             long otherCalls, long otherBytes, long otherTicks, long[] deliveryCalls, long[] deliveryBytes, long[] channelCalls,
-            long refused, long tooBigCalls, long tooBigBytes, int offThread)
+            long refused, long tooBigCalls, long tooBigBytes, int offThread, long[] entityStateRecords, long entityStateUnreadable)
         {
             Seconds = seconds;
             _ticksPerSecond = ticksPerSecond;
@@ -288,6 +369,12 @@ namespace MultiplayerARPG.MMO.Mesh
             TooBigCalls = tooBigCalls;
             TooBigBytes = tooBigBytes;
             OffThread = offThread;
+            _entityStateRecords = entityStateRecords;
+            EntityStateUnreadable = entityStateUnreadable;
+            long records = 0;
+            for (int i = 0; i < entityStateRecords.Length; ++i)
+                records += entityStateRecords[i];
+            EntityStateRecordsTotal = records;
             long totalCalls = otherCalls, totalBytes = otherBytes;
             for (int i = 0; i < types.Length; ++i)
             {
@@ -349,6 +436,15 @@ namespace MultiplayerARPG.MMO.Mesh
             return index >= 0 ? Micros(_ticks[index], _calls[index]) : 0d;
         }
 
+        /// <summary>EntityStateRecordsTotal is the EntityState records counted in the window's EntityState sends, every delivery method included.</summary>
+        public long EntityStateRecordsTotal { get; }
+
+        /// <summary>EntityStateUnreadable is the EntityState sends whose record count could not be read.</summary>
+        public long EntityStateUnreadable { get; }
+
+        /// <summary>EntityStateRecords is the EntityState records sent with <paramref name="deliveryMethod"/>; an undefined value reads the other slot.</summary>
+        public long EntityStateRecords(DeliveryMethod deliveryMethod) => _entityStateRecords[MeshSendMeter.DeliveryIndex(deliveryMethod)];
+
         /// <summary>DeliveryCalls is the sends with <paramref name="deliveryMethod"/>; an undefined value reads the other slot.</summary>
         public long DeliveryCalls(DeliveryMethod deliveryMethod) => _deliveryCalls[MeshSendMeter.DeliveryIndex(deliveryMethod)];
 
@@ -363,7 +459,10 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <see cref="LineTypeGroups"/> message types by bytes (descending, ties by type ascending) and an other group
         /// holding the rest, refused and too-big counts, the delivery groups in enum order, the non-empty channels,
         /// <paramref name="wireBytes"/> and <paramref name="wirePackets"/> (the LiteNetLib server's sent-bytes and
-        /// sent-datagram deltas over the window) and the off-thread count. Integer totals come before rates; kB is 1024 B;
+        /// sent-datagram deltas over the window) and the off-thread count. A records group (EntityState records by delivery:
+        /// reliable ordered, unreliable, the rest as other, and the unreadable EntityState sends) follows the delivery
+        /// groups only when the window counted a record or an unreadable send, and the sizes group follows whenever RecordSizes
+        /// is set. Integer totals come before rates; kB is 1024 B;
         /// us is the mean microseconds per send inside the inner transport (0.00 untimed). A negative or non-finite figure
         /// prints as 0.
         /// </summary>
@@ -406,6 +505,13 @@ namespace MultiplayerARPG.MMO.Mesh
             AppendGroup(line, restCalls, restBytes, restTicks, seconds);
             line.Append(FormattableString.Invariant($" | refused {Clean(Refused)} tooBig {Clean(TooBigCalls)} bytes {Clean(TooBigBytes)}"));
             line.Append(FormattableString.Invariant($" | delivery ru {Clean(_deliveryCalls[0])} {Clean(_deliveryBytes[0])} seq {Clean(_deliveryCalls[1])} {Clean(_deliveryBytes[1])} ro {Clean(_deliveryCalls[2])} {Clean(_deliveryBytes[2])} rs {Clean(_deliveryCalls[3])} {Clean(_deliveryBytes[3])} u {Clean(_deliveryCalls[4])} {Clean(_deliveryBytes[4])} other {Clean(_deliveryCalls[5])} {Clean(_deliveryBytes[5])}"));
+            if (EntityStateRecordsTotal + EntityStateUnreadable > 0)
+            {
+                long otherRecords = _entityStateRecords[0] + _entityStateRecords[1] + _entityStateRecords[3] + _entityStateRecords[5];
+                line.Append(FormattableString.Invariant($" | records ro {Clean(_entityStateRecords[2])} u {Clean(_entityStateRecords[4])} other {Clean(otherRecords)} unread {Clean(EntityStateUnreadable)}"));
+            }
+            if (RecordSizes != null)
+                line.Append(RecordSizes.ToGroup());
             line.Append(" | channels");
             for (int channel = 0; channel < MeshSendMeter.ChannelSlots; ++channel)
                 if (_channelCalls[channel] > 0)

@@ -1,4 +1,4 @@
-// Server Meshing add-on — rig phantom sink, worker side: the sink's peers, their polling workers and the received-type counts.
+// Server Meshing add-on — rig phantom sink, worker side: the sink's peers, their polling workers, the received-type counts and the optional record sizes.
 using System.Collections.Generic;
 using System.Globalization;
 using System.Threading;
@@ -9,19 +9,48 @@ using UnityEngine;
 
 namespace MultiplayerARPG.MMO.Mesh
 {
-    /// <summary>ServerMeshPhantomSinkCounts counts received messages by packed type: written by one worker thread, read by the main thread.</summary>
+    /// <summary>
+    /// ServerMeshPhantomSinkCounts counts received messages by packed type: written by one worker thread, read by the main
+    /// thread. With record sizes on it also walks every EntityState packet into its own MeshRecordSizeCounts, whose plain
+    /// fields a private lock guards: the worker takes it per packet, the main thread once per window.
+    /// </summary>
     internal sealed class ServerMeshPhantomSinkCounts
     {
         private const int Slots = 64;
         private readonly int[] _types = new int[Slots];
         private readonly long[] _calls = new long[Slots];
         private readonly long[] _bytes = new long[Slots];
+        private readonly MeshRecordSizeCounts _sizes;
+        private readonly object _sizesLock = new object();
         private long _otherCalls, _otherBytes;
 
-        public ServerMeshPhantomSinkCounts()
+        public ServerMeshPhantomSinkCounts(bool recordSizes)
         {
             for (int i = 0; i < Slots; ++i)
                 _types[i] = -1;
+            if (recordSizes)
+                _sizes = new MeshRecordSizeCounts();
+        }
+
+        /// <summary>RecordSizes walks one EntityState packet, data[offset..end) from its packed type, into the sizes. Worker thread only.</summary>
+        public void RecordSizes(byte[] data, int offset, int end)
+        {
+            if (_sizes == null)
+                return;
+            lock (_sizesLock)
+                _sizes.TryAddPacket(data, offset, end);
+        }
+
+        /// <summary>TakeSizes adds the sizes counted since the last call into total and clears them. Main thread.</summary>
+        public void TakeSizes(MeshRecordSizeCounts total)
+        {
+            if (_sizes == null)
+                return;
+            lock (_sizesLock)
+            {
+                total.Add(_sizes);
+                _sizes.Clear();
+            }
         }
 
         /// <summary>Record counts one message; unknown and overflowing types count as other. Worker thread only.</summary>
@@ -72,13 +101,17 @@ namespace MultiplayerARPG.MMO.Mesh
     internal sealed class ServerMeshPhantomSinkWorker
     {
         public readonly List<ServerMeshPhantomSinkPeer> Peers = new List<ServerMeshPhantomSinkPeer>();
-        public readonly ServerMeshPhantomSinkCounts Counts = new ServerMeshPhantomSinkCounts();
+        public readonly ServerMeshPhantomSinkCounts Counts;
         private readonly int _index;
         private Thread _thread;
         private volatile bool _stop;
         private long _maxPassTicks;
 
-        public ServerMeshPhantomSinkWorker(int index) => _index = index;
+        public ServerMeshPhantomSinkWorker(int index, bool recordSizes)
+        {
+            _index = index;
+            Counts = new ServerMeshPhantomSinkCounts(recordSizes);
+        }
 
         public void Start()
         {
@@ -119,7 +152,11 @@ namespace MultiplayerARPG.MMO.Mesh
         }
     }
 
-    /// <summary>ServerMeshPhantomSinkPeer is one sink peer: its NetManager's listener, hello, bind state and uploads. Worker thread only, except the counters.</summary>
+    /// <summary>
+    /// ServerMeshPhantomSinkPeer is one sink peer: its NetManager's listener, hello, bind state and uploads. Worker thread
+    /// only, except the counters. A ship peer flies the reply's path in the sink's own time base (timestamp / 1000) and
+    /// acknowledges teleport sequence 0: it never decodes the server's records, so a respawned sink ship stays stale.
+    /// </summary>
     internal sealed class ServerMeshPhantomSinkPeer : INetEventListener
     {
         private readonly int _index;
@@ -138,6 +175,9 @@ namespace MultiplayerARPG.MMO.Mesh
         private Vector3 _position;
         private Vector2 _heading = Vector2.up;
         private System.Random _random;
+        private ServerMeshShipFlightPath _shipPath;
+        private ServerMeshPhantomShipPayload _shipPayload;
+        private long _badReplies;
 
         public ServerMeshPhantomSinkPeer(int index, string host, int port, long baseMs, ServerMeshPhantomSinkCounts counts)
         {
@@ -154,6 +194,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public bool IsBound => _bound;
         public long Uploads => Interlocked.Read(ref _uploads);
         public long Disconnects => Interlocked.Read(ref _disconnects);
+        public long BadReplies => Interlocked.Read(ref _badReplies);
 
         public void Connect(double now)
         {
@@ -169,7 +210,14 @@ namespace MultiplayerARPG.MMO.Mesh
                     Connect(now);
                 return;
             }
-            if (!_bound || _reply.kind != (byte)ServerMeshPhantomKind.Character || _reply.hz == 0)
+            if (!_bound || _reply.hz == 0)
+                return;
+            if (_reply.kind == ServerMeshPhantomBindReply.ShipKind)
+            {
+                TickShip(now);
+                return;
+            }
+            if (_reply.kind != (byte)ServerMeshPhantomKind.Character)
                 return;
             if (!ServerMeshPhantomSink.UploadDue(now, 1.0 / _reply.hz, ref _nextDue))
                 return;
@@ -188,9 +236,24 @@ namespace MultiplayerARPG.MMO.Mesh
             long timestamp = ServerMeshPhantomUploads.NextTimestamp(_lastTimestamp, _baseMs + (long)(now * 1000.0));
             ServerMeshPhantomUploads.WriteFrame(_writer, timestamp, _reply.objectId);
             IServerMeshPhantomPayload payload = _reply.payload == (byte)ServerMeshPhantomPayloadKind.Input ? (IServerMeshPhantomPayload)ServerMeshPhantomInputPayload.Instance : ServerMeshPhantomTransformPayload.Instance;
-            if (!payload.TryWrite(_writer, moving, false, _position, ServerMeshPhantomUploads.YawOf(_heading), ref _stopSent, out bool reliable))
+            ServerMeshPhantomPose pose = new ServerMeshPhantomPose(_position, ServerMeshPhantomUploads.YawOf(_heading));
+            if (!payload.TryWrite(_writer, moving, false, in pose, ref _stopSent, out bool reliable))
                 return;
             _peer.Send(_writer, 2, reliable ? DeliveryMethod.ReliableOrdered : DeliveryMethod.Unreliable);
+            _lastTimestamp = timestamp;
+            Interlocked.Increment(ref _uploads);
+        }
+
+        private void TickShip(double now)
+        {
+            if (_shipPath == null || !ServerMeshPhantomSink.UploadDue(now, 1.0 / _reply.hz, ref _nextDue))
+                return;
+            long timestamp = ServerMeshPhantomUploads.NextTimestamp(_lastTimestamp, _baseMs + (long)(now * 1000.0));
+            ServerMeshPhantomPose pose = ServerMeshPhantomUploads.ShipPose(_shipPath, timestamp / 1000.0, false, Vector3.zero, Quaternion.identity, 0);
+            ServerMeshPhantomUploads.WriteFrame(_writer, timestamp, _reply.objectId);
+            if (!_shipPayload.TryWrite(_writer, true, false, in pose, ref _stopSent, out _))
+                return;
+            _peer.Send(_writer, 2, DeliveryMethod.Unreliable);
             _lastTimestamp = timestamp;
             Interlocked.Increment(ref _uploads);
         }
@@ -221,8 +284,23 @@ namespace MultiplayerARPG.MMO.Mesh
             int bytes = reader.AvailableBytes;
             bool known = MeshSendMeter.TryReadMessageType(reader.RawData, reader.Position, reader.RawDataSize, out ushort type, out _);
             _counts.Record(known, type, bytes);
+            if (known && type == GameNetworkingConsts.EntityState)
+                _counts.RecordSizes(reader.RawData, reader.Position, reader.RawDataSize);
             if (!known || type != ServerMeshPhantomTransport.BindReplyMessageType || !ServerMeshPhantomBindReply.TryRead(reader, out ServerMeshPhantomBindReply reply))
                 return;
+            _shipPath = null;
+            _shipPayload = null;
+            if (reply.kind == ServerMeshPhantomBindReply.ShipKind)
+            {
+                if (!reply.IsFollowableShip)
+                {
+                    _bound = false;
+                    Interlocked.Increment(ref _badReplies);
+                    return;
+                }
+                _shipPath = new ServerMeshShipFlightPath(reply.seed, reply.flightPath, new Vector3(reply.centreX, reply.centreY, reply.centreZ), new ServerMeshShipScale(reply.scale));
+                _shipPayload = new ServerMeshPhantomShipPayload(reply.payload == 0 ? ServerMeshShipWireKind.Legacy54 : ServerMeshShipWireKind.Header56);
+            }
             _reply = reply;
             _position = new Vector3(reply.x, 0f, reply.z);
             double now = ServerMeshPhantomSink.Now;

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using LiteNetLib.Utils;
+using LiteNetLibManager;
 using NUnit.Framework;
 
 namespace MultiplayerARPG.MMO.Mesh.Tests
@@ -130,6 +131,131 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             Assert.That(notAReply.Position, Is.EqualTo(0));
         }
 
+        private static ServerMeshPhantomBindReply ShipReplySample()
+        {
+            ServerMeshPhantomBindReply reply = SampleReply();
+            reply.kind = ServerMeshPhantomBindReply.ShipKind;
+            reply.payload = 1;
+            reply.stand = 0;
+            reply.speed = 87.5f;
+            reply.halfSide = 0f;
+            reply.centreY = 60f;
+            reply.seed = -12345;
+            reply.flightPath = 1007;
+            reply.scale = 0.03f;
+            return reply;
+        }
+
+        [Test]
+        public void BindReply_ShipKind_RoundTripsItsTrailingFields()
+        {
+            NetDataWriter writer = new NetDataWriter();
+            ShipReplySample().Write(writer);
+            NetDataReader reader = new NetDataReader(writer.CopyData());
+
+            Assert.That(writer.Length, Is.EqualTo(3 + 3 + ServerMeshPhantomBindReply.FixedBytes + ServerMeshPhantomBindReply.ShipBytes));
+            Assert.That(ServerMeshPhantomBindReply.TryRead(reader, out ServerMeshPhantomBindReply reply), Is.True);
+            Assert.That(reply, Is.EqualTo(ShipReplySample()));
+            Assert.That(reader.EndOfData, Is.True);
+        }
+
+        private static IEnumerable<TestCaseData> OldKindCases()
+        {
+            yield return new TestCaseData((byte)0).SetName("BindReply_CharacterKind_BytesUnchanged_NoTrailingFields");
+            yield return new TestCaseData((byte)1).SetName("BindReply_EyeKind_BytesUnchanged_NoTrailingFields");
+        }
+
+        [TestCaseSource(nameof(OldKindCases))]
+        public void BindReply_OldKinds_BytesUnchanged(byte kind)
+        {
+            ServerMeshPhantomBindReply plain = SampleReply();
+            plain.kind = kind;
+            ServerMeshPhantomBindReply withShipFields = plain;
+            withShipFields.centreY = 60f;
+            withShipFields.seed = 7;
+            withShipFields.flightPath = 1000;
+            withShipFields.scale = 0.5f;
+            NetDataWriter a = new NetDataWriter(), b = new NetDataWriter();
+            plain.Write(a);
+            withShipFields.Write(b);
+            NetDataReader reader = new NetDataReader(b.CopyData());
+
+            Assert.That(a.Length, Is.EqualTo(3 + 3 + ServerMeshPhantomBindReply.FixedBytes));
+            Assert.That(Hex(b), Is.EqualTo(Hex(a)));
+            Assert.That(ServerMeshPhantomBindReply.TryRead(reader, out ServerMeshPhantomBindReply read), Is.True);
+            Assert.That(read, Is.EqualTo(plain));
+            Assert.That(reader.EndOfData, Is.True);
+        }
+
+        private static IEnumerable<TestCaseData> ShortShipReplyCases()
+        {
+            yield return new TestCaseData(1).SetName("BindReply_ShipKind_OneByteShort_IsRefused_PositionKept");
+            yield return new TestCaseData(ServerMeshPhantomBindReply.ShipBytes).SetName("BindReply_ShipKind_WithoutTrailingFields_IsRefused_PositionKept");
+        }
+
+        [TestCaseSource(nameof(ShortShipReplyCases))]
+        public void BindReply_ShortShipReply_IsRefused(int cut)
+        {
+            NetDataWriter writer = new NetDataWriter();
+            ShipReplySample().Write(writer);
+            byte[] bytes = writer.CopyData();
+            NetDataReader truncated = new NetDataReader(bytes, 0, bytes.Length - cut);
+
+            Assert.That(ServerMeshPhantomBindReply.TryRead(truncated, out _), Is.False);
+            Assert.That(truncated.Position, Is.EqualTo(0));
+        }
+
+        private static IEnumerable<TestCaseData> FollowableCases()
+        {
+            ServerMeshPhantomBindReply character = ShipReplySample();
+            character.kind = 0;
+            ServerMeshPhantomBindReply noPath = ShipReplySample();
+            noPath.flightPath = -1;
+            ServerMeshPhantomBindReply zeroScale = ShipReplySample();
+            zeroScale.scale = 0f;
+            ServerMeshPhantomBindReply bigScale = ShipReplySample();
+            bigScale.scale = 10.5f;
+            ServerMeshPhantomBindReply nanCentre = ShipReplySample();
+            nanCentre.centreY = float.NaN;
+            ServerMeshPhantomBindReply edges = ShipReplySample();
+            edges.flightPath = 0;
+            edges.scale = 10f;
+            yield return new TestCaseData(character, false).SetName("IsFollowableShip_CharacterKind_False");
+            yield return new TestCaseData(noPath, false).SetName("IsFollowableShip_NegativePath_False");
+            yield return new TestCaseData(zeroScale, false).SetName("IsFollowableShip_ZeroScale_False");
+            yield return new TestCaseData(bigScale, false).SetName("IsFollowableShip_ScaleAboveTen_False");
+            yield return new TestCaseData(nanCentre, false).SetName("IsFollowableShip_NaNCentre_False");
+            yield return new TestCaseData(ShipReplySample(), true).SetName("IsFollowableShip_PhantomPath_True");
+            yield return new TestCaseData(edges, true).SetName("IsFollowableShip_PathZeroScaleTen_True");
+        }
+
+        [TestCaseSource(nameof(FollowableCases))]
+        public void IsFollowableShip(ServerMeshPhantomBindReply reply, bool expected)
+        {
+            Assert.That(reply.IsFollowableShip, Is.EqualTo(expected));
+        }
+
+        private static IEnumerable<TestCaseData> SinkSizesArgumentCases()
+        {
+            yield return new TestCaseData("2", false, false).SetName("TryParseSinkSizes_Two_Refused");
+            yield return new TestCaseData("on", false, false).SetName("TryParseSinkSizes_Word_Refused");
+            yield return new TestCaseData("", false, false).SetName("TryParseSinkSizes_Empty_Refused");
+            yield return new TestCaseData(null, true, false).SetName("TryParseSinkSizes_Absent_Off");
+            yield return new TestCaseData("0", true, false).SetName("TryParseSinkSizes_Zero_Off");
+            yield return new TestCaseData(" 1 ", true, true).SetName("TryParseSinkSizes_One_On");
+        }
+
+        [TestCaseSource(nameof(SinkSizesArgumentCases))]
+        public void TryParseSinkSizes(string text, bool parsed, bool enabled)
+        {
+            Assert.That(ServerMeshPhantomSink.TryParseSinkSizes(text, out bool gotEnabled, out string error), Is.EqualTo(parsed));
+            Assert.That(gotEnabled, Is.EqualTo(enabled));
+            if (parsed)
+                Assert.That(error, Is.Null);
+            else
+                Assert.That(error, Does.Contain(ServerMeshPhantomSink.ArgSinkSizes).And.Not.Contain("{").And.Not.Contain("}"));
+        }
+
         [Test]
         public void UploadDue_WithA15Point6MsPollQuantum_TwentyPerSecond()
         {
@@ -171,6 +297,39 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
 
             Assert.That(line, Is.EqualTo("Sink window 5.00 s: peers 50 connected 50 bound 50 | in 2621440 B 6000 pkt 512.0 kB/s | down n 4 mean 10.2 p95 10.9 max 10.9 kB/s | t119 calls 5000 bytes 2500000 | t65001 calls 0 bytes 0 | other calls 1000 bytes 30000 | out 5000 uploads 1000.0/s 30.0 kB/s | disconnects 0 | workers 1 maxPassMs 3.2"));
             Assert.That(line, Does.Not.Contain("{").And.Not.Contain("}").And.Not.Contain("Exception"));
+        }
+
+        private static MeshRecordSizeCounts ShipRecordSizes(int records)
+        {
+            NetDataWriter writer = new NetDataWriter();
+            TransportHandler.WritePacket(writer, 119);
+            writer.PutPackedLong(1_790_000_000_000L);
+            writer.Put(records);
+            for (int i = 0; i < records; ++i)
+            {
+                writer.PutPackedUInt((uint)(100 + i));
+                writer.Put(56);
+                writer.Put(new byte[56]);
+            }
+            MeshRecordSizeCounts sizes = new MeshRecordSizeCounts();
+            Assert.That(sizes.TryAddPacket(writer.Data, 0, writer.Length), Is.True);
+            return sizes;
+        }
+
+        [Test]
+        [SetCulture("de-DE")]
+        public void SinkWindowLine_WithRecordSizes_EndsWithTheSizesGroup_WithoutIsUnchanged()
+        {
+            MeshRecordSizeCounts sizes = ShipRecordSizes(3);
+            Func<MeshRecordSizeCounts, string> line = s => ServerMeshPhantomSink.SinkWindowLine(5.0, 50, 50, 50, 2621440, 6000, new List<double> { 10.9, 9.4, 10.5, 10.0 },
+                new ushort[] { 65001, 119 }, new long[] { 0, 5000 }, new long[] { 0, 2500000 }, 1000, 30000, 5000, 153600, 0, 1, 3.2, s);
+            string plain = ServerMeshPhantomSink.SinkWindowLine(5.0, 50, 50, 50, 2621440, 6000, new List<double> { 10.9, 9.4, 10.5, 10.0 },
+                new ushort[] { 65001, 119 }, new long[] { 0, 5000 }, new long[] { 0, 2500000 }, 1000, 30000, 5000, 153600, 0, 1, 3.2);
+
+            Assert.That(line(null), Is.EqualTo(plain));
+            Assert.That(line(sizes), Is.EqualTo(plain + sizes.ToGroup()));
+            Assert.That(sizes.ToGroup(), Does.StartWith(" | sizes n 3 min 56 max 56 top 56:3 "));
+            Assert.That(line(sizes), Does.Not.Contain("{").And.Not.Contain("}").And.Not.Contain("Exception"));
         }
 
         [Test]

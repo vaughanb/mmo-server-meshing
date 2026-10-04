@@ -137,6 +137,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 RefusePuppetMotion(ghost, MeshPuppetFallback.Install, error);
                 return;
             }
+            if (_stateSender != null && _stateSender.IsSending && _stateSender.Register(body))
+                body.SentBySender = true;
             ghost.body = body;
             _kinematicGhosts.Add(ghost);
         }
@@ -189,9 +191,20 @@ namespace MultiplayerARPG.MMO.Mesh
             ghost.body = null;
             _kinematicGhosts.Remove(ghost);
             BaseCharacterEntity entity = ghost.entity;
+            LeaveStateSender(body);
             body.End(entity, _slots);
             if (reason != MeshPuppetFallback.None && traceHandoffTiming && entity != null)
                 Logging.Log("Mesh", $"Puppet motion: {ghost.kind} {(string.IsNullOrEmpty(entity.CharacterName) ? ghost.kind.ToString() : entity.CharacterName)} ({MeshEntityIdOf(entity)}) back to steering ({reason})");
+        }
+
+        /// <summary>
+        /// LeaveStateSender takes a body out of the state sender before End hands its slot back, so the rewrap that slot's
+        /// LayerRemoved queues never meets a registered body; End then clears SentBySender.
+        /// </summary>
+        private void LeaveStateSender(MeshKinematicCharacterBody body)
+        {
+            if (body.SentBySender && _stateSender != null)
+                _stateSender.Unregister(body);
         }
 
         /// <summary>
@@ -209,7 +222,10 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (body == null || entity == null || entity.Identity == null || entity.Identity.IsDestroyed)
                 {
                     if (body != null)
+                    {
+                        LeaveStateSender(body);
                         body.End(entity, _slots);
+                    }
                     ghost.body = null;
                     _kinematicGhosts.RemoveAt(i);
                 }

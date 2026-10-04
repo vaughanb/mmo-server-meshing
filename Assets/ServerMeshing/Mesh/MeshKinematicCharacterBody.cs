@@ -18,7 +18,7 @@ namespace MultiplayerARPG.MMO.Mesh
     /// A discontinuity on a NavMesh-kit (monster) body sends IsTeleport alone, reliably, for exactly one write timestamp;
     /// a character-controller-kit (player) body never sets it, since its clients snap by themselves past their threshold.
     /// </summary>
-    public sealed class MeshKinematicCharacterBody : IEntityMovementDataHandler, IMeshStateSource
+    public sealed class MeshKinematicCharacterBody : IEntityMovementDataHandler, IMeshSenderOwnedSource
     {
         private const int OwnerOnlyFlags = (int)(MovementState.IsJump | MovementState.IsTeleport);
         private const uint TeleportFlags = (uint)MovementState.IsTeleport;
@@ -85,6 +85,17 @@ namespace MultiplayerARPG.MMO.Mesh
 
         /// <summary>IsBegun is true between a successful Begin and End.</summary>
         public bool IsBegun => _isBegun;
+
+        /// <summary>
+        /// SentBySender is true while the body is registered with the state sender, which then writes it once per build
+        /// through WriteState with one timestamp; the kit-facing WriteServerState returns false and writes nothing, so the
+        /// body never has two writers. Whoever takes the body out of the sender clears it (End always does), so the kit
+        /// sends the body again.
+        /// </summary>
+        public bool SentBySender { get; set; }
+
+        /// <summary>OnSenderReleased clears SentBySender when the state sender lets go of the body unasked, so the kit sends it again.</summary>
+        public void OnSenderReleased() => SentBySender = false;
 
         /// <summary>
         /// Refusal is why a puppet cannot move kinematically, or None: Handler unless <paramref name="kitHandler"/> is a
@@ -177,9 +188,11 @@ namespace MultiplayerARPG.MMO.Mesh
         /// End gives the puppet back to the kit; a second call does nothing. It removes the body from the slot (or forgets
         /// it when the entity is destroyed), removes both disable keys, enables the movement component and turns the kit's
         /// look rotation to the current yaw at once, so the kit does not turn the puppet back to its yaw before Begin.
+        /// It clears SentBySender first, even on a body that never began.
         /// </summary>
         public void End(BaseCharacterEntity entity, MeshMovementHandlerSlots slots)
         {
+            SentBySender = false;
             if (slots == null)
                 throw new ArgumentNullException(nameof(slots));
             if (!_isBegun)
@@ -303,22 +316,38 @@ namespace MultiplayerARPG.MMO.Mesh
         /// WriteServerState appends the kit's server record of the transform's position and yaw with the snapshot's flags
         /// and extra state. It changes nothing except the teleport stamp: an armed teleport is sent as IsTeleport alone,
         /// reliably, by the first write and by every write with that same timestamp; a write with another timestamp ends it.
-        /// Two writes with one timestamp therefore write identical bytes. Drive it from one clock only.
+        /// Two writes with one timestamp therefore write identical bytes. Drive it from one clock only. While SentBySender
+        /// it returns false and writes nothing (the sender writes the body through WriteState).
         /// </summary>
         public bool WriteServerState(long writeTimestamp, NetDataWriter writer, out bool shouldSendReliably)
         {
             if (writer == null)
                 throw new ArgumentNullException(nameof(writer));
+            if (SentBySender)
+            {
+                shouldSendReliably = false;
+                return false;
+            }
+            return WriteRecord(writeTimestamp, writer, out shouldSendReliably);
+        }
+
+        /// <summary>
+        /// WriteState writes the kit's server record as WriteServerState does without SentBySender, whatever SentBySender
+        /// says, and routes the record reliably while a teleport is sent.
+        /// </summary>
+        public bool WriteState(long sampleTimestamp, NetDataWriter writer, out bool sendReliably)
+        {
+            if (writer == null)
+                throw new ArgumentNullException(nameof(writer));
+            return WriteRecord(sampleTimestamp, writer, out sendReliably);
+        }
+
+        private bool WriteRecord(long writeTimestamp, NetDataWriter writer, out bool shouldSendReliably)
+        {
             bool teleport = TakeTeleport(writeTimestamp);
             shouldSendReliably = teleport;
             WriteKitTransform(writer, teleport ? TeleportFlags : _flags, _extra, _transform.position, _transform.eulerAngles.y);
             return true;
-        }
-
-        /// <summary>WriteState writes the same bytes as WriteServerState and routes the record reliably while a teleport is sent.</summary>
-        public bool WriteState(long sampleTimestamp, NetDataWriter writer, out bool sendReliably)
-        {
-            return WriteServerState(sampleTimestamp, writer, out sendReliably);
         }
 
         private bool IsKnownUnobserved => _identity != null && _identity.CountSubscribers() == 0;

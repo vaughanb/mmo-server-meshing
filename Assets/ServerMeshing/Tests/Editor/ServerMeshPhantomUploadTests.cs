@@ -18,7 +18,8 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
         {
             NetDataWriter writer = new NetDataWriter();
             ServerMeshPhantomUploads.WriteFrame(writer, timestamp, 42);
-            written = payload.TryWrite(writer, moving, teleport, position, yaw, ref stopSent, out reliable);
+            ServerMeshPhantomPose pose = new ServerMeshPhantomPose(position, yaw);
+            written = payload.TryWrite(writer, moving, teleport, in pose, ref stopSent, out reliable);
             return writer;
         }
 
@@ -150,6 +151,182 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             Assert.That(input.MovementState, Is.EqualTo(MovementState.IsTeleport));
             Assert.That(input.Position, Is.EqualTo(destination));
             Assert.That(reader.EndOfData, Is.True);
+        }
+
+        [Test]
+        public void InputFrame_ThroughThePose_IsTheKitLayoutByteForByte()
+        {
+            bool stopSent = false;
+            NetDataWriter writer = Frame(ServerMeshPhantomInputPayload.Instance, 1000, true, false, GoldenPosition, 270.125f, ref stopSent, out _, out _);
+            NetDataWriter expected = new NetDataWriter();
+            ServerMeshPhantomUploads.WriteFrame(expected, 1000, 42);
+            expected.Put((byte)ServerMeshPhantomInputPayload.MovingInput);
+            expected.PutPackedUInt((uint)MovementState.Forward);
+            expected.Put((byte)ExtraMovementState.None);
+            expected.PutVector3(GoldenPosition);
+            expected.PutPackedInt(EntityMovementFunctions.GetCompressedAngle(270.125f));
+
+            Assert.That(Hex(writer), Is.EqualTo(Hex(expected)));
+        }
+
+        [Test]
+        public void CharacterPose_KeepsPositionAndYawVerbatim_AndComputesNothingElse()
+        {
+            const float yaw = 123.456789f;
+            ServerMeshPhantomPose pose = new ServerMeshPhantomPose(GoldenPosition, yaw);
+
+            Assert.That(BitConverter.SingleToInt32Bits(pose.YawDegrees), Is.EqualTo(BitConverter.SingleToInt32Bits(yaw)));
+            Assert.That(pose.Position, Is.EqualTo(GoldenPosition));
+            Assert.That(pose.Rotation, Is.EqualTo(Quaternion.identity));
+            Assert.That(pose.Velocity, Is.EqualTo(Vector3.zero));
+            Assert.That(pose.AngularVelocity, Is.EqualTo(Vector3.zero));
+            Assert.That(pose.Forward, Is.False);
+            Assert.That(pose.Sequence + pose.FlightState + pose.Epoch, Is.EqualTo(0));
+        }
+
+        [Test]
+        public void ShipPose_HoldsEveryField_YawFromTheRotation()
+        {
+            Quaternion rotation = Quaternion.Euler(0f, 90f, 0f);
+            ServerMeshPhantomPose pose = new ServerMeshPhantomPose(GoldenPosition, rotation, new Vector3(1f, 2f, 3f), new Vector3(0f, 0.5f, 0f), true, 7, 2, 9);
+
+            Assert.That(pose.YawDegrees, Is.EqualTo(90f).Within(1e-3f));
+            Assert.That(pose.Rotation, Is.EqualTo(rotation));
+            Assert.That(pose.Velocity, Is.EqualTo(new Vector3(1f, 2f, 3f)));
+            Assert.That(pose.AngularVelocity, Is.EqualTo(new Vector3(0f, 0.5f, 0f)));
+            Assert.That(pose.Forward, Is.True);
+            Assert.That(pose.Sequence, Is.EqualTo(7));
+            Assert.That(pose.FlightState, Is.EqualTo(2));
+            Assert.That(pose.Epoch, Is.EqualTo(9));
+        }
+
+        private static ServerMeshPhantomPose SamplePose(byte sequence)
+        {
+            return new ServerMeshPhantomPose(new Vector3(1.5f, -2.25f, 1000f), new Quaternion(0f, 0.70710677f, 0f, 0.70710677f), new Vector3(10f, 0f, -5f), new Vector3(0f, 0.5f, 0f), true, sequence, 0, 0);
+        }
+
+        private static IEnumerable<TestCaseData> ShipPayloadCases()
+        {
+            yield return new TestCaseData(ServerMeshShipWireKind.Legacy54, ServerMeshShipWireKind.Legacy54, 54).SetName("ShipPayload_Legacy54_Writes54Bytes");
+            yield return new TestCaseData(ServerMeshShipWireKind.Header56, ServerMeshShipWireKind.Header56, 56).SetName("ShipPayload_Header56_Writes56Bytes");
+            yield return new TestCaseData(ServerMeshShipWireKind.Compact28, ServerMeshShipWireKind.Header56, 56).SetName("ShipPayload_Compact28_UploadsHeader56");
+        }
+
+        [TestCaseSource(nameof(ShipPayloadCases))]
+        public void ShipPayload_Length_AckByte_AndNeverReliable(ServerMeshShipWireKind configured, ServerMeshShipWireKind written, int length)
+        {
+            ServerMeshPhantomShipPayload payload = new ServerMeshPhantomShipPayload(configured);
+            foreach (bool moving in new[] { true, false })
+            {
+                NetDataWriter writer = new NetDataWriter();
+                bool stopSent = true;
+                ServerMeshPhantomPose pose = SamplePose(3);
+
+                bool wrote = payload.TryWrite(writer, moving, false, in pose, ref stopSent, out bool reliable);
+
+                Assert.That(wrote, Is.True);
+                Assert.That(reliable, Is.False);
+                Assert.That(stopSent, Is.False);
+                Assert.That(payload.Wire, Is.EqualTo(written));
+                Assert.That(payload.UploadBytes, Is.EqualTo(length));
+                Assert.That(writer.Length, Is.EqualTo(length));
+                Assert.That(writer.Data[length - 1], Is.EqualTo(3), "the teleport byte acknowledges the pose's sequence");
+            }
+        }
+
+        [Test]
+        public void ShipPayload_Header56_HeaderIsOwnerMirror_AndRoundTrips()
+        {
+            ServerMeshPhantomShipPayload payload = new ServerMeshPhantomShipPayload(ServerMeshShipWireKind.Header56);
+            NetDataWriter writer = new NetDataWriter();
+            bool stopSent = false;
+            ServerMeshPhantomPose pose = SamplePose(5);
+            payload.TryWrite(writer, true, false, in pose, ref stopSent, out _);
+            NetDataReader reader = new NetDataReader(writer.CopyData());
+
+            ServerMeshShipWire.ReadHeader56(reader, out ServerMeshShipSample sample);
+
+            Assert.That(writer.Data[0] & 0x03, Is.EqualTo((int)ServerMeshShipAuthority.OwnerMirror));
+            Assert.That(writer.Data[0] & ServerMeshShipWire.CompactBit, Is.EqualTo(0));
+            Assert.That(sample.Authority, Is.EqualTo(ServerMeshShipAuthority.OwnerMirror));
+            Assert.That(sample.Position, Is.EqualTo(pose.Position));
+            Assert.That(sample.Rotation, Is.EqualTo(pose.Rotation));
+            Assert.That(sample.Velocity, Is.EqualTo(pose.Velocity));
+            Assert.That(sample.AngularVelocity, Is.EqualTo(pose.AngularVelocity));
+            Assert.That(sample.Forward, Is.True);
+            Assert.That(sample.TeleportByte, Is.EqualTo(5));
+            Assert.That(reader.EndOfData, Is.True);
+        }
+
+        [Test]
+        public void ShipPayload_Legacy54_RoundTrips()
+        {
+            ServerMeshPhantomShipPayload payload = new ServerMeshPhantomShipPayload(ServerMeshShipWireKind.Legacy54);
+            NetDataWriter writer = new NetDataWriter();
+            bool stopSent = false;
+            ServerMeshPhantomPose pose = SamplePose(3);
+            payload.TryWrite(writer, true, false, in pose, ref stopSent, out _);
+            NetDataReader reader = new NetDataReader(writer.CopyData());
+
+            ServerMeshShipWire.ReadLegacy54(reader, out ServerMeshShipSample sample);
+
+            Assert.That(sample.Position, Is.EqualTo(pose.Position));
+            Assert.That(sample.Rotation, Is.EqualTo(pose.Rotation));
+            Assert.That(sample.Velocity, Is.EqualTo(pose.Velocity));
+            Assert.That(sample.Forward, Is.True);
+            Assert.That(sample.TeleportByte, Is.EqualTo(3));
+            Assert.That(reader.EndOfData, Is.True);
+        }
+
+        [Test]
+        public void ShipPayload_TeleportConfirm_WritesTheDestinationAtRest_NotReliably()
+        {
+            ServerMeshPhantomShipPayload payload = new ServerMeshPhantomShipPayload(ServerMeshShipWireKind.Header56);
+            NetDataWriter writer = new NetDataWriter();
+            bool stopSent = false;
+            ServerMeshPhantomPose pose = SamplePose(8);
+
+            payload.TryWrite(writer, true, true, in pose, ref stopSent, out bool reliable);
+            ServerMeshShipWire.ReadHeader56(new NetDataReader(writer.CopyData()), out ServerMeshShipSample sample);
+
+            Assert.That(reliable, Is.False);
+            Assert.That(sample.Position, Is.EqualTo(pose.Position));
+            Assert.That(sample.Velocity, Is.EqualTo(Vector3.zero));
+            Assert.That(sample.AngularVelocity, Is.EqualTo(Vector3.zero));
+            Assert.That(sample.Forward, Is.False);
+            Assert.That(sample.TeleportByte, Is.EqualTo(8));
+        }
+
+        [Test]
+        public void ShipPose_NullPath_Throws()
+        {
+            Assert.That(Assert.Throws<ArgumentNullException>(() => ServerMeshPhantomUploads.ShipPose(null, 0, false, Vector3.zero, Quaternion.identity, 0)).ParamName, Is.EqualTo("path"));
+        }
+
+        [Test]
+        public void ShipPose_FollowsThePath_OrConfirmsATeleportAtTheShip()
+        {
+            ServerMeshShipFlightPath path = new ServerMeshShipFlightPath(12345, ServerMeshShipFlightPath.PhantomIndexBase, new Vector3(0f, 60f, 0f), new ServerMeshShipScale(1f));
+            const double t = 1_790_000_000.25;
+            path.Evaluate(t, out Vector3 position, out Quaternion rotation, out Vector3 velocity, out Vector3 angular);
+            Vector3 shipAt = new Vector3(5f, 60f, -5f);
+            Quaternion shipRotation = Quaternion.Euler(0f, 30f, 0f);
+
+            ServerMeshPhantomPose flying = ServerMeshPhantomUploads.ShipPose(path, t, false, shipAt, shipRotation, 4);
+            ServerMeshPhantomPose confirm = ServerMeshPhantomUploads.ShipPose(path, t, true, shipAt, shipRotation, 5);
+
+            Assert.That(flying.Position, Is.EqualTo(position));
+            Assert.That(flying.Rotation, Is.EqualTo(rotation));
+            Assert.That(flying.Velocity, Is.EqualTo(velocity));
+            Assert.That(flying.AngularVelocity, Is.EqualTo(angular));
+            Assert.That(flying.Forward, Is.True);
+            Assert.That(flying.Sequence, Is.EqualTo(4));
+            Assert.That(confirm.Position, Is.EqualTo(shipAt));
+            Assert.That(confirm.Rotation, Is.EqualTo(shipRotation));
+            Assert.That(confirm.Velocity, Is.EqualTo(Vector3.zero));
+            Assert.That(confirm.AngularVelocity, Is.EqualTo(Vector3.zero));
+            Assert.That(confirm.Forward, Is.False);
+            Assert.That(confirm.Sequence, Is.EqualTo(5));
         }
 
         private static IEnumerable<TestCaseData> TimestampCases()

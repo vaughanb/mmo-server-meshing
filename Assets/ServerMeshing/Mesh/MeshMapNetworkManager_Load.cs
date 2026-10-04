@@ -3,6 +3,7 @@
 // line, and the latest one is shown in the Mesh stats line, after the cost figures and before the per-link breakdown.
 // Each Work window line is followed by a "Work ticks" line (MeshTickWindow): the kit's ticks and the frames they fell on.
 // With MESH_METER_SENDS set, a "Send window" line (MeshSendWindow) follows them: the window's server sends by type.
+// With MESH_SENDER set, a "Sender window" line (MeshStateSender) comes last: the state sender's builds and sends.
 using System.Collections.Generic;
 using LiteNetLib;
 using LiteNetLibManager;
@@ -58,6 +59,9 @@ namespace MultiplayerARPG.MMO.Mesh
         protected override void OnServerUpdate(LogicUpdater updater)
         {
             PoseKinematicPuppets(); // right before the kit sends movement, so watched kinematic puppets go out current
+            Sync.MeshStateSender sender = _stateSender;
+            if (sender != null)
+                sender.BeforeKitTick(Time.frameCount);
             MeshWorkMeter meter = MeshWorkProbe.Meter;
             meter.BeginTick(System.Diagnostics.Stopwatch.GetTimestamp());
             try
@@ -68,6 +72,8 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 meter.EndTick(System.Diagnostics.Stopwatch.GetTimestamp());
             }
+            if (sender != null)
+                sender.AfterKitTick(Time.frameCount); // only when the kit returned; its time lands in this tick's send sample
         }
 
         /// <summary>The kit's tick rate as its updater runs it, or updateFps before the updater exists.</summary>
@@ -156,6 +162,7 @@ namespace MultiplayerARPG.MMO.Mesh
             _hasWorkWindow = true;
             WorkWindowCount++;
             MeshSendWindow sends = TakeSendWindow(window, out long wireBytes, out long wirePackets);
+            string senderLine = _stateSender != null ? _stateSender.TakeWindowLine(window) : null;
             ReportProbeTransitions(before, _lastWorkWindow);
             if (!HasOwnZone || (OwnCell.owned.IsEmpty && OwnCell.interest.IsEmpty))
                 return; // a retired cell measures nothing
@@ -166,6 +173,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 Logging.Log("Mesh", ticks.bins);
             if (sends != null)
                 Logging.Log("Mesh", sends.ToLine(wireBytes, wirePackets));
+            if (senderLine != null)
+                Logging.Log("Mesh", senderLine);
             if (loadReportSeconds > 0f && ClusterClient != null && ClusterClient.IsAppRegistered)
                 ClusterClient.SendPacket(0, DeliveryMethod.ReliableOrdered, MeshClusterMsg.LoadReport, writer => report.Serialize(writer));
         }

@@ -11,7 +11,7 @@ using Object = UnityEngine.Object;
 
 namespace MultiplayerARPG.MMO.Mesh.Tests
 {
-    public class MeshKinematicCharacterBodyTests
+    public partial class MeshKinematicCharacterBodyTests
     {
         private const uint Id = 42;
         private const string GoldenA = "11 00 00 00 C0 3F 00 00 20 C0 00 00 50 40 FA 20 BF 02 00 00 00 00";
@@ -605,6 +605,107 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             Assert.That(_transform.position, Is.EqualTo(expectedPosition));
             Assert.That(_transform.eulerAngles.y, Is.EqualTo(expectedYaw).Within(1e-3f));
             Assert.That(body.Pose(10f), Is.EqualTo(expectedPosition));
+        }
+
+        [Test]
+        public void WriteServerState_SentBySender_ReturnsFalseAndWritesNothing()
+        {
+            MeshKinematicCharacterBody body = NewBody(false);
+            body.Accept(new Vector3(1.5f, -2.5f, 3.25f), Vector3.zero, 90f, 0x11, 0, false, 0f);
+            body.SentBySender = true;
+            NetDataWriter writer = new NetDataWriter();
+
+            bool wrote = body.WriteServerState(100, writer, out bool reliable);
+
+            Assert.That(wrote, Is.False);
+            Assert.That(reliable, Is.False);
+            Assert.That(writer.Length, Is.EqualTo(0));
+        }
+
+        [Test]
+        public void WriteServerState_SentBySender_LeavesAnArmedTeleportForWriteState()
+        {
+            MeshKinematicCharacterBody body = NewBody(true, NewIdentity(1));
+            body.Accept(Vector3.zero, Vector3.zero, 30f, 0x11, 1, false, 0f);
+            body.Accept(new Vector3(1f, 2f, 3f), Vector3.zero, 30f, 0x11, 1, true, 1f);
+            body.SentBySender = true;
+
+            Assert.That(body.WriteServerState(99, new NetDataWriter(), out _), Is.False);
+            NetDataWriter writer = new NetDataWriter();
+            Assert.That(body.WriteState(100, writer, out bool reliable), Is.True);
+
+            Assert.That(Hex(writer), Is.EqualTo(KitBytes(128u, 1)));
+            Assert.That(reliable, Is.True);
+        }
+
+        [Test]
+        public void WriteState_NullWriter_ThrowsNamingIt()
+        {
+            ArgumentNullException thrown = Assert.Throws<ArgumentNullException>(() => NewBody(false).WriteState(100, null, out _));
+
+            Assert.That(thrown.ParamName, Is.EqualTo("writer"));
+        }
+
+        [Test]
+        public void SentBySender_IsFalseOnANewBody()
+        {
+            Assert.That(NewBody(false).SentBySender, Is.False);
+        }
+
+        [Test]
+        public void End_NeverBegun_ClearsSentBySender()
+        {
+            ConcurrentDictionary<uint, IEntityMovementDataHandler> handlers = new ConcurrentDictionary<uint, IEntityMovementDataHandler>();
+            handlers[Id] = new MeshFakeKitHandler(Id);
+            MeshKinematicCharacterBody body = NewBody(false);
+            body.SentBySender = true;
+
+            body.End(null, new MeshMovementHandlerSlots(handlers));
+
+            Assert.That(body.SentBySender, Is.False);
+            Assert.That(body.IsBegun, Is.False);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void WriteState_GoldenBytes_WhateverSentBySenderSays(bool sentBySender)
+        {
+            _transform.SetPositionAndRotation(new Vector3(1.5f, -2.5f, 3.25f), Quaternion.Euler(0f, 90f, 0f));
+            MeshKinematicCharacterBody body = NewBody(false);
+            body.Accept(new Vector3(1.5f, -2.5f, 3.25f), Vector3.zero, 90f, 0x11, 0, false, 0f);
+            body.SentBySender = sentBySender;
+            NetDataWriter writer = new NetDataWriter();
+
+            Assert.That(body.WriteState(100, writer, out bool reliable), Is.True);
+
+            Assert.That(Hex(writer), Is.EqualTo(GoldenA));
+            Assert.That(reliable, Is.False);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void WriteState_Teleport_IsSentAloneAndReliablyForExactlyOneTimestamp(bool sentBySender)
+        {
+            MeshKinematicCharacterBody body = NewBody(true, NewIdentity(1));
+            body.Accept(Vector3.zero, Vector3.zero, 30f, 0x11, 1, false, 0f);
+            body.Accept(new Vector3(1f, 2f, 3f), Vector3.zero, 30f, 0x11, 1, true, 1f);
+            body.SentBySender = sentBySender;
+
+            Assert.That(StateBytes(body, 100, out bool reliable), Is.EqualTo(KitBytes(128u, 1)));
+            Assert.That(reliable, Is.True);
+            Assert.That(StateBytes(body, 100, out reliable), Is.EqualTo(KitBytes(128u, 1)));
+            Assert.That(reliable, Is.True);
+            Assert.That(StateBytes(body, 150, out reliable), Is.EqualTo(KitBytes(0x11, 1)));
+            Assert.That(reliable, Is.False);
+            Assert.That(StateBytes(body, 100, out reliable), Is.EqualTo(KitBytes(0x11, 1)));
+            Assert.That(reliable, Is.False);
+        }
+
+        private static string StateBytes(MeshKinematicCharacterBody body, long timestamp, out bool reliable)
+        {
+            NetDataWriter writer = new NetDataWriter();
+            Assert.That(body.WriteState(timestamp, writer, out reliable), Is.True);
+            return Hex(writer);
         }
     }
 }

@@ -342,5 +342,45 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             Assert.That(_handlers[43], Is.SameAs(otherLayer));
             Assert.That(_slots.HasLayer(43), Is.True);
         }
+
+        [Test]
+        public void Holds_UnknownId_IsFalse()
+        {
+            Assert.That(_slots.Holds(7, new MeshFakeKitHandler(7)), Is.False);
+            Assert.That(_slots.Holds(Id, null), Is.False);
+        }
+
+        [Test]
+        public void Holds_AnotherLayer_IsFalse()
+        {
+            MeshFakeReplaceableLayer layer = new MeshFakeReplaceableLayer(Id);
+            Assert.That(_slots.TryInstall(Id, layer, true, out _), Is.True);
+
+            Assert.That(_slots.Holds(Id, new MeshFakeReplaceableLayer(Id)), Is.False);
+            Assert.That(_slots.Holds(Id, _kit), Is.False);
+        }
+
+        [Test]
+        public void Holds_SlotTheKitWroteOver_IsFalse()
+        {
+            MeshFakeReplaceableLayer layer = new MeshFakeReplaceableLayer(Id);
+            Assert.That(_slots.TryInstall(Id, layer, true, out _), Is.True);
+
+            _handlers[Id] = _kit;
+
+            Assert.That(_slots.Holds(Id, layer), Is.False);
+        }
+
+        [Test]
+        public void Holds_TheInstalledLayer_IsTrueUntilItLeaves()
+        {
+            MeshFakeReplaceableLayer layer = new MeshFakeReplaceableLayer(Id);
+            Assert.That(_slots.TryInstall(Id, layer, true, out _), Is.True);
+
+            Assert.That(_slots.Holds(Id, layer), Is.True);
+
+            Assert.That(_slots.TryRemove(Id, layer, out _), Is.True);
+            Assert.That(_slots.Holds(Id, layer), Is.False);
+        }
     }
 }

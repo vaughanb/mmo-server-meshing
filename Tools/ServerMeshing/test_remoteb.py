@@ -42,6 +42,24 @@ class SinkArgumentsTests(unittest.TestCase):
                 self.assertEqual(remoteb.sink_arguments("192.168.50.83", port, count, base, DIR), expected)
 
 
+    def test_sink_arguments_with_sizes(self):
+        log = r"-logFile C:\MeshTest\Server\Logs\sink.log"
+        cases = {
+            "sizes": ((7770, 20, None, True),
+                      f"-batchmode -nographics -meshPhantomSink 192.168.50.83:7770:20 -meshPhantomSinkSizes 1 {log}"),
+            "sizes from a port base": (
+                (7770, 20, 9000, True),
+                f"-batchmode -nographics -meshPhantomSink 192.168.50.83:7770:20:9000 -meshPhantomSinkSizes 1 {log}"),
+            "no sizes": ((7770, 20, None, False), f"-batchmode -nographics -meshPhantomSink 192.168.50.83:7770:20 {log}"),
+        }
+        for name, ((port, count, base, sizes), expected) in cases.items():
+            with self.subTest(name):
+                self.assertEqual(remoteb.sink_arguments("192.168.50.83", port, count, base, DIR, sizes), expected)
+
+    def test_a_sink_with_sizes_still_counts_as_a_sink(self):
+        self.assertIn(remoteb.SINK_FLAG, remoteb.SINK_SIZES_FLAG)
+
+
 class ProcessFilterTests(unittest.TestCase):
     def test_cells_and_the_sink_are_told_apart(self):
         cases = {

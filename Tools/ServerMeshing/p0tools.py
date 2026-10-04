@@ -1,4 +1,4 @@
-"""Phase 0 instrument helpers (steps 2 to 5): parsers for the lines the map servers log, the toggles that switch them
+"""Phase 0 instrument helpers (steps 2 to 7): parsers for the lines the map servers log, the toggles that switch them
 on, the Phase 0 keys not built yet, and a mirror of the C# MESH_RATES grammar. Pure: nothing here reads files or the
 environment.
 
@@ -20,15 +20,18 @@ environment.
 ENV_REGISTRY holds the implemented Phase 0 keys; PENDING_KEYS the build sheet's §0.16 keys that later steps build, and
 DROPPED_KEYS the ones it no longer needs. Every parser works on a bare message or a whole log line; "end" is the line's
 stamp, or None when it has none. The step 5 lines (Send, Phantom, Sink and Bot net windows) and the MESH_PHANTOM,
-MESH_PHANTOM_AREA and MESH_METER_SENDS grammars are p0phantom's.
+MESH_PHANTOM_AREA and MESH_METER_SENDS grammars are p0phantom's; the step 6 lines (Sender window, CE-12 check) and the
+MESH_SENDER and MESH_SENDER_TIERS grammars are p0sender's; the step 7 lines (Ships, Feeder, Sync load, Bot ships), the
+ship grammars and the ten step 7 key meanings are p0ships'.
 Unit tests: python -m unittest discover -s Tools/ServerMeshing -p "test_*.py"
 """
 import re
 
+import p0ships
 import rigtools
 
-# The Phase 0 toggles (six from step 2, four from step 3, ten from step 5), each also in regress.ENV_KEYS so a Play
-# request can set and clear it.
+# The Phase 0 toggles (six from step 2, four from step 3, ten from step 5, ten from step 6, ten from step 7), each also in
+# regress.ENV_KEYS so a Play request can set and clear it. Step 7's meanings live in p0ships (the ~500-line rule).
 ENV_REGISTRY = {
     "MESH_WORK_BINS": "1: every Work ticks line is followed by a Work bins line listing the non-empty 0.05 ms bins",
     "MESH_RATES": "<fps>/<step>, u/<step> or u<fps>/<step>: every cell's frame cap (u: none, budgeted at <fps> or "
@@ -51,32 +54,37 @@ ENV_REGISTRY = {
     "MESH_LOAD_FIGHT": "0 or 1: whether steered synthetic players look for monsters in reach and attack them "
                        "(default 1)",
     "MESH_METER_SENDS": "off, count or time: meter server sends into a Send window line (time also times them)",
-    "MESH_PHANTOM": "<virtual|sink>:<P>:<character|eye>:<cell[,cell..]|all>: P phantom clients on each listed cell",
+    "MESH_PHANTOM": "<virtual|sink>:<P>:<character|eye|ship>:<cell[,cell..]|all>: P phantom clients on each listed cell",
     "MESH_PHANTOM_VIEW": "V movers per phantom (character >= 1; eye 0 follows existing movers); needed unless AREA",
     "MESH_PHANTOM_ARRIVAL_PER_S": "phantom and filler binds per second, above 0 (default 50)",
     "MESH_PHANTOM_UPLOAD_HZ": "1 to 60: uploads per phantom per second (default 20)",
-    "MESH_PHANTOM_PAYLOAD": "transform or input: what a phantom uploads (default transform; input not with eyes)",
+    "MESH_PHANTOM_PAYLOAD": "transform or input: what a character phantom uploads (default transform; input not with eyes)",
     "MESH_PHANTOM_STEPS": "<P1,..,Pn>@<s>: step the bound eye phantoms through these counts, s seconds each",
     "MESH_PHANTOM_AREA": "<cx>,<cz>,<w>,<h> or disc:<cx>,<cz>,<r>: character phantoms walk here, no groups or filler",
     "MESH_PHANTOM_STAND": "share 0 to 1 of the character phantoms, chosen by seed, that stand (default 0)",
     "MESH_PHANTOM_FIGHT": "share 0 to 1 of the character phantoms, chosen by seed, that fight on the server (default 0)",
+    "MESH_SENDER": "off, measure or on: the state sender writes entity state after the kit and counts it (measure), "
+                   "or sends it in place of the kit's loop (on), with a Sender window line (default off)",
+    "MESH_SENDER_SOURCES": "kit, direct or kit,direct: what the sender sends, wrapped kit handlers and/or registered "
+                           "direct sources (default both)",
+    "MESH_SENDER_TIERS": "near/mid/far[/owner] Hz, each 0, 1, 2, 5, 10 or 20: the distance tiers (owner default 20; "
+                         "unset 20/20/20/20)",
+    "MESH_SENDER_R0": "metres above 0: the tier radius (near within half, mid within it; default the visible range)",
+    "MESH_SENDER_COMPACT": "off or far: whether far pairs get compact records from sources that have them (default off)",
+    "MESH_SENDER_SPREAD": "0 or 1: defer every second source's routine unreliable records to the next frame (default 0)",
+    "MESH_SENDER_XZ": "0 or 1: tier distances on the X/Z plane instead of in 3D (default 0)",
+    "MESH_SENDER_CLASSIFY_BUILDS": "1 to 1000: builds between re-classifications of a pair, spread evenly (default 4)",
+    "MESH_SENDER_PACKET_BYTES": "1020, 510 or 255: the sender's packet cap in bytes (default 1020)",
+    "MESH_CE12_CHECK": "1: each serving cell spawns a hidden character, classifies its kit handler's one-shot flags "
+                       "and logs one CE-12 check line",
 }
+ENV_REGISTRY.update(p0ships.STEP7_REGISTRY)
 
 # The build sheet's other §0.16 keys: nothing reads them yet, so a plan that sets one is refused (rigrun.check_env).
-_STAGE_0B_STEP_6 = "stage 0b, step 6"
-_STAGE_0B_STEP_7 = "stage 0b, step 7"
+_STAGE_0B_STEP_8 = "stage 0b, step 8"
 _STAGE_0C_STEP_9 = "stage 0c, step 9"
 PENDING_KEYS = {
-    "MESH_SENDER": _STAGE_0B_STEP_6, "MESH_SENDER_SOURCES": _STAGE_0B_STEP_6, "MESH_SENDER_TIERS": _STAGE_0B_STEP_6,
-    "MESH_SENDER_R0": _STAGE_0B_STEP_6, "MESH_SENDER_COMPACT": _STAGE_0B_STEP_6, "MESH_SENDER_SPREAD": _STAGE_0B_STEP_6,
-    "MESH_SENDER_XZ": _STAGE_0B_STEP_6, "MESH_SENDER_CLASSIFY_BUILDS": _STAGE_0B_STEP_6,
-    "MESH_SENDER_PACKET_BYTES": _STAGE_0B_STEP_6, "MESH_SENDER_RESIDUAL_PROBE": _STAGE_0B_STEP_6,
-    "MESH_CE12_CHECK": _STAGE_0B_STEP_6,
-    "MESH_LOAD_SHIPS": _STAGE_0B_STEP_7, "MESH_LOAD_SHIP_PILOTS": _STAGE_0B_STEP_7, "MESH_SHIP_WIRE": _STAGE_0B_STEP_7,
-    "MESH_SHIP_SCALE": _STAGE_0B_STEP_7, "MESH_SHIP_PROJECTILES": _STAGE_0B_STEP_7,
-    "MESH_SHIP_PARK_SLEEP": _STAGE_0B_STEP_7, "MESH_SHIP_JUMP_SECONDS": _STAGE_0B_STEP_7,
-    "MESH_RIG_SHIPS": _STAGE_0B_STEP_7, "MESH_PUPPET_FEEDER": _STAGE_0B_STEP_7, "MESH_SYNC_LOAD": _STAGE_0B_STEP_7,
-    "MESH_PREWARM": _STAGE_0B_STEP_7,
+    "MESH_SHIP_PARK_SLEEP": _STAGE_0B_STEP_8, "MESH_PREWARM": _STAGE_0B_STEP_8, "MESH_SHIP_JUMP_SECONDS": _STAGE_0C_STEP_9,
     "MESH_MONSTER_CELL": _STAGE_0C_STEP_9, "MESH_DB_BURST": _STAGE_0C_STEP_9, "MESH_SPACES": _STAGE_0C_STEP_9,
 }
 DROPPED_KEYS = {
@@ -84,6 +92,8 @@ DROPPED_KEYS = {
     "MESH_PHANTOM_REGISTER": "dropped in step 5 (decision 3): phantoms anchor through their owned object, and "
                              "registering sends central traffic and makes them handoff candidates whose handoff writes "
                              "a fake row",
+    "MESH_SENDER_RESIDUAL_PROBE": "dropped in step 6 (decision 13): the Work ticks move part already times the kit's "
+                                  "movement loop under MESH_AOI_TIMING=1",
 }
 
 UNCAPPED = -1   # the frame rate of a setting, or a Rates line, without a cap

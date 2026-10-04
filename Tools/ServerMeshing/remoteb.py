@@ -12,8 +12,9 @@ so B needs nothing but the OpenSSH server, the build unpacked somewhere, and thi
     python Tools/ServerMeshing/remoteb.py clearmarkers   delete B's one-shot fault markers before a crash test
     python Tools/ServerMeshing/remoteb.py impair --profile loss2   degrade B's UDP link to A (see PROFILES)
     python Tools/ServerMeshing/remoteb.py impair --profile off      stop degrading it
-    python Tools/ServerMeshing/remoteb.py sink-start --sink-port 7770 [--sink-count 50] [--sink-base 9000]
+    python Tools/ServerMeshing/remoteb.py sink-start --sink-port 7770 [--sink-count 50] [--sink-base 9000] [--sink-sizes]
                                          start the phantom sink (Phase 0 step 5) against A's cell on that port
+                                         (--sink-sizes: its Sink window adds record sizes, Phase 0 step 7)
     python Tools/ServerMeshing/remoteb.py sink-stop  stop it (start/stop/status only ever count and stop cells)
 
 Defaults match Docs/ServerMeshing/MULTIHOST.md; override with --host/--user/--key/--dir or the MESH_B_* environment
@@ -80,6 +81,7 @@ def ssh(args, command, timeout=120):
 # The phantom sink (Phase 0 step 5) is the same executable as a cell, told apart by its command line, which
 # Get-Process cannot read: these filters list Win32_Process instead. A cell is any kit process without the sink flag.
 SINK_FLAG = "-meshPhantomSink"
+SINK_SIZES_FLAG = "-meshPhantomSinkSizes"   # ServerMeshPhantomSink.ArgSinkSizes (Phase 0 step 7)
 IS_CELL = "($_.Name -eq 'kit-ce-project.exe' -and $_.CommandLine -notlike '*" + SINK_FLAG + "*')"
 IS_SINK = "($_.Name -eq 'kit-ce-project.exe' -and $_.CommandLine -like '*" + SINK_FLAG + "*')"
 # Stop filters also catch the launch scripts. Their own text names those scripts, so the session running one (and
@@ -114,9 +116,10 @@ def sink_running(args):
     return out.strip() not in ("", "0")
 
 
-def sink_arguments(a_ip, port, count, base, directory):
+def sink_arguments(a_ip, port, count, base, directory, sizes=False):
     """The sink process's command-line arguments: it connects `count` peers to A's cell at a_ip:port, from local ports
-    starting at `base` when given, and logs to <directory>\\Logs\\sink.log (a sink gets no kit file log of its own).
+    starting at `base` when given, walks received EntityState records into a sizes group when `sizes`
+    (-meshPhantomSinkSizes 1), and logs to <directory>\\Logs\\sink.log (a sink gets no kit file log of its own).
     Raises ValueError for a port or base outside 1-65535 or a count below 1."""
     if not 1 <= port <= 65535:
         raise ValueError(f"sink port {port} is not from 1 to 65535")
@@ -127,7 +130,9 @@ def sink_arguments(a_ip, port, count, base, directory):
         if not 1 <= base <= 65535:
             raise ValueError(f"sink port base {base} is not from 1 to 65535")
         target += f":{base}"
-    return " ".join(["-batchmode", "-nographics", SINK_FLAG, target, "-logFile", directory + "\\Logs\\sink.log"])
+    sizes_flag = [SINK_SIZES_FLAG, "1"] if sizes else []
+    return " ".join(["-batchmode", "-nographics", SINK_FLAG, target] + sizes_flag
+                    + ["-logFile", directory + "\\Logs\\sink.log"])
 
 
 def launch_detached(args, name, body):
@@ -271,7 +276,7 @@ def cmd_sink_start(args):
         print("B already runs a phantom sink; sink-stop it first.")
         return 1
     try:
-        arguments = sink_arguments(args.a_ip, args.sink_port, args.sink_count, args.sink_base, args.dir)
+        arguments = sink_arguments(args.a_ip, args.sink_port, args.sink_count, args.sink_base, args.dir, args.sink_sizes)
     except ValueError as e:
         print(f"sink-start: {e}")
         return 2
@@ -400,6 +405,8 @@ def main():
                     help="sink-start: A's cell port, from its 'Phantoms: cell C port N' line (required)")
     ap.add_argument("--sink-count", type=int, default=50, help="sink-start: peers to connect (default 50)")
     ap.add_argument("--sink-base", type=int, default=None, help="sink-start: the peers' first local port")
+    ap.add_argument("--sink-sizes", action="store_true",
+                    help="sink-start: add record sizes to the Sink window (-meshPhantomSinkSizes 1, Phase 0 step 7)")
     ap.add_argument("--profile", default="off", help="impairment profile: " + ", ".join(sorted(PROFILES)))
     ap.add_argument("--clumsy", default=os.environ.get("MESH_B_CLUMSY", r"C:\MeshTest\clumsy"),
                     help="where clumsy lives on B")

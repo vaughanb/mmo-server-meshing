@@ -13,7 +13,7 @@ using Object = UnityEngine.Object;
 
 namespace MultiplayerARPG.MMO.Mesh.Tests
 {
-    public class MeshMeteredTransportTests
+    public partial class MeshMeteredTransportTests
     {
         private readonly List<GameObject> _gameObjects = new List<GameObject>();
 
@@ -527,6 +527,88 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             Assert.That(line, Does.Not.Contain("{"));
             Assert.That(line, Does.Not.Contain("\n"));
             Assert.That(line, Does.Not.Contain("Exception"));
+        }
+
+        private static NetDataWriter EntityStatePacket(int records)
+        {
+            NetDataWriter writer = new NetDataWriter();
+            TransportHandler.WritePacket(writer, GameNetworkingConsts.EntityState);
+            writer.PutPackedLong(1_790_000_000_000L);
+            writer.Put(records);
+            for (int i = 0; i < records; ++i)
+            {
+                writer.PutPackedUInt((uint)(i + 1));
+                writer.Put(1);
+                writer.Put((byte)i);
+            }
+            return writer;
+        }
+
+        [Test]
+        public void ServerSend_TooBigEntityState_CountsNoRecords()
+        {
+            MeshFakeTransport fake = NewFake();
+            fake.serverSendThrows = new TooBigPacketException("too big");
+            MeshSendMeter meter = new MeshSendMeter(1_000_000);
+            MeshMeteredTransport metered = new MeshMeteredTransport(fake, meter, false);
+
+            Assert.That(() => metered.ServerSend(1, 2, DeliveryMethod.Unreliable, EntityStatePacket(4)), Throws.TypeOf<TooBigPacketException>());
+
+            MeshSendWindow window = meter.TakeWindow(1d);
+            Assert.That(window.EntityStateRecordsTotal, Is.EqualTo(0));
+            Assert.That(window.EntityStateUnreadable, Is.EqualTo(0));
+        }
+
+        [Test]
+        public void ServerSend_TruncatedEntityState_CountsOneUnreadable()
+        {
+            MeshSendMeter meter = new MeshSendMeter(1_000_000);
+            MeshMeteredTransport metered = new MeshMeteredTransport(NewFake(), meter, false);
+            NetDataWriter writer = new NetDataWriter();
+            TransportHandler.WritePacket(writer, GameNetworkingConsts.EntityState);
+            writer.PutPackedLong(1000);
+
+            metered.ServerSend(1, 2, DeliveryMethod.Unreliable, writer);
+
+            MeshSendWindow window = meter.TakeWindow(1d);
+            Assert.That(window.EntityStateUnreadable, Is.EqualTo(1));
+            Assert.That(window.EntityStateRecordsTotal, Is.EqualTo(0));
+            Assert.That(window.Calls(GameNetworkingConsts.EntityState), Is.EqualTo(1));
+        }
+
+        [Test]
+        public void ServerSend_OtherMessageType_CountsNoRecords()
+        {
+            MeshSendMeter meter = new MeshSendMeter(1_000_000);
+            MeshMeteredTransport metered = new MeshMeteredTransport(NewFake(), meter, false);
+            NetDataWriter writer = Message(118, 12);
+
+            metered.ServerSend(1, 2, DeliveryMethod.Unreliable, writer);
+
+            MeshSendWindow window = meter.TakeWindow(1d);
+            Assert.That(window.EntityStateRecordsTotal, Is.EqualTo(0));
+            Assert.That(window.EntityStateUnreadable, Is.EqualTo(0));
+            Assert.That(window.ToLine(0, 0), Does.Not.Contain("| records"));
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public void ServerSend_EntityState_CountsItsRecordsUnderItsDelivery(bool accepted)
+        {
+            MeshFakeTransport fake = NewFake();
+            fake.result = accepted;
+            MeshSendMeter meter = new MeshSendMeter(1_000_000);
+            MeshMeteredTransport metered = new MeshMeteredTransport(fake, meter, false);
+
+            metered.ServerSend(1, 2, DeliveryMethod.Unreliable, EntityStatePacket(5));
+            metered.ServerSend(1, 2, DeliveryMethod.ReliableOrdered, EntityStatePacket(2));
+
+            MeshSendWindow window = meter.TakeWindow(1d);
+            Assert.That(window.EntityStateRecords(DeliveryMethod.Unreliable), Is.EqualTo(5));
+            Assert.That(window.EntityStateRecords(DeliveryMethod.ReliableOrdered), Is.EqualTo(2));
+            Assert.That(window.EntityStateRecordsTotal, Is.EqualTo(7));
+            Assert.That(window.EntityStateUnreadable, Is.EqualTo(0));
+            Assert.That(window.ToLine(0, 0), Does.Contain("| records ro 2 u 5 other 0 unread 0 | channels"));
         }
     }
 }

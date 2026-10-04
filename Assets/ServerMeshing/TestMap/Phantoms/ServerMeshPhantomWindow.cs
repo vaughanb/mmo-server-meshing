@@ -21,6 +21,7 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private readonly List<int> _vmove = new List<int>(64);
         private readonly List<float> _posErr = new List<float>(4096);
+        private readonly List<float> _viewErr = new List<float>(4096);
         private readonly List<double> _down = new List<double>(256);
         private readonly long[] _swallowedCalls = new long[ServerMeshPhantomTransport.DeliverySlots];
         private readonly long[] _swallowedBytes = new long[ServerMeshPhantomTransport.DeliverySlots];
@@ -40,6 +41,8 @@ namespace MultiplayerARPG.MMO.Mesh
         public int EyeSeen;
         /// <summary>ShowFighting prints the fighting count (MESH_PHANTOM_FIGHT is set).</summary>
         public bool ShowFighting;
+        /// <summary>ShowViewErr prints the viewErr group (the binder sets it when it starts the view sampler).</summary>
+        public bool ShowViewErr;
         /// <summary>Fighting is the phantoms that fight.</summary>
         public int Fighting;
         /// <summary>StepIndex is the current step from 1, or 0 when MESH_PHANTOM_STEPS is unset.</summary>
@@ -63,6 +66,8 @@ namespace MultiplayerARPG.MMO.Mesh
         public int VMoveSamples => _vmove.Count;
         /// <summary>PosErrSamples is how many posErr samples the window holds.</summary>
         public int PosErrSamples => _posErr.Count;
+        /// <summary>ViewErrSamples is how many viewErr samples the window holds.</summary>
+        public int ViewErrSamples => _viewErr.Count;
         /// <summary>DownSamples is how many down samples the window holds.</summary>
         public int DownSamples => _down.Count;
 
@@ -71,6 +76,9 @@ namespace MultiplayerARPG.MMO.Mesh
 
         /// <summary>AddPosErr adds one posErr sample in metres.</summary>
         public void AddPosErr(float metres) => _posErr.Add(metres);
+
+        /// <summary>AddViewErr adds one viewErr sample in metres: an observer's newest received position of an object against the object's server position.</summary>
+        public void AddViewErr(float metres) => _viewErr.Add(metres);
 
         /// <summary>AddDown adds one phantom's swallowed payload rate in kB/s.</summary>
         public void AddDown(double kiloBytesPerSecond) => _down.Add(kiloBytesPerSecond);
@@ -87,6 +95,7 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             _vmove.Clear();
             _posErr.Clear();
+            _viewErr.Clear();
             _down.Clear();
             Array.Clear(_swallowedCalls, 0, _swallowedCalls.Length);
             Array.Clear(_swallowedBytes, 0, _swallowedBytes.Length);
@@ -140,13 +149,15 @@ namespace MultiplayerARPG.MMO.Mesh
 
         /// <summary>
         /// ToLine is the window's line: every field always printed, zeros when empty, rates 0 when the window has no length,
-        /// no NaN or negatives. It sorts the sample lists in place.
+        /// no NaN or negatives; the fighting and viewErr groups only while ShowFighting and ShowViewErr are set. It sorts the
+        /// sample lists in place.
         /// </summary>
         public string ToLine()
         {
             double seconds = Seconds > 0 && !double.IsInfinity(Seconds) ? Seconds : 0;
             _vmove.Sort();
             _posErr.Sort();
+            _viewErr.Sort();
             _down.Sort();
             StringBuilder b = _line.Clear();
             b.Append("Phantom window ").Append(Fixed(seconds, "0.00")).Append(" s: bound virtual ").Append(Count(BoundVirtual));
@@ -160,6 +171,11 @@ namespace MultiplayerARPG.MMO.Mesh
             b.Append(" | uploads ").Append(Fixed(Rate(Uploads, seconds), "0.0")).Append("/s");
             b.Append(" | posErr n ").Append(_posErr.Count).Append(" p50 ").Append(Fixed(Percentile(_posErr, 0.5), "0.00"));
             b.Append(" p95 ").Append(Fixed(Percentile(_posErr, 0.95), "0.00")).Append(" max ").Append(Fixed(_posErr.Count > 0 ? _posErr[_posErr.Count - 1] : 0f, "0.00")).Append(" m");
+            if (ShowViewErr)
+            {
+                b.Append(" | viewErr n ").Append(_viewErr.Count).Append(" p50 ").Append(Fixed(Percentile(_viewErr, 0.5), "0.00"));
+                b.Append(" p95 ").Append(Fixed(Percentile(_viewErr, 0.95), "0.00")).Append(" max ").Append(Fixed(_viewErr.Count > 0 ? _viewErr[_viewErr.Count - 1] : 0f, "0.00")).Append(" m");
+            }
             b.Append(" | down n ").Append(_down.Count).Append(" mean ").Append(Fixed(Mean(_down), "0.0"));
             b.Append(" p95 ").Append(Fixed(Percentile(_down, 0.95), "0.0")).Append(" max ").Append(Fixed(_down.Count > 0 ? _down[_down.Count - 1] : 0.0, "0.0")).Append(" kB/s");
             b.Append(" | swallowed");

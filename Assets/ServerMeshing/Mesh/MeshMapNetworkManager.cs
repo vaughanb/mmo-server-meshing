@@ -92,17 +92,40 @@ namespace MultiplayerARPG.MMO.Mesh
         private bool _prevLoadOfflineScene;
         private ClientMigrationController _migration;
         private MeshSendMeter _sendMeter;
+        private Sync.MeshStateSender _stateSender;
 
         protected override void Awake()
         {
             world = MeshLayoutOverride.Resolve(world); // rig: MESH_LAYOUT_OVERRIDE re-cuts maps for a test run
             InstallSendMeter();
+            InstallStateSender();
             base.Awake();
         }
 
         /// <summary>
+        /// Phase 0 toggle MESH_SENDER (measure or on): adds the state sender before the kit collects its manager
+        /// components. Unset, empty or off adds nothing and logs nothing; any other value logs one warning and adds nothing.
+        /// </summary>
+        private void InstallStateSender()
+        {
+            string value = System.Environment.GetEnvironmentVariable(Sync.MeshStateSender.EnvironmentKey);
+            if (!Sync.MeshStateSender.TryParseSetting(value, out Sync.MeshStateSenderSetting setting, out string warning))
+            {
+                Logging.LogWarning("Mesh", warning);
+                return;
+            }
+            if (setting == Sync.MeshStateSenderSetting.Off)
+                return;
+            Sync.MeshStateSender sender = gameObject.AddComponent<Sync.MeshStateSender>();
+            sender.Setting = setting;
+            _stateSender = sender;
+            Logging.Log("Mesh", $"State sender: {Sync.MeshStateSender.EnvironmentKey}={Sync.MeshStateSender.CleanForLog(value.Trim())}: added before the kit collects its components");
+        }
+
+        /// <summary>
         /// Rig toggle MESH_METER_SENDS (count or time): wraps the kit's transport factory in a metered one, so every
-        /// server send is counted for the Send window line. Unset, empty or off changes nothing and logs nothing.
+        /// server send is counted for the Send window line. Unset, empty or off changes nothing and logs nothing. With the
+        /// meter installed, MESH_METER_RECORD_SIZES=1 also counts record sizes; the key alone does nothing.
         /// </summary>
         private void InstallSendMeter()
         {
@@ -124,6 +147,9 @@ namespace MultiplayerARPG.MMO.Mesh
             metered.Inner = kit;
             metered.Meter = new MeshSendMeter(System.Diagnostics.Stopwatch.Frequency);
             metered.Timed = timed;
+            if (!MeshRecordSizeCounts.TryParseSetting(System.Environment.GetEnvironmentVariable(MeshRecordSizeCounts.EnvironmentKey), out bool recordSizes, out string sizesWarning))
+                Logging.LogWarning("Mesh", sizesWarning);
+            metered.Meter.RecordSizes = recordSizes;
             TransportFactory = metered;
             _sendMeter = metered.Meter;
             Logging.Log("Mesh", MeshMeteredTransportFactory.SettingLine(timed));

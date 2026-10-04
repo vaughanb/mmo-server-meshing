@@ -1,4 +1,4 @@
-// Server Meshing add-on — rig phantom binder: makes MESH_PHANTOM's phantoms real, ready kit players, each owning one character or eye, on the cells it names.
+// Server Meshing add-on — rig phantom binder: makes MESH_PHANTOM's phantoms real, ready kit players, each owning one character, eye or ship, on the cells it names.
 using System.Collections.Generic;
 using LiteNetLib.Utils;
 using LiteNetLibManager;
@@ -27,6 +27,8 @@ namespace MultiplayerARPG.MMO.Mesh
         private IMeshLog _log;
         private ServerMeshPhantomUploads _uploads;
         private ServerMeshPhantomFighter _fighter;
+        private ServerMeshPhantomViewSampler _viewSampler;
+        private int _viewRound;
         private readonly ServerMeshPhantomWindow _window = new ServerMeshPhantomWindow();
         private readonly List<ServerMeshPhantomSlot> _slots = new List<ServerMeshPhantomSlot>();
         private readonly List<BasePlayerCharacterEntity> _filler = new List<BasePlayerCharacterEntity>();
@@ -167,10 +169,16 @@ namespace MultiplayerARPG.MMO.Mesh
             BandEdges(cell, out bool west, out bool east, out bool south, out bool north);
             int phantoms = _settings.Phantoms;
             bool eyes = _settings.Kind == ServerMeshPhantomKind.Eye;
+            bool ships = _settings.Kind == ServerMeshPhantomKind.Ship;
             Vector2[] positions = new Vector2[phantoms];
             Rect[] regions = new Rect[phantoms];
             int[] groupOf = new int[phantoms];
-            if (_settings.HasArea)
+            if (ships)
+            {
+                if (!PlanShips(scene, positions, regions))
+                    return false;
+            }
+            else if (_settings.HasArea)
             {
                 Rect region = _settings.AreaRegion;
                 if (region.xMin < scene.xMin || region.xMax > scene.xMax || region.yMin < scene.yMin || region.yMax > scene.yMax)
@@ -234,6 +242,14 @@ namespace MultiplayerARPG.MMO.Mesh
             _uploads.Log = _log;
             _uploads.Period = 1.0 / _settings.UploadHz;
             _uploads.Payload = _settings.Payload == ServerMeshPhantomPayloadKind.Input ? (IServerMeshPhantomPayload)ServerMeshPhantomInputPayload.Instance : ServerMeshPhantomTransformPayload.Instance;
+            _uploads.ShipPayload = ships ? new ServerMeshPhantomShipPayload(_settings.Wire) : null;
+            if (_settings.Route != ServerMeshPhantomRoute.Sink)
+            {
+                _viewSampler = new ServerMeshPhantomViewSampler(phantoms, _settings.Seed);
+                _transport.ViewSampler = _viewSampler;
+                _uploads.ViewSampler = _viewSampler;
+                _window.ShowViewErr = true;
+            }
             _fighter.Begin(mesh, _window, _log);
             _nextBind = Time.unscaledTimeAsDouble;
             int view = _settings.View < 0 ? 0 : _settings.View;
@@ -422,9 +438,12 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private void Release(ServerMeshPhantomSlot slot)
         {
+            if (_viewSampler != null && slot.connectionId >= 0)
+                _viewSampler.Untrack(slot.connectionId);
             if (slot.entity != null)
                 _fighter.Remove(slot.entity);
             _sinkConnections.Remove(slot.connectionId);
+            ReleaseShip(slot);
             slot.Release();
         }
 
@@ -436,28 +455,6 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (_slots[k].bound && entity != null && !entity.IsDestroyed)
                     SyntheticPlayerBrain.HealWhenLow(entity);
             }
-        }
-
-        private int CountVirtualBound()
-        {
-            int bound = 0;
-            for (int k = 0; k < _slots.Count; ++k)
-            {
-                if (_slots[k].bound && !_slots[k].sink)
-                    ++bound;
-            }
-            return bound;
-        }
-
-        private int CountVirtualActive()
-        {
-            int active = 0;
-            for (int k = 0; k < _slots.Count; ++k)
-            {
-                if (_slots[k].connectionId >= 0 && !_slots[k].sink)
-                    ++active;
-            }
-            return active;
         }
 
         private void Halt()
@@ -494,7 +491,13 @@ namespace MultiplayerARPG.MMO.Mesh
                 _mesh.onSpawnEntitiesFinish.RemoveListener(OnKitSpawnedEntities);
             _started = _decided = _serving = _planned = _halted = _kitSpawned = false;
             _mesh = null;
+            if (_transport != null)
+                _transport.ViewSampler = null;
             _transport = null;
+            _viewSampler = null;
+            _viewRound = 0;
+            _window.ShowViewErr = false;
+            ReleaseShips();
             _slots.Clear();
             _filler.Clear();
             _fillerGroups.Clear();

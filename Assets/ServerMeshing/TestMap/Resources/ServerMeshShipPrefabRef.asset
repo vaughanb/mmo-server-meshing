@@ -1,0 +1,15 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4ddbafe0a9a448d4a9af26fdaa748dd4, type: 3}
+  m_Name: ServerMeshShipPrefabRef
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.MMO.Mesh.ServerMeshShipPrefabRef
+  prefab: {fileID: 7885664086778731795, guid: 50317ae64d7568c43bb7be6a7419db93, type: 3}

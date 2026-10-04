@@ -15,6 +15,10 @@ namespace MultiplayerARPG.MMO.Mesh
         public BasePlayerCharacterEntity entity;
         public LiteNetLibIdentity identity;
         public ServerMeshPhantomEye eye;
+        public ServerMeshShipEntity ship;
+        public int flightPath = -1;
+        public ServerMeshShipFlightPath shipPath;
+        public byte shipSequence;
         public uint objectId;
         public Vector2 spawn;
         public Rect region;
@@ -43,6 +47,9 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>FedHere is true for a bound virtual character phantom: the feeder walks and uploads for it.</summary>
         public bool FedHere => bound && !sink && entity != null;
 
+        /// <summary>ShipFedHere is true for a bound virtual ship phantom: the feeder uploads its flight path.</summary>
+        public bool ShipFedHere => bound && !sink && ship != null;
+
         public void Release()
         {
             connectionId = -1;
@@ -52,6 +59,10 @@ namespace MultiplayerARPG.MMO.Mesh
             entity = null;
             identity = null;
             eye = null;
+            ship = null;
+            flightPath = -1;
+            shipPath = null;
+            shipSequence = 0;
             objectId = 0;
             lastTimestamp = 0;
             stopSent = false;

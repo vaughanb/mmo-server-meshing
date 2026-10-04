@@ -23,7 +23,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public const EntityMovementInputState StopInput = EntityMovementInputState.IsKeyMovement | EntityMovementInputState.IsStopped;
 
         /// <summary>TryWrite writes a moving, teleport-confirm or stop frame, or nothing for an idle phantom whose stop was already sent.</summary>
-        public bool TryWrite(NetDataWriter writer, bool moving, bool teleport, Vector3 position, float yawDegrees, ref bool stopSent, out bool reliable)
+        public bool TryWrite(NetDataWriter writer, bool moving, bool teleport, in ServerMeshPhantomPose pose, ref bool stopSent, out bool reliable)
         {
             if (!moving && !teleport)
             {
@@ -38,8 +38,8 @@ namespace MultiplayerARPG.MMO.Mesh
             writer.Put((byte)MovingInput);
             writer.PutPackedUInt((uint)(teleport ? MovementState.IsTeleport : MovementState.Forward));
             writer.Put((byte)ExtraMovementState.None);
-            writer.PutVector3(position);
-            writer.PutPackedInt(EntityMovementFunctions.GetCompressedAngle(Mathf.Repeat(yawDegrees, 360f)));
+            writer.PutVector3(pose.Position);
+            writer.PutPackedInt(EntityMovementFunctions.GetCompressedAngle(Mathf.Repeat(pose.YawDegrees, 360f)));
             stopSent = false;
             reliable = teleport;
             return true;

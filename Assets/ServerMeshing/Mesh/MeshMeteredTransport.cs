@@ -74,7 +74,9 @@ namespace MultiplayerARPG.MMO.Mesh
 
         /// <summary>
         /// ServerSend forwards to the inner transport and records the send: under its packed message type, or as unknown
-        /// when the writer holds none. It allocates nothing.
+        /// when the writer holds none. An EntityState send also records its record count, or one unreadable EntityState
+        /// send when the count cannot be read, and its record sizes when the meter counts them; a too-big send counts no
+        /// records. It allocates nothing.
         /// </summary>
         public bool ServerSend(long connectionId, byte dataChannel, DeliveryMethod deliveryMethod, NetDataWriter writer)
         {
@@ -97,6 +99,15 @@ namespace MultiplayerARPG.MMO.Mesh
                 _meter.Record(type, deliveryMethod, dataChannel, bytes, elapsed, !sent);
             else
                 _meter.RecordUnknown(deliveryMethod, dataChannel, bytes, elapsed, !sent);
+            if (known && type == GameNetworkingConsts.EntityState)
+            {
+                if (MeshSendMeter.TryReadEntityStateCount(writer.Data, 0, bytes, out int records))
+                    _meter.RecordEntityStateRecords(deliveryMethod, records);
+                else
+                    _meter.RecordEntityStateUnreadable();
+                if (_meter.RecordSizes)
+                    _meter.RecordEntityStateSizes(writer.Data, 0, bytes);
+            }
             return sent;
         }
 

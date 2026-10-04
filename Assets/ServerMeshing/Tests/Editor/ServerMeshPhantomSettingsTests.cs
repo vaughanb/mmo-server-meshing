@@ -18,14 +18,13 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
         private static IEnumerable<TestCaseData> InvalidPhantomCases()
         {
             yield return new TestCaseData("virtual:200:character", "no cell field").SetName("TryParsePhantom_NoCellField_Refused");
-            yield return new TestCaseData("virtual:200:ship:C", "step 7").SetName("TryParsePhantom_ShipKind_RefusedUntilStep7");
             yield return new TestCaseData("remote:5:eye:C", "not virtual or sink").SetName("TryParsePhantom_UnknownMode_Refused");
             yield return new TestCaseData("virtual:0:eye:C", "at least 1").SetName("TryParsePhantom_ZeroCount_Refused");
             yield return new TestCaseData("virtual:-1:eye:C", "at least 1").SetName("TryParsePhantom_NegativeCount_Refused");
             yield return new TestCaseData("virtual:+5:eye:C", "at least 1").SetName("TryParsePhantom_SignedCount_Refused");
             yield return new TestCaseData("virtual:5.0:eye:C", "at least 1").SetName("TryParsePhantom_DecimalCount_Refused");
             yield return new TestCaseData("virtual:abc:eye:C", "at least 1").SetName("TryParsePhantom_WordCount_Refused");
-            yield return new TestCaseData("virtual:5:robot:C", "not character or eye").SetName("TryParsePhantom_UnknownKind_Refused");
+            yield return new TestCaseData("virtual:5:robot:C", "not character, eye or ship").SetName("TryParsePhantom_UnknownKind_Refused");
             yield return new TestCaseData("virtual:5:eye:", "cell field").SetName("TryParsePhantom_EmptyCellField_Refused");
             yield return new TestCaseData("virtual:5:eye:C,,E", "cell field").SetName("TryParsePhantom_EmptyCellInList_Refused");
             yield return new TestCaseData("virtual:5:eye:C,c", "twice").SetName("TryParsePhantom_DuplicateCell_Refused");
@@ -59,6 +58,8 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             yield return new TestCaseData("virtual:200:character:C", ServerMeshPhantomRoute.Virtual, 200, ServerMeshPhantomKind.Character, false, new[] { "C" }).SetName("TryParsePhantom_VirtualCharacterOnOneCell");
             yield return new TestCaseData(" Sink : 50 : EYE : C , E ", ServerMeshPhantomRoute.Sink, 50, ServerMeshPhantomKind.Eye, false, new[] { "C", "E" }).SetName("TryParsePhantom_WhitespaceAndCase_AreIgnored");
             yield return new TestCaseData("virtual:1:eye:ALL", ServerMeshPhantomRoute.Virtual, 1, ServerMeshPhantomKind.Eye, true, new string[0]).SetName("TryParsePhantom_AllCells");
+            yield return new TestCaseData("virtual:200:ship:C", ServerMeshPhantomRoute.Virtual, 200, ServerMeshPhantomKind.Ship, false, new[] { "C" }).SetName("TryParsePhantom_ShipKind_Parses");
+            yield return new TestCaseData("sink:20:SHIP:C", ServerMeshPhantomRoute.Sink, 20, ServerMeshPhantomKind.Ship, false, new[] { "C" }).SetName("TryParsePhantom_SinkShipKind_Parses");
         }
 
         [TestCaseSource(nameof(ValidPhantomCases))]
@@ -87,8 +88,8 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             yield return new TestCaseData(ServerMeshPhantomSettings.ENV_UPLOAD_HZ, "0", ServerMeshPhantomKind.Eye).SetName("TryParseUploadHz_Zero_Refused");
             yield return new TestCaseData(ServerMeshPhantomSettings.ENV_UPLOAD_HZ, "61", ServerMeshPhantomKind.Eye).SetName("TryParseUploadHz_AboveSixty_Refused");
             yield return new TestCaseData(ServerMeshPhantomSettings.ENV_UPLOAD_HZ, "20.5", ServerMeshPhantomKind.Eye).SetName("TryParseUploadHz_Decimal_Refused");
-            yield return new TestCaseData(ServerMeshPhantomSettings.ENV_PAYLOAD, "ship56", ServerMeshPhantomKind.Character).SetName("TryParsePayload_Ship56_RefusedUntilStep7");
-            yield return new TestCaseData(ServerMeshPhantomSettings.ENV_PAYLOAD, "ship28", ServerMeshPhantomKind.Character).SetName("TryParsePayload_Ship28_RefusedUntilStep7");
+            yield return new TestCaseData(ServerMeshPhantomSettings.ENV_PAYLOAD, "ship56", ServerMeshPhantomKind.Character).SetName("TryParsePayload_Ship56_Refused");
+            yield return new TestCaseData(ServerMeshPhantomSettings.ENV_PAYLOAD, "ship28", ServerMeshPhantomKind.Ship).SetName("TryParsePayload_Ship28_Refused");
             yield return new TestCaseData(ServerMeshPhantomSettings.ENV_PAYLOAD, "input", ServerMeshPhantomKind.Eye).SetName("TryParsePayload_InputWithEyes_Refused");
             yield return new TestCaseData(ServerMeshPhantomSettings.ENV_PAYLOAD, "pose", ServerMeshPhantomKind.Character).SetName("TryParsePayload_UnknownWord_Refused");
             yield return new TestCaseData(ServerMeshPhantomSettings.ENV_STAND, "-0.1", ServerMeshPhantomKind.Character).SetName("TryParseShare_Negative_Refused");
@@ -238,6 +239,15 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             yield return new TestCaseData(new[] { "MESH_PHANTOM", "virtual:20:eye:C", "MESH_PHANTOM_VIEW", "10", "MESH_PHANTOM_FIGHT", "1" }, "MESH_PHANTOM_FIGHT=1 needs the character kind").SetName("TryResolve_FightWithEyes_Refused");
             yield return new TestCaseData(new[] { "MESH_PHANTOM", "virtual:20:eye:C", "MESH_PHANTOM_VIEW", "10", "MESH_LOAD_SEED", "x" }, "MESH_LOAD_SEED").SetName("TryResolve_BadSeed_Refused");
             yield return new TestCaseData(new[] { "MESH_PHANTOM", "virtual:{1}:eye:C" }, "virtual:(1):eye:C").SetName("TryResolve_Braces_TurnIntoParentheses");
+            yield return new TestCaseData(new[] { "MESH_PHANTOM", "virtual:20:ship:C", "MESH_PHANTOM_VIEW", "10" }, "MESH_PHANTOM_VIEW=10 is refused with the ship kind").SetName("TryResolve_ShipWithView_Refused");
+            yield return new TestCaseData(new[] { "MESH_PHANTOM", "virtual:20:ship:C", "MESH_PHANTOM_AREA", "0,0,50,50" }, "MESH_PHANTOM_AREA=0,0,50,50 is refused with the ship kind").SetName("TryResolve_ShipWithArea_Refused");
+            yield return new TestCaseData(new[] { "MESH_PHANTOM", "virtual:20:ship:C", "MESH_PHANTOM_PAYLOAD", "ship56" }, "MESH_PHANTOM_PAYLOAD=ship56 is refused with the ship kind").SetName("TryResolve_ShipWithPayload_Refused");
+            yield return new TestCaseData(new[] { "MESH_PHANTOM", "virtual:20:ship:C", "MESH_PHANTOM_STAND", "0.5" }, "MESH_PHANTOM_STAND=0.5 is refused with the ship kind").SetName("TryResolve_ShipWithStand_Refused");
+            yield return new TestCaseData(new[] { "MESH_PHANTOM", "virtual:20:ship:C", "MESH_PHANTOM_FIGHT", "1" }, "MESH_PHANTOM_FIGHT=1 is refused with the ship kind").SetName("TryResolve_ShipWithFight_Refused");
+            yield return new TestCaseData(new[] { "MESH_PHANTOM", "virtual:20:ship:C", "MESH_PHANTOM_STEPS", "10,20@5" }, "MESH_PHANTOM_STEPS=10,20@5 is refused with the ship kind").SetName("TryResolve_ShipWithSteps_Refused");
+            yield return new TestCaseData(new[] { "MESH_PHANTOM", "virtual:20:ship:C", "MESH_SHIP_WIRE", "ship56" }, "MESH_SHIP_WIRE=ship56 is refused for the ship kind").SetName("TryResolve_ShipWithJunkWire_Refused");
+            yield return new TestCaseData(new[] { "MESH_PHANTOM", "virtual:20:ship:C", "MESH_SHIP_SCALE", "0" }, "MESH_SHIP_SCALE=0 is refused for the ship kind").SetName("TryResolve_ShipWithZeroScale_Refused");
+            yield return new TestCaseData(new[] { "MESH_PHANTOM", "virtual:20:ship:C", "MESH_LOAD_SEED", "x" }, "MESH_LOAD_SEED").SetName("TryResolve_ShipWithBadSeed_Refused");
         }
 
         [TestCaseSource(nameof(RefusedResolveCases))]
@@ -310,6 +320,69 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             Assert.That(eyes.View, Is.EqualTo(0));
             Assert.That(eyes.Steps, Is.EqualTo(new[] { 10, 50 }));
             Assert.That(eyes.StepHoldSeconds, Is.EqualTo(20f));
+        }
+
+        private static IEnumerable<TestCaseData> ShipResolveCases()
+        {
+            yield return new TestCaseData(null, null, ServerMeshShipWireKind.Legacy54, ServerMeshShipWireKind.Legacy54, 1f, "payload legacy54 scale 1 ").SetName("TryResolve_ShipKind_DefaultsToLegacy54AtScaleOne");
+            yield return new TestCaseData("header56", "0.03", ServerMeshShipWireKind.Header56, ServerMeshShipWireKind.Header56, 0.03f, "payload header56 scale 0.03 ").SetName("TryResolve_ShipKind_Header56AtScale003");
+            yield return new TestCaseData("compact28", "0.5", ServerMeshShipWireKind.Compact28, ServerMeshShipWireKind.Header56, 0.5f, "payload compact28 scale 0.5 ").SetName("TryResolve_ShipKind_Compact28_UploadsHeader56");
+        }
+
+        [TestCaseSource(nameof(ShipResolveCases))]
+        public void TryResolve_ShipKind(string wireText, string scaleText, ServerMeshShipWireKind wire, ServerMeshShipWireKind upload, float scale, string payloadText)
+        {
+            bool resolved = ServerMeshPhantomSettings.TryResolve(Env("MESH_PHANTOM", "virtual:20:ship:C", "MESH_SHIP_WIRE", wireText, "MESH_SHIP_SCALE", scaleText, "MESH_PHANTOM_UPLOAD_HZ", "30"), out ServerMeshPhantomSettings settings, out string warning);
+
+            Assert.That(resolved, Is.True, warning);
+            Assert.That(warning, Is.Null);
+            Assert.That(settings.Kind, Is.EqualTo(ServerMeshPhantomKind.Ship));
+            Assert.That(settings.View, Is.EqualTo(-1));
+            Assert.That(settings.HasArea, Is.False);
+            Assert.That(settings.UploadHz, Is.EqualTo(30));
+            Assert.That(settings.Wire, Is.EqualTo(wire));
+            Assert.That(settings.UploadWire, Is.EqualTo(upload));
+            Assert.That(settings.ShipScale, Is.EqualTo(scale));
+            Assert.That(settings.SettingLine(), Does.Contain("kind ship P 20 view unset"));
+            Assert.That(settings.SettingLine(), Does.Contain(payloadText));
+        }
+
+        [Test]
+        public void TryResolve_CharacterKind_IgnoresTheShipKeys_AndKeepsItsSettingLine()
+        {
+            Assert.That(ServerMeshPhantomSettings.TryResolve(Env("MESH_PHANTOM", "virtual:20:character:C", "MESH_PHANTOM_VIEW", "10", "MESH_SHIP_WIRE", "junk", "MESH_SHIP_SCALE", "x"), out ServerMeshPhantomSettings settings, out string warning), Is.True, warning);
+            Assert.That(settings.Wire, Is.EqualTo(ServerMeshShipWireKind.Legacy54));
+            Assert.That(settings.ShipScale, Is.EqualTo(1f));
+            Assert.That(settings.SettingLine(), Does.Contain(" payload transform steps none "));
+        }
+
+        private static IEnumerable<TestCaseData> ShipWireNameCases()
+        {
+            yield return new TestCaseData(ServerMeshShipWireKind.Legacy54, "legacy54", ServerMeshShipWireKind.Legacy54).SetName("ShipWireName_Legacy54_UploadsLegacy54");
+            yield return new TestCaseData(ServerMeshShipWireKind.Header56, "header56", ServerMeshShipWireKind.Header56).SetName("ShipWireName_Header56_UploadsHeader56");
+            yield return new TestCaseData(ServerMeshShipWireKind.Compact28, "compact28", ServerMeshShipWireKind.Header56).SetName("ShipWireName_Compact28_UploadsHeader56");
+        }
+
+        [TestCaseSource(nameof(ShipWireNameCases))]
+        public void ShipWireName_AndUploadWireOf(ServerMeshShipWireKind wire, string name, ServerMeshShipWireKind upload)
+        {
+            Assert.That(ServerMeshPhantomSettings.ShipWireName(wire), Is.EqualTo(name));
+            Assert.That(ServerMeshPhantomSettings.UploadWireOf(wire), Is.EqualTo(upload));
+        }
+
+        [Test]
+        public void ShipRefusal_NullReader_Throws_AndNothingSet_IsNull()
+        {
+            Assert.That(Assert.Throws<ArgumentNullException>(() => ServerMeshPhantomSettings.ShipRefusal(null)).ParamName, Is.EqualTo("readValue"));
+            Assert.That(ServerMeshPhantomSettings.ShipRefusal(Env("MESH_PHANTOM", "virtual:20:ship:C", "MESH_PHANTOM_VIEW", "")), Is.Null);
+        }
+
+        [Test]
+        public void KindName_NamesEveryKind()
+        {
+            Assert.That(ServerMeshPhantomSettings.KindName(ServerMeshPhantomKind.Character), Is.EqualTo("character"));
+            Assert.That(ServerMeshPhantomSettings.KindName(ServerMeshPhantomKind.Eye), Is.EqualTo("eye"));
+            Assert.That(ServerMeshPhantomSettings.KindName(ServerMeshPhantomKind.Ship), Is.EqualTo("ship"));
         }
 
         private static IEnumerable<TestCaseData> StepTargetCases()

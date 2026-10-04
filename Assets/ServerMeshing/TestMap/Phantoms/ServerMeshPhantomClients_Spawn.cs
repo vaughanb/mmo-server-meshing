@@ -1,4 +1,4 @@
-// Server Meshing add-on — rig phantom binder, spawn part: binds sink hellos and spawns phantom characters, eyes and filler.
+// Server Meshing add-on — rig phantom binder, spawn part: binds sink hellos and spawns phantom characters, eyes, ships and filler.
 using System.Collections.Generic;
 using LiteNetLib;
 using LiteNetLibManager;
@@ -81,6 +81,14 @@ namespace MultiplayerARPG.MMO.Mesh
                 slot.identity = eye.Identity;
                 slot.eye = eye;
             }
+            else if (_settings.Kind == ServerMeshPhantomKind.Ship)
+            {
+                if (!SpawnShip(mesh, slot, now))
+                {
+                    Halt();
+                    return false;
+                }
+            }
             else
             {
                 string id = System.FormattableString.Invariant($"phantom-{_cell}-{slot.connectionId}");
@@ -103,6 +111,8 @@ namespace MultiplayerARPG.MMO.Mesh
             slot.objectId = slot.identity.ObjectId;
             slot.bound = true;
             slot.lastDownBytes = 0;
+            if (_viewSampler != null)
+                _viewSampler.Track(slot.connectionId);
             return true;
         }
 
@@ -251,6 +261,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 centreZ = slot.region.center.y,
                 halfSide = slot.region.width * 0.5f,
             };
+            if (slot.ship != null)
+                reply = ShipReply(slot.objectId, _settings.UploadHz, _settings.Wire, _settings.Seed, slot.flightPath, _settings.ShipScale, slot.shipPath.Centre, slot.shipPath.MaxSpeed);
             reply.Write(_replyWriter);
             mesh.ServerSendMessage(slot.connectionId, 0, DeliveryMethod.ReliableOrdered, _replyWriter);
         }

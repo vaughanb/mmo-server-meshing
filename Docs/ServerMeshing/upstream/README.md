@@ -35,6 +35,7 @@ calls `IEntityMovementServerStateFlags.ConsumeServerStateFlags()` from 0006, so 
 **0006-0007: merged.** Written against `develop` at e37cfe4 (2026-09-30) on the upstream branch `movement-state-fixes`;
 [PR #3](https://github.com/open-mmorpg/OpenMMORPG/pull/3) merged them into `develop` on 2026-10-02 (bb9895f), after the
 add-on's kit copy had compiled them (CE-12/CE-13), passed 1094 EditMode tests and passed accept-a on the rig.
+From Phase 0 step 6 the add-on requires 0006 (Mesh/Sync references its interface).
 
 ## Pushing (how it was done; for a re-run)
 

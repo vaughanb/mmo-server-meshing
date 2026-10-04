@@ -155,6 +155,19 @@ namespace MultiplayerARPG.MMO.Mesh.Sync
         }
 
         /// <summary>
+        /// Holds is true while exactly <paramref name="layer"/>, installed by this instance, sits in the slot of object
+        /// <paramref name="id"/>; false once the kit wrote its own handler over it, or for another layer.
+        /// </summary>
+        public bool Holds(uint id, IEntityMovementDataHandler layer)
+        {
+            return layer != null
+                && _records.TryGetValue(id, out LayerRecord record)
+                && ReferenceEquals(record.Layer, layer)
+                && _handlers.TryGetValue(id, out IEntityMovementDataHandler current)
+                && ReferenceEquals(current, layer);
+        }
+
+        /// <summary>
         /// Forget drops the layer record of object <paramref name="id"/> (its entity is gone) and removes the slot's entry only
         /// if it still holds that layer. It never writes a kit handler back, so a reused id's new handler stays.
         /// </summary>

@@ -1,4 +1,4 @@
-// Server Meshing add-on — rig phantom binder, window part: samples the phantoms and logs a Phantom window line with every Work window.
+// Server Meshing add-on — rig phantom binder, window part: counts and samples the phantoms and logs a Phantom window line with every Work window.
 using LiteNetLibManager;
 using UnityEngine;
 
@@ -39,6 +39,8 @@ namespace MultiplayerARPG.MMO.Mesh
             _windowStart = now;
             _windowFrames = 0;
             _binderTicks = 0;
+            if (_viewSampler != null)
+                _viewSampler.BeginWindow(_viewRound++);
             if (_transport == null)
                 return;
             for (int i = 0; i < ServerMeshPhantomTransport.DeliverySlots; ++i)
@@ -102,9 +104,31 @@ namespace MultiplayerARPG.MMO.Mesh
                 _window.SetSwallowed(i, _transport.SwallowedCalls(i) - _swallowedCallsBase[i], _transport.SwallowedBytes(i) - _swallowedBytesBase[i]);
         }
 
+        private int CountVirtualBound()
+        {
+            int bound = 0;
+            for (int k = 0; k < _slots.Count; ++k)
+            {
+                if (_slots[k].bound && !_slots[k].sink)
+                    ++bound;
+            }
+            return bound;
+        }
+
+        private int CountVirtualActive()
+        {
+            int active = 0;
+            for (int k = 0; k < _slots.Count; ++k)
+            {
+                if (_slots[k].connectionId >= 0 && !_slots[k].sink)
+                    ++active;
+            }
+            return active;
+        }
+
         private void CheckRate(int frames, double seconds)
         {
-            if (_warnedRate || seconds <= 0 || frames <= 0 || _settings.Kind != ServerMeshPhantomKind.Character)
+            if (_warnedRate || seconds <= 0 || frames <= 0 || _settings.Kind == ServerMeshPhantomKind.Eye)
                 return;
             int frameRate = Application.targetFrameRate > 0 ? Application.targetFrameRate : (int)System.Math.Round(frames / seconds);
             if (_settings.UploadHz <= frameRate)

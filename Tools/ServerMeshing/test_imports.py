@@ -12,16 +12,16 @@ import sys
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-# The modules of the step 4 contract's import graph, and step 5's p0phantom: each must exist (a missing one would
-# silently leave the tests).
-PHASE0 = ("p0base", "p0tools", "p0phantom", "p0cells", "p0geo", "p0model", "p0rates", "p0results", "p0markdown",
+# The modules of the step 4 contract's import graph, step 5's p0phantom, step 6's p0sender and step 7's p0ships: each
+# must exist (a missing one would silently leave the tests).
+PHASE0 = ("p0base", "p0tools", "p0phantom", "p0sender", "p0ships", "p0cells", "p0geo", "p0model", "p0rates", "p0results", "p0markdown",
           "p0checks", "p0accept", "p0plans", "p0dryrun", "rigrun", "abgrade", "abload", "p0report", "p0gates", "p0load",
           "p0blocks", "abregrade", "regress", "rigtools")
 # The contract's pure modules never import the ones that drive the rig or write files (rigrun is allowed: its
-# constants, layout_override, check_env and run_problems do no I/O). p0rates, p0markdown, p0accept, p0dryrun and
-# p0phantom are split out of p0model, p0results, p0checks, p0plans and p0tools (the ~500-line rule) and stay pure
-# like them.
-PURE = ("p0base", "p0tools", "p0phantom", "p0cells", "p0checks", "p0accept", "p0model", "p0rates", "p0geo",
+# constants, layout_override, check_env and run_problems do no I/O). p0rates, p0markdown, p0accept, p0dryrun,
+# p0phantom, p0sender and p0ships are split out of p0model, p0results, p0checks, p0plans and p0tools (the ~500-line rule)
+# and stay pure like them.
+PURE = ("p0base", "p0tools", "p0phantom", "p0sender", "p0ships", "p0cells", "p0checks", "p0accept", "p0model", "p0rates", "p0geo",
         "p0results", "p0markdown", "p0plans", "p0dryrun", "abgrade", "p0report", "p0gates")
 IO = ("abload", "p0load", "p0blocks", "abregrade")
 TIMEOUT_S = 120

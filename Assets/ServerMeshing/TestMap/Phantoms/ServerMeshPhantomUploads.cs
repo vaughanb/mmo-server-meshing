@@ -1,7 +1,8 @@
-// Server Meshing add-on — rig phantom feeder: walks every virtual character phantom and queues its uploads into the phantom transport before the kit drains the server.
+// Server Meshing add-on — rig phantom feeder: walks every virtual character phantom, flies every virtual ship phantom, and queues their uploads into the phantom transport before the kit drains the server.
 using System.Collections.Generic;
 using LiteNetLib.Utils;
 using LiteNetLibManager;
+using MultiplayerARPG.MMO.Mesh.Sync;
 using UnityEngine;
 
 namespace MultiplayerARPG.MMO.Mesh
@@ -11,11 +12,13 @@ namespace MultiplayerARPG.MMO.Mesh
     /// execution order), it samples posErr for a rotating tenth of the virtual character phantoms, walks each one inside its
     /// region with ServerMeshKinematicWalk.StepWithin at the character's move speed, and queues at most one upload per
     /// phantom when its seeded schedule is due: [119][packed long ts][packed uint object id][payload], ts = max(last + 1,
-    /// ServerTimestamp − 50). A server teleport is confirmed once per destination, as a real client does. Sink-bound
-    /// phantoms are fed by their sink, never here. The pure parts are public statics.
+    /// ServerTimestamp − 50). A server teleport is confirmed once per destination, as a real client does. A ship phantom
+    /// uploads its flight path evaluated at ServerTimestamp / 1000 on the same schedule, moving or not, acknowledging its
+    /// ship's teleport sequence; a new sequence is confirmed once, at the ship's position. Sink-bound phantoms are fed by
+    /// their sink, never here. The pure parts are public statics.
     /// </summary>
     [DefaultExecutionOrder(-100)]
-    public class ServerMeshPhantomUploads : MonoBehaviour
+    public class ServerMeshPhantomUploads : MonoBehaviour, IServerMeshPhantomTruth
     {
         /// <summary>TimestampDelayMs is how far behind the server clock a fresh upload's timestamp sits.</summary>
         public const long TimestampDelayMs = 50;
@@ -25,6 +28,10 @@ namespace MultiplayerARPG.MMO.Mesh
         public const float TurnSpreadSeconds = 4f;
         /// <summary>SameDestinationMetres is how close two teleport destinations are to count as the same teleport.</summary>
         public const float SameDestinationMetres = 0.01f;
+        /// <summary>ViewErrPerFrame is how many viewErr entries are compared each frame.</summary>
+        public const int ViewErrPerFrame = 64;
+        /// <summary>ViewErrMaxAgeSeconds is how fresh a received record must be to be compared.</summary>
+        public const double ViewErrMaxAgeSeconds = 0.1;
 
         private readonly NetDataWriter _writer = new NetDataWriter(true, 64);
         private int _sampleCursor;
@@ -34,8 +41,39 @@ namespace MultiplayerARPG.MMO.Mesh
         internal MeshMapNetworkManager Mesh;
         internal ServerMeshPhantomWindow Window;
         internal IServerMeshPhantomPayload Payload;
+        internal ServerMeshPhantomShipPayload ShipPayload;
         internal IMeshLog Log;
         internal double Period = 1.0 / ServerMeshPhantomSettings.DefaultUploadHz;
+        internal ServerMeshPhantomViewSampler ViewSampler;
+        private MeshMovementHandlerSlots _truthSlots;
+
+        /// <summary>
+        /// MaxAgeFrames is <paramref name="maxAgeSeconds"/> in frames at <paramref name="framesPerSecond"/>, rounded up and
+        /// at least 1 (a non-positive or non-finite rate counts as 60 frames per second).
+        /// </summary>
+        public static int MaxAgeFrames(double maxAgeSeconds, double framesPerSecond)
+        {
+            double rate = framesPerSecond > 0 && !double.IsInfinity(framesPerSecond) ? framesPerSecond : 60.0;
+            return System.Math.Max(1, (int)System.Math.Ceiling(maxAgeSeconds * rate - 1e-9));
+        }
+
+        /// <summary>
+        /// TryGetPosition is a spawned object's server position, only for an object whose kit handler writes the kit's
+        /// movement layout (the character-controller or NavMesh handler, also behind a kinematic body).
+        /// </summary>
+        public bool TryGetPosition(uint objectId, out Vector3 position)
+        {
+            position = default;
+            MeshMapNetworkManager mesh = Mesh;
+            if (mesh == null || mesh.Assets == null || !mesh.Assets.TryGetSpawnedObject(objectId, out LiteNetLibIdentity identity) || identity == null || identity.IsDestroyed)
+                return false;
+            if (_truthSlots == null)
+                _truthSlots = MeshMovementHandlerSlots.For(mesh);
+            if (!_truthSlots.TryGetKitHandler(objectId, out IEntityMovementDataHandler kit) || !(kit is BuiltInEntityMovementFunctions3D || kit is NavMeshEntityMovement))
+                return false;
+            position = identity.transform.position;
+            return true;
+        }
 
         /// <summary>NextTimestamp is an upload's timestamp: max(last + 1, serverTimestampMs − 50), so it rises strictly whatever the clock does.</summary>
         public static long NextTimestamp(long last, long serverTimestampMs)
@@ -94,6 +132,20 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>YawOf is the yaw in degrees (0 to 360) of a heading (x, z).</summary>
         public static float YawOf(Vector2 heading) => Mathf.Repeat(Mathf.Atan2(heading.x, heading.y) * Mathf.Rad2Deg, 360f);
 
+        /// <summary>
+        /// ShipPose is a ship phantom's upload pose: its path at timeSeconds (moving forward), or, for a teleport confirm, the
+        /// ship's own position and rotation at rest; sequence is the teleport sequence acknowledged either way.
+        /// </summary>
+        public static ServerMeshPhantomPose ShipPose(ServerMeshShipFlightPath path, double timeSeconds, bool teleport, Vector3 shipPosition, Quaternion shipRotation, byte sequence)
+        {
+            if (path == null)
+                throw new System.ArgumentNullException(nameof(path));
+            if (teleport)
+                return new ServerMeshPhantomPose(shipPosition, shipRotation, Vector3.zero, Vector3.zero, false, sequence, 0, 0);
+            path.Evaluate(timeSeconds, out Vector3 position, out Quaternion rotation, out Vector3 velocity, out Vector3 angularVelocity);
+            return new ServerMeshPhantomPose(position, rotation, velocity, angularVelocity, true, sequence, 0, 0);
+        }
+
         /// <summary>WriteFrame resets writer and writes an upload's header: [packed ushort 119][packed long ts][packed uint object id].</summary>
         public static void WriteFrame(NetDataWriter writer, long timestamp, uint objectId)
         {
@@ -129,6 +181,11 @@ namespace MultiplayerARPG.MMO.Mesh
             float deltaTime = Time.unscaledDeltaTime;
             int frame = Time.frameCount;
             SamplePositionError(frame);
+            if (ViewSampler != null)
+            {
+                double framesPerSecond = Application.targetFrameRate > 0 ? Application.targetFrameRate : (deltaTime > 0f ? 1.0 / deltaTime : 0.0);
+                ViewSampler.Sample(ViewErrPerFrame, this, Window, frame, MaxAgeFrames(ViewErrMaxAgeSeconds, framesPerSecond));
+            }
             long serverTimestamp = Mesh.ServerTimestamp;
             for (int i = 0; i < Slots.Count; ++i)
             {
@@ -136,6 +193,15 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (!slot.FedHere || slot.entity == null || slot.entity.IsDestroyed)
                     continue;
                 Feed(slot, now, deltaTime, frame, serverTimestamp);
+            }
+            if (ShipPayload != null)
+            {
+                for (int i = 0; i < Slots.Count; ++i)
+                {
+                    ServerMeshPhantomSlot slot = Slots[i];
+                    if (slot.ShipFedHere && !slot.ship.IsDestroyed && slot.shipPath != null)
+                        FeedShip(slot, now, frame, serverTimestamp);
+                }
             }
             Window.FeederMs += (System.Diagnostics.Stopwatch.GetTimestamp() - started) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
         }
@@ -173,13 +239,36 @@ namespace MultiplayerARPG.MMO.Mesh
             float yaw = teleport ? entityTransform.eulerAngles.y : YawOf(slot.heading);
             long timestamp = NextTimestamp(slot.lastTimestamp, serverTimestamp);
             WriteFrame(_writer, timestamp, slot.objectId);
-            if (!Payload.TryWrite(_writer, (!slot.standing || slot.chasing) && !teleport, teleport, position, yaw, ref slot.stopSent, out _))
+            ServerMeshPhantomPose pose = new ServerMeshPhantomPose(position, yaw);
+            if (!Payload.TryWrite(_writer, (!slot.standing || slot.chasing) && !teleport, teleport, in pose, ref slot.stopSent, out _))
                 return;
             if (!Transport.QueueUpload(slot.connectionId, _writer))
                 return;
             slot.teleportPending = false;
             slot.lastTimestamp = timestamp;
             slot.lastQueuedPosition = position;
+            slot.lastQueuedFrame = frame;
+            ++Window.Uploads;
+        }
+
+        private void FeedShip(ServerMeshPhantomSlot slot, double now, int frame, long serverTimestamp)
+        {
+            if (!TakeDue(now, Period, ref slot.nextDue))
+                return;
+            ServerMeshShipEntity ship = slot.ship;
+            byte sequence = ship.ShipMovement.TeleportSequence;
+            bool teleport = sequence != slot.shipSequence;
+            Transform shipTransform = ship.transform;
+            ServerMeshPhantomPose pose = ShipPose(slot.shipPath, serverTimestamp / 1000.0, teleport, shipTransform.position, shipTransform.rotation, sequence);
+            long timestamp = NextTimestamp(slot.lastTimestamp, serverTimestamp);
+            WriteFrame(_writer, timestamp, slot.objectId);
+            if (!ShipPayload.TryWrite(_writer, true, teleport, in pose, ref slot.stopSent, out _))
+                return;
+            if (!Transport.QueueUpload(slot.connectionId, _writer))
+                return;
+            slot.shipSequence = sequence;
+            slot.lastTimestamp = timestamp;
+            slot.lastQueuedPosition = pose.Position;
             slot.lastQueuedFrame = frame;
             ++Window.Uploads;
         }
@@ -245,7 +334,10 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             Slots = null;
             Transport = null;
+            ShipPayload = null;
             Mesh = null;
+            ViewSampler = null;
+            _truthSlots = null;
             _sampleCursor = 0;
         }
     }

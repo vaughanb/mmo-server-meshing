@@ -9,7 +9,7 @@ using Is = UnityEngine.TestTools.Constraints.Is;
 
 namespace MultiplayerARPG.MMO.Mesh.Tests
 {
-    public class MeshSendMeterTests
+    public partial class MeshSendMeterTests
     {
         private const long TicksPerSecond = 1_000_000;
         private const string ContractLine = "Send window 5.00 s: calls 1250 250.0/s bytes 512000 100.0 kB/s | t119 calls 1000 bytes 501760 200.0/s 98.0 kB/s 0.00 us | t2 calls 250 bytes 10240 50.0/s 2.0 kB/s 0.00 us | other calls 0 bytes 0 0.0/s 0.0 kB/s 0.00 us | refused 0 tooBig 0 bytes 0 | delivery ru 0 0 seq 0 0 ro 250 10240 rs 0 0 u 1000 501760 other 0 0 | channels 0:250 2:1000 other:0 | wire 530000 B 1300 pkt | offThread 0";
@@ -407,6 +407,179 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             Assert.That(line, Does.Not.Contain("Exception"));
             Assert.That(line, Does.Contain("| refused 1 tooBig 1 bytes 1100 |"));
             Assert.That(line, Does.Contain("| wire 0 B 0 pkt | offThread 0"));
+        }
+
+        private const string RecordsLine = "Send window 5.00 s: calls 1250 250.0/s bytes 512000 100.0 kB/s | t119 calls 1000 bytes 501760 200.0/s 98.0 kB/s 0.00 us | t2 calls 250 bytes 10240 50.0/s 2.0 kB/s 0.00 us | other calls 0 bytes 0 0.0/s 0.0 kB/s 0.00 us | refused 0 tooBig 0 bytes 0 | delivery ru 0 0 seq 0 0 ro 250 10240 rs 0 0 u 1000 501760 other 0 0 | records ro 300 u 49700 other 5 unread 2 | channels 0:250 2:1000 other:0 | wire 530000 B 1300 pkt | offThread 0";
+
+        private static byte[] EntityStateHeader(long timestamp, int count)
+        {
+            NetDataWriter writer = new NetDataWriter();
+            writer.PutPackedUShort(119);
+            writer.PutPackedLong(timestamp);
+            writer.Put(count);
+            return writer.CopyData();
+        }
+
+        private static IEnumerable<TestCaseData> UnreadableCountCases()
+        {
+            yield return new TestCaseData(null, 0, 0).SetName("TryReadEntityStateCount_NullData_Fails");
+            yield return new TestCaseData("", 0, 0).SetName("TryReadEntityStateCount_Empty_Fails");
+            yield return new TestCaseData("77 00 F7 E0 03 00 00 00", 0, 1).SetName("TryReadEntityStateCount_CutAfterTheType_Fails");
+            yield return new TestCaseData("77 00 F7 E0 03 00 00 00", 0, 2).SetName("TryReadEntityStateCount_CutAfterTheHighWord_Fails");
+            yield return new TestCaseData("77 00 F7 E0 03 00 00 00", 0, 3).SetName("TryReadEntityStateCount_CutInsideTheLowWord_Fails");
+            yield return new TestCaseData("77 00 F7 E0 03 00 00 00", 0, 4).SetName("TryReadEntityStateCount_CutBeforeTheCount_Fails");
+            yield return new TestCaseData("77 00 F7 E0 03 00 00 00", 0, 7).SetName("TryReadEntityStateCount_CutInsideTheCount_Fails");
+            yield return new TestCaseData("77 FC 00 00 00 00 00 00 00 00 00 00 00 00", 0, 14).SetName("TryReadEntityStateCount_LeadByte252_Fails");
+            yield return new TestCaseData("77 00 FF 00 00 00 00 00 00 00 00 00 00 00", 0, 14).SetName("TryReadEntityStateCount_LeadByte255_Fails");
+            yield return new TestCaseData("77 00 F7 E0 FF FF FF FF", 0, 8).SetName("TryReadEntityStateCount_NegativeCount_Fails");
+            yield return new TestCaseData("77 00 F7 E0 03 00 00 00", 0, 9).SetName("TryReadEntityStateCount_EndPastTheData_Fails");
+        }
+
+        [TestCaseSource(nameof(UnreadableCountCases))]
+        public void TryReadEntityStateCount_Unreadable(string hex, int offset, int end)
+        {
+            byte[] data = hex == null ? null : Bytes(hex);
+
+            bool read = MeshSendMeter.TryReadEntityStateCount(data, offset, end, out int count);
+
+            Assert.That(read, Is.False);
+            Assert.That(count, Is.EqualTo(0));
+        }
+
+        [Test]
+        public void TryReadEntityStateCount_GoldenHeaderForTimestamp1000_ReadsTheCount()
+        {
+            byte[] data = Bytes("77 00 F7 E0 03 00 00 00");
+
+            Assert.That(MeshSendMeter.TryReadEntityStateCount(data, 0, data.Length, out int count), Is.True);
+            Assert.That(count, Is.EqualTo(3));
+            Assert.That(EntityStateHeader(1000, 3), Is.EqualTo(data));
+        }
+
+        [TestCase(1_790_000_000_000L, 0)]
+        [TestCase(1_790_000_000_000L, 254)]
+        [TestCase(1L, 70000)]
+        [TestCase(long.MaxValue, int.MaxValue)]
+        public void TryReadEntityStateCount_HeaderTheKitWrites_ReadsTheCount(long timestamp, int expected)
+        {
+            byte[] data = EntityStateHeader(timestamp, expected);
+
+            Assert.That(MeshSendMeter.TryReadEntityStateCount(data, 0, data.Length, out int count), Is.True);
+            Assert.That(count, Is.EqualTo(expected));
+        }
+
+        [Test]
+        public void TryReadEntityStateCount_AtAnOffset_ReadsFromThere()
+        {
+            byte[] header = EntityStateHeader(1_790_000_000_000L, 9);
+            byte[] data = new byte[header.Length + 3];
+            Array.Copy(header, 0, data, 2, header.Length);
+
+            Assert.That(MeshSendMeter.TryReadEntityStateCount(data, 2, 2 + header.Length, out int count), Is.True);
+            Assert.That(count, Is.EqualTo(9));
+        }
+
+        [Test]
+        public void RecordEntityStateRecords_FromAnotherThread_CountsOnlyOffThread()
+        {
+            MeshSendMeter meter = new MeshSendMeter(TicksPerSecond);
+            Thread other = new Thread(() =>
+            {
+                meter.RecordEntityStateRecords(DeliveryMethod.Unreliable, 40);
+                meter.RecordEntityStateUnreadable();
+            });
+            other.Start();
+            other.Join();
+
+            MeshSendWindow window = meter.TakeWindow(1d);
+
+            Assert.That(window.OffThread, Is.EqualTo(2));
+            Assert.That(window.EntityStateRecordsTotal, Is.EqualTo(0));
+            Assert.That(window.EntityStateUnreadable, Is.EqualTo(0));
+            Assert.That(window.ToLine(0, 0), Does.Not.Contain("| records"));
+        }
+
+        [Test]
+        public void RecordEntityStateRecords_TotalsPerDeliveryAndResetsWithTheWindow()
+        {
+            MeshSendMeter meter = new MeshSendMeter(TicksPerSecond);
+            meter.RecordEntityStateRecords(DeliveryMethod.ReliableOrdered, 2);
+            meter.RecordEntityStateRecords(DeliveryMethod.ReliableOrdered, 3);
+            meter.RecordEntityStateRecords(DeliveryMethod.Unreliable, 7);
+            meter.RecordEntityStateRecords(DeliveryMethod.Sequenced, 4);
+            meter.RecordEntityStateRecords((DeliveryMethod)9, 1);
+            meter.RecordEntityStateUnreadable();
+
+            MeshSendWindow window = meter.TakeWindow(1d);
+            MeshSendWindow next = meter.TakeWindow(0d);
+
+            Assert.That(window.EntityStateRecords(DeliveryMethod.ReliableOrdered), Is.EqualTo(5));
+            Assert.That(window.EntityStateRecords(DeliveryMethod.Unreliable), Is.EqualTo(7));
+            Assert.That(window.EntityStateRecords(DeliveryMethod.Sequenced), Is.EqualTo(4));
+            Assert.That(window.EntityStateRecords((DeliveryMethod)7), Is.EqualTo(1));
+            Assert.That(window.EntityStateRecordsTotal, Is.EqualTo(17));
+            Assert.That(window.EntityStateUnreadable, Is.EqualTo(1));
+            Assert.That(window.ToLine(0, 0), Does.Contain("| delivery ru 0 0 seq 0 0 ro 0 0 rs 0 0 u 0 0 other 0 0 | records ro 5 u 7 other 5 unread 1 | channels other:0 |"));
+            Assert.That(next.EntityStateRecordsTotal, Is.EqualTo(0));
+            Assert.That(next.EntityStateUnreadable, Is.EqualTo(0));
+            Assert.That(next.ToLine(0, 0), Is.EqualTo(EmptyLine));
+        }
+
+        [Test]
+        public void ToLine_UnreadableOnly_PrintsTheRecordsGroup()
+        {
+            MeshSendMeter meter = new MeshSendMeter(TicksPerSecond);
+            meter.RecordEntityStateUnreadable();
+
+            Assert.That(meter.TakeWindow(1d).ToLine(0, 0), Does.Contain("| records ro 0 u 0 other 0 unread 1 | channels"));
+        }
+
+        [Test, SetCulture("de-DE")]
+        public void ToLine_WithRecords_IsExactUnderAGermanCulture()
+        {
+            MeshSendMeter meter = new MeshSendMeter(TicksPerSecond);
+            for (int i = 0; i < 760; ++i)
+                meter.Record(119, DeliveryMethod.Unreliable, 2, 502, 0, false);
+            for (int i = 0; i < 240; ++i)
+                meter.Record(119, DeliveryMethod.Unreliable, 2, 501, 0, false);
+            for (int i = 0; i < 240; ++i)
+                meter.Record(2, DeliveryMethod.ReliableOrdered, 0, 41, 0, false);
+            for (int i = 0; i < 10; ++i)
+                meter.Record(2, DeliveryMethod.ReliableOrdered, 0, 40, 0, false);
+            meter.RecordEntityStateRecords(DeliveryMethod.Unreliable, 49700);
+            meter.RecordEntityStateRecords(DeliveryMethod.ReliableOrdered, 300);
+            meter.RecordEntityStateRecords(DeliveryMethod.ReliableUnordered, 5);
+            meter.RecordEntityStateUnreadable();
+            meter.RecordEntityStateUnreadable();
+
+            string line = meter.TakeWindow(5d).ToLine(530000, 1300);
+
+            Assert.That(line, Is.EqualTo(RecordsLine));
+        }
+
+        [Test]
+        public void ToLine_WithoutRecords_PrintsNoRecordsGroup()
+        {
+            MeshSendMeter meter = new MeshSendMeter(TicksPerSecond);
+            meter.Record(119, DeliveryMethod.Unreliable, 2, 100, 0, false);
+
+            Assert.That(meter.TakeWindow(1d).ToLine(0, 0), Does.Not.Contain("records"));
+        }
+
+        [Test]
+        public void RecordEntityStateRecords_AllocatesNothing()
+        {
+            MeshSendMeter meter = new MeshSendMeter(TicksPerSecond);
+            meter.RecordEntityStateRecords(DeliveryMethod.Unreliable, 1);
+            meter.RecordEntityStateUnreadable();
+            byte[] header = EntityStateHeader(1_790_000_000_000L, 12);
+
+            Assert.That(() =>
+            {
+                MeshSendMeter.TryReadEntityStateCount(header, 0, header.Length, out int count);
+                meter.RecordEntityStateRecords(DeliveryMethod.Unreliable, count);
+                meter.RecordEntityStateUnreadable();
+            }, Is.Not.AllocatingGCMemory());
         }
     }
 }

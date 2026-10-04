@@ -1,0 +1,1008 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &65106665580069018
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 7295381207688506917}
+  - component: {fileID: 8356973624020065294}
+  - component: {fileID: 8618302776186515494}
+  m_Layer: 0
+  m_Name: Hull
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &7295381207688506917
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 65106665580069018}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0.4, z: 3.4}
+  m_LocalScale: {x: 8.4, y: 3, z: 11.9}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 8201130029533676114}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!33 &8356973624020065294
+MeshFilter:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 65106665580069018}
+  m_Mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
+--- !u!23 &8618302776186515494
+MeshRenderer:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 65106665580069018}
+  m_Enabled: 1
+  m_CastShadows: 1
+  m_ReceiveShadows: 1
+  m_DynamicOccludee: 1
+  m_StaticShadowCaster: 0
+  m_MotionVectors: 1
+  m_LightProbeUsage: 1
+  m_ReflectionProbeUsage: 1
+  m_RayTracingMode: 2
+  m_RayTraceProcedural: 0
+  m_RayTracingAccelStructBuildFlagsOverride: 0
+  m_RayTracingAccelStructBuildFlags: 1
+  m_SmallMeshCulling: 1
+  m_ForceMeshLod: -1
+  m_MeshLodSelectionBias: 0
+  m_RenderingLayerMask: 1
+  m_RendererPriority: 0
+  m_Materials:
+  - {fileID: 2100000, guid: 31321ba15b8f8eb4c954353edc038b1d, type: 2}
+  m_StaticBatchInfo:
+    firstSubMesh: 0
+    subMeshCount: 0
+  m_StaticBatchRoot: {fileID: 0}
+  m_ProbeAnchor: {fileID: 0}
+  m_LightProbeVolumeOverride: {fileID: 0}
+  m_ScaleInLightmap: 1
+  m_ReceiveGI: 1
+  m_PreserveUVs: 1
+  m_IgnoreNormalsForChartDetection: 0
+  m_ImportantGI: 0
+  m_StitchLightmapSeams: 1
+  m_SelectedEditorRenderState: 3
+  m_MinimumChartSize: 4
+  m_AutoUVMaxDistance: 0.5
+  m_AutoUVMaxAngle: 89
+  m_LightmapParameters: {fileID: 0}
+  m_GlobalIlluminationMeshLod: 0
+  m_SortingLayerID: 0
+  m_SortingLayer: 0
+  m_SortingOrder: 0
+  m_MaskInteraction: 0
+  m_AdditionalVertexStreams: {fileID: 0}
+--- !u!1 &488451651172497221
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 8578486710675145439}
+  m_Layer: 0
+  m_Name: BarrelRight
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &8578486710675145439
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 488451651172497221}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 2, y: 0, z: 6}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 8201130029533676114}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &2981547338802485903
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 6885958334384832584}
+  m_Layer: 0
+  m_Name: BarrelLeft
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &6885958334384832584
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2981547338802485903}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -2, y: 0, z: 6}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 8201130029533676114}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &5202035491765440399
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 3498823968020025467}
+  m_Layer: 0
+  m_Name: Exit
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &3498823968020025467
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5202035491765440399}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: -8}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 8201130029533676114}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &5794230280518911018
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 2412037554446273770}
+  m_Layer: 0
+  m_Name: Seat
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &2412037554446273770
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5794230280518911018}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0.5, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 8201130029533676114}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &7885664086778731795
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 8201130029533676114}
+  - component: {fileID: 7410549092654988847}
+  - component: {fileID: 7046710739799480876}
+  - component: {fileID: 7663338266521261231}
+  - component: {fileID: 1712582635339175163}
+  - component: {fileID: 7797531712616421826}
+  - component: {fileID: 4192835880706222774}
+  - component: {fileID: 596434260510718799}
+  m_Layer: 0
+  m_Name: ServerMeshShip
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &8201130029533676114
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7885664086778731795}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children:
+  - {fileID: 7295381207688506917}
+  - {fileID: 6885958334384832584}
+  - {fileID: 8578486710675145439}
+  - {fileID: 2412037554446273770}
+  - {fileID: 3498823968020025467}
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &7410549092654988847
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7885664086778731795}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 56367cc2ed44f1e49835e9c247771fd9, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: LiteNetLibManager::LiteNetLibManager.LiteNetLibIdentity
+  autoAssignAssetIdIfEmpty: 1
+  forceUseAssetGUIDAsAssetId: 0
+  assetId: 50317ae64d7568c43bb7be6a7419db93
+  autoAssignSceneObjectIdIfEmpty: 1
+  sceneObjectId: ServerMeshShip_1
+  forceNotSceneObject: 0
+  networkedObjectId: 0
+  syncChannelId: 0
+  defaultRpcChannelId: 0
+  subChannelId: 
+  visibleRange: 0
+  alwaysVisible: 0
+  doNotDestroyWhenDisconnect: 0
+  poolingSize: 0
+  forceRenderingOffWhileHidding: 1
+  muteAudioSourceWhileHidding: 1
+  onGetInstance:
+    m_PersistentCalls:
+      m_Calls: []
+  onPushBack:
+    m_PersistentCalls:
+      m_Calls: []
+--- !u!114 &7046710739799480876
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7885664086778731795}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 61fc4ab24a099b04ba637c9b6c392864, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.MMO.Mesh.ServerMeshShipEntity
+  _behaviourIndex: 0
+  entityTitle: 
+  entityTitles: []
+  syncTitle:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  ownerObjects: []
+  nonOwnerObjects: []
+  model: {fileID: 0}
+  cameraTargetTransform: {fileID: 0}
+  fpsCameraTargetTransform: {fileID: 0}
+  canSideSprint: 0
+  canBackwardSprint: 0
+  syncOverrideInput:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  syncOverrideMoveSpeed:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  syncOverrideJumpHeight:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  syncOverrideGravityRate:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  combatTextTransform: {fileID: 0}
+  opponentAimTransform: {fileID: 0}
+  isStaticHitBoxes: 0
+  onNormalDamageHit:
+    m_PersistentCalls:
+      m_Calls: []
+  onCriticalDamageHit:
+    m_PersistentCalls:
+      m_Calls: []
+  onBlockedDamageHit:
+    m_PersistentCalls:
+      m_Calls: []
+  onDamageMissed:
+    m_PersistentCalls:
+      m_Calls: []
+  isInvincible:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  currentHp:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  activatableDistance: 0
+  vehicleType: {fileID: 0}
+  moveSpeedType: 0
+  moveSpeed: 5
+  driverMoveSpeedRate: 1.5
+  seats:
+  - cameraTarget: 0
+    passengingTransform: {fileID: 2412037554446273770}
+    exitTransform: {fileID: 3498823968020025467}
+    meleeDamageTransform: {fileID: 0}
+    missileDamageTransform: {fileID: 0}
+    canAttack: 0
+    canUseSkill: 0
+    hidePassenger: 0
+    overridePassengerActionAnimations: 0
+    overridePassengerHitBoxes: 0
+  canBeAttacked: 0
+  hp:
+    baseAmount: 2500
+    amountIncreaseEachLevel: 0
+    rateIncreaseEachLevel: 0
+    amountIncreaseEachLevelByLevels: []
+  resistances: []
+  armors: []
+  buff:
+    tag: 
+    restrictTags: []
+    enableApplyChance: 0
+    applyChance:
+      baseAmount: 0
+      amountIncreaseEachLevel: 0
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+    increaseStats:
+      baseStats:
+        hp: 0
+        hpRecovery: 0
+        hpLeechRate: 0
+        mp: 0
+        mpRecovery: 0
+        mpLeechRate: 0
+        stamina: 0
+        staminaRecovery: 0
+        staminaLeechRate: 0
+        food: 0
+        water: 0
+        accuracy: 0
+        evasion: 0
+        criRate: 0
+        criDmgRate: 0
+        blockRate: 0
+        blockDmgRate: 0
+        moveSpeed: 0
+        sprintSpeed: 0
+        atkSpeed: 0
+        weightLimit: 0
+        slotLimit: 0
+        goldRate: 0
+        expRate: 0
+        itemDropRate: 0
+        jumpHeight: 0
+        headDamageAbsorbs: 0
+        bodyDamageAbsorbs: 0
+        fallDamageAbsorbs: 0
+        gravityRate: 0
+        protectedSlotLimit: 0
+        ammoCapacityModifier: 0
+        ammoCapacityRate: 0
+        recoilModifier: 0
+        recoilYawModifier: 0
+        recoilRollModifier: 0
+        recoilRate: 0
+        recoilYawRate: 0
+        recoilRollRate: 0
+        rateOfFireModifier: 0
+        rateOfFireRate: 0
+        reloadDurationModifier: 0
+        reloadDurationRate: 0
+        fireSpreadRangeModifier: 0
+        fireSpreadRangeRate: 0
+        fireSpreadModifier: 0
+        fireSpreadRate: 0
+        decreaseFoodDecreation: 0
+        decreaseWaterDecreation: 0
+        decreaseStaminaDecreation: 0
+        buyItemPriceRate: 0
+        sellItemPriceRate: 0
+      statsIncreaseEachLevel:
+        hp: 0
+        hpRecovery: 0
+        hpLeechRate: 0
+        mp: 0
+        mpRecovery: 0
+        mpLeechRate: 0
+        stamina: 0
+        staminaRecovery: 0
+        staminaLeechRate: 0
+        food: 0
+        water: 0
+        accuracy: 0
+        evasion: 0
+        criRate: 0
+        criDmgRate: 0
+        blockRate: 0
+        blockDmgRate: 0
+        moveSpeed: 0
+        sprintSpeed: 0
+        atkSpeed: 0
+        weightLimit: 0
+        slotLimit: 0
+        goldRate: 0
+        expRate: 0
+        itemDropRate: 0
+        jumpHeight: 0
+        headDamageAbsorbs: 0
+        bodyDamageAbsorbs: 0
+        fallDamageAbsorbs: 0
+        gravityRate: 0
+        protectedSlotLimit: 0
+        ammoCapacityModifier: 0
+        ammoCapacityRate: 0
+        recoilModifier: 0
+        recoilYawModifier: 0
+        recoilRollModifier: 0
+        recoilRate: 0
+        recoilYawRate: 0
+        recoilRollRate: 0
+        rateOfFireModifier: 0
+        rateOfFireRate: 0
+        reloadDurationModifier: 0
+        reloadDurationRate: 0
+        fireSpreadRangeModifier: 0
+        fireSpreadRangeRate: 0
+        fireSpreadModifier: 0
+        fireSpreadRate: 0
+        decreaseFoodDecreation: 0
+        decreaseWaterDecreation: 0
+        decreaseStaminaDecreation: 0
+        buyItemPriceRate: 0
+        sellItemPriceRate: 0
+      rateIncreaseEachLevel:
+        hp: 0
+        hpRecovery: 0
+        hpLeechRate: 0
+        mp: 0
+        mpRecovery: 0
+        mpLeechRate: 0
+        stamina: 0
+        staminaRecovery: 0
+        staminaLeechRate: 0
+        food: 0
+        water: 0
+        accuracy: 0
+        evasion: 0
+        criRate: 0
+        criDmgRate: 0
+        blockRate: 0
+        blockDmgRate: 0
+        moveSpeed: 0
+        sprintSpeed: 0
+        atkSpeed: 0
+        weightLimit: 0
+        slotLimit: 0
+        goldRate: 0
+        expRate: 0
+        itemDropRate: 0
+        jumpHeight: 0
+        headDamageAbsorbs: 0
+        bodyDamageAbsorbs: 0
+        fallDamageAbsorbs: 0
+        gravityRate: 0
+        protectedSlotLimit: 0
+        ammoCapacityModifier: 0
+        ammoCapacityRate: 0
+        recoilModifier: 0
+        recoilYawModifier: 0
+        recoilRollModifier: 0
+        recoilRate: 0
+        recoilYawRate: 0
+        recoilRollRate: 0
+        rateOfFireModifier: 0
+        rateOfFireRate: 0
+        reloadDurationModifier: 0
+        reloadDurationRate: 0
+        fireSpreadRangeModifier: 0
+        fireSpreadRangeRate: 0
+        fireSpreadModifier: 0
+        fireSpreadRate: 0
+        decreaseFoodDecreation: 0
+        decreaseWaterDecreation: 0
+        decreaseStaminaDecreation: 0
+        buyItemPriceRate: 0
+        sellItemPriceRate: 0
+      statsIncreaseEachLevelByLevels: []
+    increaseStatsRate:
+      baseStats:
+        hp: 0
+        hpRecovery: 0
+        hpLeechRate: 0
+        mp: 0
+        mpRecovery: 0
+        mpLeechRate: 0
+        stamina: 0
+        staminaRecovery: 0
+        staminaLeechRate: 0
+        food: 0
+        water: 0
+        accuracy: 0
+        evasion: 0
+        criRate: 0
+        criDmgRate: 0
+        blockRate: 0
+        blockDmgRate: 0
+        moveSpeed: 0
+        sprintSpeed: 0
+        atkSpeed: 0
+        weightLimit: 0
+        slotLimit: 0
+        goldRate: 0
+        expRate: 0
+        itemDropRate: 0
+        jumpHeight: 0
+        headDamageAbsorbs: 0
+        bodyDamageAbsorbs: 0
+        fallDamageAbsorbs: 0
+        gravityRate: 0
+        protectedSlotLimit: 0
+        ammoCapacityModifier: 0
+        ammoCapacityRate: 0
+        recoilModifier: 0
+        recoilYawModifier: 0
+        recoilRollModifier: 0
+        recoilRate: 0
+        recoilYawRate: 0
+        recoilRollRate: 0
+        rateOfFireModifier: 0
+        rateOfFireRate: 0
+        reloadDurationModifier: 0
+        reloadDurationRate: 0
+        fireSpreadRangeModifier: 0
+        fireSpreadRangeRate: 0
+        fireSpreadModifier: 0
+        fireSpreadRate: 0
+        decreaseFoodDecreation: 0
+        decreaseWaterDecreation: 0
+        decreaseStaminaDecreation: 0
+        buyItemPriceRate: 0
+        sellItemPriceRate: 0
+      statsIncreaseEachLevel:
+        hp: 0
+        hpRecovery: 0
+        hpLeechRate: 0
+        mp: 0
+        mpRecovery: 0
+        mpLeechRate: 0
+        stamina: 0
+        staminaRecovery: 0
+        staminaLeechRate: 0
+        food: 0
+        water: 0
+        accuracy: 0
+        evasion: 0
+        criRate: 0
+        criDmgRate: 0
+        blockRate: 0
+        blockDmgRate: 0
+        moveSpeed: 0
+        sprintSpeed: 0
+        atkSpeed: 0
+        weightLimit: 0
+        slotLimit: 0
+        goldRate: 0
+        expRate: 0
+        itemDropRate: 0
+        jumpHeight: 0
+        headDamageAbsorbs: 0
+        bodyDamageAbsorbs: 0
+        fallDamageAbsorbs: 0
+        gravityRate: 0
+        protectedSlotLimit: 0
+        ammoCapacityModifier: 0
+        ammoCapacityRate: 0
+        recoilModifier: 0
+        recoilYawModifier: 0
+        recoilRollModifier: 0
+        recoilRate: 0
+        recoilYawRate: 0
+        recoilRollRate: 0
+        rateOfFireModifier: 0
+        rateOfFireRate: 0
+        reloadDurationModifier: 0
+        reloadDurationRate: 0
+        fireSpreadRangeModifier: 0
+        fireSpreadRangeRate: 0
+        fireSpreadModifier: 0
+        fireSpreadRate: 0
+        decreaseFoodDecreation: 0
+        decreaseWaterDecreation: 0
+        decreaseStaminaDecreation: 0
+        buyItemPriceRate: 0
+        sellItemPriceRate: 0
+      rateIncreaseEachLevel:
+        hp: 0
+        hpRecovery: 0
+        hpLeechRate: 0
+        mp: 0
+        mpRecovery: 0
+        mpLeechRate: 0
+        stamina: 0
+        staminaRecovery: 0
+        staminaLeechRate: 0
+        food: 0
+        water: 0
+        accuracy: 0
+        evasion: 0
+        criRate: 0
+        criDmgRate: 0
+        blockRate: 0
+        blockDmgRate: 0
+        moveSpeed: 0
+        sprintSpeed: 0
+        atkSpeed: 0
+        weightLimit: 0
+        slotLimit: 0
+        goldRate: 0
+        expRate: 0
+        itemDropRate: 0
+        jumpHeight: 0
+        headDamageAbsorbs: 0
+        bodyDamageAbsorbs: 0
+        fallDamageAbsorbs: 0
+        gravityRate: 0
+        protectedSlotLimit: 0
+        ammoCapacityModifier: 0
+        ammoCapacityRate: 0
+        recoilModifier: 0
+        recoilYawModifier: 0
+        recoilRollModifier: 0
+        recoilRate: 0
+        recoilYawRate: 0
+        recoilRollRate: 0
+        rateOfFireModifier: 0
+        rateOfFireRate: 0
+        reloadDurationModifier: 0
+        reloadDurationRate: 0
+        fireSpreadRangeModifier: 0
+        fireSpreadRangeRate: 0
+        fireSpreadModifier: 0
+        fireSpreadRate: 0
+        decreaseFoodDecreation: 0
+        decreaseWaterDecreation: 0
+        decreaseStaminaDecreation: 0
+        buyItemPriceRate: 0
+        sellItemPriceRate: 0
+      statsIncreaseEachLevelByLevels: []
+    increaseAttributes: []
+    increaseAttributesRate: []
+    increaseResistances: []
+    increaseArmors: []
+    increaseArmorsRate: []
+    increaseDamages: []
+    increaseDamagesRate: []
+    increaseSkills: []
+    isOverrideDamageInfo: 0
+    overrideDamageInfo:
+      damageType: 0
+      hitOnlySelectedTarget: 0
+      startAttackDistance: 0.5
+      hitDistance: 2
+      hitFov: 60
+      originOffsets: 1
+      missileDistance: 10
+      missileSpeed: 10
+      isHeadshotInstantDeath: 1
+      missileDamageEntity: {fileID: 0}
+      projectileEffect: {fileID: 0}
+      pierceThroughEntities: 0
+      impactEffects: {fileID: 0}
+      throwForce: 15
+      throwableLifeTime: 2
+      throwableDamageEntity: {fileID: 0}
+      customDamageInfo: {fileID: 0}
+    isOverrideSkills: 0
+    overrideSkills: []
+    mount:
+      mountEntity: {fileID: 0}
+      level:
+        baseAmount: 0
+        amountIncreaseEachLevel: 0
+        rateIncreaseEachLevel: 0
+        amountIncreaseEachLevelByLevels: []
+    increaseStatusEffectResistances: []
+    duration:
+      baseAmount: 0
+      amountIncreaseEachLevel: 0
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+    noDuration: 0
+    recoveryHp:
+      baseAmount: 0
+      amountIncreaseEachLevel: 0
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+    recoveryMp:
+      baseAmount: 0
+      amountIncreaseEachLevel: 0
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+    recoveryStamina:
+      baseAmount: 0
+      amountIncreaseEachLevel: 0
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+    recoveryFood:
+      baseAmount: 0
+      amountIncreaseEachLevel: 0
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+    recoveryWater:
+      baseAmount: 0
+      amountIncreaseEachLevel: 0
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+    buffRemovals: []
+    damageOverTimes: []
+    ailment: 0
+    disallowMove: 0
+    disallowSprint: 0
+    disallowWalk: 0
+    disallowJump: 0
+    disallowDash: 0
+    disallowCrouch: 0
+    disallowCrawl: 0
+    disallowAttack: 0
+    disallowUseSkill: 0
+    disallowUseItem: 0
+    freezeAnimation: 0
+    removeBuffWhenAttackChance:
+      baseAmount: 0
+      amountIncreaseEachLevel: 0
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+    removeBuffWhenAttackedChance:
+      baseAmount: 0
+      amountIncreaseEachLevel: 0
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+    removeBuffWhenUseSkillChance:
+      baseAmount: 0
+      amountIncreaseEachLevel: 0
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+    removeBuffWhenUseItemChance:
+      baseAmount: 0
+      amountIncreaseEachLevel: 0
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+    removeBuffWhenPickupItemChance:
+      baseAmount: 0
+      amountIncreaseEachLevel: 0
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+    isHide: 0
+    isRevealsHide: 0
+    isBlind: 0
+    muteFootstepSound: 0
+    selfStatusEffectsWhenAttacking: []
+    enemyStatusEffectsWhenAttacking: []
+    selfStatusEffectsWhenAttacked: []
+    enemyStatusEffectsWhenAttacked: []
+    doNotRemoveOnDead: 0
+    isExtendDuration: 0
+    maxStack:
+      baseAmount: 0
+      amountIncreaseEachLevel: 0
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+    effects: []
+  destroyDelay: 2
+  destroyRespawnDelay: 5
+  onVehicleDestroy:
+    m_PersistentCalls:
+      m_Calls: []
+  level:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  passengerIds:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  flightPath:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  pathCentre:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+    valueChangeDistance: 0.01
+  barrels:
+  - {fileID: 6885958334384832584}
+  - {fileID: 8578486710675145439}
+--- !u!114 &7663338266521261231
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7885664086778731795}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6b803e5699b95894481a875e6bbbf118, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.MMO.Mesh.ServerMeshShipMovement
+  _behaviourIndex: 0
+--- !u!114 &1712582635339175163
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7885664086778731795}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 48255fb01d4973245b7eb30fce997cd4, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.MMO.Mesh.ServerMeshShipPilot
+--- !u!114 &7797531712616421826
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7885664086778731795}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4c6e06fda30f5c749a2714280bd43166, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.MMO.Mesh.ServerMeshShipCombat
+  _behaviourIndex: 0
+  shield:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  destroyed:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  load0:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  load1:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  load2:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  load3:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  load4:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  load5:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  load6:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  load7:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+--- !u!54 &4192835880706222774
+Rigidbody:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7885664086778731795}
+  serializedVersion: 5
+  m_Mass: 1
+  m_LinearDamping: 3
+  m_AngularDamping: 8
+  m_CenterOfMass: {x: 0, y: 0, z: 0}
+  m_InertiaTensor: {x: 1, y: 1, z: 1}
+  m_InertiaRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ImplicitCom: 1
+  m_ImplicitTensor: 1
+  m_UseGravity: 0
+  m_IsKinematic: 0
+  m_Interpolate: 0
+  m_Constraints: 0
+  m_CollisionDetection: 0
+--- !u!65 &596434260510718799
+BoxCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7885664086778731795}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Size: {x: 8.4, y: 3, z: 11.9}
+  m_Center: {x: 0, y: 0.4, z: 3.4}

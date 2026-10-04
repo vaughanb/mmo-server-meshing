@@ -1,6 +1,9 @@
 """Phase 0 step 5 instrument helpers: parsers for the Send, Phantom, Sink and Bot net window lines, and mirrors of the
 MESH_PHANTOM, MESH_PHANTOM_AREA and MESH_METER_SENDS grammars. Pure: nothing here reads files or the environment.
-Split out of p0tools (the ~500-line rule), whose registry lists the step 5 keys.
+Split out of p0tools (the ~500-line rule), whose registry lists the step 5 keys. Step 6 adds two optional groups that
+never change an old line: the Send window's records group and the Phantom window's viewErr group; step 7 adds the
+record sizes group to the Send window (MESH_METER_RECORD_SIZES=1) and to the Sink window (-meshPhantomSinkSizes 1), and
+the ship kind.
 
     p0phantom.parse_send_window(line)     # the "Send window" line a cell logs with MESH_METER_SENDS on, else None
     p0phantom.send_window_problems(f)     # where a Send window's totals or group order break the contract
@@ -8,6 +11,7 @@ Split out of p0tools (the ~500-line rule), whose registry lists the step 5 keys.
     p0phantom.parse_sink_window(line)     # the "Sink window" line the sink process logs every 5 s
     p0phantom.parse_bot_net_window(line)  # the "Bot net window" line a bot logs with -meshBotNetSeconds
     p0phantom.phantom_setting("virtual:200:character:C")   # ("virtual", 200, "character", ("C",), None)
+    p0phantom.ship_phantom_refusal(env)                    # the error for a key a ship phantom refuses, else None
     p0phantom.phantom_area_setting("disc:0,0,50")          # ("disc", (0.0, 0.0, 50.0), None)
     p0phantom.meter_sends_setting("count")                 # (True, False, None)
 
@@ -27,6 +31,13 @@ MAX_TYPE_GROUPS = 6     # the per-type groups a Send or Sink window lists before
 DELIVERIES = ("ru", "seq", "ro", "rs", "u", "other")   # the delivery groups, in LiteNetLib's enum order, then other
 
 _PAIRS = " ".join(rf"{name} (?P<d_{name}_calls>\d+) (?P<d_{name}_bytes>\d+)" for name in DELIVERIES)
+# The optional record sizes group (step 7, MeshRecordSizeCounts.ToGroup): EntityState records by payload length.
+_SIZES = (rf"\| sizes n (?P<sizes_n>\d+) min (?P<sizes_min>\d+) max (?P<sizes_max>\d+) "
+          rf"top (?P<sizes_l1>\d+):(?P<sizes_c1>\d+) (?P<sizes_l2>\d+):(?P<sizes_c2>\d+) (?P<sizes_l3>\d+):(?P<sizes_c3>\d+) "
+          rf"payload (?P<sizes_payload>{NUM}) framed (?P<sizes_framed>{NUM}) B over (?P<sizes_over>\d+) "
+          rf"unread (?P<sizes_unread>\d+)")
+_SIZE_GROUPS = {"sizes_n", "sizes_min", "sizes_max", "sizes_payload", "sizes_framed", "sizes_over", "sizes_unread"} | {
+    f"sizes_{part}{k}" for part in ("l", "c") for k in (1, 2, 3)}
 _PAIR_GROUPS = {f"d_{name}_{part}" for name in DELIVERIES for part in ("calls", "bytes")}
 _SEND_TYPE = re.compile(rf"t(?P<type>\d+) calls (?P<calls>\d+) bytes (?P<bytes>\d+) (?P<calls_per_s>{NUM})/s "
                         rf"(?P<kb_per_s>{NUM}) kB/s (?P<us>{NUM}) us")
@@ -38,10 +49,16 @@ SEND_WINDOW = re.compile(
     rf"(?P<other_kb_per_s>{NUM}) kB/s (?P<other_us>{NUM}) us "
     rf"\| refused (?P<refused>\d+) tooBig (?P<too_big>\d+) bytes (?P<too_big_bytes>\d+) "
     rf"\| delivery {_PAIRS} "
+    rf"(?:\| records ro (?P<records_ro>\d+) u (?P<records_u>\d+) other (?P<records_other>\d+) "
+    rf"unread (?P<records_unread>\d+) )?"
+    rf"(?:{_SIZES} )?"
     rf"\| channels (?P<channels>(?:\d+:\d+ )*)other:(?P<channels_other>\d+) "
     rf"\| wire (?P<wire_bytes>\d+) B (?P<wire_packets>\d+) pkt \| offThread (?P<off_thread>\d+)$")
 SEND_WINDOW_INTS = {"calls", "bytes", "other_calls", "other_bytes", "refused", "too_big", "too_big_bytes",
                     "channels_other", "wire_bytes", "wire_packets", "off_thread"}
+RECORDS = ("ro", "u", "other", "unread")   # the optional records group (step 6): 119 records by delivery, unreadable
+_RECORD_GROUPS = {f"records_{name}" for name in RECORDS}
+ENTITY_STATE = 119                          # the kit's EntityState message type, whose records the group counts
 
 PHANTOM_WINDOW = re.compile(
     rf"Phantom window (?P<seconds>{NUM}) s: bound virtual (?P<bound_virtual>\d+) sink (?P<bound_sink>\d+) "
@@ -51,12 +68,15 @@ PHANTOM_WINDOW = re.compile(
     rf"\| uploads (?P<uploads_per_s>{NUM})/s "
     rf"\| posErr n (?P<pos_err_n>\d+) p50 (?P<pos_err_p50>{NUM}) p95 (?P<pos_err_p95>{NUM}) "
     rf"max (?P<pos_err_max>{NUM}) m "
+    rf"(?:\| viewErr n (?P<view_err_n>\d+) p50 (?P<view_err_p50>{NUM}) p95 (?P<view_err_p95>{NUM}) "
+    rf"max (?P<view_err_max>{NUM}) m )?"
     rf"\| down n (?P<down_n>\d+) mean (?P<down_mean>{NUM}) p95 (?P<down_p95>{NUM}) max (?P<down_max>{NUM}) kB/s "
     rf"\| swallowed {_PAIRS} "
     rf"\| frames (?P<frames>\d+) rig feeder (?P<feeder_ms_per_s>{NUM}) binder (?P<binder_ms_per_s>{NUM}) "
     rf"sampler (?P<sampler_ms_per_s>{NUM}) ms/s (?P<rig_ms_per_frame>{NUM}) ms/frame$")
 PHANTOM_WINDOW_INTS = {"bound_virtual", "bound_sink", "ready", "filler", "eye_seen", "step", "steps", "target",
-                       "vmove_n", "vmove_p95", "vmove_min", "pos_err_n", "down_n", "frames"}
+                       "vmove_n", "vmove_p95", "vmove_min", "pos_err_n", "view_err_n", "down_n", "frames"}
+VIEW_ERR = ("view_err_n", "view_err_p50", "view_err_p95", "view_err_max")   # the optional viewErr group (step 6)
 
 _SINK_TYPE = re.compile(r"t(?P<type>\d+) calls (?P<calls>\d+) bytes (?P<bytes>\d+)")
 SINK_WINDOW = re.compile(
@@ -66,7 +86,8 @@ SINK_WINDOW = re.compile(
     rf"(?P<types>(?:\| t\d+ calls \d+ bytes \d+ )*)"
     rf"\| other calls (?P<other_calls>\d+) bytes (?P<other_bytes>\d+) "
     rf"\| out (?P<out_uploads>\d+) uploads (?P<uploads_per_s>{NUM})/s (?P<out_kb_per_s>{NUM}) kB/s "
-    rf"\| disconnects (?P<disconnects>\d+) \| workers (?P<workers>\d+) maxPassMs (?P<max_pass_ms>{NUM})$")
+    rf"\| disconnects (?P<disconnects>\d+) \| workers (?P<workers>\d+) maxPassMs (?P<max_pass_ms>{NUM})"
+    rf"(?: {_SIZES})?$")
 SINK_WINDOW_INTS = {"peers", "connected", "bound", "in_bytes", "in_packets", "down_n", "other_calls", "other_bytes",
                     "out_uploads", "disconnects", "workers"}
 
@@ -78,8 +99,11 @@ BOT_NET_WINDOW = re.compile(
 BOT_NET_WINDOW_INTS = {"hops", "rtt_ms", "players_seen"}
 
 PHANTOM_MODES = ("virtual", "sink")
-PHANTOM_KINDS = ("character", "eye")
-PHANTOM_SHAPE = "<virtual|sink>:<P>:<character|eye>:<cell[,cell..]|all>"
+PHANTOM_KINDS = ("character", "eye", "ship")
+PHANTOM_SHAPE = "<virtual|sink>:<P>:<character|eye|ship>:<cell[,cell..]|all>"
+# The keys a ship phantom refuses (decision 23): it sees the ships in its range and uploads what MESH_SHIP_WIRE names.
+SHIP_REFUSED_KEYS = ("MESH_PHANTOM_VIEW", "MESH_PHANTOM_AREA", "MESH_PHANTOM_STAND", "MESH_PHANTOM_FIGHT",
+                     "MESH_PHANTOM_STEPS", "MESH_PHANTOM_PAYLOAD")
 AREA_SHAPES = "<cx>,<cz>,<w>,<h> or disc:<cx>,<cz>,<r>"
 METER_SENDS_VALUES = ("off", "count", "time")
 COUNT = re.compile(r"[0-9]+")
@@ -110,6 +134,17 @@ def _type_groups(pattern, text, fields):
     return groups if len(groups) <= MAX_TYPE_GROUPS else None
 
 
+def _sizes(match):
+    """The record sizes group as {"n", "min", "max", "top": [(length, count) x 3], "payload", "framed" (float means per
+    record), "over", "unread"}, or None when the line has none."""
+    if match["sizes_n"] is None:
+        return None
+    sizes = {name: int(match[f"sizes_{name}"]) for name in ("n", "min", "max", "over", "unread")}
+    sizes.update({"top": [(int(match[f"sizes_l{k}"]), int(match[f"sizes_c{k}"])) for k in (1, 2, 3)],
+                  "payload": float(match["sizes_payload"]), "framed": float(match["sizes_framed"])})
+    return sizes
+
+
 def _channels(text):
     """" 0:250 2:1000 " as {0: 250, 2: 1000}, else None: indices strictly increasing and below 16, calls at least 1."""
     channels, last = {}, -1
@@ -128,8 +163,11 @@ def parse_send_window(line):
     "calls", "bytes" (int), "calls_per_s", "kb_per_s", "us" (float)}, and the rest in "other" (the same keys, no type);
     "refused", "too_big", "too_big_bytes"; "delivery", {ru, seq, ro, rs, u, other: (calls, bytes)}; "channels",
     {index: calls} for the non-empty ones, and "channels_other"; "wire_bytes" and "wire_packets" (the innermost
-    LiteNetLib server's window deltas); "off_thread". None when a type repeats or exceeds 65535, more than six type
-    groups are listed, or a channel index is not strictly increasing, reaches 16 or lists no calls."""
+    LiteNetLib server's window deltas); "off_thread"; "records", {ro, u, other, unread} (int: the EntityState records
+    counted by delivery, and the 119 packets whose count could not be read), or None for a line without the group
+    (step 5's lines, and any window that counted no 119 record); "sizes", the record sizes group (see _sizes) or None
+    for a line without it (MESH_METER_RECORD_SIZES unset). None when a type repeats or exceeds 65535, more than six
+    type groups are listed, or a channel index is not strictly increasing, reaches 16 or lists no calls."""
     m = SEND_WINDOW.search(line.rstrip())
     if not m:
         return None
@@ -138,8 +176,11 @@ def parse_send_window(line):
     if types is None or channels is None:
         return None
     other_keys = ("other_calls", "other_bytes", "other_calls_per_s", "other_kb_per_s", "other_us")
-    fields = _numbers(m, SEND_WINDOW_INTS, skip={"types", "channels"} | set(other_keys) | _PAIR_GROUPS)
-    fields.update({"end": rigtools.stamp_datetime(line), "types": types, "channels": channels,
+    fields = _numbers(m, SEND_WINDOW_INTS,
+                      skip={"types", "channels"} | set(other_keys) | _PAIR_GROUPS | _RECORD_GROUPS | _SIZE_GROUPS)
+    records = None if m["records_ro"] is None else {name: int(m[f"records_{name}"]) for name in RECORDS}
+    fields.update({"end": rigtools.stamp_datetime(line), "types": types, "channels": channels, "records": records,
+                   "sizes": _sizes(m),
                    "other": {key[len("other_"):]: int(m[key]) if key in SEND_WINDOW_INTS else float(m[key])
                              for key in other_keys},
                    "delivery": _pairs(m)})
@@ -149,7 +190,8 @@ def parse_send_window(line):
 def send_window_problems(fields):
     """What a parsed Send window contradicts in the contract, as messages (empty when it agrees): the type groups plus
     other, the delivery groups and the channels plus channel other must each sum to the calls (and the first two to
-    the bytes), and the type groups must run by bytes descending, ties by type ascending."""
+    the bytes), and the type groups must run by bytes descending, ties by type ascending. A records group that counts
+    anything needs t119 calls: a listed t119 group, or calls in other when t119 is not listed."""
     calls, total_bytes = fields["calls"], fields["bytes"]
     type_calls = sum(g["calls"] for g in fields["types"]) + fields["other"]["calls"]
     type_bytes = sum(g["bytes"] for g in fields["types"]) + fields["other"]["bytes"]
@@ -167,6 +209,13 @@ def send_window_problems(fields):
     if order != sorted(order):
         problems.append("type groups are not by bytes descending, ties by type ascending: "
                         + " ".join(f"t{g['type']}:{g['bytes']}" for g in fields["types"]))
+    records = fields.get("records")
+    if records and sum(records.values()) > 0:
+        listed = [g["calls"] for g in fields["types"] if g["type"] == ENTITY_STATE]
+        t119_calls = listed[0] if listed else fields["other"]["calls"]
+        if t119_calls == 0:
+            problems.append("records without t119 calls: "
+                            + " ".join(f"{name} {records[name]}" for name in RECORDS))
     return problems
 
 
@@ -176,13 +225,17 @@ def parse_phantom_window(line):
     V_move "vmove_n", "vmove_mean", "vmove_p95", "vmove_min"; "uploads_per_s"; posErr "pos_err_n", "pos_err_p50",
     "pos_err_p95", "pos_err_max" (metres); the per-phantom down distribution "down_n", "down_mean", "down_p95",
     "down_max" (kB/s); "swallowed", {ru, seq, ro, rs, u, other: (calls, bytes)}; "frames" and the rig's time,
-    "feeder_ms_per_s", "binder_ms_per_s", "sampler_ms_per_s" and "rig_ms_per_frame". Counts are int, the rest float."""
+    "feeder_ms_per_s", "binder_ms_per_s", "sampler_ms_per_s" and "rig_ms_per_frame"; viewErr (step 6, metres)
+    "view_err_n", "view_err_p50", "view_err_p95", "view_err_max", each None when the line has no viewErr group. Counts
+    are int, the rest float."""
     m = PHANTOM_WINDOW.search(line.rstrip())
     if not m:
         return None
     fields = _numbers(m, PHANTOM_WINDOW_INTS, skip=_PAIR_GROUPS)
     fields.update({"end": rigtools.stamp_datetime(line), "fighting": int(m["fighting"]) if m["fighting"] else None,
                    "swallowed": _pairs(m)})
+    for name in VIEW_ERR:
+        fields.setdefault(name, None)
     return fields
 
 
@@ -191,16 +244,17 @@ def parse_sink_window(line):
     (the summed window deltas of every sink manager) and "in_kb_per_s"; the per-peer down distribution "down_n",
     "down_mean", "down_p95", "down_max" (kB/s, wire); "types", up to six received types in line order, each {"type",
     "calls", "bytes"}, and the rest as "other_calls" and "other_bytes"; "out_uploads", "uploads_per_s",
-    "out_kb_per_s"; "disconnects"; "workers" and "max_pass_ms". None when a type repeats or exceeds 65535, or more than
-    six type groups are listed."""
+    "out_kb_per_s"; "disconnects"; "workers" and "max_pass_ms"; "sizes", the record sizes group (see _sizes) or None
+    without -meshPhantomSinkSizes 1. None when a type repeats or exceeds 65535, or more than six type groups are
+    listed."""
     m = SINK_WINDOW.search(line.rstrip())
     if not m:
         return None
     types = _type_groups(_SINK_TYPE, m["types"], ("type", "calls", "bytes"))
     if types is None:
         return None
-    fields = _numbers(m, SINK_WINDOW_INTS, skip={"types"})
-    fields.update({"end": rigtools.stamp_datetime(line), "types": types})
+    fields = _numbers(m, SINK_WINDOW_INTS, skip={"types"} | _SIZE_GROUPS)
+    fields.update({"end": rigtools.stamp_datetime(line), "types": types, "sizes": _sizes(m)})
     return fields
 
 
@@ -246,9 +300,9 @@ def phantom_setting(text):
     """MESH_PHANTOM read as ServerMeshPhantomSettings reads it: (mode, count, kind, cells, None), or
     (None, None, None, None, error). An empty or unset value is (None, None, None, None, None): unset, no warning.
 
-    mode is virtual or sink, count the phantoms bound on each listed cell (at least 1), kind character or eye, and
-    cells "all" or a tuple of cell ids. Parts are trimmed and keywords ignore case. The ship kind (step 7) and a
-    value without the cell field are refused: without it every cell would bind.
+    mode is virtual or sink, count the phantoms bound on each listed cell (at least 1), kind character, eye or ship,
+    and cells "all" or a tuple of cell ids. Parts are trimmed and keywords ignore case. A value without the cell field
+    is refused: without it every cell would bind.
     """
     if text is None or not text.strip():
         return None, None, None, None, None
@@ -262,15 +316,28 @@ def phantom_setting(text):
         return None, None, None, None, f"mode '{parts[0]}' is not virtual or sink"
     if not COUNT.fullmatch(parts[1]) or int(parts[1]) < 1:
         return None, None, None, None, f"count '{parts[1]}' is not an integer of at least 1"
-    if parts[2].lower() == "ship":
-        return None, None, None, None, "kind 'ship' is refused until step 7"
     kind = _keyword(parts[2], PHANTOM_KINDS)
     if kind is None:
-        return None, None, None, None, f"kind '{parts[2]}' is not character or eye"
+        return None, None, None, None, f"kind '{parts[2]}' is not character, eye or ship"
     cells = _cells(parts[3])
     if isinstance(cells, str) and cells != "all":
         return None, None, None, None, cells
     return mode, int(parts[1]), kind, cells, None
+
+
+def ship_phantom_refusal(env):
+    """What ServerMeshPhantomSettings refuses beside a ship-kind MESH_PHANTOM (decision 23): the error naming the first
+    of SHIP_REFUSED_KEYS the environment sets, in that order, or None when none is set or MESH_PHANTOM is not a ship
+    phantom (an unparsable MESH_PHANTOM is phantom_setting's error, not this one)."""
+    kind = phantom_setting(env.get("MESH_PHANTOM"))[2]
+    if kind != "ship":
+        return None
+    for key in SHIP_REFUSED_KEYS:
+        value = env.get(key)
+        if value:
+            return f"{key}={value} is refused with the ship kind: a ship phantom sees the ships in its range and " \
+                   f"uploads what MESH_SHIP_WIRE names"
+    return None
 
 
 def _floats(parts):

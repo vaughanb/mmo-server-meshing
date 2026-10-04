@@ -15,32 +15,14 @@ namespace MultiplayerARPG.MMO.Mesh
         Sink = 1,
     }
 
-    /// <summary>ServerMeshPhantomKind is what a phantom owns: a walking character or a hidden eye.</summary>
-    public enum ServerMeshPhantomKind
-    {
-        /// <summary>Character phantoms own a player character fed by uploads.</summary>
-        Character = 0,
-        /// <summary>Eye phantoms own a hidden identity that follows a host and observes what is around it.</summary>
-        Eye = 1,
-    }
-
-    /// <summary>ServerMeshPhantomPayloadKind is what a character phantom uploads (MESH_PHANTOM_PAYLOAD).</summary>
-    public enum ServerMeshPhantomPayloadKind
-    {
-        /// <summary>Transform uploads are the kit's NotSecure sync transform: state, extra state, position, yaw.</summary>
-        Transform = 0,
-        /// <summary>Input uploads are the kit's ServerAuthoritative key-movement input, sent only when it changes.</summary>
-        Input = 1,
-    }
-
     /// <summary>
     /// ServerMeshPhantomSettings is one parsed phantom setting: MESH_PHANTOM with every MESH_PHANTOM_* key checked against
     /// it. The TryParse members read one value each; an empty or null value is unset, gives the default and no error.
     /// <see cref="TryResolve"/> reads them all and applies the rules between keys. Error texts never contain braces.
     /// </summary>
-    public sealed class ServerMeshPhantomSettings
+    public sealed partial class ServerMeshPhantomSettings
     {
-        /// <summary>ENV_PHANTOM is the phantom setting: &lt;virtual|sink&gt;:&lt;P&gt;:&lt;character|eye&gt;:&lt;cell[,cell..]|all&gt;.</summary>
+        /// <summary>ENV_PHANTOM is the phantom setting: &lt;virtual|sink&gt;:&lt;P&gt;:&lt;character|eye|ship&gt;:&lt;cell[,cell..]|all&gt;.</summary>
         public const string ENV_PHANTOM = "MESH_PHANTOM";
         /// <summary>ENV_VIEW is V, the movers each phantom sees (required unless MESH_PHANTOM_AREA is set; 0 means host mode for eyes).</summary>
         public const string ENV_VIEW = "MESH_PHANTOM_VIEW";
@@ -78,7 +60,7 @@ namespace MultiplayerARPG.MMO.Mesh
 
         /// <summary>Route is virtual or sink.</summary>
         public ServerMeshPhantomRoute Route { get; private set; }
-        /// <summary>Kind is character or eye.</summary>
+        /// <summary>Kind is character, eye or ship.</summary>
         public ServerMeshPhantomKind Kind { get; private set; }
         /// <summary>Phantoms is P, bound on each listed cell.</summary>
         public int Phantoms { get; private set; }
@@ -144,22 +126,22 @@ namespace MultiplayerARPG.MMO.Mesh
                 ? FormattableString.Invariant($"disc {AreaCentre.x:0.0} {AreaCentre.y:0.0} r {AreaRadius:0.0}")
                 : FormattableString.Invariant($"rect {AreaCentre.x:0.0} {AreaCentre.y:0.0} size {AreaSize.x:0.0} {AreaSize.y:0.0}");
             return Printable(FormattableString.Invariant(
-                $"Phantoms: {ENV_PHANTOM}={Source} installed: mode {RouteName(Route)} kind {KindName(Kind)} P {Phantoms} view {view} arrival {ArrivalPerSecond:0.0}/s upload {UploadHz} Hz payload {PayloadName(Payload)} steps {steps} area {area} stand {StandShare:0.00} fight {FightShare:0.00} seed {Seed}"));
+                $"Phantoms: {ENV_PHANTOM}={Source} installed: mode {RouteName(Route)} kind {KindName(Kind)} P {Phantoms} view {view} arrival {ArrivalPerSecond:0.0}/s upload {UploadHz} Hz payload {PayloadText()} steps {steps} area {area} stand {StandShare:0.00} fight {FightShare:0.00} seed {Seed}"));
         }
 
         /// <summary>RouteName is virtual or sink.</summary>
         public static string RouteName(ServerMeshPhantomRoute route) => route == ServerMeshPhantomRoute.Sink ? "sink" : "virtual";
 
-        /// <summary>KindName is character or eye.</summary>
-        public static string KindName(ServerMeshPhantomKind kind) => kind == ServerMeshPhantomKind.Eye ? "eye" : "character";
+        /// <summary>KindName is character, eye or ship.</summary>
+        public static string KindName(ServerMeshPhantomKind kind) => kind == ServerMeshPhantomKind.Eye ? "eye" : kind == ServerMeshPhantomKind.Ship ? "ship" : "character";
 
         /// <summary>PayloadName is transform or input.</summary>
         public static string PayloadName(ServerMeshPhantomPayloadKind payload) => payload == ServerMeshPhantomPayloadKind.Input ? "input" : "transform";
 
         /// <summary>
-        /// TryParsePhantom reads MESH_PHANTOM, &lt;virtual|sink&gt;:&lt;P&gt;:&lt;character|eye&gt;:&lt;cell[,cell..]|all&gt;, ignoring case
-        /// in the words and whitespace around each field. Null or empty is unset: false with a null error. The kind ship (step 7)
-        /// and an omitted cell field are refused with an error.
+        /// TryParsePhantom reads MESH_PHANTOM, &lt;virtual|sink&gt;:&lt;P&gt;:&lt;character|eye|ship&gt;:&lt;cell[,cell..]|all&gt;, ignoring
+        /// case in the words and whitespace around each field. Null or empty is unset: false with a null error. An omitted cell
+        /// field is refused with an error.
         /// </summary>
         public static bool TryParsePhantom(string text, out ServerMeshPhantomRoute route, out int phantoms, out ServerMeshPhantomKind kind, out bool allCells, out string[] cells, out string error)
         {
@@ -191,7 +173,7 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             if (parts.Length != 4)
             {
-                error = $"{ENV_PHANTOM}={text} is not <virtual|sink>:<P>:<character|eye>:<cell[,cell..]|all>";
+                error = $"{ENV_PHANTOM}={text} is not <virtual|sink>:<P>:<character|eye|ship>:<cell[,cell..]|all>";
                 return false;
             }
             string mode = parts[0].Trim();
@@ -216,13 +198,10 @@ namespace MultiplayerARPG.MMO.Mesh
             else if (string.Equals(kindText, "eye", StringComparison.OrdinalIgnoreCase))
                 kind = ServerMeshPhantomKind.Eye;
             else if (string.Equals(kindText, "ship", StringComparison.OrdinalIgnoreCase))
-            {
-                error = $"{ENV_PHANTOM}={text}: the kind ship needs step 7";
-                return false;
-            }
+                kind = ServerMeshPhantomKind.Ship;
             else
             {
-                error = $"{ENV_PHANTOM}={text}: kind {kindText} is not character or eye";
+                error = $"{ENV_PHANTOM}={text}: kind {kindText} is not character, eye or ship";
                 return false;
             }
             string cellField = parts[3].Trim();
@@ -302,7 +281,7 @@ namespace MultiplayerARPG.MMO.Mesh
             return true;
         }
 
-        /// <summary>TryParsePayload reads MESH_PHANTOM_PAYLOAD, transform or input; ship56 and ship28 need step 7, and input is refused with eyes. Null or empty gives transform.</summary>
+        /// <summary>TryParsePayload reads MESH_PHANTOM_PAYLOAD, transform or input; ship56 and ship28 are not grammar (MESH_SHIP_WIRE sets a ship upload), and input is refused with eyes. Null or empty gives transform.</summary>
         public static bool TryParsePayload(string text, ServerMeshPhantomKind kind, out ServerMeshPhantomPayloadKind payload, out string error)
         {
             payload = ServerMeshPhantomPayloadKind.Transform;
@@ -324,7 +303,7 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             if (string.Equals(value, "ship56", StringComparison.OrdinalIgnoreCase) || string.Equals(value, "ship28", StringComparison.OrdinalIgnoreCase))
             {
-                error = $"{ENV_PAYLOAD}={text} needs step 7";
+                error = $"{ENV_PAYLOAD}={text} is not grammar: a ship phantom uploads what {ServerMeshShipSettings.WireKey} names (legacy54 54 B, header56 and compact28 56 B)";
                 return false;
             }
             error = $"{ENV_PAYLOAD}={text} is not transform or input";
@@ -490,7 +469,8 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>
         /// TryResolve reads every phantom key through readValue (an environment lookup) and applies the rules between them:
         /// MESH_PHANTOM_VIEW is required unless MESH_PHANTOM_AREA is set, and then it must be unset; the area, stand and fight
-        /// keys need the character kind; steps need the virtual mode. It returns false with a null warning when MESH_PHANTOM is
+        /// keys need the character kind; steps need the virtual mode; the ship kind takes no view, area, stand, fight, steps or
+        /// payload and reads MESH_SHIP_WIRE and MESH_SHIP_SCALE instead. It returns false with a null warning when MESH_PHANTOM is
         /// unset, and false with a warning (naming the key, no braces) when anything is refused; nothing binds then.
         /// </summary>
         public static bool TryResolve(Func<string, string> readValue, out ServerMeshPhantomSettings settings, out string warning)
@@ -515,6 +495,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 AllCells = allCells,
                 Cells = cells,
             };
+            if (kind == ServerMeshPhantomKind.Ship && !TryResolveShip(readValue, s, out error))
+                return Refuse(error, out warning);
             string viewText = readValue(ENV_VIEW);
             if (!TryParseArea(readValue(ENV_AREA), out bool hasArea, out bool disc, out Vector2 centre, out Vector2 size, out float radius, out error))
                 return Refuse(error, out warning);
@@ -530,7 +512,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 s.AreaSize = size;
                 s.AreaRadius = radius;
             }
-            else
+            else if (kind != ServerMeshPhantomKind.Ship)
             {
                 if (string.IsNullOrEmpty(viewText))
                     return Refuse($"{ENV_VIEW} is required with {ENV_PHANTOM} (V, the movers each phantom sees)", out warning);

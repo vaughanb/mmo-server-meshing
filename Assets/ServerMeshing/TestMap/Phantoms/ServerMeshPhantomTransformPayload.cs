@@ -22,15 +22,15 @@ namespace MultiplayerARPG.MMO.Mesh
         public const MovementState IdleState = MovementState.IsGrounded;
 
         /// <summary>TryWrite writes the sync transform and returns true; reliable only for a teleport confirm.</summary>
-        public bool TryWrite(NetDataWriter writer, bool moving, bool teleport, Vector3 position, float yawDegrees, ref bool stopSent, out bool reliable)
+        public bool TryWrite(NetDataWriter writer, bool moving, bool teleport, in ServerMeshPhantomPose pose, ref bool stopSent, out bool reliable)
         {
             MovementState state = moving ? MovingState : IdleState;
             if (teleport)
                 state |= MovementState.IsTeleport;
             writer.PutPackedUInt((uint)state);
             writer.Put((byte)ExtraMovementState.None);
-            writer.PutVector3(position);
-            writer.PutPackedInt(EntityMovementFunctions.GetCompressedAngle(Mathf.Repeat(yawDegrees, 360f)));
+            writer.PutVector3(pose.Position);
+            writer.PutPackedInt(EntityMovementFunctions.GetCompressedAngle(Mathf.Repeat(pose.YawDegrees, 360f)));
             stopSent = false;
             reliable = teleport;
             return true;

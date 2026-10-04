@@ -89,6 +89,9 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>IsReliableOnly is forwarded.</summary>
         public bool IsReliableOnly => _inner.IsReliableOnly;
 
+        /// <summary>ViewSampler, when set (by the binder, for virtual phantoms), reads the swallowed sends of its sampled phantoms.</summary>
+        public ServerMeshPhantomViewSampler ViewSampler { get; set; }
+
         /// <summary>IsPhantom is true for a bound phantom.</summary>
         public bool IsPhantom(long connectionId) => _phantoms.TryGetValue(connectionId, out int slot) && slot >= 0;
 
@@ -257,6 +260,9 @@ namespace MultiplayerARPG.MMO.Mesh
                 ++_swallowedCalls[deliverySlot];
                 _swallowedBytes[deliverySlot] += length;
                 _slotBytes[slot] += length;
+                ServerMeshPhantomViewSampler sampler = ViewSampler;
+                if (sampler != null && sampler.IsSampled(connectionId))
+                    sampler.OnSwallowed(connectionId, writer.Data, length, UnityEngine.Time.frameCount);
                 return true;
             }
             if (connectionId >= IdBase)

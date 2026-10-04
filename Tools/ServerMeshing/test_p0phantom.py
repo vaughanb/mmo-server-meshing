@@ -25,11 +25,18 @@ SEND_FIELDS = {
     "other": {"calls": 0, "bytes": 0, "calls_per_s": 0.0, "kb_per_s": 0.0, "us": 0.0},
     "refused": 0, "too_big": 0, "too_big_bytes": 0,
     "delivery": {"ru": (0, 0), "seq": (0, 0), "ro": (250, 10240), "rs": (0, 0), "u": (1000, 501760), "other": (0, 0)},
-    "channels": {0: 250, 2: 1000}, "channels_other": 0, "wire_bytes": 530000, "wire_packets": 1300, "off_thread": 0}
+    "channels": {0: 250, 2: 1000}, "channels_other": 0, "wire_bytes": 530000, "wire_packets": 1300, "off_thread": 0,
+    "records": None, "sizes": None}
 SEND_EMPTY = ("Send window 5.00 s: calls 0 0.0/s bytes 0 0.0 kB/s | other calls 0 bytes 0 0.0/s 0.0 kB/s 0.00 us "
               "| refused 0 tooBig 0 bytes 0 | delivery ru 0 0 seq 0 0 ro 0 0 rs 0 0 u 0 0 other 0 0 "
               "| channels other:0 | wire 0 B 0 pkt | offThread 0")
 SEND_TYPE_GROUP = "| t{t} calls 1 bytes 1 0.2/s 0.0 kB/s 0.00 us "
+RECORDS_GROUP = "| records ro 300 u 49700 other 0 unread 0 "
+SEND_RECORDS = SEND_SAMPLE.replace("| channels", RECORDS_GROUP + "| channels")
+SIZES_GROUP = "| sizes n 5000 min 54 max 54 top 54:5000 0:0 0:0 payload 54.0 framed 60.0 B over 0 unread 0 "
+SIZES_FIELDS = {"n": 5000, "min": 54, "max": 54, "top": [(54, 5000), (0, 0), (0, 0)], "payload": 54.0, "framed": 60.0,
+                "over": 0, "unread": 0}
+SEND_SIZES = SEND_RECORDS.replace("| channels", SIZES_GROUP + "| channels")
 
 PHANTOM_SAMPLE = (
     "Phantom window 5.00 s: bound virtual 200 sink 0 ready 200 filler 2 eyeSeen 0 | step 0/0 target 200 "
@@ -44,7 +51,10 @@ PHANTOM_FIELDS = {
     "down_n": 200, "down_mean": 55.3, "down_p95": 56.0, "down_max": 57.2,
     "swallowed": {"ru": (0, 0), "seq": (0, 0), "ro": (1000, 56000), "rs": (0, 0), "u": (60000, 56000000),
                   "other": (0, 0)},
-    "frames": 150, "feeder_ms_per_s": 1.2, "binder_ms_per_s": 0.1, "sampler_ms_per_s": 0.05, "rig_ms_per_frame": 0.045}
+    "frames": 150, "feeder_ms_per_s": 1.2, "binder_ms_per_s": 0.1, "sampler_ms_per_s": 0.05, "rig_ms_per_frame": 0.045,
+    "view_err_n": None, "view_err_p50": None, "view_err_p95": None, "view_err_max": None}
+VIEW_ERR_GROUP = "| viewErr n 64 p50 0.08 p95 0.31 max 0.77 m "
+PHANTOM_VIEW_ERR = PHANTOM_SAMPLE.replace("| down n", VIEW_ERR_GROUP + "| down n")
 
 SINK_SAMPLE = (
     "Sink window 5.00 s: peers 50 connected 50 bound 50 | in 2621440 B 6000 pkt 512.0 kB/s "
@@ -55,7 +65,7 @@ SINK_FIELDS = {
     "in_kb_per_s": 512.0, "down_n": 50, "down_mean": 10.2, "down_p95": 10.5, "down_max": 10.9,
     "types": [{"type": 119, "calls": 5000, "bytes": 2500000}, {"type": 65001, "calls": 0, "bytes": 0}],
     "other_calls": 1000, "other_bytes": 30000, "out_uploads": 5000, "uploads_per_s": 1000.0, "out_kb_per_s": 30.0,
-    "disconnects": 0, "workers": 1, "max_pass_ms": 3.2}
+    "disconnects": 0, "workers": 1, "max_pass_ms": 3.2, "sizes": None}
 
 BOT_SAMPLE = ("Bot net window 5.00 s: in 52.3 kB/s 120 pkt/s out 3.1 kB/s 22 pkt/s | hops 0 | rtt 1 ms "
               "| players seen 200 | at 2026-10-01T12:00:05Z")
@@ -97,11 +107,80 @@ class SendWindowTests(unittest.TestCase):
                 "other": {"calls": 0, "bytes": 0, "calls_per_s": 0.0, "kb_per_s": 0.0, "us": 0.0},
                 "refused": 0, "too_big": 0, "too_big_bytes": 0,
                 "delivery": {name: (0, 0) for name in p0phantom.DELIVERIES}, "channels": {}, "channels_other": 0,
-                "wire_bytes": 0, "wire_packets": 0, "off_thread": 0, "end": None}),
+                "wire_bytes": 0, "wire_packets": 0, "off_thread": 0, "records": None, "sizes": None, "end": None}),
         }
         for name, (line, expected) in cases.items():
             with self.subTest(name):
                 self.assertEqual(p0phantom.parse_send_window(line), expected)
+
+    def test_the_records_group(self):
+        cases = {
+            "records before delivery": (SEND_SAMPLE.replace("| delivery", RECORDS_GROUP + "| delivery"), None),
+            "records after channels": (SEND_SAMPLE.replace("| wire", RECORDS_GROUP + "| wire"), None),
+            "records twice": (SEND_SAMPLE.replace("| channels", RECORDS_GROUP * 2 + "| channels"), None),
+            "no unread": (SEND_SAMPLE.replace("| channels", "| records ro 300 u 49700 other 0 | channels"), None),
+            "rs instead of other": (SEND_SAMPLE.replace("| channels", RECORDS_GROUP.replace("other", "rs")
+                                                        + "| channels"), None),
+            "a fractional count": (SEND_SAMPLE.replace("| channels", RECORDS_GROUP.replace("ro 300", "ro 300.5")
+                                                       + "| channels"), None),
+            "a negative count": (SEND_SAMPLE.replace("| channels", RECORDS_GROUP.replace("u 49700", "u -49700")
+                                                     + "| channels"), None),
+            "a step 5 line": (SEND_SAMPLE, dict(SEND_FIELDS, end=None)),
+            "a step 6 line": (SEND_RECORDS, dict(SEND_FIELDS, end=None,
+                                                 records={"ro": 300, "u": 49700, "other": 0, "unread": 0})),
+            "a step 6 log line": (stamped(SEND_RECORDS), dict(SEND_FIELDS, end=END,
+                                                              records={"ro": 300, "u": 49700, "other": 0,
+                                                                       "unread": 0})),
+            "only unreadable": (SEND_SAMPLE.replace("| channels", "| records ro 0 u 0 other 0 unread 2 | channels"),
+                                dict(SEND_FIELDS, end=None, records={"ro": 0, "u": 0, "other": 0, "unread": 2})),
+        }
+        for name, (line, expected) in cases.items():
+            with self.subTest(name):
+                self.assertEqual(p0phantom.parse_send_window(line), expected)
+
+    def test_the_sizes_group(self):
+        records = {"ro": 300, "u": 49700, "other": 0, "unread": 0}
+        cases = {
+            "sizes before records": (SEND_SAMPLE.replace("| channels", SIZES_GROUP + RECORDS_GROUP + "| channels"), None),
+            "sizes after channels": (SEND_SAMPLE.replace("| wire", SIZES_GROUP + "| wire"), None),
+            "sizes twice": (SEND_RECORDS.replace("| channels", SIZES_GROUP * 2 + "| channels"), None),
+            "two top lengths": (SEND_SIZES.replace(" 0:0 0:0 payload", " 0:0 payload"), None),
+            "no framed mean": (SEND_SIZES.replace(" framed 60.0 B", " B"), None),
+            "a negative count": (SEND_SIZES.replace("sizes n 5000", "sizes n -5000"), None),
+            "a step 6 line": (SEND_RECORDS, dict(SEND_FIELDS, end=None, records=records)),
+            "a step 7 line": (SEND_SIZES, dict(SEND_FIELDS, end=None, records=records, sizes=SIZES_FIELDS)),
+            "a step 7 log line": (stamped(SEND_SIZES), dict(SEND_FIELDS, end=END, records=records, sizes=SIZES_FIELDS)),
+            "sizes without records": (SEND_SAMPLE.replace("| channels", SIZES_GROUP + "| channels"),
+                                      dict(SEND_FIELDS, end=None, sizes=SIZES_FIELDS)),
+            "three lengths": (SEND_SIZES.replace("min 54 max 54 top 54:5000 0:0 0:0 payload 54.0 framed 60.0",
+                                                 "min 28 max 56 top 28:3900 56:1000 54:100 payload 34.0 framed 40.5"),
+                              dict(SEND_FIELDS, end=None, records=records,
+                                   sizes=dict(SIZES_FIELDS, min=28, max=56, payload=34.0, framed=40.5,
+                                              top=[(28, 3900), (56, 1000), (54, 100)]))),
+        }
+        for name, (line, expected) in cases.items():
+            with self.subTest(name):
+                self.assertEqual(p0phantom.parse_send_window(line), expected)
+
+    def test_records_need_t119_calls(self):
+        no_119 = SEND_EMPTY.replace("| channels", RECORDS_GROUP + "| channels")
+        hidden_119 = SEND_EMPTY.replace("| other calls 0 bytes 0", "| other calls 5 bytes 0").replace(
+            "| channels", RECORDS_GROUP + "| channels")
+        zero_records = SEND_EMPTY.replace("| channels", "| records ro 0 u 0 other 0 unread 0 | channels")
+        cases = {
+            "records and no t119": (no_119, ["records without t119 calls: ro 300 u 49700 other 0 unread 0"]),
+            "a step 6 line": (SEND_RECORDS, []),
+            "t119 in other": (hidden_119, None),
+            "a zero records group": (zero_records, []),
+            "no records group": (SEND_EMPTY, []),
+        }
+        for name, (line, expected) in cases.items():
+            with self.subTest(name):
+                problems = p0phantom.send_window_problems(p0phantom.parse_send_window(line))
+                if expected is None:
+                    self.assertNotIn("records without t119 calls", " ".join(problems))
+                else:
+                    self.assertEqual(problems, expected)
 
     def test_six_type_groups_parse(self):
         six = [SEND_TYPE_GROUP.format(t=t) for t in range(1, 7)]
@@ -167,6 +246,29 @@ class PhantomWindowTests(unittest.TestCase):
             with self.subTest(name):
                 self.assertEqual(p0phantom.parse_phantom_window(line), expected)
 
+    def test_the_view_err_group(self):
+        view_err = {"view_err_n": 64, "view_err_p50": 0.08, "view_err_p95": 0.31, "view_err_max": 0.77}
+        cases = {
+            "viewErr before posErr": (PHANTOM_SAMPLE.replace("| posErr", VIEW_ERR_GROUP + "| posErr"), None),
+            "viewErr after down": (PHANTOM_SAMPLE.replace("| swallowed", VIEW_ERR_GROUP + "| swallowed"), None),
+            "viewErr twice": (PHANTOM_SAMPLE.replace("| down n", VIEW_ERR_GROUP * 2 + "| down n"), None),
+            "no viewErr unit": (PHANTOM_VIEW_ERR.replace("max 0.77 m", "max 0.77"), None),
+            "no p95": (PHANTOM_VIEW_ERR.replace(" p95 0.31", ""), None),
+            "a fractional n": (PHANTOM_VIEW_ERR.replace("viewErr n 64", "viewErr n 64.5"), None),
+            "a NaN p50": (PHANTOM_VIEW_ERR.replace("p50 0.08", "p50 NaN"), None),
+            "a step 5 line": (PHANTOM_SAMPLE, dict(PHANTOM_FIELDS, end=None)),
+            "a step 6 line": (PHANTOM_VIEW_ERR, dict(PHANTOM_FIELDS, end=None, **view_err)),
+            "a step 6 log line": (stamped(PHANTOM_VIEW_ERR), dict(PHANTOM_FIELDS, end=END, **view_err)),
+            "an empty sample": (PHANTOM_SAMPLE.replace("| down n", "| viewErr n 0 p50 0.00 p95 0.00 max 0.00 m | down n"),
+                                dict(PHANTOM_FIELDS, end=None, view_err_n=0, view_err_p50=0.0, view_err_p95=0.0,
+                                     view_err_max=0.0)),
+            "with fighting": (PHANTOM_VIEW_ERR.replace("eyeSeen 0", "eyeSeen 0 fighting 40"),
+                              dict(PHANTOM_FIELDS, end=None, fighting=40, **view_err)),
+        }
+        for name, (line, expected) in cases.items():
+            with self.subTest(name):
+                self.assertEqual(p0phantom.parse_phantom_window(line), expected)
+
 
 class SinkWindowTests(unittest.TestCase):
     def test_parse_sink_window(self):
@@ -185,6 +287,9 @@ class SinkWindowTests(unittest.TestCase):
             "a sample": (SINK_SAMPLE, dict(SINK_FIELDS, end=None)),
             "a log line": (stamped(SINK_SAMPLE), dict(SINK_FIELDS, end=END)),
             "no type groups": (bare, dict(SINK_FIELDS, types=[], end=None)),
+            "a sizes group": (SINK_SAMPLE + " " + SIZES_GROUP.strip(), dict(SINK_FIELDS, sizes=SIZES_FIELDS, end=None)),
+            "a sizes group before workers": (SINK_SAMPLE.replace("| workers", SIZES_GROUP + "| workers"), None),
+            "a cut sizes group": (SINK_SAMPLE + " | sizes n 20 min 56", None),
         }
         for name, (line, expected) in cases.items():
             with self.subTest(name):
@@ -220,11 +325,12 @@ class PhantomSettingTests(unittest.TestCase):
             "two parts": ("virtual:20", refused + (f"'virtual:20' is not {shape}",)),
             "five parts": ("virtual:20:eye:C:x", refused + (f"'virtual:20:eye:C:x' is not {shape}",)),
             "an unknown mode": ("ship:20:eye:C", refused + ("mode 'ship' is not virtual or sink",)),
+            "a fifth kind": ("virtual:20:monster:C", refused + ("kind 'monster' is not character, eye or ship",)),
             "a zero count": ("virtual:0:eye:C", refused + ("count '0' is not an integer of at least 1",)),
             "a negative count": ("virtual:-5:eye:C", refused + ("count '-5' is not an integer of at least 1",)),
             "a fractional count": ("virtual:2.5:eye:C", refused + ("count '2.5' is not an integer of at least 1",)),
-            "the ship kind": ("virtual:20:ship:C", refused + ("kind 'ship' is refused until step 7",)),
-            "an unknown kind": ("virtual:20:monster:C", refused + ("kind 'monster' is not character or eye",)),
+            "the ship kind": ("virtual:20:ship:C", ("virtual", 20, "ship", ("C",), None)),
+            "a sink ship kind": ("sink:20:SHIP:C", ("sink", 20, "ship", ("C",), None)),
             "an empty cell": ("virtual:20:eye:C,,E", refused + ("cell field 'C,,E' has an empty cell",)),
             "an empty cell field": ("virtual:20:eye:", refused + ("cell field '' has an empty cell",)),
             "a repeated cell": ("virtual:20:eye:C,c", refused + ("cell field 'C,c' names c twice",)),
@@ -239,6 +345,29 @@ class PhantomSettingTests(unittest.TestCase):
         for name, (text, expected) in cases.items():
             with self.subTest(name):
                 self.assertEqual(p0phantom.phantom_setting(text), expected)
+
+    def test_ship_phantom_refusal(self):
+        ship = {"MESH_PHANTOM": "virtual:4:ship:C"}
+        tail = "is refused with the ship kind: a ship phantom sees the ships in its range and uploads what " \
+               "MESH_SHIP_WIRE names"
+        cases = {
+            "view": (dict(ship, MESH_PHANTOM_VIEW="10"), f"MESH_PHANTOM_VIEW=10 {tail}"),
+            "area": (dict(ship, MESH_PHANTOM_AREA="0,0,50,50"), f"MESH_PHANTOM_AREA=0,0,50,50 {tail}"),
+            "stand": (dict(ship, MESH_PHANTOM_STAND="0.5"), f"MESH_PHANTOM_STAND=0.5 {tail}"),
+            "fight": (dict(ship, MESH_PHANTOM_FIGHT="1"), f"MESH_PHANTOM_FIGHT=1 {tail}"),
+            "steps": (dict(ship, MESH_PHANTOM_STEPS="1,4@5"), f"MESH_PHANTOM_STEPS=1,4@5 {tail}"),
+            "payload": (dict(ship, MESH_PHANTOM_PAYLOAD="ship56"), f"MESH_PHANTOM_PAYLOAD=ship56 {tail}"),
+            "view before payload": (dict(ship, MESH_PHANTOM_PAYLOAD="ship28", MESH_PHANTOM_VIEW="3"),
+                                    f"MESH_PHANTOM_VIEW=3 {tail}"),
+            "ship alone": (ship, None),
+            "an empty view": (dict(ship, MESH_PHANTOM_VIEW=""), None),
+            "the ship keys": (dict(ship, MESH_SHIP_WIRE="header56", MESH_PHANTOM_UPLOAD_HZ="20"), None),
+            "a character with a view": ({"MESH_PHANTOM": "virtual:4:character:C", "MESH_PHANTOM_VIEW": "3"}, None),
+            "no phantom": ({"MESH_PHANTOM_VIEW": "3"}, None),
+        }
+        for name, (env, expected) in cases.items():
+            with self.subTest(name):
+                self.assertEqual(p0phantom.ship_phantom_refusal(env), expected)
 
     def test_phantom_area_setting(self):
         shapes = p0phantom.AREA_SHAPES

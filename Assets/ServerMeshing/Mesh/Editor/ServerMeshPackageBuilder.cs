@@ -220,7 +220,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         }
 
         /// <summary>
-        /// FindStrayReferences lists each use, in a script <paramref name="carried"/> ships, of a type declared in a script it
+        /// FindStrayReferences lists each use, in a script <paramref name="carried"/> carries, of a type declared in a script it
         /// leaves behind. Scripts are (asset path, text).
         /// </summary>
         internal static List<string> FindStrayReferences(IEnumerable<KeyValuePair<string, string>> scripts, Func<string, bool> carried)
@@ -247,7 +247,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             return strays;
         }
 
-        /// <summary>Which asset paths a package ships: its own export paths and those of the packages it depends on.</summary>
+        /// <summary>Which asset paths a package exports: its own export paths and those of the packages it depends on.</summary>
         private static Func<string, bool> CarriedBy(Addon addon)
         {
             List<string> carried = new List<string>(addon.ExportPaths);

@@ -46,6 +46,8 @@ right for a sandbox where towns can appear anywhere.
 - OpenMMORPG at master from 2026-09-15 or later: it carries the four small core changes the add-on relies on (an
   owner-change movement fix, frame-granular request waits, a virtual `IsWatched()` on the monster activity component and a
   protected pending-spawn dictionary on the map manager; DESIGN.md §17).
+- A kit carrying upstream patch 0006 (OpenMMORPG `develop` bb9895f or later); the state sender calls its
+  `IEntityMovementServerStateFlags`, and the add-on does not compile without it ([upstream/README.md](upstream/README.md)).
 - Your map scenes in the build settings, your map infos in the game database.
 
 ## 4. Step by step
@@ -357,6 +359,81 @@ and, later, several hosts all reach one database, and SQLite is a single file on
   `MESH_LOAD_MOTION=steered|kinematic|inert` chooses how synthetic players move (kinematic: a transform walk with the kit's
   movement component switched off once it has started; inert: spawned and standing), `MESH_LOAD_FIGHT=0` stops them
   attacking, and `MESH_RIG_SERVER_ANIMATION=0|1` sets the kit's server-side animation on a cell.
+- **The state sender (Phase 0):** `MESH_SENDER=measure|on` (default off: no component is added, no line appears and
+  the kit sends movement as today) adds the add-on's own entity-state sender to a map server. `measure` writes and
+  encodes every record after the kit's own send and only counts it, so the wire bytes do not change; `on` sends
+  movement state in place of the kit's loop for the wrapped kit handlers (`BuiltInEntityMovementFunctions3D`,
+  `NavMeshEntityMovement`) and for kinematic puppets, at a rate per observer chosen by distance. It stays inactive,
+  with one warning, while the kit's grid path is on. Its keys: `MESH_SENDER_SOURCES=kit|direct|kit,direct` (default
+  both), `MESH_SENDER_TIERS=near/mid/far[/owner]` (each 0, 1, 2, 5, 10 or 20 Hz; the owner tier defaults to 20, unset
+  is 20/20/20/20), `MESH_SENDER_R0` (the tier radius in metres: near within half of it, mid within it; default the
+  visible range), `MESH_SENDER_COMPACT=off|far`, `MESH_SENDER_SPREAD=0|1` (every second source's routine records go
+  out on the next frame), `MESH_SENDER_XZ=0|1` (tier distances on the ground plane), `MESH_SENDER_CLASSIFY_BUILDS`
+  (builds between re-classifications of a pair, default 4) and `MESH_SENDER_PACKET_BYTES=1020|510|255`. It logs
+  `State sender: on | sources … | tiers … r0 … m … | compact … spread … classify … packet … B build … Hz` once
+  configured, and with the Mesh stats lines `Sender window … s: on sources N kit N direct N pairs N clients N | builds
+  … | writes … | records u N r N deferred N | packets u N r N … | stuckReliable N withheldOwner N | hz 20:N 10:N 5:N
+  2:N 1:N 0:N withheld N clamped N | out … kB/s … pkt/s per client … | ms/s build … fanout … send … total … |
+  us/packet … | build p95 … max … ms | gc0 N` (`measure` in place of `on`); any `State sender error:` line is a fault.
+  With `MESH_METER_SENDS` on, a Send window that counted EntityState messages gains `| records ro N u N other N
+  unread N`, the records they carried by delivery. In measure mode the extra write after the kit's sets the 3D
+  mover's server-local movement state one frame earlier than the kit's next write would; no wire bytes change.
+  `MESH_METER_RECORD_SIZES=1` (default 0; read only where the meter or the sender runs, so with both off it does
+  nothing, and junk logs one warning and counts nothing) adds the record sizes: the Send window gains `| sizes n N min
+  N max N top L:N L:N L:N payload … framed … B over N unread N` after the records group (the payload length of every
+  EntityState record sent, the three most frequent lengths, and the mean payload and framed size per record, framed
+  being the packed object id, the 4-byte length and the payload), and the Sender window gains `| payload full n N min
+  N max N compact n N min N max N` after `gc0 N` (the Full and Compact payloads the sender wrote). A direct source
+  that is also its object's kit movement handler implements `IMeshSenderOwnedSource`: the sender calls its
+  `OnSenderReleased` when it lets go of the source unasked (server stop, object destroyed, dropped by the fan-out),
+  never on an explicit `Unregister`, and the source then goes back to being written by the kit; `OnSenderReleased`
+  clears only the source's own state and never calls the registry. `MeshKinematicCharacterBody` is one.
+  `MESH_CE12_CHECK=1` makes each serving cell spawn one hidden, server-owned character, classify how its kit handler
+  sends one-shot movement flags, and log one `CE-12 check: cell C shape=pass first=1 second=1 next=1 consume=yes
+  after=0 reliable=1/1/1/0 handler=…` line (`pass` is the shape a kit with patch 0006 gives).
+  `Tools/ServerMeshing/p0sender.py` parses the Sender window and CE-12 check lines.
+- **Ship stand-ins (Phase 0):** a rig-only stand-in for the space game's ship (a vehicle with its own 54-byte movement
+  record, AI pilot, engine and guns) to measure ship load on a cell. Default off: with no ship key no ship component is
+  added, nothing is registered with the kit and no line appears. The keys: `MESH_LOAD_SHIPS=<cell>:<n>:<ai|mirror|
+  parked>[,…]` (load ships per cell, n 1 to 2000, one group per cell and authority; `ai` ships patrol, fight and
+  respawn by teleport 10 s after being destroyed, `mirror` ships fly a seeded flight path fed in-process through
+  their own upload reader at 20 Hz, `parked` ships sit 20 m plus 3 m scaled above the path plane),
+  `MESH_LOAD_SHIP_PILOTS=0|1` (default 0; 1 seats a server pilot character in each load ship, never in a phantom
+  ship), `MESH_SHIP_WIRE=legacy54|header56|compact28` (default legacy54: the space game's record; header56 adds a
+  two-byte authority, flight state and epoch header; compact28 is a rig-only 28-byte record for far observers sent
+  by the state sender with `MESH_SENDER_COMPACT=far`, whose Full record is header56), `MESH_SHIP_SCALE` (0.001 to
+  10, default 1: every distance and speed of the ship times this factor; rates, timers, torques and bytes never scale,
+  and the runner scales `MESH_SENDER_R0` itself), `MESH_SHIP_PROJECTILES=instantiate|pooled` (default instantiate: the
+  space game's server bolts, each instantiated and casting `RaycastAll` every frame; pooled reuses bolts with
+  `RaycastNonAlloc`), `MESH_SHIP_MIRROR_VELOCITY=zero|real` (default zero: a player ship's server mirror sends zero
+  velocities as the space game's does; real sends the last upload's), `MESH_RIG_SHIPS=1` (the runner passes the bot
+  argument), `MESH_PUPPET_FEEDER=<ship|character>:<N>@<Hz>` (N untracked in-process puppets, 1 to 2000, fed at 1 to
+  60 Hz) and `MESH_SYNC_LOAD=dirty:<D>,rpc:<R>` (D sync-field writes per kit tick, 0 to 10,000, and R RPCs per second,
+  0 to 100,000, over the cell's load ships, which it needs). `MESH_PHANTOM=<route>:<n>:ship:<cell>` binds ship
+  phantoms that upload along their own flight paths (kind ship takes no `MESH_PHANTOM_VIEW`, `_AREA`, `_PAYLOAD`,
+  `_STAND`, `_FIGHT` or `_STEPS`; the upload length follows `MESH_SHIP_WIRE`). With a ship key set,
+  `MESH_LOAD_SEED` (default 12345) seeds every flight path and AI pilot, and `MESH_LOAD_AREA=x,z,r` also confines load
+  ships (AI and parked spawn points, mirror path centres) to that square inside the cell; phantom ships always use
+  the whole cell, and a junk seed or area is then an error. Bots get `-meshRigShips <wire>:<seed>:<scale>` (the seed
+  and scale texts verbatim, so server and bot parse the same numbers) and check every ship record against its flight
+  path; a sink started with `-meshPhantomSinkSizes 1` (`remoteb.py sink-start --sink-sizes`) adds the sizes group to
+  its Sink window. The lines: `Ships: cell C ai 50 mirror 0 parked 0 pilots 0 | wire header56 scale 0.03 projectiles
+  instantiate mirrorVelocity zero | area none | prefab hash N` once and, beside Mesh stats, `Ships window 5.00 s: cell
+  C ships N ai N mirror N parked N phantom N pilots N seated N outside N notInSlot N | speed p50 … max … patrol p50 …
+  m/s | scans N casts N shots N bolts N hits N respawns N | shield writes N | rpcSends N | uploads N stale N bad N |
+  ms/s pilot … engine … combat … bolts … mirror … | gc0 N`; `Feeder: ship 200 @ 20 Hz on cell C` and `Feeder window
+  5.00 s: ship N observed N | snapshots N | ms/s encode … decode … accept … pose … total … | us/snapshot … | gc0 N`;
+  `Sync load: dirty 100/tick rpc 200/s over 50 ships` and `Sync load window 5.00 s: ships N | writes N rpc N rpcSends
+  N | ms/s write … rpc … | alloc … B/rpc gc0 N`; on bots `Bot ships 5.00 s: seen N records N pathed N parked N
+  unpathed N | path n N p50 … p95 … p99 … max … m lag p50 … ms | parked max … m | unknownPath N badLength N`. Any
+  `Ships error:`, `Feeder error:`, `Sync load error:` or `Bot ships error:` line is a fault. The ship prefab is made in
+  the editor by `Server Meshing ▸ Test Rig ▸ Build Ship Prefab` (or `-executeMethod
+  MultiplayerARPG.MMO.Mesh.Editor.ServerMeshShipPrefabBuilder.BuildFromCommandLine`), which saves
+  `TestMap/Prefabs/ServerMeshShip.prefab` with its own GUID as the asset id (refusing a clash with any other prefab)
+  and `TestMap/Resources/ServerMeshShipPrefabRef.asset` pointing at it; the prefab itself stays out of every Resources
+  folder, so no game database collects it, and a process registers it as a vehicle only under a ship key.
+  `MESH_SHIP_PARK_SLEEP` and `MESH_PREWARM` stay pending until stage 0b and `MESH_SHIP_JUMP_SECONDS` until stage 0c.
+  `Tools/ServerMeshing/p0ships.py` parses the Ships, Feeder, Sync load and Bot ships lines.
 - **Dynamic cells on the rig:** `MESH_CELL_MODE=<map|all>:<Static|Dynamic>[,…]` sets maps' cell modes for a run
   without touching the asset (`all` first, a map's own entry wins; e.g. `all:Dynamic`, or
   `ServerMeshTestMap:Dynamic`), and `MESH_COORDINATOR_STORE` moves the central's store. `regress.py` deletes the store
