@@ -244,7 +244,7 @@ def accept_commands(parts=("C", "D")):
                 "D": [("D", "regress-unit", [REGRESS, "--unit"], True),
                       ("D", "unittest", ["-m", "unittest", "discover", "-s", "Tools/ServerMeshing", "-p", "test_*.py"],
                        True),
-                      ("D", "ruff", ["ruff", "check", "Tools/ServerMeshing"], False)]}
+                      ("D", "ruff", ["-m", "ruff", "check", "Tools/ServerMeshing"], True)]}
     return [command for part in chosen for command in commands[part]]
 
 

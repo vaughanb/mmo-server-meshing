@@ -129,7 +129,7 @@ class PlanTests(unittest.TestCase):
         self.assertEqual([label for _, label, _, _ in commands],
                          ["scenarios", "scenarios-dynamic", "dynidle", "kinematic", "regress-unit", "unittest", "ruff"])
         self.assertEqual(commands[3][2][-4:], ["wake", "dynidle", "--env", "MESH_PUPPET_MOTION=kinematic"])
-        self.assertEqual(commands[-1], ("D", "ruff", ["ruff", "check", "Tools/ServerMeshing"], False))
+        self.assertEqual(commands[-1], ("D", "ruff", ["-m", "ruff", "check", "Tools/ServerMeshing"], True))
 
     def test_rates(self):
         specs = p0plans.rates_plan()

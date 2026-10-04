@@ -130,14 +130,20 @@ namespace MultiplayerARPG.MMO.Mesh
 
         // A ship's identity outlives its owner's disconnect (VehicleEntity sets DoNotDestroyWhenDisconnect), so the binder
         // destroys it itself while the server still runs; once it stopped, the kit already destroyed every spawned object.
+        // A sink peer's disconnect removes its kit player before the binder releases the slot, and the kit's destroy then
+        // dereferences the missing owner player (LiteNetLibIdentity.OnNetworkDestroy: Player.SpawnedObjects): so the
+        // ship is first made unowned, as the ghosting code does for a disconnecting player's entity.
         private static void ReleaseShip(ServerMeshPhantomSlot slot)
         {
             ServerMeshShipEntity ship = slot.ship;
             if (ship == null)
                 return;
             LiteNetLibIdentity identity = ship.Identity;
-            if (identity != null && !identity.IsDestroyed && identity.IsServer)
-                identity.NetworkDestroy();
+            if (identity == null || identity.IsDestroyed || !identity.IsServer)
+                return;
+            if (identity.ConnectionId >= 0 && identity.Player == null)
+                identity.Manager.Assets.SetObjectOwnerImmediately(identity.ObjectId, -1);
+            identity.NetworkDestroy();
         }
 
         private void ReleaseShips()

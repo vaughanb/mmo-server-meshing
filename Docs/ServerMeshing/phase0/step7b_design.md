@@ -173,6 +173,13 @@ ServerAI/parked header56 records would now read as mode 1/2; OwnerMirror uploads
   records/s per arm and the saving. `g1s` keeps only its velocity arms. First run (06:42): selfAck 0 3.6 reliable
   records/s to 8 subscribers with 3 respawns (pending 2 at the end); selfAck 1 0.0/s with 5 respawns.
 
+- **b1 sink arm passed (2026-10-04, A + B on the new build, `phase0/accept_step7_sink.py`):** 20 ship sink peers on B,
+  header56: Sink sizes min 56 max 56 in all 58 windows (about 40,000 records each); no error line on B or cell C. Its
+  first run found a step 7 bug only the sink path reaches: a sink peer's disconnect removes its kit player before the
+  binder releases the slot, and the kit's destroy then dereferenced the missing owner (`LiteNetLibIdentity.
+  OnNetworkDestroy`, NRE on cell C). `ServerMeshPhantomClients_Ships.ReleaseShip` now makes the ship unowned first
+  (`SetObjectOwnerImmediately(id, -1)`, as the ghosting code does for a disconnecting player's entity).
+
 ## Questions still for the space team (written; no live session)
 - Will they acknowledge server-owned teleports (S4)? We report the measured reliable cost of not doing so.
 - Mode 3's state byte split and angular full scale (we chose seq7 | forward << 7 and 4 rad/s).
