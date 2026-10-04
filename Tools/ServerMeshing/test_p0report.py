@@ -154,7 +154,7 @@ class RefusalTests(unittest.TestCase):
         result = report(old + new, build="b2")
         c0 = [f for f in result["fits"] if f["fit_id"] == "floor @ 60/0.03" and f["name"] == "c0"][0]
         self.assertAlmostEqual(c0["value"], 31.4)
-        self.assertIn("4 rig run rows of other builds left out (--build b2)", result["markdown"])
+        self.assertIn("4 rig run rows of other builds or hosts left out (--build b2, host None)", result["markdown"])
 
     def test_a_rerun_plan_key_counts_once(self):
         rows = base_rows()
@@ -254,7 +254,7 @@ class FitTests(unittest.TestCase):
         self.assertEqual(result["files"][f"report_{STAMP}.md"], result["markdown"])
         self.assertTrue(result["markdown"].startswith(f"# Phase 0 stage 0a report {STAMP}\n"))
         for heading in ("## Summary", "## Runs not accepted", "## Fits", "## Gates", "## Map-size table",
-                        "## Frozen abgeo predictions", "| Side (m) | B (m) | k |", "G1-F needs 0b (steps 5-6)"):
+                        "## Frozen abgeo predictions", "| Side (m) | B (m) | k |", "G1-F needs 0b (step 8b)"):
             with self.subTest(heading):
                 self.assertIn(heading, result["markdown"])
 

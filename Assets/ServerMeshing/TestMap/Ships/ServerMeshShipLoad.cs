@@ -200,7 +200,8 @@ namespace MultiplayerARPG.MMO.Mesh
             CountGroups(mesh.OwnZoneId, out int ai, out int mirror, out int parked);
             int pilots = _settings.Pilots ? ai + mirror + parked : 0;
             Logging.Log("Mesh", SettingLine(mesh.OwnZoneId, ai, mirror, parked, pilots, _settings.Wire, _settings.Scale, _settings.PooledProjectiles,
-                _settings.RealMirrorVelocity, _settings.SelfAck, _settings.WaveAi, _settings.HasArea, _settings.Area, _prefab.Identity.HashAssetId));
+                _settings.RealMirrorVelocity, _settings.SelfAck, _settings.WaveAi, _settings.HasArea, _settings.Area, _prefab.Identity.HashAssetId,
+                _settings.HasParkSleep, _settings.ParkSleep));
             StartWindow();
             if (ai + mirror + parked > 0)
                 SpawnLoad(mesh.OwnZoneId);

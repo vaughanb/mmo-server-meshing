@@ -7,8 +7,9 @@ clock.
     p0report.chain3_monster_counts(texts)   # per-cell monster counts from saved 0.71 abload reports (label M)
 
 Order (the step 4 contract's §H report): canary drift (p0results.apply_drift); the latest accepted row of each (build,
-plan_key) (a planned run made twice counts once); the rig team's rows (other teams' imported rows are only summarised),
-one build of them with --build; the build check (two rig builds pool only with --bridge and p0results.bridge_ok);
+host, plan_key, step) (a planned run made twice counts once); the rig team's rows (other teams' imported rows are only
+summarised), one build of them with --build and one host with host (rows of two hosts never pool, step 8a decision 1,
+and a host's rows must state one CPU); the build check (two rig builds pool only with --bridge and p0results.bridge_ok);
 summaries; the fits: block K's rates, density and the N² form (fixed before any
 grid is fitted), floor and λ, presence (with q only when density's q interval excludes 0), the refit at 60/0.03; the
 0a gates (p0gates); the frozen abgeo predictions (--predict abgeo); the map-size table. Only run rows are fitted:
@@ -31,10 +32,11 @@ REFIT_RATES = p0gates.REFIT_RATES
 RATE_ARMS, RATE_KINDS = ("idle", "steered", "kinematic", "inert"), ("steered", "kinematic", "inert")
 ANIMATION_OFF_POINT, PUPPET_ARMS = 200, ("puppets-steered", "puppets-kinematic")
 BRIDGE_053_MS = 47.1     # 0.53's C at 500 players in 200 m, uncapped at 60 fps: ms per measured frame
-PENDING_GATES = (("G1-F", "0b (steps 5-6)"), ("G2-F", "0b (steps 5-6)"), ("G3-F (O)", "0b (step 5)"),
-                 ("Crossings (B10)", "0b (step 5)"), ("Database", "0c (step 9)"),
-                 ("Phantom validity (J)", "0b (step 5)"),
-                 ("space gates (G1-S, G2-S, G3-S, kill for ships)", "0b (step 7)"))
+# Step 8a measures b3-b8 but builds no stage 0b fits or gates: they come with step 8b's rows (B10, J and the sink arms).
+PENDING_GATES = (("G1-F", "0b (step 8b)"), ("G2-F", "0b (step 8b)"), ("G3-F (O)", "0b (step 8b)"),
+                 ("Crossings (B10)", "0b (step 8b)"), ("Database", "0c (step 9)"),
+                 ("Phantom validity (J)", "0b (step 8b)"),
+                 ("space gates (G1-S, G2-S, G3-S, kill for ships)", "0b (step 8b)"))
 FIT_ORDER = ("rates: block K's rate decomposition per arm, then the per-entity split per kind",
              "density: n2_form (q·Q or q·N²), then the density fit",
              "floor: c0 and λ per rate set (2 repeats: the t(1) interval, runs as groups beside it)",
@@ -50,7 +52,7 @@ AB_CELL = re.compile(r"(?P<cell>\S+) [\d.]+ ms sat \d+% own \d+p/(?P<own>\d+)m p
 
 class ReportError(ValueError):
     """ReportError is a report the rows cannot make: no run rows, builds pooled without a passing --bridge, a --build
-    naming no single build."""
+    naming no single build, rig rows of two hosts, or a host stating two CPUs."""
 
 
 def _table(columns, rows):
@@ -213,38 +215,52 @@ def _refit(out, runs, density, bridged):
 
 def latest_per_plan_key(runs):
     """(rows, dropped): the run rows keeping, among accepted non-canary rows, only the latest row (by window_local end,
-    then file order) of each (build, plan_key), so a planned run made twice (abgeo --resume re-runs a partly done
-    sub-block in full; a block run again without --resume) counts once in summaries, fits and gates. Unaccepted rows
-    (the not-accepted table) and canaries (apply_drift needs every check) are all kept; dropped is how many went."""
+    then file order) of each (build, host, plan_key, point.step), so a planned run made twice (abgeo --resume re-runs a
+    partly done sub-block in full; a block run again without --resume) counts once in summaries, fits and gates, and
+    each step of a stepped run once. Unaccepted rows (the not-accepted table) and canaries (apply_drift needs every
+    check) are all kept; dropped is how many went."""
     def pooled(row):
         return row.get("accepted") and row.get("family") != "canary" and row.get("plan_key")
     latest = {}
     for index, row in enumerate(runs):
         if pooled(row):
             order = ((row.get("window_local") or {}).get("end") or "", index)
-            key = (row.get("build"), row["plan_key"])
+            key = p0results.machine(row) + (row["plan_key"], (row.get("point") or {}).get("step"))
             latest[key] = max(latest.get(key, order), order)
     keep = {index for _, index in latest.values()}
     rows = [row for index, row in enumerate(runs) if not pooled(row) or index in keep]
     return rows, len(runs) - len(rows)
 
 
-def _one_build(rig, build, bridge):
-    """(the rig rows of the build --build names, how many rig rows of other builds were left out)."""
-    if build is None:
-        return rig, 0
-    if bridge is not None:
-        raise ReportError("pass --bridge or --build, not both: --bridge pools two builds, --build reports one")
-    builds = sorted({str(row.get("build")) for row in rig})
-    named = [b for b in builds if b.startswith(build)]
-    if len(named) != 1:
-        what = "none of the rig builds" if not named else f"{len(named)} rig builds"
-        raise ReportError(f"--build {build} names {what} ({', '.join(b[:12] for b in named or builds)})")
-    kept = [row for row in rig if str(row.get("build")) == named[0]]
+def _one_build(rig, build, bridge, host=None):
+    """(the rig rows of the build --build names (every build without one) on the host named (else the rows' one
+    host), how many rig rows of other builds or hosts were left out). ReportError for a build or host naming no rig
+    rows, rig rows of several hosts with no host named, and a host whose kept rows state two CPUs."""
+    named = None
+    if build is not None:
+        if bridge is not None:
+            raise ReportError("pass --bridge or --build, not both: --bridge pools two builds, --build reports one")
+        builds = sorted({str(row.get("build")) for row in rig})
+        found = [b for b in builds if b.startswith(build)]
+        if len(found) != 1:
+            what = "none of the rig builds" if not found else f"{len(found)} rig builds"
+            raise ReportError(f"--build {build} names {what} ({', '.join(b[:12] for b in found or builds)})")
+        named = found[0]
+    hosts = sorted({str(row.get("host")) for row in rig})
+    if host is not None and host not in hosts:
+        raise ReportError(f"host {host} names none of the rig hosts ({', '.join(hosts)})")
+    if host is None and len(hosts) > 1:
+        raise ReportError(f"rig run rows from {len(hosts)} hosts ({', '.join(hosts)}) are never pooled: report one "
+                          f"host at a time")
+    kept = [row for row in rig if (named is None or str(row.get("build")) == named)
+            and (host is None or str(row.get("host")) == host)]
+    problems = p0results.cpu_problems(kept)
+    if problems:
+        raise ReportError("; ".join(problems))
     return kept, len(rig) - len(kept)
 
 
-def _check_builds(runs, bridge):
+def _check_builds(runs, bridge):   # runs are one host's (_one_build): two builds are compared on one machine
     counts = {}
     for row in runs:
         counts[str(row.get("build"))] = counts.get(str(row.get("build")), 0) + 1
@@ -260,7 +276,7 @@ def _check_builds(runs, bridge):
         raise ReportError(f"--bridge {bridge} must name one of exactly two builds; the rows hold {listed}")
     new = next(build for build in counts if build != old[0])
     try:
-        ok = p0results.bridge_ok(runs, old[0], new, p0gates.DRIFT_SHARE)
+        ok = p0results.bridge_ok(runs, old[0], new, runs[0].get("host"), p0gates.DRIFT_SHARE)
     except p0base.ModelError as ex:
         raise ReportError(f"--bridge {bridge}: {ex}") from ex
     if not ok:
@@ -281,7 +297,8 @@ def _markdown(stamp, out, summaries, ignored, predictions, prediction_error):
     lines = [f"# Phase 0 stage 0a report {stamp}", "",
              f"{len(runs)} run rows ({sum(1 for r in runs if r.get('accepted'))} accepted, {drift} excluded by canary "
              f"drift), {len(predictions)} prediction rows read; {ignored} summary, fit and gate rows of earlier "
-             f"reports ignored. Builds {', '.join(sorted({str(r.get('build'))[:12] for r in runs}))}; CPU "
+             f"reports ignored. Builds {', '.join(sorted({str(r.get('build'))[:12] for r in runs}))}; host "
+             f"{', '.join(sorted({str(r.get('host')) for r in runs}))}; CPU "
              f"{', '.join(sorted({str(r.get('cpu')) for r in runs}))}.", ""]
     lines += [f"- {note}" for note in out["notes"]] + ([""] if out["notes"] else []) + ["## Summary", ""]
     lines += p0markdown.markdown_summary(summaries, out["gates"]).splitlines()
@@ -319,18 +336,19 @@ def _bridge_lines(runs):
 
 
 def build_report(rows, stamp, bridge=None, predict=None, predict_points=(), layouts=None, monster_counts=None,
-                 created_utc=None, build=None):
+                 created_utc=None, build=None, host=None):
     """The stage 0a report from mesh-p0/1 rows: {"markdown", "files", "summary", "fits", "gates", "predictions",
     "prediction_error"}. files maps report_<stamp>.md to the Markdown and <team>_<game>_fit_<stamp>.jsonl (one per team
     and game) to its summary, fit and gate rows, plus rig_fantasy_abgeo-prediction_<stamp>.jsonl with predict "abgeo".
-    Only the rig team's run rows feed the fits and gates (--build keeps one build's); other teams' imported rows are
-    summarised per team and game. Each (build, plan_key) counts once (latest_per_plan_key). The predictions and G-GEO
+    Only the rig team's run rows of one host feed the fits and gates (--build keeps one build's; host names the host
+    when the rows hold several); other teams' imported rows are summarised per team, game and host. Each (build, host,
+    plan_key, step) counts once (latest_per_plan_key). The predictions and G-GEO
     (c) take predict_points [{case, players, monsters, band (0 = as configured), puppets, load, pair "cut/base"}],
     layouts {name: [(cell, rect)]}, monster_counts {(layout, band): {cell: {O_monster, U_monster}}}
     (chain3_monster_counts) and created_utc. A prediction that cannot be made leaves no prediction file and names why
     in prediction_error. Raises ReportError for no (rig) run rows, rig builds pooled without a passing bridge (a build
-    sha or a unique prefix), a --build naming no single rig build or given with --bridge, and a predict other than
-    abgeo."""
+    sha or a unique prefix), a --build naming no single rig build or given with --bridge, rig rows of several hosts
+    without host (or a host naming none), a host stating two CPUs, and a predict other than abgeo."""
     if predict not in (None, "abgeo"):
         raise ReportError(f"--predict {predict!r}: only abgeo has frozen predictions")
     every = p0results.apply_drift(p0results.rows_of_type(rows, "run"))
@@ -341,13 +359,14 @@ def build_report(rows, stamp, bridge=None, predict=None, predict_points=(), layo
     others = [r for r in kept if (r.get("team") or p0results.TEAM) != p0results.TEAM]
     if not rig:
         raise ReportError("no rig run rows to report (only other teams' rows): run a block first")
-    runs, left_out = _one_build(rig, build, bridge)   # the rig rows every fit and gate reads
+    runs, left_out = _one_build(rig, build, bridge, host)   # the rig rows every fit and gate reads
     predictions = p0results.rows_of_type(rows, "prediction")
     bridged = _check_builds(runs, bridge)
     summaries = p0results.summary_rows(runs + others)
     notes = [f"{repeated} accepted run rows repeat a plan key on their build: only the latest row of each plan key is "
              f"used"] if repeated else []
-    notes += [f"{left_out} rig run rows of other builds left out (--build {build})"] if left_out else []
+    notes += [f"{left_out} rig run rows of other builds or hosts left out (--build {build}, host {host})"
+              ] if left_out else []
     out = {"runs": runs, "others": others, "notes": notes, "fits": [], "fit_lines": [], "fit_notes": [],
            "predictions": []}
     _rates_fits(out, runs)

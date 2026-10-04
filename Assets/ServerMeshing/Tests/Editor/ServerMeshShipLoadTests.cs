@@ -190,6 +190,25 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
                 + " selfAck 1 aiPrefab wave | area -30,-30,30.5,30 | prefab hash 99"));
         }
 
+        private static IEnumerable<TestCaseData> ParkSettingCases()
+        {
+            yield return new TestCaseData(false, true, "").SetName("SettingLine_ParkSleepKeyUnset_NoParkField");
+            yield return new TestCaseData(true, false, " parkSleep 0").SetName("SettingLine_ParkSleep0_PrintsIt");
+            yield return new TestCaseData(true, true, " parkSleep 1").SetName("SettingLine_ParkSleep1_PrintsIt");
+        }
+
+        [TestCaseSource(nameof(ParkSettingCases))]
+        [SetCulture("de-DE")]
+        public void SettingLine_ParkSleep(bool hasParkSleep, bool parkSleep, string field)
+        {
+            string line = ServerMeshShipLoad.SettingLine("C", 0, 0, 200, 0, ServerMeshShipWireKind.Legacy54, new ServerMeshShipScale(0.03f), false, true, false, false,
+                false, default, 7, hasParkSleep, parkSleep);
+
+            Assert.That(line, Is.EqualTo("Ships: cell C ai 0 mirror 0 parked 200 pilots 0 | wire legacy54 scale 0.03 projectiles instantiate mirrorVelocity real"
+                + " selfAck 0 aiPrefab enemy" + field + " | area none | prefab hash 7"));
+            AssertPrintable(line);
+        }
+
         private static IEnumerable<TestCaseData> ClassCases()
         {
             yield return new TestCaseData(ServerMeshShipAuthority.OwnerMirror, false).SetName("ClassFor_Mirror_BaseWhateverTheAiClass");
@@ -248,6 +267,28 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
 
         [Test]
         [SetCulture("de-DE")]
+        public void WindowLine_ParkSleepKeySet_AddsParkedSleepingBeforeGc0()
+        {
+            ServerMeshShipCounters c = new ServerMeshShipCounters { Ships = 200, Parked = 200, ParkedSleeping = 187 };
+
+            string line = ServerMeshShipLoad.WindowLine(5.0, "C", c, 2, true);
+
+            StringAssert.EndsWith(" mirror 0.00 | mirror age n 0 p50 none ms frames none | parked sleeping 187 of 200 | gc0 2", line);
+            AssertPrintable(line);
+        }
+
+        [Test]
+        [SetCulture("de-DE")]
+        public void WindowLine_ParkSleepKeyUnset_IsTheStep7bLine()
+        {
+            ServerMeshShipCounters c = new ServerMeshShipCounters { ParkedSleeping = 5 };
+
+            Assert.That(ServerMeshShipLoad.WindowLine(double.NaN, null, c, -3), Is.EqualTo(ZeroLine));
+            Assert.That(ServerMeshShipLoad.WindowLine(double.NaN, null, c, -3, false), Is.EqualTo(ZeroLine));
+        }
+
+        [Test]
+        [SetCulture("de-DE")]
         public void WindowLine_NoPatrolSampleButMirrorAges_PrintsNoneForPatrolOnly()
         {
             ServerMeshShipCounters c = new ServerMeshShipCounters { Ships = 2, Mirror = 2 };
@@ -265,7 +306,7 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
         [Test]
         public void CountersReset_EmptiesEverything()
         {
-            ServerMeshShipCounters c = new ServerMeshShipCounters { Ships = 3, Hits = 4, BoltMs = 2.0, Pending = 2 };
+            ServerMeshShipCounters c = new ServerMeshShipCounters { Ships = 3, Hits = 4, BoltMs = 2.0, Pending = 2, ParkedSleeping = 3 };
             c.Speeds.Add(1f);
             c.PatrolSpeeds.Add(1f);
             c.MirrorAges.Add(30L);
@@ -275,6 +316,7 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             c.Reset();
 
             Assert.That(ServerMeshShipLoad.WindowLine(0, null, c, 0), Is.EqualTo(ZeroLine));
+            Assert.That(c.ParkedSleeping, Is.EqualTo(0));
         }
     }
 }

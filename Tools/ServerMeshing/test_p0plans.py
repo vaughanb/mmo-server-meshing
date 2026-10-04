@@ -55,9 +55,14 @@ class RefusalTests(unittest.TestCase):
         for name, stage in p0plans.STAGE_LATER.items():
             with self.subTest(name):
                 self.assertIn(stage, p0plans.later_refusal(name))
-        self.assertEqual(p0plans.later_refusal("fanout"),
-                         "p0load fanout needs stage 0b, steps 5-6; stage 0a builds no runs for it")
-        self.assertEqual(p0plans.OBSERVED_REFUSAL, "B1-O needs phantom observers (stage 0b, step 5)")
+        self.assertEqual(p0plans.later_refusal("accept-b"),
+                         "p0load accept-b needs stage 0b, step 8b; no runs are built for it yet")
+        self.assertEqual(p0plans.later_refusal("spaces"), "p0load spaces needs stage 0c, step 9; no runs are built for "
+                                                          "it yet")
+        with self.assertRaisesRegex(ValueError, "'fanout' is not a later-stage family"):
+            p0plans.later_refusal("fanout")
+        self.assertEqual(p0plans.OBSERVED_REFUSAL,
+                         "presence --observed has moved: use p0load observed --part O (or R, SA, M, S)")
 
 
 class PlanTests(unittest.TestCase):

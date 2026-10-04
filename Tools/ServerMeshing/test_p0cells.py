@@ -321,6 +321,25 @@ class CellRecordTests(unittest.TestCase):
         self.assertEqual(record["ticks"]["windows"], 12)
         self.assertAlmostEqual(record["ticks"]["work_ms_per_s"], 400.0)
 
+    def test_the_fan_out_rule_applies_only_to_fan_out_runs(self):
+        lines = [ticks_line("10:00:40", t2=10) if line == ticks_line("10:00:40") else line for line in run_lines(())]
+        cases = {"another family": (False, []), "family fanout": (True, [at("10:00:40")])}
+        for name, (fanout, saturated) in cases.items():
+            with self.subTest(name):
+                record = p0cells.cell_record("C", lines, START, END, fanout)
+                self.assertEqual((record["saturated"], record["dropped"]), (saturated, saturated))
+
+    def test_load_fields(self):
+        record = p0cells.cell_record("C", run_lines(), START, END)
+        with self.assertRaisesRegex(ValueError, "MESH_BAND 'wide' is not a number of metres"):
+            p0cells.load_fields({}, {"MESH_BAND": "wide"}, {"C": record})
+        fields = p0cells.load_fields({"band": 150.0}, {"MESH_LOAD_MOTION": "Inert"}, {"C": record})
+        self.assertEqual({key: fields[key] for key in ("kind", "owned", "density", "band_m", "visible_range_m",
+                                                       "scale")},
+                         {"kind": "character", "owned": {"character_inert": 60.0, "monster": 0.0}, "density": 3000.0,
+                          "band_m": 150.0, "visible_range_m": 150.0, "scale": 1.0})
+        self.assertEqual(p0cells.load_fields({}, {}, {})["band_m"], p0cells.DEFAULT_BAND)
+
     def test_only_problems_inside_the_measurement(self):
         record = p0cells.cell_record("C", run_lines(), START, END)
         self.assertEqual(record["pairing"], ["Work ticks at 10:00:32 has no Work window"])

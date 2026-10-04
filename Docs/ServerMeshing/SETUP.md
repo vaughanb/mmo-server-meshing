@@ -445,8 +445,34 @@ and, later, several hosts all reach one database, and SQLite is a single file on
   `TestMap/Prefabs/ServerMeshShip.prefab` with its own GUID as the asset id (refusing a clash with any other prefab)
   and `TestMap/Resources/ServerMeshShipPrefabRef.asset` pointing at it; the prefab itself stays out of every Resources
   folder, so no game database collects it, and a process registers it as a vehicle only under a ship key.
-  `MESH_SHIP_PARK_SLEEP` and `MESH_PREWARM` stay pending until stage 0b and `MESH_SHIP_JUMP_SECONDS` until stage 0c.
+  `MESH_SHIP_PARK_SLEEP=0|1` (step 8a; unset or 0 is today: parked ships are dynamic bodies with zero force, which
+  PhysX may put to sleep; 1 pins every parked ship to its parked pose each FixedUpdate, velocities zeroed, as the
+  space game's landed ships, so none sleeps): with the key set either way the Ships window adds ` | parked sleeping S
+  of P` before ` | gc0 N` (`Rigidbody.IsSleeping()` at the window's end) and the settings line adds ` parkSleep 0|1`
+  after `aiPrefab`; unset, both lines are unchanged. `MESH_SHIP_JUMP_SECONDS` stays pending until stage 0c.
   `Tools/ServerMeshing/p0ships.py` parses the Ships, Feeder, Sync load and Bot ships lines.
+- **Pre-warm bursts and placed monsters (Phase 0 step 8a):** default off; with neither key no component is added and
+  no line appears. `MESH_PREWARM=<kind>:<N>@<t>[/<perFrame>]` makes one burst t seconds (at least 0) after the server
+  can instantiate: `steered` or `kinematic` (N synthetic Player ghosts, 1 to 10,000, fed through the real neighbour
+  path at 10 Hz in a 50 m disc at `MESH_LOAD_AREA`'s centre, else the cell's; the kind must match `MESH_PUPPET_MOTION`),
+  `ship` (N stand-in ships posed as the puppet feeder's, fed at 20 Hz; a ship key), `range` (the default visible
+  range goes to N metres, above 0 and at most 10,000; no perFrame) or `group` (N owned server characters, spawned
+  out of view 10 s before, teleported into the burst disc); perFrame (1 to N) paces the spawns, absent all in one
+  frame. Lines: `Prewarm: kind K n N at T s perFrame F on cell C` once (F 0: all at once) and `Prewarm burst: cell C
+  kind K n N perFrame F frames S | spawn ms T per puppet P | after frames W over budget O budget B ms worst X ms |
+  gc0 G` once per burst (T and P `n/a` for range and group; B `uncapped` without a frame cap; over budget counts the
+  frames whose period exceeded 1.05 x the probe budget). `MESH_MONSTER_PLACE=<n>@<x>,<z>,<r>[:passive][;…]` places n
+  monsters (the test map's first monster prefab, registered on every cell) at seeded points (`MESH_LOAD_SEED`) in each
+  disc, on the cell that owns the disc's centre; a placed monster below half health is healed to full and one that is
+  destroyed is placed again at its point after 10 s; `:passive` monsters never target anyone. The total is at most
+  2,000, r above 0 and n at least 1, a disc must lie inside its owning cell, and every run that places monsters sets
+  `MESH_NO_MONSTER_HANDOFF=1` (a placed monster has no spawn area to hand off); it works with `MESH_NO_MONSTERS=1`.
+  Lines: `Monsters: placed N in <discs> on cell C` once and, per work window, `Monsters window 5.00 s: cell C placed N
+  alive A awake W healed H respawned R | gc0 G` (alive: placed monsters that are not ghosts; awake: those with a
+  subscriber). Any `Prewarm error:` or `Monsters error:` line is a fault. `Tools/ServerMeshing/p0stage0b.py` parses
+  these lines (and the phantom `Phantoms: cell C port N …` and `Phantom step i/n: P a -> b` lines) and mirrors the
+  three grammars; `python Tools/ServerMeshing/p0geom.py` computes the offline fight geometry (V per client in 3D and
+  X/Z for A0 2 km and 3 km, ships within 1 km, pilots within 80 m, lock subscriptions) into `Logs/p0/geom/`.
 - **Dynamic cells on the rig:** `MESH_CELL_MODE=<map|all>:<Static|Dynamic>[,…]` sets maps' cell modes for a run
   without touching the asset (`all` first, a map's own entry wins; e.g. `all:Dynamic`, or
   `ServerMeshTestMap:Dynamic`), and `MESH_COORDINATOR_STORE` moves the central's store. `regress.py` deletes the store

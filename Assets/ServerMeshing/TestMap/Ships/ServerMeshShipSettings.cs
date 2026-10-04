@@ -1,7 +1,7 @@
 // Server Meshing test rig — every stand-in ship key in one resolver (Phase 0 step 7): MESH_LOAD_SHIPS,
 // MESH_LOAD_SHIP_PILOTS, MESH_SHIP_WIRE, MESH_SHIP_SCALE, MESH_SHIP_PROJECTILES, MESH_SHIP_MIRROR_VELOCITY,
-// MESH_RIG_SHIPS and (step 7b) MESH_SHIP_SELF_ACK and MESH_SHIP_AI_PREFAB, plus the bot argument -meshRigShips. Default
-// off: with no ship key nothing else is read. The ship they configure is modelled on the space game at commits 1a3a58d9
+// MESH_RIG_SHIPS, (step 7b) MESH_SHIP_SELF_ACK and MESH_SHIP_AI_PREFAB and (step 8a) MESH_SHIP_PARK_SLEEP, plus the bot
+// argument -meshRigShips. Default off: with no ship key nothing else is read. The ship they configure is modelled on the space game at commits 1a3a58d9
 // and c2eb4154.
 using System;
 using System.Globalization;
@@ -11,8 +11,8 @@ namespace MultiplayerARPG.MMO.Mesh
 {
     /// <summary>
     /// ServerMeshShipSettings is a process's resolved ship settings. AnyShipKey is false when no ship key is set (none of
-    /// the nine ship keys, no MESH_PHANTOM of kind ship, no MESH_PUPPET_FEEDER of kind ship); the other properties then
-    /// hold their defaults and nothing else was read.
+    /// the ten ship keys, no MESH_PHANTOM of kind ship, no MESH_PUPPET_FEEDER or MESH_PREWARM of kind ship); the other
+    /// properties then hold their defaults and nothing else was read.
     /// </summary>
     public sealed class ServerMeshShipSettings
     {
@@ -37,6 +37,11 @@ namespace MultiplayerARPG.MMO.Mesh
         public const string SelfAckKey = "MESH_SHIP_SELF_ACK";
         /// <summary>AiPrefabKey is the class of ServerAI load ships: enemy (the default, Ship_Enemy) or wave (Ship_AI, the Base numbers).</summary>
         public const string AiPrefabKey = "MESH_SHIP_AI_PREFAB";
+        /// <summary>
+        /// ParkSleepKey is the parked ships' pin: unset (today's dynamic bodies, no window figure), 0 (the same, with the
+        /// window's sleeping count) or 1 (the space game's Landed pin every physics step, so they never sleep).
+        /// </summary>
+        public const string ParkSleepKey = "MESH_SHIP_PARK_SLEEP";
         /// <summary>BotArgument is the bot's command-line argument: &lt;wire&gt;:&lt;seed&gt;:&lt;scale&gt;.</summary>
         public const string BotArgument = "-meshRigShips";
         /// <summary>SeedKey is the load generator's seed, read once a ship key is set (default 12345).</summary>
@@ -47,10 +52,12 @@ namespace MultiplayerARPG.MMO.Mesh
         public const string PhantomKey = "MESH_PHANTOM";
         /// <summary>FeederKey is the puppet feeder setting; only its kind (before the first colon) is read here.</summary>
         public const string FeederKey = "MESH_PUPPET_FEEDER";
+        /// <summary>PrewarmKey is the pre-warm setting; only its kind (before the first colon, spaces trimmed) is read here.</summary>
+        public const string PrewarmKey = "MESH_PREWARM";
         /// <summary>DefaultSeed is the seed when MESH_LOAD_SEED is unset.</summary>
         public const int DefaultSeed = 12345;
 
-        private static readonly string[] ShipKeys = { LoadKey, PilotsKey, WireKey, ScaleKey, ProjectilesKey, MirrorVelocityKey, RigShipsKey, SelfAckKey, AiPrefabKey };
+        private static readonly string[] ShipKeys = { LoadKey, PilotsKey, WireKey, ScaleKey, ProjectilesKey, MirrorVelocityKey, RigShipsKey, SelfAckKey, AiPrefabKey, ParkSleepKey };
 
         private ServerMeshShipSettings()
         {
@@ -92,6 +99,12 @@ namespace MultiplayerARPG.MMO.Mesh
 
         /// <summary>WaveAi is true when MESH_SHIP_AI_PREFAB=wave: ServerAI load ships take the Base class (Ship_AI).</summary>
         public bool WaveAi { get; private set; }
+
+        /// <summary>HasParkSleep is true when MESH_SHIP_PARK_SLEEP is set (0 or 1): the Ships lines then carry the park figures.</summary>
+        public bool HasParkSleep { get; private set; }
+
+        /// <summary>ParkSleep is true when MESH_SHIP_PARK_SLEEP=1: parked ships are pinned to their pose every physics step.</summary>
+        public bool ParkSleep { get; private set; }
 
         /// <summary>AiClass is the class of ServerAI load ships: Base under WaveAi, else Enemy. Every other ship is Base.</summary>
         public ServerMeshShipClass AiClass => WaveAi ? ServerMeshShipClass.Base : ServerMeshShipClass.Enemy;
@@ -151,6 +164,10 @@ namespace MultiplayerARPG.MMO.Mesh
             if (!TryParseSwitch(read(AiPrefabKey), "enemy", "wave", out bool wave))
                 return Fail(out error, $"{AiPrefabKey}={Clean(read(AiPrefabKey))} is not enemy or wave");
             settings.WaveAi = wave;
+            if (!TryParseSwitch(read(ParkSleepKey), "0", "1", out bool parkSleep))
+                return Fail(out error, $"{ParkSleepKey}={Clean(read(ParkSleepKey))} is not 0 or 1");
+            settings.HasParkSleep = Trimmed(read(ParkSleepKey)).Length > 0;
+            settings.ParkSleep = parkSleep;
             if (!TryParseSeed(read(SeedKey), out int seed))
                 return Fail(out error, $"{SeedKey}={Clean(read(SeedKey))} is not a whole number");
             settings.Seed = seed;
@@ -245,7 +262,15 @@ namespace MultiplayerARPG.MMO.Mesh
             string[] phantom = Trimmed(read(PhantomKey)).Split(':');
             if (phantom.Length >= 3 && Is(phantom[2].Trim(), "ship"))
                 return true;
-            return Trimmed(read(FeederKey)).StartsWith("ship:", StringComparison.OrdinalIgnoreCase);
+            return Trimmed(read(FeederKey)).StartsWith("ship:", StringComparison.OrdinalIgnoreCase) || IsShipPrewarm(read(PrewarmKey));
+        }
+
+        /// <summary>IsShipPrewarm is true when the pre-warm's kind (before its first colon, spaces trimmed) is ship, any case.</summary>
+        private static bool IsShipPrewarm(string text)
+        {
+            string value = Trimmed(text);
+            int colon = value.IndexOf(':');
+            return colon >= 0 && Is(value.Substring(0, colon).Trim(), "ship");
         }
 
         private static bool TryParseSwitch(string text, string off, string on, out bool value)

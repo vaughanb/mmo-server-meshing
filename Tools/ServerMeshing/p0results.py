@@ -5,7 +5,8 @@ thin wrappers that read and append files around the pure parse_rows and format_r
     p0results.run_row(spec, run, context, problems, excluded_reason)  # one rig run as a row, accepted or not
     p0results.write_rows(path, rows) / read_rows(paths)  # append / read JSONL; SchemaError names file:line
     p0results.apply_drift(rows)                   # canary drift: rows before a drifted canary become "drift"
-    p0results.summary_rows(rows)                  # one per (game, family, case, arm, point, cell) over accepted runs
+    p0results.summary_rows(rows)                  # one per (game, family, case, arm, point, host, cell), accepted
+    p0results.machine(row)                        # (build, host): every baseline, drift, resume and pool keys on it
 
 Row types: run (a row without "row" is one: §5 has no row field), summary, fit, gate, prediction; each must hold the
 fields its type REQUIRES (null allowed), and other fields are kept. File names: see file_name.
@@ -20,15 +21,23 @@ import statistics
 
 import p0base
 import p0cells
+import p0cells0b
 
 SCHEMA = "mesh-p0/1"
 ROW_TYPES = ("run", "summary", "fit", "gate", "prediction")
 FAMILIES_0A = ("canary", "accept", "rates", "presence", "density", "floor", "abgeo", "fit")
+FAMILIES_8A = ("observed", "fanout", "targets", "syncrpc", "packets", "prewarm")   # stage 0b, step 8a (decision 2)
+FAMILIES_8B, LATER_8B = ("accept-b", "calibrate", "crossings", "jfull"), "stage 0b, step 8b"   # refused in 8a
+FAMILIES_0B = frozenset(FAMILIES_8A + FAMILIES_8B)
+# A family's game when its spec names none (p0plans.GAMES; a spec's own game wins: observed S and ship arms are space).
 FAMILY_GAME = {"canary": "neutral", "accept": "neutral", "rates": "neutral", "floor": "neutral",
-               "presence": "fantasy", "density": "fantasy", "abgeo": "fantasy"}
+               "presence": "fantasy", "density": "fantasy", "abgeo": "fantasy", "observed": "fantasy",
+               "fanout": "fantasy", "targets": "fantasy", "syncrpc": "space", "packets": "fantasy",
+               "prewarm": "fantasy"}
+STAGE = {**{family: "0a" for family in FAMILIES_0A}, **{family: "0b" for family in sorted(FAMILIES_0B)}}
 GEOGRAPHIC = ("presence", "density", "abgeo")
 PREDICTION_FAMILY = "abgeo-prediction"   # rig_fantasy_abgeo-prediction_<stamp>.jsonl
-TEAM, STAGE, TICK_HZ, DEFAULT_BAND, CANARY_CELL = "rig", "0a", 20, 80.0, "C"
+TEAM, STAGE_0A, TICK_HZ, CANARY_CELL = "rig", "0a", 20, "C"
 CONTEXT_FIELDS = ("host", "cpu", "cores", "logical", "os", "power_plan", "build", "kit_patches")
 THIRD_REPEAT_FIELDS = ("replaces_repeat", "third_reason")   # a third repeat's spec fields its run row carries
 
@@ -38,6 +47,7 @@ HEADER_FIELDS = ("schema", "team", "game", "model", "family", "case", "arm", "st
 LOAD_FIELDS = ("kind", "owned", "puppets", "awake_monsters", "clients", "v_move_mean", "v_move_p95", "density",
                "visible_range_m", "band_m", "payload_B", "budget_kBps", "scale")
 HEADER_SUBSET = ("schema", "row", "team", "game", "family", "stage", "build", "cpu")
+HEAD_KEYS = HEADER_SUBSET[2:] + ("host",)   # host is carried, not REQUIRED (older report rows have none)
 REQUIRED = {"run": HEADER_FIELDS + LOAD_FIELDS + ("metrics",),
             "summary": HEADER_SUBSET + ("case", "arm", "point", "cell", "n"),
             "fit": HEADER_SUBSET + ("fit_id", "name", "value", "lo", "hi"),
@@ -52,7 +62,7 @@ METRIC_NAMES = frozenset((
     "downlink_wire_kBps_per_client", "entity_state_kBps_per_client", "datagrams_per_s_per_client", "rate_hz_by_tier",
     "reliable_records_per_s", "thread_ms_per_s", "process_cores", "mem_MB", "link_kBps_in", "link_kBps_out",
     "latency_ms", "frames_per_s", "physics_steps_per_s", "ticks_per_s", "puppet_count", "puppet_steer_m",
-    "puppet_snaps", "puppet_unobserved_poses_per_s", "puppet_fallbacks"))
+    "puppet_snaps", "puppet_unobserved_poses_per_s", "puppet_fallbacks")) | p0cells0b.METRIC_NAMES_0B
 
 OWNER_KINDS = ("steered", "steered_nofight", "kinematic", "inert", "monster")
 PUPPET_KINDS = ("steered", "kinematic", "inert", "monster", "monster_steered", "monster_kinematic")
@@ -121,61 +131,54 @@ def _iso(stamp):
     return stamp.isoformat() if isinstance(stamp, datetime.datetime) else stamp
 
 
-def _band(spec, env):
-    if spec.get("band") is not None:
-        return float(spec["band"])
-    text = (env.get("MESH_BAND") or "").strip()
-    try:
-        return float(text) if text else DEFAULT_BAND
-    except ValueError as err:
-        raise ValueError(f"MESH_BAND '{text}' is not a number of metres") from err
+def machine(row):
+    """A row's machine key (build, host): A and B may share a CPU model, so the machine is its host (decision 1)."""
+    return row.get("build"), row.get("host")
 
 
-def _load_fields(spec, env, records):
-    ticks = [record["ticks"] for record in records.values() if record["ticks"] is not None]
-    placed = [p0cells.spawn_area(record) for record in records.values()]
-    area, spawned = sum(a for a, _ in placed), sum(n for _, n in placed)
-    owner = (env.get("MESH_LOAD_MOTION") or "steered").strip().lower()
-    puppet = (env.get("MESH_PUPPET_MOTION") or "steered").strip().lower()
-
-    def total(field):
-        return math.fsum(t[field] for t in ticks)
-
-    band = _band(spec, env)
-    return {"kind": "character",
-            "owned": {f"character_{owner}": total("owned_players"), "monster": total("owned_monsters")},
-            "puppets": {f"character_{puppet}": total("puppet_players"), "monster": total("puppet_monsters")},
-            "awake_monsters": None, "clients": {"real": 0, "phantom_virtual": 0, "phantom_sink": 0, "observer_kind": None},
-            "v_move_mean": None, "v_move_p95": None, "density": area / spawned if spawned else None,
-            "visible_range_m": band, "band_m": band, "payload_B": None, "budget_kBps": None, "scale": 1.0}
+def cpu_problems(rows):
+    """'host X ran on 2 CPUs (A and B)' per host whose rows state more than one cpu (a row without a cpu is not
+    counted): cpu must be constant per host, or the host key would pool two machines."""
+    cpus = {}
+    for row in (row for row in rows if row.get("cpu") is not None):
+        cpus.setdefault(row.get("host"), set()).add(str(row["cpu"]))
+    return [f"host {host} ran on {len(found)} CPUs ({' and '.join(sorted(found))}): give each machine its own host "
+            f"name" for host, found in cpus.items() if len(found) > 1]
 
 
 def run_row(spec, run, context, problems, excluded_reason):
     """One rig run as a run row, accepted or not (§5's fields plus the contract's additions). spec is a p0plans
-    RunSpec; run is {"since", "start", "end", "cells": {cell: {"structural", "p0": p0cells.cell_record}}} (None or
-    partial for a failed run; a naive start is local time); context is rigrun.host_context(). owned and puppets are
-    Work window means summed over the read cells, keyed by MESH_LOAD_MOTION / MESH_PUPPET_MOTION; density is m² per
-    spawned character. A third repeat's replaces_repeat and third_reason are copied from the spec when it sets them.
-    ValueError for a family without a game, a bad MESH_RATES or MESH_BAND, or an unknown metric."""
+    RunSpec; run is {"since", "start", "end", "cells": {cell: {"structural", "p0": p0cells.cell_record, and for a stage
+    0b family "p0b": p0cells0b.cell_record_0b}}} (None or partial for a failed run; a naive start is local time);
+    context is rigrun.host_context() (peer_host and peer_cpu, the second machine of step 8b, None when absent). owned
+    and puppets are Work window means summed over the read cells, keyed by MESH_LOAD_MOTION / MESH_PUPPET_MOTION;
+    density is m² per spawned character; stage 0b rows add p0cells0b's metrics and load fields. A third repeat's
+    replaces_repeat and third_reason, and a stepped run's stepped, are copied from the spec when it sets them.
+    ValueError for a step 8b family, a family without a game, a bad MESH_RATES or MESH_BAND, or an unknown metric."""
     family = spec["family"]
+    if family in FAMILIES_8B:
+        raise ValueError(f"family '{family}' needs {LATER_8B}")
     game = spec.get("game") or FAMILY_GAME.get(family)
     if game is None:
         raise ValueError(f"family '{family}' has no game: give the spec a game or use one of {', '.join(FAMILY_GAME)}")
     rates = p0cells.stated_rates(spec.get("rates"))
     env, context, run = dict(spec.get("env") or {}), context or {}, run or {}
-    records = {cid: cell["p0"] for cid, cell in (run.get("cells") or {}).items() if cell.get("p0") is not None}
+    cells = run.get("cells") or {}
+    records = {cid: cell["p0"] for cid, cell in cells.items() if cell.get("p0") is not None}
+    records_0b = {cid: cell["p0b"] for cid, cell in cells.items() if cell.get("p0b") is not None}
     metrics = [m for cid, record in records.items() for m in p0cells.cell_metrics(record, rates["fps"], cid)]
+    metrics += [m for record in records_0b.values() for m in p0cells0b.cell_metrics_0b(record)]
     unknown = sorted({metric_base(m["name"]) for m in metrics} - METRIC_NAMES)
     if unknown:
         raise ValueError(f"metric names {', '.join(unknown)} are not in p0results.METRIC_NAMES")
     start, problems = run.get("start"), list(problems)
     row = {"schema": SCHEMA, "row": "run", "team": TEAM, "game": game,
            "model": "geographic" if family in GEOGRAPHIC else "none", "family": family, "case": spec["case"],
-           "arm": spec["arm"], "stage": STAGE, "repeat": spec["repeat"], "seed": spec["seed"], "order": spec["order"],
-           "plan_key": spec.get("key"), "point": spec.get("point") or {},
+           "arm": spec["arm"], "stage": STAGE.get(family, STAGE_0A), "repeat": spec["repeat"], "seed": spec["seed"],
+           "order": spec["order"], "plan_key": spec.get("key"), "point": spec.get("point") or {},
            "started_utc": None if start is None else start.astimezone(datetime.timezone.utc).isoformat(),
            "window_local": None if start is None else {key: _iso(run.get(key)) for key in ("since", "start", "end")}}
-    row.update({key: context.get(key) for key in CONTEXT_FIELDS})
+    row.update({key: context.get(key) for key in CONTEXT_FIELDS + ("peer_host", "peer_cpu")})
     row.update({"rates": {"fps": rates["fps"], "fixed_step_s": rates["fixed_step_s"], "tick_hz": TICK_HZ},
                 "capped": rates["capped"] and not spec.get("uncapped"), "env": env, "layout": spec.get("layout"),
                 "cells_started": list(spec.get("cells_started") or []),
@@ -183,29 +186,34 @@ def run_row(spec, run, context, problems, excluded_reason):
                 "excluded_reason": excluded_reason,
                 "dropped_windows": {cid: [_iso(end) for end in record["dropped"]]
                                     for cid, record in records.items() if record["dropped"]}})
-    row.update(_load_fields(spec, env, records))
+    row.update(p0cells.load_fields(spec, env, records))
+    if family in FAMILIES_0B:
+        row.update(p0cells0b.load_fields_0b(spec, records_0b))
     row["metrics"] = metrics
     row["windows"] = {cid: p0cells.window_rows(record) for cid, record in records.items()}
-    row.update({field: spec[field] for field in THIRD_REPEAT_FIELDS if spec.get(field) is not None})
+    row.update({field: spec[field] for field in THIRD_REPEAT_FIELDS + ("stepped",) if spec.get(field) is not None})
     return row
 
 
 def _head(kind, header, defaults=None):
-    head = {"schema": SCHEMA, "row": kind, "team": TEAM, "game": None, "family": None, "stage": STAGE, "build": None,
-            "cpu": None}
+    head = {"schema": SCHEMA, "row": kind, "team": TEAM, "game": None, "family": None, "stage": STAGE_0A,
+            "build": None, "cpu": None, "host": None}
     for source in (defaults or {}, header or {}):
-        head.update({key: value for key, value in source.items() if key in HEADER_SUBSET[2:]})
+        head.update({key: value for key, value in source.items() if key in HEAD_KEYS})
     return head
 
 
 def header_of(rows, family=None):
-    """The header subset (team, game, family, stage, build, cpu) the rows share, for the rows made from them: each
-    field's one value, or its values joined with "+" (a bridged report pools two builds); family, when given, replaces
-    theirs. Raises ValueError for no rows."""
+    """The header subset (team, game, family, stage, build, cpu) and host the rows share, for the rows made from them:
+    each field's one value, or its values joined with "+" (a bridged report pools two builds); family, when given,
+    replaces theirs. Raises ValueError for no rows and for rows of two hosts (two machines never pool)."""
     if not rows:
         raise ValueError("a header needs at least one row")
+    hosts = sorted({str(row.get("host")) for row in rows})
+    if len(hosts) > 1:
+        raise ValueError(f"rows from {len(hosts)} hosts ({', '.join(hosts)}) are never pooled: one host at a time")
     head = {}
-    for key in HEADER_SUBSET[2:]:
+    for key in HEAD_KEYS:
         values = {row.get(key) for row in rows}
         head[key] = values.pop() if len(values) == 1 else "+".join(sorted(str(value) for value in values))
     if family is not None:
@@ -256,20 +264,22 @@ def summary_row(runs, cell):
                 "tick_send_p95_ms_median": _median(metric_value(r, "tick_send_ms", "p95", cell) for r in runs),
                 "owned": _median(_mean_load(r, cell, "owned") for r in runs),
                 "puppets": _median(_mean_load(r, cell, "puppet") for r in runs),
-                "clients": 0, "plan_keys": [run.get("plan_key") for run in runs]})
+                "clients": _median(sum((r.get("clients") or {}).get(k) or 0
+                                       for k in ("phantom_virtual", "phantom_sink")) for r in runs) or 0,
+                "plan_keys": [run.get("plan_key") for run in runs]})
     return row
 
 
 def summary_rows(rows):
-    """One summary row per (game, family, case, arm, point, rates, cell) over the accepted run rows, in first-seen
+    """One summary row per (game, family, case, arm, point, rates, host, cell) over the accepted run rows, in first-seen
     order; a run joins the group of each cell it has work_ms_per_s for. Rates are in the key so two rate sets are
-    never pooled (a point normally names its rates already)."""
+    never pooled (a point normally names its rates already), and the host so two machines never are."""
     groups = {}
     for row in rows:
         if row_type(row) != "run" or not row.get("accepted"):
             continue
         key = (row.get("game"), row.get("family"), row.get("case"), row.get("arm"),
-               json.dumps(row.get("point") or {}, sort_keys=True), rates_label(row))
+               json.dumps(row.get("point") or {}, sort_keys=True), rates_label(row), row.get("host"))
         for cell in dict.fromkeys(m.get("cell") for m in row.get("metrics") or []
                                   if m["name"] == "work_ms_per_s" and m["stat"] == "mean"):
             groups.setdefault(key + (cell,), []).append(row)
@@ -391,19 +401,20 @@ def canary_work(row):
     return metric_value(row, "work_ms_per_s", "mean", CANARY_CELL)
 
 
-def _canaries(rows, arm, build=None):
+def _canaries(rows, arm, key=None):
     return [row for row in rows if row_type(row) == "run" and row.get("family") == "canary" and row.get("arm") == arm
-            and row.get("accepted") and (build is None or row.get("build") == build)]
+            and row.get("accepted") and (key is None or machine(row) == key)]
 
 
 def canary_baselines(rows):
-    """{build: the mean C work ms/s of its accepted baseline canary rows}; a build without one is left out."""
+    """{(build, host): the mean C work ms/s of its accepted baseline canary rows}; a machine without one is left
+    out."""
     values = {}
     for row in _canaries(rows, "baseline"):
         work = canary_work(row)
         if work is not None:
-            values.setdefault(row.get("build"), []).append(work)
-    return {build: math.fsum(works) / len(works) for build, works in values.items()}
+            values.setdefault(machine(row), []).append(work)
+    return {key: math.fsum(works) / len(works) for key, works in values.items()}
 
 
 def _share(work, baseline):
@@ -418,20 +429,20 @@ def _with_problem(row, text):
 
 def apply_drift(rows, threshold=0.05):
     """A new list of the rows (changed ones copied) with canary drift applied. Each accepted canary check row gets
-    "drift": whether |w - baseline|/baseline is above the threshold (w its C work ms/s, baseline its build's mean
-    accepted baseline), or None with a note when either is missing. Every other accepted run row whose next accepted
-    check canary on its build (by window_local.end) drifted becomes accepted false, excluded_reason "drift", with a
-    problems entry; an unjudged next canary adds a note; no later canary adds "no canary after this run" (still
-    accepted). Rows without window_local are left alone."""
+    "drift": whether |w - baseline|/baseline is above the threshold (w its C work ms/s, baseline the mean accepted
+    baseline of its machine, (build, host)), or None with a note when either is missing. Every other accepted run row
+    whose next accepted check canary on its machine (by window_local.end) drifted becomes accepted false,
+    excluded_reason "drift", with a problems entry; an unjudged next canary adds a note; no later canary adds "no
+    canary after this run" (still accepted). Rows without window_local are left alone."""
     out = [dict(row) for row in rows]
     baselines = canary_baselines(out)
     checks = []
     for row in _canaries(out, "check"):
-        baseline, work = baselines.get(row.get("build")), canary_work(row)
+        baseline, work = baselines.get(machine(row)), canary_work(row)
         at = (row.get("window_local") or {}).get("end")
         if baseline is None or work is None:
-            what = (f"no accepted baseline canary on build {row.get('build')}" if baseline is None
-                    else f"no {CANARY_CELL} work_ms_per_s metric")
+            what = (f"no accepted baseline canary on build {row.get('build')} host {row.get('host')}"
+                    if baseline is None else f"no {CANARY_CELL} work_ms_per_s metric")
             row["drift"] = None
             _with_problem(row, f"drift not judged: {what}")
             text = f"the canary at {at} after this run could not be judged: {what}"
@@ -448,7 +459,7 @@ def apply_drift(rows, threshold=0.05):
                 or not row.get("window_local")):
             continue
         end = datetime.datetime.fromisoformat(row["window_local"]["end"])
-        later = next((check for check in checks if check[1].get("build") == row.get("build") and check[0] > end), None)
+        later = next((check for check in checks if machine(check[1]) == machine(row) and check[0] > end), None)
         if later is None:
             _with_problem(row, "no canary after this run")
         elif later[1]["drift"]:
@@ -459,16 +470,16 @@ def apply_drift(rows, threshold=0.05):
     return out
 
 
-def bridge_ok(rows, old_build, new_build, threshold=0.05):
-    """Whether new_build's rows may be pooled with old_build's: every accepted canary check of the new build lies
-    within the threshold of the old build's baseline. ModelError when the old build has no baseline or the new build
-    no accepted check canary with a C work metric (nothing to judge)."""
-    baseline = canary_baselines(rows).get(old_build)
+def bridge_ok(rows, old_build, new_build, host, threshold=0.05):
+    """Whether new_build's rows may be pooled with old_build's on one host: every accepted canary check of the new
+    build there lies within the threshold of the old build's baseline there. ModelError when the old build has no
+    baseline or the new build no accepted check canary with a C work metric on the host (nothing to judge)."""
+    baseline = canary_baselines(rows).get((old_build, host))
     if baseline is None:
-        raise p0base.ModelError(f"build {old_build} has no accepted baseline canary to bridge from")
-    works = [w for w in (canary_work(row) for row in _canaries(rows, "check", new_build)) if w is not None]
+        raise p0base.ModelError(f"build {old_build} has no accepted baseline canary on host {host} to bridge from")
+    works = [w for w in (canary_work(row) for row in _canaries(rows, "check", (new_build, host))) if w is not None]
     if not works:
-        raise p0base.ModelError(f"build {new_build} has no accepted canary check to bridge with")
+        raise p0base.ModelError(f"build {new_build} has no accepted canary check on host {host} to bridge with")
     return not any(p0base.above(_share(work, baseline), threshold) for work in works)
 
 

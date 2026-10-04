@@ -1,37 +1,43 @@
 #!/usr/bin/env python3
-"""Phase 0 stage 0a on the rig (step 4): every stage 0a block, its canaries, and the report.
+"""Phase 0 on the rig (steps 4 and 8a): every stage 0a block, stage 0b's single-machine blocks, their canaries, and the
+report.
 
     python Tools/ServerMeshing/p0load.py canary [--baseline]
     python Tools/ServerMeshing/p0load.py accept-a [--parts A,B,C,D,E]
     python Tools/ServerMeshing/p0load.py rates [--repeats 3]
     python Tools/ServerMeshing/p0load.py presence [--players 100,200,400] [--steered-players 100,200,250]
-                                                  [--rates 60/0.03] [--observed]
+                                                  [--rates 60/0.03]
     python Tools/ServerMeshing/p0load.py density [--players 100,200] [--rates 60/0.03]
     python Tools/ServerMeshing/p0load.py floor
     python Tools/ServerMeshing/p0load.py abgeo [--subs 1,2,3] [--without-predictions]
-    python Tools/ServerMeshing/p0load.py report [--import FILE ...] [--predict abgeo] [--bridge SHA | --build SHA]
-    python Tools/ServerMeshing/p0load.py fanout|packets|prewarm|crossings|calibrate|workerab|dbburst|spaces
+    python Tools/ServerMeshing/p0load.py report [--import FILE ...] [--predict abgeo] [--bridge SHA | --build SHA] [--host NAME]
+    python Tools/ServerMeshing/p0load.py observed --part O|R|SA|M|S
+    python Tools/ServerMeshing/p0load.py fanout|targets|syncrpc|packets|prewarm
+    python Tools/ServerMeshing/p0load.py accept-b|calibrate|crossings|jfull|workerab|dbburst|spaces   (refused)
     common: --dry-run --resume --no-canary --warmup S --measure S
 
-The plans are p0plans' (the step 4 contract's §H), run by p0blocks: each run is abload's protocol (rigrun.run_window),
-read per cell with rigrun.cell_window and p0cells.cell_record, graded by p0checks, and appended as a mesh-p0/1 row to
-Logs/p0/rig_<game>_<family>_<stamp>.jsonl whatever happened (a run that raises is a failed run; the block goes on).
-Each run's line is also kept in Logs/p0/rig_<family>_<stamp>.txt. abgeo runs abload once per sub-block (its rows go to
-Logs/p0/rig_fantasy_abgeo_<stamp>.jsonl) and needs frozen predictions (report --predict abgeo) unless
---without-predictions. Stage 0b/0c families and presence --observed are refused, naming the step that builds them.
+The plans are p0plans' (the step 4 contract's §H) and p0plans0b's (step 8a, decisions 6-11), run by p0blocks: each run
+is abload's protocol (rigrun.run_window), read per cell with rigrun.cell_window and p0cells.cell_record, graded by
+p0checks, and appended as a mesh-p0/1 row to Logs/p0/rig_<game>_<family>_<stamp>.jsonl whatever happened (a run that
+raises is a failed run; the block goes on). Each run's line is also kept in Logs/p0/rig_<family>_<stamp>.txt. abgeo runs
+abload once per sub-block (its rows go to Logs/p0/rig_fantasy_abgeo_<stamp>.jsonl) and needs frozen predictions (report
+--predict abgeo) unless --without-predictions. Step 8b's and stage 0c's families are refused, naming the step that
+builds them; presence --observed is refused, pointing at observed. A stage 0b spec carries its own game
+(rig_<game>_<family>_<stamp>.jsonl), and a stepped run (fanout, packets saturation) has warm-up 10 s and measures its
+steps' holds and bind ramps + 20 s.
 
-Canaries (Decision 17: coarse C, 200 kinematic owners, 30/0.02) around rates, presence, density, floor and abgeo, into
-Logs/p0/rig_neutral_canary_<stamp>.jsonl: one at the start (unless a canary on this build is under 2 h old), one before
-any run once 2 h have passed, one at the end (abgeo: one after each sub-block). A canary drifted more than 5 % from its
-build's baseline, or not accepted, is repeated at once; if the repeat passes after a drift, the runs since the last
-good canary are queued again once at the end (abgeo: that sub-block). Two drifts, or two unaccepted canaries in a
-row, stop p0load (exit 3). They need a baseline on this build (canary --baseline: 2 runs, a third when they differ by
-more than 2.5 %). floor, density's bridge and rates --repeats 2 (2 repeats) get third repeats where two runs
-disagree, decided over the whole block plan (so --resume still owes them) after the block and again after a drifted
-canary. --resume skips planned runs with an accepted, non-drift row on this build (accept-a refuses it: it grades its
-runs together); the runs an earlier invocation made after the last good canary are queued again too when a canary
-drifts, and the verdict counts every planned run. The start canary runs unless the newest canary on this build passed
-under 2 h ago. --no-canary skips the canaries.
+Canaries (Decision 17: coarse C, 200 kinematic owners, 30/0.02) around rates, presence, density, floor, abgeo and the
+stage 0b blocks (CANARY_FAMILIES), into Logs/p0/rig_neutral_canary_<stamp>.jsonl: one at the start (unless a canary on
+this build is under 2 h old), one before any run once 2 h have passed, one at the end (abgeo: one after each sub-block).
+A canary drifted more than 5 % from its build's baseline, or not accepted, is repeated at once; if the repeat passes
+after a drift, the runs since the last good canary are queued again once at the end (abgeo: that sub-block). Two drifts,
+or two unaccepted canaries in a row, stop p0load (exit 3). They need a baseline on this machine (build and host; canary
+--baseline: 2 runs, a third when they differ by more than 2.5 %). floor, density's bridge and rates --repeats 2 (2
+repeats) get third repeats where two runs disagree, decided over the whole block plan (so --resume still owes them)
+after the block and again after a drifted canary. --resume skips planned runs with an accepted, non-drift row on this
+machine (a stepped run: one per step; accept-a refuses it: it grades its runs together); the runs an earlier invocation
+made after the last good canary are queued again too when a canary drifts, and the verdict counts every planned run. The
+start canary runs unless the newest canary on this machine passed under 2 h ago. --no-canary skips the canaries.
 --dry-run prints the plan, every run's environment and predicted load (label E); it touches no editor, database,
 PowerShell or Temp file and writes nothing. report reads Logs/p0/*.jsonl (+ --import) and writes
 Logs/p0/report_<stamp>.md and Logs/p0/<team>_<game>_fit_<stamp>.jsonl (p0report.build_report); only the rig's rows are
@@ -52,17 +58,28 @@ import abload
 import p0blocks
 import p0dryrun
 import p0plans
+import p0plans0b
 import p0report
 import p0results
 import rigrun
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FIXTURE = os.path.join(HERE, "fixtures", "abload_chain3_20260925")
+# p0blocks' canaried families and step 8a's (decision 11: every new family is canaried)
+CANARY_FAMILIES = tuple(p0blocks.CANARY_FAMILIES) + tuple(family for family in p0plans0b.FAMILIES
+                                                          if family not in p0blocks.CANARY_FAMILIES)
+
+
+def this_host():
+    """The machine a row is keyed on beside its build (decision 1): rigrun.host_context's host, read without
+    PowerShell so --resume and a dry run can use it."""
+    return os.environ.get("COMPUTERNAME", "?")
 
 
 def block_plan(args):
-    """The RunSpecs of a rig block's arguments, --warmup/--measure applied. Raises ValueError for what the plan
-    builders refuse (bad counts, rates or parts, a key regress.ENV_KEYS lacks or a pending key)."""
+    """The RunSpecs of a rig block's arguments, --warmup/--measure applied (prewarm times its bursts from the warm-up
+    it runs with). Raises ValueError for what the plan builders refuse (bad counts, rates or parts, a key
+    regress.ENV_KEYS lacks or a pending key) and for a command with no plan."""
     command = args.command
     if command == "canary":
         specs = p0plans.canary_plan("baseline", 2) if args.baseline else p0plans.canary_plan("check")
@@ -76,8 +93,25 @@ def block_plan(args):
             steered_points=p0blocks.listed_ints(args.steered_players, "--steered-players"))
     elif command == "density":
         specs = p0plans.density_plan(args.rates, p0blocks.listed_ints(args.players, "--players"))
-    else:
+    elif command == "floor":
         specs = p0plans.floor_plan()
+    elif command == "observed":
+        specs = p0plans0b.observed_plan(args.part)
+    elif command == "fanout":
+        specs = p0plans0b.fanout_plan()
+    elif command == "targets":
+        specs = p0plans0b.targets_plan()
+    elif command == "syncrpc":
+        specs = p0plans0b.syncrpc_plan()
+    elif command == "packets":
+        specs = p0plans0b.packets_plan()
+    elif command == "prewarm":
+        specs = p0plans0b.prewarm_plan(p0plans.LONG[0] if args.warmup is None else args.warmup)
+    else:
+        raise ValueError(f"p0load has no plan for {command!r}")
+    if (args.warmup is not None or args.measure is not None) and any(s.get("stepped") for s in specs):
+        raise ValueError(f"{command} has stepped runs, whose warmup (10 s) and measure (the step holds, the bind ramps "
+                         "and 20 s) are set by their plan: --warmup and --measure are refused for it")
     for spec in specs:
         spec["warmup"] = spec["warmup"] if args.warmup is None else args.warmup
         spec["measure"] = spec["measure"] if args.measure is None else args.measure
@@ -114,7 +148,7 @@ def canary_note(args):
 def dry_run(args, specs):
     """Prints a rig block's plan (p0dryrun.dry_run_lines), its canaries, third repeats and accept-a commands; 0."""
     lines = p0dryrun.dry_run_lines(specs) if specs else ["no rig runs"]
-    if args.command in p0blocks.CANARY_FAMILIES:
+    if args.command in CANARY_FAMILIES:
         lines += canary_note(args)
     if args.command in p0blocks.THIRD:
         metric, thresholds = p0blocks.THIRD[args.command]
@@ -173,7 +207,8 @@ def report_command(args):
         read_text(path) for path in sorted(glob.glob(os.path.join(FIXTURE, "abload_ab_*.txt"))))
     stamp = time.strftime("%Y%m%d_%H%M%S")
     result = p0report.build_report(rows, stamp, args.bridge, args.predict, predict_points() if args.predict else (),
-                                   rigrun.LAYOUTS, counts, datetime.datetime.now(datetime.timezone.utc), args.build)
+                                   rigrun.LAYOUTS, counts, datetime.datetime.now(datetime.timezone.utc), args.build,
+                                   args.host)
     os.makedirs(p0blocks.P0_LOGS, exist_ok=True)
     for name, content in result["files"].items():
         path = os.path.join(p0blocks.P0_LOGS, name)
@@ -199,7 +234,8 @@ def build_parser():
     def command(name, **kwargs):
         p = sub.add_parser(name, **kwargs)
         p.add_argument("--dry-run", action="store_true", help="print the plan; no editor, database or file")
-        p.add_argument("--resume", action="store_true", help="skip runs with an accepted, non-drift row on this build")
+        p.add_argument("--resume", action="store_true",
+                       help="skip runs with an accepted, non-drift row on this build and host")
         p.add_argument("--no-canary", action="store_true", help="skip the scheduled canaries")
         p.add_argument("--warmup", type=int, default=None, help="warm-up seconds of every run (default: the plan's)")
         p.add_argument("--measure", type=int, default=None, help="measured seconds of every run (default: the plan's)")
@@ -212,11 +248,15 @@ def build_parser():
     p.add_argument("--players", default="100,200,400", help="kinematic and inert points")
     p.add_argument("--steered-players", default="100,200,250", help="steered points")
     p.add_argument("--rates", default="60/0.03")
-    p.add_argument("--observed", action="store_true", help="B1-O: refused (stage 0b, step 5)")
+    p.add_argument("--observed", action="store_true", help="refused: B1-O moved to p0load observed")
     p = command("density")
     p.add_argument("--players", default="100,200")
     p.add_argument("--rates", default="60/0.03")
     command("floor")
+    command("observed").add_argument("--part", required=True, type=str.upper, choices=p0plans0b.OBSERVED_PARTS,
+                                     help="b3 O, R, SA; b4 M; b5 S")
+    for name in ("fanout", "targets", "syncrpc", "packets", "prewarm"):
+        command(name)
     p = command("abgeo")
     p.add_argument("--subs", default="1,2,3")
     p.add_argument("--without-predictions", action="store_true", help="run without frozen predictions")
@@ -225,6 +265,8 @@ def build_parser():
     p.add_argument("--predict", choices=["abgeo"], default=None)
     p.add_argument("--bridge", default=None, metavar="SHA", help="pool two builds when this build's canary allows")
     p.add_argument("--build", default=None, metavar="SHA", help="report only this build's rig rows")
+    p.add_argument("--host", default=None, metavar="NAME",
+                   help="report only this machine's rig rows (needed when Logs/p0 holds rows of two machines)")
     for name in p0plans.STAGE_LATER:
         command(name, help=f"refused: {p0plans.STAGE_LATER[name]}")
     return ap
@@ -253,7 +295,8 @@ def main(argv=None):
         if args.command == "abgeo" and not args.without_predictions and not glob.glob(frozen):
             raise ValueError("abgeo needs frozen predictions (p0load report --predict abgeo) or "
                              "--without-predictions")
-        done = p0blocks.done_keys(p0blocks.read_history()[1], rigrun.build_id()) if args.resume else frozenset()
+        done = (p0blocks.done_keys(p0blocks.read_history()[1], rigrun.build_id(), this_host()) if args.resume
+                else frozenset())
         if args.command == "abgeo" and args.dry_run:
             return abgeo_dry_run(args, done)
         plan = [] if args.command == "abgeo" else block_plan(args)
@@ -275,11 +318,12 @@ def run_command(args, specs, done, plan):
     except p0results.SchemaError as ex:
         problems.append(f"cannot read Logs/p0: {ex}")
         history = []
-    build = rigrun.build_id()
-    canaried = args.command in p0blocks.CANARY_FAMILIES and not args.no_canary
+    build, host = rigrun.build_id(), this_host()
+    canaried = args.command in CANARY_FAMILIES and not args.no_canary
     needs_baseline = canaried or (args.command == "canary" and not args.baseline)
-    if needs_baseline and build not in p0results.canary_baselines(history):
-        problems.append(f"no baseline canary on build {build[:12] or '(none)'}: run p0load canary --baseline first"
+    if needs_baseline and (build, host) not in p0results.canary_baselines(history):
+        problems.append(f"no baseline canary on build {build[:12] or '(none)'} on {host}: run p0load canary --baseline "
+                        "first"
                         + (" (or pass --no-canary)" if canaried else ""))
     for problem in problems:
         print(problem)

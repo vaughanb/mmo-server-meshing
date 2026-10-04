@@ -5,6 +5,7 @@ no client and the run's environment, wait the warm-up, measure, stop Play (alway
 each cell's logs since Play began and decide whether the run can be used.
 
     rigrun.run_window(env, warmup, measure, rep)          # (play start, window start, window end); Play always stopped
+    rigrun.run_window(env, warmup, measure, rep, on_play) # the same, calling on_play(play start) once Play is up
     rigrun.cell_window(cell, map_id, since, start, end)   # a cell's work figures over the window, and what it logged
     rigrun.run_problems(cells, plan, results, measure)    # why a run cannot be used ([] when it can)
     rigrun.cell_lines(cell, map_id, since)                # every line a cell logged since Play began
@@ -80,9 +81,12 @@ def now():
     return datetime.datetime.now().replace(microsecond=0)
 
 
-def run_window(env, warmup, measure, rep):
+def run_window(env, warmup, measure, rep, on_play=None):
     """One Play session with no client: returns (play start, window start, window end) as datetimes. Play is always
-    stopped, and a failure is raised to the caller only after that, so one broken run never leaves the editor playing."""
+    stopped, and a failure is raised to the caller only after that, so one broken run never leaves the editor playing.
+    on_play, when given, is called as on_play(play start) once Play is up (after wait_play, before the warm-up), so
+    what must start after Play (step 8b's sink and bots: leftover bots are killed first) starts there; an exception
+    it raises stops Play and is re-raised (step 8a decision 5)."""
     r.kill_bots()
     leftover = r.kit_process_count()
     if leftover:
@@ -97,6 +101,8 @@ def run_window(env, warmup, measure, rep):
         r.db_reset(PARK, (0, 0), clear_buildings=True)
         r.request_play("none", 0, 0, env=env, enabled=False)
         r.wait_play(120)
+        if on_play is not None:
+            on_play(play_start)
         time.sleep(warmup)
         start = now()
         time.sleep(measure)

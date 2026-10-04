@@ -2,7 +2,8 @@
 abload --dry-run print for a plan. Pure: every input is an argument; nothing here runs the rig. Split out of p0plans
 (the ~500-line rule), whose RunSpecs, RUN_SECONDS and run_seconds these read.
 
-    p0dryrun.predict_load(spec)      # per started cell: ms/frame, util and [predicted saturated] (label E)
+    p0dryrun.predict_load(spec)      # per started cell: ms/frame, util and [predicted saturated] (label E); None
+                                     # for a stage 0b spec, whose phantoms, ships and monsters have no cost here
     p0dryrun.dry_run_lines(specs)    # what p0load --dry-run prints
 
 Unit tests: python -m unittest discover -s Tools/ServerMeshing -p "test_*.py"
@@ -10,6 +11,7 @@ Unit tests: python -m unittest discover -s Tools/ServerMeshing -p "test_*.py"
 import p0base
 import p0geo
 import p0plans
+import p0plans0b
 import rigrun
 
 # predict_load's costs, ms per frame at 60 fps (label E): 0.71's steered owner and puppet and monster costs; step 3's
@@ -20,6 +22,7 @@ PUPPET_MS = {"steered": 0.0440, "kinematic": 0.0047}
 MONSTER_MS, MONSTER_PUPPET_MS = 0.0037, 0.0087
 MONSTERS = {"off": 0, "edge": 4, "all": 294}    # abload's monster settings (label E)
 PREDICTED_SATURATED = 0.85                      # a chain3 window at util 0.88 already had sat 23.1 %
+NOT_MODELLED = "(E) not modelled for phantoms, ships or monsters"   # a stage 0b spec's prediction
 
 
 def _cells(spec):
@@ -42,7 +45,10 @@ def predict_load(spec, monster_counts=None):
     ("[predicted saturated]") at util 0.85 or more on a capped cell. Owners come from the plan and puppets from
     expect["puppets"]; an abgeo spec (expect {}) takes its puppets from p0geo.layout_loads (spread load). Monsters use
     monster_counts {cell: {O_monster, U_monster}} when given, else abload's count for the spec's setting (MONSTERS)
-    spread uniformly. Raises ValueError for a motion without a cost."""
+    spread uniformly. Raises ValueError for a motion without a cost. A stage 0b spec (p0plans0b.FAMILIES) gives None:
+    its phantoms, ships, feeder, sender and placed monsters have no cost here, and a guess would be wrong."""
+    if spec["family"] in p0plans0b.FAMILIES:
+        return None
     env, cells = spec["env"], _cells(spec)
     owner, puppet = _motion(env, "MESH_LOAD_MOTION", OWNER_MS), _motion(env, "MESH_PUPPET_MOTION", PUPPET_MS)
     band = spec["band"] or 80.0
@@ -76,8 +82,9 @@ def _predicted(cid, load):
 def dry_run_lines(specs, per_run_s=None, env_keys=None):
     """What p0load --dry-run prints: a header naming how many regress.ENV_KEYS keys no run sets (env_keys, default
     regress.ENV_KEYS through rigrun), then per run '[i/n] family case arm point rN seed S key K | layout L | start ...
-    | read ... | W+M s', its env (the keys set, sorted) and predict_load's figures (label E), and a footer with the
-    runs ("1 run", "12 runs") and minutes (p0plans.run_seconds)."""
+    | read ... | W+M s' (a stepped run adds '| steps P1,..,Pn at H s each'), its env (the keys set, sorted) and
+    predict_load's figures (label E; NOT_MODELLED for a stage 0b spec), and a footer with the runs ("1 run", "12
+    runs") and minutes (p0plans.run_seconds)."""
     per_run_s = p0plans.RUN_SECONDS if per_run_s is None else per_run_s
     env_keys = rigrun.r.ENV_KEYS if env_keys is None else env_keys
     used = {key for spec in specs for key in spec["env"]}
@@ -85,12 +92,17 @@ def dry_run_lines(specs, per_run_s=None, env_keys=None):
     for index, spec in enumerate(specs, 1):
         point = " ".join(f"{key}={value}" for key, value in spec["point"].items()) or "-"
         extra = "".join(f" | {name} {spec[name]}" for name in ("checks_family", "third_reason") if spec.get(name))
+        if spec.get("stepped"):
+            steps = ",".join(str(step) for step in spec["stepped"]["steps"])
+            extra += f" | steps {steps} at {spec['stepped']['hold']:g} s each"
         lines.append(f"[{index}/{len(specs)}] {spec['family']} {spec['case']} {spec['arm']} {point} r{spec['repeat']} "
                      f"seed {spec['seed']} key {spec['key']} | layout {spec['layout'] or 'ten-cell rig'} | start "
                      f"{','.join(spec['cells_started'])} | read {','.join(spec['cells_read'])} | "
                      f"{spec['warmup']}+{spec['measure']} s{extra}")
         lines.append("    env: " + (" ".join(f"{key}={value}" for key, value in sorted(spec["env"].items())) or "-"))
-        lines.append("    predicted (E): " + ", ".join(_predicted(cid, load) for cid, load in predict_load(spec).items()))
+        loads = predict_load(spec)
+        lines.append(f"    predicted {NOT_MODELLED}" if loads is None else
+                     "    predicted (E): " + ", ".join(_predicted(cid, load) for cid, load in loads.items()))
     minutes = sum(p0plans.run_seconds(spec, per_run_s) for spec in specs) / 60.0
     rates = " and ".join(f"{seconds} s per {w}+{m} run" for (w, m), seconds in per_run_s.items())
     count = "1 run" if len(specs) == 1 else f"{len(specs)} runs"

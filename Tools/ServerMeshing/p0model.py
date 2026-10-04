@@ -246,6 +246,7 @@ def select_rows(run_rows, fit_id, rates=None):
 
 def _check_pool(rows, columns, bridged):
     fields = [("rates", "rate sets", "fit one rate set at a time and convert with block K"),
+              ("host", "hosts", "fit one machine at a time (step 8a decision 1)"),
               ("cpu", "CPUs", "fit one CPU at a time")]
     if not bridged:
         fields.append(("build", "builds", "pool builds only when report --bridge passes"))
@@ -308,8 +309,8 @@ def work_rows(run_rows, fit_id, q_form=None, rates=None, bridged=False):
     """(rows, y, groups, notes) for a fit: one row per accepted (run, read cell) of the fit's selection, y = that
     cell's work_ms_per_s, groups = (unit, label) per row ("repeat" and the effective repeat when balanced, else "run"
     and the run's index), notes (rows left out, dropped all-zero optional columns, E-labelled values, unbalanced
-    repeats). Refuses mixed rate sets, CPUs or builds (unless bridged), uncapped rows, MESH_LOAD_FIGHT=0 rows without
-    an O_steered_nofight regressor, a load the fit does not model and an all-zero required column."""
+    repeats). Refuses mixed rate sets, hosts, CPUs or builds (unless bridged), uncapped rows, MESH_LOAD_FIGHT=0 rows
+    without an O_steered_nofight regressor, a load the fit does not model and an all-zero required column."""
     rows, y, run_index, _, labels, unit, notes = _work_rows(run_rows, fit_id, q_form, rates, bridged)
     return rows, y, [(unit, labels[i]) for i in run_index], notes
 

@@ -9,6 +9,7 @@ metrics its JSONL row carries. Pure: every input is an argument.
     p0cells.cell_metrics(record, fps, cell)       # the record's §5 metric dicts
     p0cells.window_rows(record)                   # its per-window data for the run row
     p0cells.spawn_area(record)                    # (placement m², players spawned) from its spawn line
+    p0cells.load_fields(spec, env, records)       # a run row's 0a load fields over its cells' records
     p0cells.stated_rates("60/0.03")               # {"fps": 60, "fixed_step_s": 0.03, "capped": True}
 
 Saturation (the step 4 contract's Decision 18): a single saturated window on a cell is dropped from its aggregate and
@@ -25,6 +26,7 @@ import rigtools
 
 SLACK = datetime.timedelta(seconds=1)   # a window stamped at whole seconds may have begun up to 1 s before the start
 FANOUT_MULTI_TICK_SHARE = 0.02          # fan-out runs only: frames holding two or more ticks, as a share of frames
+DEFAULT_BAND = 80.0                     # the kit's visible range: the band of a run that sets none
 P95, P99 = 950000, 990000
 
 SUMMED = ("ticks", "expected", "dropped", "cap", "unclosed", "frames", "t0", "t1", "t2", "aoi_passes", "aoi_frames",
@@ -242,7 +244,7 @@ def _median_mem(lines, start, end):
     return statistics.median(values) if values else None
 
 
-def cell_record(cell, lines, start, end):
+def cell_record(cell, lines, start, end, fanout=False):
     """Everything p0 reads for one cell of one run, from its log lines since Play and the measurement [start, end]:
     "triples" (the Work window/ticks/bins triples inside the measurement), "pairing" (the unpaired-line problems inside
     it, and any unstamped), "saturated" (the ends of its saturated windows), "dropped" (that end when exactly one is
@@ -250,11 +252,11 @@ def cell_record(cell, lines, start, end):
     dropped one), "bins" (each histogram merged over the same triples, or None), "threads" and "puppets" (their
     selected windows with means, or None), "rates" and "rates_cells" (every Rates and Rates cell line since Play),
     "markers" ({name: every parsed marker line since Play}) and "mem_mb" (the median Mesh stats mem in the
-    measurement, or None)."""
+    measurement, or None). fanout applies window_saturated's fan-out rule (family fanout, the §3 rule)."""
     lines = list(lines)
     all_triples, unpaired = p0tools.pair_work_lines(lines)
     triples = select_windows(all_triples, start, end)
-    flags = [window_saturated(t["window"], t["ticks"]) for t in triples]
+    flags = [window_saturated(t["window"], t["ticks"], fanout) for t in triples]
     drop_one = sum(flags) == 1
     kept = [t for t, flag in zip(triples, flags) if not (drop_one and flag)]
     saturated = [t["end"] for t, flag in zip(triples, flags) if flag]
@@ -336,6 +338,40 @@ def spawn_area(record):
         return 0, 0
     last = record["markers"]["spawned"][-1]
     return (last["x_max"] - last["x_min"]) * (last["z_max"] - last["z_min"]), last["spawned"]
+
+
+def _band(spec, env):
+    if spec.get("band") is not None:
+        return float(spec["band"])
+    text = (env.get("MESH_BAND") or "").strip()
+    try:
+        return float(text) if text else DEFAULT_BAND
+    except ValueError as err:
+        raise ValueError(f"MESH_BAND '{text}' is not a number of metres") from err
+
+
+def load_fields(spec, env, records):
+    """A run row's §5 load fields over its cells' records ({cell: cell_record}), as stage 0a fills them: kind
+    "character"; owned and puppets, the Work window means summed over the cells, keyed by MESH_LOAD_MOTION /
+    MESH_PUPPET_MOTION; density, m² per spawned character (None without a spawn line); visible_range_m and band_m, the
+    spec's band, else MESH_BAND, else 80 m; scale 1.0; no clients, V move, payload, budget or awake monsters (stage 0b
+    rows replace them: p0cells0b.load_fields_0b). ValueError for a MESH_BAND that is not a number."""
+    ticks = [record["ticks"] for record in records.values() if record["ticks"] is not None]
+    placed = [spawn_area(record) for record in records.values()]
+    area, spawned = sum(a for a, _ in placed), sum(n for _, n in placed)
+    owner = (env.get("MESH_LOAD_MOTION") or "steered").strip().lower()
+    puppet = (env.get("MESH_PUPPET_MOTION") or "steered").strip().lower()
+
+    def total(field):
+        return math.fsum(t[field] for t in ticks)
+
+    band = _band(spec, env)
+    return {"kind": "character",
+            "owned": {f"character_{owner}": total("owned_players"), "monster": total("owned_monsters")},
+            "puppets": {f"character_{puppet}": total("puppet_players"), "monster": total("puppet_monsters")},
+            "awake_monsters": None, "clients": {"real": 0, "phantom_virtual": 0, "phantom_sink": 0, "observer_kind": None},
+            "v_move_mean": None, "v_move_p95": None, "density": area / spawned if spawned else None,
+            "visible_range_m": band, "band_m": band, "payload_B": None, "budget_kBps": None, "scale": 1.0}
 
 
 def stated_rates(text):

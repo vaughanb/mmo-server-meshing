@@ -4,7 +4,6 @@ the sink runs on B with -meshPhantomSinkSizes 1. Pass: every full Sink window's 
 lines. Writes Logs/p0/p0sink7_<stamp>.txt. Pattern: rigrun.run_window on a thread, sink work on the main thread."""
 import datetime
 import os
-import re
 import subprocess
 import sys
 import threading
@@ -13,6 +12,7 @@ import time
 TOOLS = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 sys.path.insert(0, TOOLS)
 import p0phantom  # noqa: E402
+import p0stage0b  # noqa: E402
 import regress as r  # noqa: E402
 import rigrun  # noqa: E402
 
@@ -53,9 +53,9 @@ def main():
         port = None
         while port is None and t.is_alive() and (datetime.datetime.now() - since).total_seconds() < 180:
             for line in r.zone_lines("C", since.strftime("%H:%M:%S"), since.strftime("%Y-%m-%d")):
-                m = re.search(r"Phantoms: cell C port (\d+) ", line)
-                if m:
-                    port = int(m.group(1))
+                setup = p0stage0b.parse_phantoms_port(line)
+                if setup and setup["cell"] == "C":
+                    port = setup["port"]
             time.sleep(2)
         if port is None:
             rep.note("FAIL: cell C never logged its sink port")

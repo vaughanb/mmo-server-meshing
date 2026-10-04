@@ -22,16 +22,17 @@ DROPPED_KEYS the ones it no longer needs. Every parser works on a bare message o
 stamp, or None when it has none. The step 5 lines (Send, Phantom, Sink and Bot net windows) and the MESH_PHANTOM,
 MESH_PHANTOM_AREA and MESH_METER_SENDS grammars are p0phantom's; the step 6 lines (Sender window, CE-12 check) and the
 MESH_SENDER and MESH_SENDER_TIERS grammars are p0sender's; the step 7 lines (Ships, Feeder, Sync load, Bot ships), the
-ship grammars and the ten step 7 key meanings are p0ships'.
+ship grammars and the twelve step 7 key meanings are p0ships'; step 8a's lines and three keys are p0stage0b's.
 Unit tests: python -m unittest discover -s Tools/ServerMeshing -p "test_*.py"
 """
 import re
 
 import p0ships
+import p0stage0b
 import rigtools
 
-# The Phase 0 toggles (six from step 2, four from step 3, ten from step 5, ten from step 6, ten from step 7), each also in
-# regress.ENV_KEYS so a Play request can set and clear it. Step 7's meanings live in p0ships (the ~500-line rule).
+# The Phase 0 toggles (6 from step 2, 4 from step 3, 10 from step 5, 10 from step 6, 12 from step 7, 3 from step 8a),
+# each also in regress.ENV_KEYS. Step 7's meanings live in p0ships, step 8a's in p0stage0b (the ~500-line rule).
 ENV_REGISTRY = {
     "MESH_WORK_BINS": "1: every Work ticks line is followed by a Work bins line listing the non-empty 0.05 ms bins",
     "MESH_RATES": "<fps>/<step>, u/<step> or u<fps>/<step>: every cell's frame cap (u: none, budgeted at <fps> or "
@@ -79,14 +80,11 @@ ENV_REGISTRY = {
                        "and logs one CE-12 check line",
 }
 ENV_REGISTRY.update(p0ships.STEP7_REGISTRY)
+ENV_REGISTRY.update(p0stage0b.STEP8_REGISTRY)
 
 # The build sheet's other §0.16 keys: nothing reads them yet, so a plan that sets one is refused (rigrun.check_env).
-_STAGE_0B_STEP_8 = "stage 0b, step 8"
-_STAGE_0C_STEP_9 = "stage 0c, step 9"
-PENDING_KEYS = {
-    "MESH_SHIP_PARK_SLEEP": _STAGE_0B_STEP_8, "MESH_PREWARM": _STAGE_0B_STEP_8, "MESH_SHIP_JUMP_SECONDS": _STAGE_0C_STEP_9,
-    "MESH_MONSTER_CELL": _STAGE_0C_STEP_9, "MESH_DB_BURST": _STAGE_0C_STEP_9, "MESH_SPACES": _STAGE_0C_STEP_9,
-}
+PENDING_KEYS = dict.fromkeys(("MESH_SHIP_JUMP_SECONDS", "MESH_MONSTER_CELL", "MESH_DB_BURST", "MESH_SPACES"),
+                             "stage 0c, step 9")
 DROPPED_KEYS = {
     "MESH_LOAD_COLLIDE": "dropped in step 3 (decision 4): the kit already ignores every character pair",
     "MESH_PHANTOM_REGISTER": "dropped in step 5 (decision 3): phantoms anchor through their owned object, and "

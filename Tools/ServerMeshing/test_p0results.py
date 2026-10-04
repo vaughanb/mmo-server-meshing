@@ -9,6 +9,7 @@ import p0base
 import p0cells
 import p0results
 import test_p0cells
+import test_p0cells0b
 
 CONTEXT = {"host": "RIG", "cpu": "Test CPU", "cores": 8, "logical": 16, "os": "Windows-11", "power_plan": "Balanced",
            "build": "abc123", "kit_patches": {"CE-6": "present", "CE-12": "absent"}}
@@ -42,7 +43,8 @@ def other_rows():
 class RunRowTests(unittest.TestCase):
     def test_refusals(self):
         cases = {
-            "a family without a game": (spec(family="fanout"), "family 'fanout' has no game"),
+            "a step 8b family": (spec(family="crossings"), "family 'crossings' needs stage 0b, step 8b"),
+            "a family without a game": (spec(family="workerab"), "family 'workerab' has no game"),
             "a malformed MESH_RATES": (spec(rates="30/x"), "MESH_RATES step part 'x' is not a number of seconds"),
             "a malformed MESH_BAND": (spec(env={"MESH_BAND": "wide"}), "MESH_BAND 'wide' is not a number of metres"),
         }
@@ -130,9 +132,44 @@ class RunRowTests(unittest.TestCase):
 
     def test_every_metric_is_in_the_vocabulary(self):
         row = p0results.run_row(spec(), a_run(), CONTEXT, [], None)
-        for metric in row["metrics"]:
+        stage_0b = p0results.run_row(spec(family="fanout"), stage_0b_run(), CONTEXT, [], None)
+        self.assertTrue(stage_0b["accepted"])
+        for metric in row["metrics"] + stage_0b["metrics"]:
             with self.subTest(metric["name"]):
                 self.assertIn(p0results.metric_base(metric["name"]), p0results.METRIC_NAMES)
+
+    def test_a_stage_0b_row(self):
+        stepped = {"steps": [50, 100], "hold": 90}
+        value = spec(family="targets", game="fantasy", kind="character", payload_B=None, scale=0.5, stepped=stepped,
+                     point={"players": 60, "step": 50},
+                     env=dict(spec()["env"], MESH_PHANTOM="virtual:200:character:C"))
+        row = p0results.run_row(value, stage_0b_run(), dict(CONTEXT, peer_host="B"), [], None)
+        p0results.validate_row(row, "row")
+        self.assertEqual({key: row[key] for key in ("stage", "game", "kind", "clients", "v_move_mean", "v_move_p95",
+                                                    "payload_B", "scale", "awake_monsters", "peer_host", "peer_cpu",
+                                                    "stepped", "point")},
+                         {"stage": "0b", "game": "fantasy", "kind": "character",
+                          "clients": {"real": 0, "phantom_virtual": 200.0, "phantom_sink": 0,
+                                      "observer_kind": "character"},
+                          "v_move_mean": 100.0, "v_move_p95": 100, "payload_B": None, "scale": 0.5,
+                          "awake_monsters": 190.0, "peer_host": "B", "peer_cpu": None, "stepped": stepped,
+                          "point": {"players": 60, "step": 50}})
+        self.assertEqual(p0results.metric_value(row, "datagrams_per_s", cell="C"), 260.0)
+        self.assertEqual(p0results.run_row(spec(), a_run(), CONTEXT, [], None)["peer_host"], None)
+
+    def test_stages_and_games_of_the_families(self):
+        self.assertEqual(p0results.FAMILIES_0B, {"observed", "fanout", "targets", "syncrpc", "packets", "prewarm",
+                                                 "accept-b", "calibrate", "crossings", "jfull"})
+        cases = {"presence": ("0a", "fantasy"), "canary": ("0a", "neutral"), "observed": ("0b", "fantasy"),
+                 "fanout": ("0b", "fantasy"), "targets": ("0b", "fantasy"), "syncrpc": ("0b", "space"),
+                 "packets": ("0b", "fantasy"), "prewarm": ("0b", "fantasy")}
+        for family, (stage, game) in cases.items():
+            with self.subTest(family):
+                row = p0results.run_row(spec(family=family), None, CONTEXT, ["Play failed"], "run failed")
+                self.assertEqual((row["stage"], row["game"]), (stage, game))
+        self.assertEqual(p0results.run_row(spec(family="observed", game="space"), None, CONTEXT, [], None)["game"],
+                         "space")
+        self.assertTrue(all(p0results.STAGE[family] == "0b" for family in p0results.FAMILIES_8B))
 
 
 class ReadWriteTests(unittest.TestCase):
@@ -240,15 +277,22 @@ class FitNamesTests(unittest.TestCase):
                           "n": 12, "method": "ols + jackknife over repeats", "reference": "a_steered", "notes": []})
 
 
-def canary_row(arm, clock, work, build="b1", accepted=True):
+def stage_0b_run():
+    """a_run with cell C's stage 0b record (test_p0cells0b's lines: two Send and Phantom windows, a Prewarm burst...)."""
+    run = a_run()
+    run["cells"]["C"]["p0b"] = test_p0cells0b.record()
+    return run
+
+
+def canary_row(arm, clock, work, build="b1", accepted=True, host=None):
     return {"schema": "mesh-p0/1", "row": "run", "family": "canary", "arm": arm, "build": build, "accepted": accepted,
-            "problems": [], "excluded_reason": None, "window_local": {"end": f"2026-09-26T{clock}"},
+            "host": host, "problems": [], "excluded_reason": None, "window_local": {"end": f"2026-09-26T{clock}"},
             "metrics": [] if work is None else [{"name": "work_ms_per_s", "stat": "mean", "value": work, "unit": "ms/s",
                                                  "label": "M", "cell": "C"}]}
 
 
-def block_row(clock, build="b1", accepted=True):
-    return {"schema": "mesh-p0/1", "row": "run", "family": "presence", "arm": "a", "build": build,
+def block_row(clock, build="b1", accepted=True, host=None):
+    return {"schema": "mesh-p0/1", "row": "run", "family": "presence", "arm": "a", "build": build, "host": host,
             "accepted": accepted, "problems": [], "excluded_reason": None,
             "window_local": {"end": f"2026-09-26T{clock}"}, "metrics": []}
 
@@ -283,9 +327,9 @@ class DriftTests(unittest.TestCase):
                 block_row("10:20:00", build="b0"), block_row("10:30:00", accepted=False)]
         out = p0results.apply_drift(rows)
         self.assertEqual(out[3]["drift"], None)
-        self.assertEqual(out[3]["problems"], ["drift not judged: no accepted baseline canary on build b1"])
+        self.assertEqual(out[3]["problems"], ["drift not judged: no accepted baseline canary on build b1 host None"])
         self.assertEqual(out[1]["problems"], ["the canary at 2026-09-26T10:10:00 after this run could not be judged: "
-                                              "no accepted baseline canary on build b1"])
+                                              "no accepted baseline canary on build b1 host None"])
         self.assertEqual(out[1]["accepted"], True)
         self.assertNotIn("drift", out[2])
         self.assertEqual(out[4]["problems"], ["no canary after this run"])
@@ -297,20 +341,30 @@ class DriftTests(unittest.TestCase):
         self.assertEqual(p0results.canary_baselines([canary_row("baseline", "09:00:00", 98.0),
                                                      canary_row("baseline", "09:05:00", 102.0, build="b2"),
                                                      canary_row("baseline", "09:06:00", 104.0, build="b2")]),
-                         {"b1": 98.0, "b2": 103.0})
+                         {("b1", None): 98.0, ("b2", None): 103.0})
 
     def test_bridge_ok(self):
-        base = [canary_row("baseline", "09:00:00", 100.0, build="old")]
-        cases = {"no old baseline": ([canary_row("check", "10:00:00", 100.0, build="new")],
-                                     "build old has no accepted baseline canary to bridge from"),
-                 "no new canary": (base + [canary_row("check", "10:00:00", 100.0, build="new", accepted=False)],
-                                   "build new has no accepted canary check to bridge with")}
+        base = [canary_row("baseline", "09:00:00", 100.0, build="old", host="A")]
+        cases = {"no old baseline": ([canary_row("check", "10:00:00", 100.0, build="new", host="A")],
+                                     "build old has no accepted baseline canary on host A to bridge from"),
+                 "the old baseline on another host": (
+                     [canary_row("baseline", "09:00:00", 100.0, build="old", host="B"),
+                      canary_row("check", "10:00:00", 100.0, build="new", host="A")],
+                     "build old has no accepted baseline canary on host A to bridge from"),
+                 "no new canary": (base + [canary_row("check", "10:00:00", 100.0, build="new", accepted=False,
+                                                      host="A")],
+                                   "build new has no accepted canary check on host A to bridge with"),
+                 "the new canary on another host": (base + [canary_row("check", "10:00:00", 100.0, build="new",
+                                                                       host="B")],
+                                                    "build new has no accepted canary check on host A to bridge with")}
         for name, (rows, message) in cases.items():
             with self.subTest(name):
                 with self.assertRaisesRegex(p0base.ModelError, message):
-                    p0results.bridge_ok(rows, "old", "new")
-        self.assertFalse(p0results.bridge_ok(base + [canary_row("check", "10:00:00", 105.1, build="new")], "old", "new"))
-        self.assertTrue(p0results.bridge_ok(base + [canary_row("check", "10:00:00", 95.0, build="new")], "old", "new"))
+                    p0results.bridge_ok(rows, "old", "new", "A")
+        self.assertFalse(p0results.bridge_ok(base + [canary_row("check", "10:00:00", 105.1, build="new", host="A")],
+                                             "old", "new", "A"))
+        self.assertTrue(p0results.bridge_ok(base + [canary_row("check", "10:00:00", 95.0, build="new", host="A")],
+                                            "old", "new", "A"))
 
 
 class SummaryTests(unittest.TestCase):
@@ -346,8 +400,11 @@ class SummaryTests(unittest.TestCase):
             p0results.header_of([])
         rows = [{"team": "rig", "game": "fantasy", "family": "presence", "stage": "0a", "build": build, "cpu": "X"}
                 for build in ("b2", "b1")]
+        with self.assertRaisesRegex(ValueError, r"rows from 2 hosts \(A, None\) are never pooled: one host at a time"):
+            p0results.header_of(rows + [dict(rows[0], host="A")])
         self.assertEqual(p0results.header_of(rows, family="fit"),
-                         {"team": "rig", "game": "fantasy", "family": "fit", "stage": "0a", "build": "b1+b2", "cpu": "X"})
+                         {"team": "rig", "game": "fantasy", "family": "fit", "stage": "0a", "build": "b1+b2", "cpu": "X",
+                          "host": None})
 
     def test_rates_label(self):
         cases = {"none": ({"rates": {"fps": None, "fixed_step_s": None}}, None),

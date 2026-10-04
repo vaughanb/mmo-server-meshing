@@ -1,0 +1,3370 @@
+
+Large Systems Meshing Reply
+
+- 
+
+- 
+
+- 
+
+ Server Meshing add-on · reply to the large-systems plan · 25 September 2026
+
+### Large Systems Meshing Reply
+
+ Answers to your reply: the send path re-run at 30 fps / 20 Hz / 50 Hz, the ship-sender interface to agree before anyone edits ShipMovementComponent, and the BubblePolicy spec rebuilt on per-group frame changes.
+
+ C read from code
+ M measured
+ E estimate
+ A assumption to replace
+
+ Three investigations, each re-checked by an adversarial reviewer against the kit code, then checked against your repository at main 1a3a58d9. Nothing here was measured; estimates are marked.
+
+ Contents
+
+- Reply in brief
+
+- The numbers that change your plan
+
+- The ship-sender interface (Part 2), for both sides to agree
+
+- BubblePolicy (Part 3)
+
+- Findings for your plan, most important first
+
+- Measurements to pool
+
+- What we need from you
+
+- Part 1: The send path at your rates
+- Summary
+
+- 1. How the kit sends movement C
+
+- 2. Inputs and rate classes
+
+- 3. Case (a): 64 players + 64 AI, V = 128 ships in view (plus own pilot), shared process
+
+- 4. Case (b): 400 players + 100 AI, V = 500
+
+- 5. Rest of the frame at 30 fps (for context, rate-corrected)
+
+- 6. What this changes in the proposal
+
+- 7. What Phase 0 must measure
+
+- Part 2: The ship-sender interface
+- 0. Result in brief
+
+- 1. What the kit does today
+
+- 2. Item (1): payload, header and WriteState [their code]
+
+- 3. Item (2): keeping the kit loop from also writing ships
+
+- 4. Item (3): fan-out in exactly the kit's record format
+
+- 5. Item (4): tiering, budget and who owns them
+
+- 6. Item (5): reliable and unreliable
+
+- 7. Item (6): timestamps and the epoch
+
+- 8. Item (7): code split and C# sketch
+
+- 9. Item (8): tests
+
+- 10. Open items: what depends on their code, and what to agree
+
+- Part 3: BubblePolicy spec
+- 0. What changes from proposal §4, and the kit facts this spec rests on
+
+- 1. Inputs
+
+- 2. Outputs, state, and the procedure
+
+- 3. Thresholds as functions of A
+
+- 4. The merge predicate must match the AOI predicate: X/Z or 3D
+
+- 5. The roam boundary with fixed anchors
+
+- 6. The §4.7 scenarios under per-group frame changes
+
+- 7. Table-driven tests for BubblePolicy (failure cases first)
+
+- What depends on the team's code (confirm before building)
+
+### Reply in brief
+
+- 
+Where this comes from. Your reply as pasted to us, checked against your repo at main 1a3a58d9 (cloned here on 2026-09-25). Your plan (large-star-systems.md) and the contract extract are not on this machine, so this answers the reply itself; send the extract if you want it aligned word for word.
+
+- 
+Order of work. Brenden is confirming it on our side: finish verifying Slice 2a (it becomes the bubble directory), confirm the CE-11 pool fix, then replace slices 2b–6 with bubble Phase 0.
+
+- 
+Your corrections are adopted.
+
+- 
+30 fps logic, 20 Hz sends, 50 Hz physics (checked: GameInstance.prefab:230, MapNetworkManager-CE.prefab:129, TimeManager.asset fixed step 0.02). Part 1 re-runs the send path at those rates. Frame rate does not change the per-second send cost; a tick now falls on 2 of every 3 frames, and the tick frame is 1.5× the frame average.
+
+- 
+Ships are ShipEntity (a VehicleEntity) moved by ShipMovementComponent. Checked: it registers itself as the kit movement handler at OnIdentityInitialize, and its WriteServerState writes the same bytes for every receiver, so "build once per tick, copy per client" works on your payload as it is.
+
+- 
+Per-group frame changes, never moving an anchor. Part 3 is rebuilt around it: no re-centring, no slot classes, no whole-bubble rebase.
+
+- 
+Your handoff moments, including handing a ship to the planet's process during the supercruise approach.
+
+- 
+The 30 Hz step in our degradation ladder is gone (it is already your rate). It is replaced by "shrink V on the send side": cap the ships sent per client by priority. Never do it by cutting the AOI range, because BubblePolicy's thresholds read that range.
+
+### The numbers that change your plan
+
+All figures are estimates E from code reading. Phase 0 measures the inputs. Details and arithmetic are in Part 1.
+
+Case | Kit send path | With the ship sender | What limits it | 
+64 players + 64 AI, all in view, shared process | CPU 1.3–2.7 ms/frame average (at most 11 % of 33 ms). Downlink 172 kB/s per client | CPU 0.55–0.97 ms/frame. Downlink 118 kB/s at your 60 B payload, 60 kB/s quantized | The downlink, not CPU. A 100 kB/s budget needs a quantized payload, or at most about 108 ships in view | 
+400 players + 100 AI, all in view, dedicated process | Sends alone take 32–67 ms/frame. Cannot run | 12.7–20.4 ms/frame of sends (10.0–11.9 with two kit patches). Whole frame 33–53 ms (99–158 %) | One process holds about 170–310 players + 100 AI mutually visible. Admission, AI workers or a smaller V become the plan, not the fallback | 
+
+Two facts from your code raise the stress-case cost:
+
+- 
+Shield and hull are kit sync fields (ShipCombatComponent.shield is a SyncFieldFloat; hull is the vehicle's currentHp), and fire and impacts are AllRpc. The sync pass and RPC-to-All loop over every player on the process: about +200 ms/s in the 400 + 100 case. Moving hull and shield into the ship state (and fire visuals through the sender) removes most of it.
+
+- 
+Seated pilots are written to observers every tick. A seated character's movement handler stays registered, and the kit does not check the seat. Cheap in bytes (1–4 observers within 80 m), but each pilot is a second kit entity with a per-frame cost and recovery sync fields.
+
+### The ship-sender interface (Part 2), for both sides to agree
+
+- 
+Your payload stays yours. ShipMovementComponent keeps its message and your Phase 0 header [mode][flightMode][epoch], and gains one method, WriteState(sampleTimestamp, writer, out sendReliably). The sender calls it at most once per ship per send tick and copies the bytes unchanged to each recipient.
+
+- 
+The ship stays registered as a kit movement handler. Owner uploads (BaseGameNetworkManager.cs:584) and client reads (:599) both look it up. While the sender owns the ship, the kit-facing WriteServerState returns false and the kit skips it (:703-704).
+
+- 
+No client change. The sender emits ordinary EntityState (message 119) packets in the kit's record layout. The one condition is that ReadServerStateAtClient consumes exactly the bytes it was given, synchronously; yours does today.
+
+- 
+The bytes describe the ship at sampleTimestamp. Extrapolate AI from the last physics step and mirrors from the owner's upload time. Otherwise observers trail by 5–12.5 m E.
+
+- 
+Discrete events travel as state (teleport sequence, mode, epoch). A DiscreteVersion counter makes a ship urgent: it goes to every subscriber on three builds in a row. No reliable channel is needed.
+
+- 
+Frame changes: withhold in both directions whenever the observer's applied frame is not known to be the ship's frame.
+
+- 
+Who owns what. You own IShipSendPolicy (locks, attackers, wing, seats, supercruise, frame-change state) and the per-client byte budget. The add-on owns the mechanism: budget enforcement, fairness, repeats, withholding, packet assembly, timing.
+
+- 
+What remains in the kit loop. It still visits every (client, ship) pair each tick: about 6 ms on each tick frame in the stress case E. Only a kit patch to the loop at BaseGameNetworkManager.cs:695-704 removes it; scope it after the G1 measurement.
+
+- 
+The grid send path must stay disabled. It is, by default, in your kit copy (DefaultGridManagerComponent.isDisabled = true). That path never calls a handler's WriteServerState, so your ship message would not go out at all.
+
+- 
+To agree: the byte budget; whether to add a compact payload variant for the stress case; whether flightMode counts as a discrete event; packing mode and flightMode into one byte (saves a third of the 3 B header). The C# contract sketch is in Part 2, §8.
+
+### BubblePolicy (Part 3)
+
+- 
+Thresholds as functions of your AOI. With τ = t + L_max = 2 s:
+| Quantity | Value |
+
+|---|---|
+
+| D_merge, armed pair | 3.7–4.0 km (set by the 3 km lock range, not the AOI) |
+
+| D_merge, unarmed pair | 3.3–3.6 km |
+
+| D_split | 14 km (by capability, not current speed) |
+
+| Drop-join radius J | 14 km |
+
+| Roam keep R_out / entry R_in | 29.5 km / 22 km |
+
+| Neighbourhood gap for placement D_nbr | 69 km |
+
+| Never offload across a gap below | 34 km |
+
+| Flapping | at most one merge-and-split cycle per 50 s per pair |
+
+- 
+Mechanism, in your order: a merge, split or roam exit is a batch of per-group frame changes. The server moves every group of the batch in the plan frame; each client applies and acks; the batch's visibility flips once, on the last ack or at a deadline. Flipping per group would make the ships of one fight despawn and respawn for each other.
+
+- 
+One metric for the AOI and the policy. The kit AOI is X/Z only. We recommend 3D for both: a copy of the kit AOI class as your own BaseInterestManager with the Y axis on (no kit patch), 3 km cells, and bounds that stay inside the kit's int cell index. If the AOI stays X/Z, BubblePolicy must use X/Z too.
+
+- 
+Deliverable: inputs and outputs, pseudo-code, determinism rules, and 60+ table-driven test cases (failure cases first). We will review P1's BubblePolicy against that table.
+
+### Findings for your plan, most important first
+
+- 
+Missile lock (3 km) is longer than the largest normal-space visible range (2.625 km). Decide whether a lock needs visibility. For armed ships the lock range, not the AOI, sets D_merge.
+
+- 
+Flip visibility per batch, not per group (above).
+
+- 
+Gameplay physics queries must filter by SubChannelId. A moved group shares slot geometry with its target bubble until its ack, and physics does not know sub-channels. ShipAIPilot and ShipCombatComponent use physics queries.
+
+- 
+ShipEntity has no GetInfo override, so a ship as instigator of kit damage reports an empty sub-channel, and that damage is refused once targets carry bubble ids (DamageableEntity.cs:416). Your ship weapons use TakeShipDamage, so this only matters for kit damage paths.
+
+- 
+Seated characters should carry their ship's visible range. At the default 80 m, a remote client sees a ship whose pilot spawns only within 80 m.
+
+- 
+Low cruise inside a bubble: with R = 30 km the policy's invariants fail above about 525 m/s. Faster low cruise must be a handoff moment (your "promotion" moment covers it if it is).
+
+- 
+Kit client read path: after a successful handler read the kit does not move to the end of the record, and an async void reader escapes its catch. Recommended vendor patch: reader.SetPosition(recordStart + length) after BaseGameNetworkManager.cs:609.
+
+- 
+Teleport patch scope. The clears are at BuiltInEntityMovementFunctions3D.cs:1375-1378: jump (1375), dash (1376), teleport (1377), still-move (1378); your :1376 is the dash clear. IsJump and IsDash have the same first-observer-only bug. The grid path repeats it in CreateMovementData (:1329-1332), and NavMeshEntityMovement repeats the teleport clear (:595-596, :629-630). We have no patch. We would like to carry yours in our kit copy too, so both copies stay the same.
+
+- 
+Two more kit patches to scope after G1: no movement write for a seated passenger unless a flag is pending; and a send loop that visits only the entities the kit still sends.
+
+### Measurements to pool
+
+- 
+Ours (Phase 0):
+
+- 
+the per-write cost of ShipMovementComponent.WriteServerState at up to 400 clients × 500 ships;
+
+- 
+the kit loop residual;
+
+- 
+the per-packet send cost;
+
+- 
+the sender prototype;
+
+- 
+the cost of a kinematic ship puppet;
+
+- 
+tick-frame p95/p99.
+
+- 
+Yours:
+
+- 
+S5, supercruise contacts;
+
+- 
+S8, a headless planet;
+
+- 
+the per-client frame-change latency (apply + ack) at p50/p95/p99/p99.9 under load, which sets BubblePolicy's deadline L_max.
+
+- 
+One results format for both: work per second, tick-frame p95, bytes per client including UDP/IP, and the model inputs, recorded in both plans.
+
+### What we need from you
+
+- 
+The contract extract (and the plan section on SlotLayout, B.4).
+
+- 
+Group composition: which entities move with a ship (seated characters, missiles, drones, towed objects), and the client count per group.
+
+- 
+The lock-visibility decision, and station and planet roam radii.
+
+- 
+Low-cruise top speed, and whether it is flown inside a bubble.
+
+- 
+Which channel position-bearing client messages (fire requests, skills) use, and whether they need an epoch.
+
+### Part 1: The send path at your rates
+
+Written from the kit code before your repo was cloned here. Where this part says your code is not on this machine, the reply in brief above answers the points the clone settles.
+
+Labels: C read from code, M measured, E estimate, A assumption.
+
+Path aliases:
+
+- 
+Kit/ = Assets/OpenMMORPG/
+
+- 
+LNL/ = Kit/ThirdParty/LiteNetLibManager/
+
+- 
+LNLib/ = LNL/Plugins/LiteNetLib/
+
+- 
+BGNM = Kit/Core/Scripts/Networking/BaseGameNetworkManager.cs
+
+- 
+BIEMF = Kit/Core/Scripts/Gameplay/EntityMovementSystems/Implements/BuiltInEntityMovementFunctions3D.cs
+
+### Summary
+
+- 
+Frame rate does not change the send cost. The kit writes every subscribed entity to every client on every 20 Hz tick. That is per-second work, so going from 60 to 30 fps leaves its share of the CPU the same. What changes is timing:
+
+- 
+the tick frame is now 1.5× the frame average (it was 3×);
+
+- 
+a tick falls on 2 of every 3 frames.
+
+- 
+The kit does write seated pilots, once per subscriber per tick. A pilot is subscribed only by its owner and by players within the pilot's own 80 m range. That is 1–4 writes per pilot per tick E: 0.2–0.8 % of movement writes in (b), 0.8–3.1 % in (a), and at most 1.3 % of bytes. Pilots matter in other ways:
+
+- 
+each one is a second kit entity per player, with a per-frame cost;
+
+- 
+their recovery sync fields feed the sync scan, which loops over every player on the process for every dirty element;
+
+- 
+their writes carry no information, because clients snap passengers to the seat every frame.
+
+- 
+Case (a): 64 players + 64 AI, all in view.
+
+- 
+Kit path CPU: 1.25–2.71 ms/frame on average and 1.7–3.8 ms on the tick frame. That is at most 11 % of 33.3 ms, so CPU is not the problem.
+
+- 
+The downlink is the problem: 172–173 kB/s per client (1.38 Mbit/s), above the proposal's G1 limit of 100 kB/s, and 11 MB/s per process.
+
+- 
+Ship sender: 0.55–0.97 ms/frame, or 0.43–0.57 with two kit patches. Downlink is 118 kB/s at their 60 B payload, which is still above 100 kB/s, or 60 kB/s quantized.
+
+- 
+Case (b): 400 players + 100 AI, all in view.
+
+- 
+Kit path: 955–2,014 ms of main-thread send work per second. That is 31.8–67.1 ms/frame on average and 43.5–93.7 ms on the tick frame. With the rest of the frame, demand is 1,650–3,230 ms of main thread per second. It cannot run at any per-pair cost in the 0.1–0.3 µs range.
+
+- 
+Kit egress: 668 kB/s per client, 267 MB/s (2.14 Gbit/s) per process, 272k datagrams/s.
+
+- 
+Ship sender: 12.7–20.4 ms/frame, or 10.0–11.9 ms with the two kit patches. Downlink is 411 kB/s per client at 60 B, which is 164 MB/s (1.31 Gbit/s) per process and more than one 1 GbE link. Quantized, it is 208 kB/s per client.
+
+- 
+Under their AOI, every visible ship is within about 2.6 km: 2,000 m + (250 + 250 m/s) × 1.25 s = 2,625 m at boost. None reaches the proposal's 1–2 Hz tier (beyond 10 km), and most sit in its 20 Hz tier (≤ 2 km). The far-tier savings the proposal counted on never happen.
+
+- 
+In (b), the sender cuts send CPU (movement plus sync and events) by 2.5–3.3× at equal per-pair cost, or 3.2–5.6× with the patches. The proposal's M1 figure was about 2.7 ms/frame at 60 Hz replacing 14–30 ms, i.e. 5–11×. Design A's 13.5× does not hold either.
+
+- 
+It cuts bytes by only 1.5–1.6× at their payload.
+
+- 
+The proposal's 52–65 kB/s per client needs a quantized payload, plus a byte budget that drops ships beyond gun range to about 2 Hz.
+
+- 
+Whole frame for (b), rate-corrected: 33.1–52.5 ms (99–158 %) with the patched sender. The proposal's "~24 ms (71 %)" does not hold.
+
+- 
+One-process cap at the 80 % line, with everyone mutually visible: about 170–310 players + 100 AI E.
+
+- 
+Agree two points before either side edits ShipMovementComponent (§6 point 7):
+
+- 
+The ship handler must stay registered, because the server's inbound path and the client's read path both look it up.
+
+- 
+The client read path trusts each handler to consume exactly the bytes it wrote.
+
+### 1. How the kit sends movement C
+
+Rates in this repo vs theirs
+
+Rate | This repo | Theirs | 
+Map-server network tick (updateFps) | 20 Hz: MapNetworkManager-CE.prefab:139; default LNL/Scripts/LiteNetLibManager.cs:36 | 20 Hz | 
+Server frame rate | 60 in GameInstance-CE.prefab:230 (where the proposal's 60 Hz came from). Kit default is 30 (Kit/Core/Scripts/GameInstance/GameInstance.cs:588), applied only when headless (:1463-1468). GameInstanceLan-CE.prefab:230 is 30 | 30 fps | 
+Physics fixed timestep | 0.03 s = 33.3 Hz (ProjectSettings/TimeManager.asset:6). The proposal's "50 Hz physics" was not this repo's value either | 50 Hz | 
+
+Our setup window flags only frame rates above 60, and then offers "Set 60" (Assets/ServerMeshing/Mesh/Editor/ServerMeshSetupWindow.cs:382-392).
+
+Tick scheduling
+
+- 
+LogicUpdater(1/updateFps) is built at LNL/Scripts/LiteNetLibManager.cs:155 and advanced every frame (:159-162) by an accumulator loop (LNL/Scripts/Utils/LogicUpdater.cs:88-110).
+
+- 
+At 33.3 ms frames and 50 ms ticks the pattern is 0, 1, 1 ticks per frame, so 2 of 3 frames send.
+
+- 
+A long frame makes the next frame run 2 ticks back to back when it lasts at least 66.7, 83.3 or 100 ms. Which one applies depends on where the accumulator stood: at 30 fps it holds 33.3, 16.7 or 0 ms between frames. A frame of 100 ms or more always causes a double tick.
+
+- 
+The loop allows up to 5 ticks per frame, then drops the backlog (LogicUpdater.cs:7,99-102). Catch-up ticks resend unchanged positions.
+
+- 
+Physics at 50 Hz gives 1, 2, 2 steps per frame. Two of every three frames have 2 physics steps and two of every three have a send, so at least one frame in three has both.
+
+What runs on each tick (LNL/Scripts/GameApi/LiteNetLibGameManager.cs:109-121, BGNM:129-137)
+
+- 
+The sync-field pass.
+
+- 
+The AOI countdown, on a 1 s interval (Kit/Core/Scripts/Networking/AOI/JobifiedGridSpatialPartitioningAOI.cs:18,175-178). It completes in LateUpdate of the same frame (:248-337).
+
+- 
+The movement send.
+
+The send loop (BGNM:661-766)
+
+The grid path is off by default (Kit/Core/Scripts/Networking/GridManager/DefaultGridManagerComponent.cs:16-23), so BGNM:133-134 takes the SendServerEntityMovementState path. For each player the loop does four things:
+
+- 
+Reset two writers (:683-694).
+
+- 
+For every subscribed id (:695-697): a ConcurrentDictionary lookup (:699, type at :108), a writer reset (:701), then WriteServerState (:703).
+
+- 
+Copy the result in, with a packed object id and a 4-byte int length (:708-710, :734-736).
+
+- 
+Flush when the next entry would reach 1,020 B, i.e. position + entry + 8 ≥ 1,020 (:717-733; the limit is at LNL/Scripts/GameApi/LiteNetLibGameManager.StateSyncing.cs:12).
+
+Every subscribed entity is written every tick, with no change check.
+
+- 
+The kit handler returns true whenever _isStarted is set (BIEMF:1340-1341,1379).
+
+- 
+The interface has no receiver parameter (Kit/Core/Scripts/Gameplay/Interfaces/IEntityMovementDataHandler.cs:17), so a handler cannot tier or skip per client.
+
+- 
+A player's own objects are always in its subscriptions (LNL/Scripts/GameApi/BaseInterestManager.cs:65-66), so V includes the player's own ship.
+
+- 
+Whether their ShipMovementComponent returns false when nothing changed depends on their code. It could only do that per entity, not per receiver.
+
+Packets
+
+- 
+The header is 12 B:
+
+- 
+message type 119 as a packed value: 1 B (Kit/Core/Scripts/Networking/GameNetworkingConsts.cs:25, LNL/Scripts/Extensions/NetDataWriterExtension.cs:181-184);
+
+- 
+the packed long timestamp: 7 B. It is written as two zigzag packed ints (NetDataWriterExtension.cs:161-165); the high word (about 416) takes 2 B and the low word 5 B;
+
+- 
+a 4 B count.
+
+- 
+A 57 B ship entry costs 64 B with its framing: a 3 B packed id plus a 4 B length.
+
+- 
+A Ids between 2,288 and 67,823 take 3 B (NetDataWriterExtension.cs:192-197), and ids only grow (LNL/Scripts/GameApi/LiteNetLibIdentity.cs:668-682).
+
+- 
+15 entries fit in a packet: 12 + 15 × 64 = 972 B. A 16th would need 972 + 57 + 8 = 1,037 ≥ 1,020.
+
+- 
+On the wire, add 1 B (LiteNetLib) + 28 B (UDP/IPv4). That is 1,001 B per 15 entries, i.e. 66.7 B per ship entry. The proposal assumed 61 B.
+
+- 
+The transport sends with peer.Send (LNL/Scripts/Transports/LiteNetLib/LiteNetLibTransport.cs:120). That call:
+
+- 
+goes to SendInternal, which copies the packet into a pooled buffer and queues it under a lock (LNLib/LiteNetPeer.cs:605-684; the queue is at :679-684);
+
+- 
+is drained by LiteNetLib's single logic thread every 15 ms (LNLib/LiteNetManager.cs:113,498-537; LNLib/LiteNetPeer.cs:1302-1319).
+
+- 
+The MTU stays at 1,024 B. MTU discovery is off by default and nothing in this repo turns it on (LNLib/LiteNetManager.cs:244; LNLib/LiteNetPeer.cs:317; LNLib/NetConstants.cs:89-103).
+
+- 
+A 973 B packet is below the direct-send threshold of 1,001 B (LiteNetPeer.cs:1187-1200), so it goes into the merge buffer (:1202-1209).
+
+- 
+Two such packets never fit in 1,024 B, so each still leaves as its own datagram (SendMerged, :1161-1184), after one extra copy.
+
+- 
+So the main thread pays a handoff per packet, and one network thread pays for every sendto.
+
+The client read path (BGNM:589-617)
+
+- 
+Each packet carries one timestamp and a count. For each entry the client reads a packed id and an int32 length, looks up the handler, and calls ReadServerStateAtClient.
+
+- 
+It skips by the length only when no handler is registered or the read throws (:599-604, :610-615).
+
+- 
+After a successful read it does not seek to the end of the entry. The handler must consume exactly the bytes it wrote.
+
+- 
+A short read silently shifts every later entry in that packet. Their Phase 0 header must be written and read in lockstep.
+
+- 
+The server side needs the handler as well. An inbound client state is dropped unless the object has a registered handler owned by the sending connection (BGNM:579-587).
+
+Seated pilots
+
+- 
+Taking a seat sets the pilot's Movement.enabled = false (Kit/Core/Scripts/Gameplay/BaseGameEntity.cs:361-375). For the kit's CharacterControllerEntityMovement, that only unregisters its per-frame Update (Kit/Core/Scripts/Gameplay/EntityMovementSystems/CharacterControllerEntityMovement.cs:298-309).
+
+- 
+The movement handler stays registered. It is added on identity init and removed on destroy (BIEMF:222-231), not on enable or disable.
+
+- 
+NavMeshEntityMovement behaves the same way: it registers at :139-143 and its WriteServerState returns true whenever the entity has started (:601-632).
+
+- 
+Which component their pilot prefab uses depends on their code.
+
+- 
+WriteServerState does not check for a seat.
+
+- 
+It writes the pilot's position, which the seat snap sets every LateUpdate (BaseGameEntity.cs:441-461).
+
+- 
+Payload is about 19–22 B (Kit/Core/Scripts/Gameplay/EntityMovementSystems/EntityMovementFunctions.cs:136-145; the list count is at NetDataWriterExtension.cs:121-133), about 26–29 B with framing.
+
+- 
+So the kit writes a seated pilot once per subscriber per tick.
+
+- 
+Who subscribes? The visible range belongs to the observed object.
+
+- 
+The AOI queries a sphere around each target using the target's own range (JobifiedGridSpatialPartitioningAOI.cs:219; BaseInterestManager.cs:56-59,67).
+
+- 
+The grid ignores Y (JobifiedGridSpatialPartitioningAOI.cs:122, disableYAxis = true).
+
+- 
+A pilot is therefore seen by its owner plus the players within 80 m in X/Z. Their "characters see 80 m" is the character's own visible range. That gives 1–4 writes per pilot per tick (E; it depends on formation spacing).
+
+- 
+The driver owns the ship (Kit/Core/Scripts/Gameplay/BaseGameEntity_MountFunctions.cs:105-107; LNL/Scripts/GameApi/LiteNetLibAssets.cs:594-596). The client sends the ship's movement, and passengers send nothing (BGNM:620-627, 639-660).
+
+- 
+hidePassenger only hides the model on the client (Kit/Core/Scripts/Gameplay/CharacterEntity/BaseCharacterEntity.cs:1154).
+
+- 
+The pilot's writes carry no information, because clients snap passengers to the seat every LateUpdate (BaseGameEntity.cs:400-461).
+
+Sync fields and RPCs of seated characters
+
+- 
+A sync field goes only to the identity's subscribers (LNL/Scripts/GameApi/LiteNetLibSyncElement.cs:9-12).
+
+- 
+But the pass loops over every ready player on the process × every dirty element, every tick, whoever subscribes (StateSyncing.cs:378-392).
+
+- 
+That is O(players) per dirty element, and O(P²) overall once the number of dirty elements grows with players.
+
+- 
+Recovery changes HP, MP and similar values once a second per character (Kit/Core/Scripts/Gameplay/Rule/DefaultGameplayRule.cs:991-994; Kit/Core/Scripts/Gameplay/CharacterSystems/CharacterRecoveryComponent.cs:43-55).
+
+- 
+An RPC to All loops over every connection on the process (LNL/Scripts/GameApi/LiteNetLibRPC.cs:78) and serializes and sends once per subscriber (:86-93).
+
+- 
+In a shared process, both loops cover the players of every bubble on that process.
+
+- 
+Consequence: anything that observers beyond 80 m must see, such as fire visuals or hull, cannot live on the pilot character. Whether it does today depends on their code.
+
+- 
+The ship's own sync fields (currentHp, level, passengerIds) go to the ship's 2 km subscribers (Kit/Core/Scripts/Gameplay/VehicleSystems/VehicleEntity.cs:66-70,143-151).
+
+Side notes
+
+- 
+Teleport-flag lines. The clears are at BIEMF:1375-1378: jump (1375), dash (1376), teleport (1377) and still-move (1378). The team's :1376 is the dash clear.
+
+- 
+IsJump and IsDash have the same "only the first observer sees it" bug.
+
+- 
+The grid/job path repeats it in CreateMovementData (BIEMF:1329-1332), which is called once per player (BGNM:831).
+
+- 
+NavMeshEntityMovement repeats the teleport clear at :595-596 (CreateMovementData) and :629-630 (WriteServerState).
+
+- 
+Their Phase 0 patch should cover all four flags on both paths, and NavMeshEntityMovement if any of their entities use it.
+
+- 
+Grid path. If their project turns the grid on:
+
+- 
+the job path calls CreateMovementData and never calls WriteServerState (BGNM:826-834,864), so their ship message would never be sent;
+
+- 
+it allocates per player per tick (:812-824);
+
+- 
+it clamps X/Z to ±960 m (DefaultGridManagerComponent.cs:16-17), which cannot serve 2 km ranges.
+
+### 2. Inputs and rate classes
+
+Rate classes, and how each converts to a 33.3 ms frame:
+
+- 
+[T] per tick: the cost per second is fixed. Average per frame = per-second ÷ 30, and the whole tick lands on one frame.
+
+- 
+[F] per frame: the cost per frame is unchanged.
+
+- 
+[P] per physics step: 1.67 steps per frame.
+
+- 
+[E] per event: the cost per second is fixed.
+
+Converting the proposal's per-entity numbers. e, x_P and x_AI were per 60 Hz frame.
+
+- 
+At 30 fps they become 1.0× per frame (for work that runs every frame) to 2.0× (for per-second or physics work).
+
+- 
+For x_AI I used 2.0×, because under the proposal's M2 schedule PID steering, think and casts all run at fixed rates. If their AI ticks every frame, the factor is 1.0×. That depends on their code.
+
+Carried over from the proposal (E/A):
+
+- 
+c_pair: 0.1–0.3 µs per movement write;
+
+- 
+sync scan: 0.1 µs per (player × dirty element);
+
+- 
+RPC: 0.3–0.5 µs per send;
+
+- 
+sender tier scan 15 ns and per-entry copy 50 ns;
+
+- 
+build 0.3 µs, which I widen to 0.3–1.0 µs because their message has more fields;
+
+- 
+events: 30 ms/s in (b);
+
+- 
+fire rates of 3 shots/s (players) and 2 shots/s (AI), with half of them hitting;
+
+- 
+250 dirty ship sync fields per tick in (b), scaled to 64 in (a);
+
+- 
+c0: 0.6 ms M;
+
+- 
+hit processing 20 µs, inbound message 2 µs.
+
+New E:
+
+- 
+Main-thread handoff per datagram: 0.2–0.5 µs.
+
+- 
+Kit loop residual: 20–60 ns per (player, subscribed ship) when the ship's WriteServerState returns false.
+
+- 
+Pilot dirty sync elements: about 3 per second each.
+
+- 
+Seated pilot per-frame cost: 0.005–0.02 ms.
+
+Tier plan A, rebuilt around their ranges:
+
+- 
+20 Hz for ships within gun range (1 km), plus locked targets, attackers and wing;
+
+- 
+10 Hz from 1 km to the edge of visibility (2–2.6 km);
+
+- 
+average send rate r̄ = 14 Hz in (a) (40 % near) and 12.5 Hz in (b) (25 % near).
+
+- 
+Caveat: missile lock (3 km) and AI detection (2.2 km) exceed the base visible range: 2 km at rest, 2,000 + 250 × 1.25 = 2,312 m at combat speed. A target locked beyond the visible range is not subscribed, so neither the kit nor a sender that walks subscriptions sends it. Whether their lock code adds subscriptions, and so raises V, depends on their code.
+
+Sender entry sizes A. There are two framing options (see §6 point 7):
+
+- 
+New message type with 3 B framing (for example a 2 B ship index and a 1 B length; needs a client reader of ours). Egress figures below use this option.
+
+- 
+Their 57 B payload + the Phase 0 header [mode][flightMode][epoch] of 3 B + 3 B framing = 63 B. 15 fit a packet with a 12 B header: (12 + 945 + 29) ÷ 15 = 65.7 B on the wire.
+
+- 
+Quantized: 26 + 3 + 3 = 32 B, 31 per packet: (12 + 992 + 29) ÷ 31 = 33.3 B on the wire.
+
+- 
+Reuse the kit's EntityState message (119), with no client change and the kit's 7 B framing.
+
+- 
+67 B entries, 15 per packet: (12 + 1,005 + 29) ÷ 15 = 69.7 B, which is +6 %.
+
+- 
+Quantized: 36 B entries, 28 per packet: (12 + 1,008 + 29) ÷ 28 = 37.5 B, which is +13 %.
+
+### 3. Case (a): 64 players + 64 AI, V = 128 ships in view (plus own pilot), shared process
+
+Kit path
+
+Term | Arithmetic | ms/s | 
+Ship writes [T] | 64 × 128 × 20 = 163,840 × 0.1–0.3 µs | 16.4–49.2 | 
+Pilot writes [T] | 64 × (1–4) × 20 = 1.3–5.1k × 0.1–0.3 µs | 0.1–1.5 | 
+Datagram handoff [T] | 64 × 9 × 20 = 11,520 × 0.2–0.5 µs | 2.3–5.8 | 
+Sync scan [T] | 64 × (64 ship + 10 pilot) × 20 = 94,720 × 0.1 µs | 9.5 | 
+RPC to All [E] | (320 shots + 160 hits) × 64 = 30,720 × 0.3–0.5 µs | 9.2–15.4 | 
+Total | | 37.5–81.4 | 
+
+- 
+Per frame: 37.5–81.4 ÷ 30 = 1.25–2.71 ms on average.
+
+- 
+Tick frame: the [T] terms are 28.3–66.0 ms/s. (28.3–66.0) ÷ 20 + (9.2–15.4) ÷ 30 = 1.7–3.8 ms, which is 5–11 % of 33.3 ms.
+
+- 
+The AOI pass (their budget is ≤ 2 ms) lands on one tick frame per second.
+
+Sender
+
+Term | Arithmetic | ms/s | 
+Build once per ship | 128 × 20 × 0.3–1.0 µs | 0.8–2.6 | 
+Tier scan | 163,840 × 15 ns | 2.5 | 
+Copy | 64 × 128 × 14 = 114,688 × 50 ns | 5.7 | 
+Datagram handoff | 64 × 6 × 20 = 7,680 × 0.2–0.5 µs | 1.5–3.8 | 
+Kit loop residual | 64 × 128 × 20 = 163,840 × 20–60 ns | 3.3–9.8 | 
+Pilot writes | as kit path | 0.1–1.5 | 
+Pilot packets (their own small datagram) | 64 × 20 = 1,280 × 0.2–0.5 µs | 0.3–0.6 | 
+Sync residual | pilot recovery fields: 64 × 10 × 20 × 0.1 µs | 1.3 | 
+Filtered events | 30 ms/s × 30,720 ÷ 840,000 | 1.1 | 
+Total | | 16.6–29.0 | 
+
+- 
+That is 0.55–0.97 ms/frame.
+
+- 
+With the kit patches from §6 point 4 (no residual loop, no pilot writes or pilot packets) it is 12.9–17.0 ms/s, i.e. 0.43–0.57 ms/frame.
+
+- 
+Send CPU ratio: 2.3–2.8× unpatched, 2.9–4.8× patched.
+
+Egress
+
+Path | Per client | Per process | 
+Kit | 128 × 64 + 9 × 41 = 8,561 B/tick × 20 = 171 kB/s, + pilots 0.6–2.2 = 172–173 kB/s (1.38 Mbit/s) | 11.0 MB/s (88 Mbit/s) | 
+Sender, their 60 B payload | 128 × 14 × 65.7 = 118 kB/s (message 119: 125 kB/s) | 7.5 MB/s | 
+Sender, quantized | 128 × 14 × 33.3 = 60 kB/s (message 119: 67 kB/s) | 3.8 MB/s | 
+Sender, quantized, 20/5 Hz tiers | 128 × 11 × 33.3 = 47 kB/s | 3.0 MB/s | 
+
+- 
+At 60 B, (a) passes G1's 100 kB/s only if V ≤ 100,000 ÷ 65.7 ÷ 14 = 108.
+
+- 
+Until patch 1, pilot packets add 12 + 28 × (1–4) + 29 = 69–153 B per client per tick, i.e. 1.4–3.1 kB/s.
+
+### 4. Case (b): 400 players + 100 AI, V = 500
+
+Kit path
+
+Term | Arithmetic | ms/s | 
+Ship writes [T] | 400 × 500 × 20 = 4.0 M × 0.1–0.3 µs | 400–1,200 | 
+Pilot writes [T] | 400 × (1–4) × 20 = 8–32k × 0.1–0.3 µs | 1–10 | 
+Datagram handoff [T] | 400 × 34 × 20 = 272k × 0.2–0.5 µs | 54–136 | 
+Sync scan [T] | 400 × (250 ships + 60 pilots) × 20 = 2.48 M × 0.1 µs | 248 | 
+RPC to All [E] | 2,100 × 400 = 0.84 M × 0.3–0.5 µs | 252–420 | 
+Total | | 955–2,014 | 
+
+- 
+Per frame: 31.8–67.1 ms on average, which is 95–201 % of the budget from sends alone.
+
+- 
+Tick frame: (703–1,594) ÷ 20 + 8.4–14.0 = 43.5–93.7 ms.
+
+- 
+With the other work added (23.1–40.6 ms/frame, §5):
+
+- 
+tick frames reach 67–134 ms, and every frame exceeds 50 ms;
+
+- 
+frames run 2 ticks back to back until the 5-tick cap drops the backlog (LogicUpdater.cs:99-102);
+
+- 
+at 30 fps the demand is 955–2,014 ms/s of sends plus 693–1,218 ms/s of other work, i.e. 1,650–3,230 ms of main thread per second.
+
+- 
+Separately, LiteNetLib's single network thread must make 272k sendto calls per second. At 1–4 µs each E, that is 0.27–1.09 s of CPU per second, enough to saturate the thread.
+
+Sender
+
+Term | Arithmetic | ms/s | 
+Build | 500 × 20 × 0.3–1.0 µs | 3–10 | 
+Tier scan | 4.0 M × 15 ns | 60 | 
+Copy | 400 × 500 × 12.5 = 2.5 M × 50 ns | 125 | 
+Datagram handoff | 400 × 21 × 20 = 168k × 0.2–0.5 µs | 34–84 | 
+Kit loop residual | 400 × 500 × 20 = 4.0 M × 20–60 ns | 80–240 | 
+Pilot writes | as kit path | 1–10 | 
+Pilot packets | 400 × 20 = 8,000 × 0.2–0.5 µs | 1.6–4.0 | 
+Sync residual | 400 × 60 × 20 × 0.1 µs | 48 | 
+Events | proposal figure | 30 | 
+Total | | 382–611 | 
+
+- 
+Per frame: 12.7–20.4 ms.
+
+- 
+With the patches (no residual loop, no pilot writes or pilot packets): 300–357 ms/s, 10.0–11.9 ms/frame.
+
+- 
+Adding a quantized payload and re-tiering at 2 Hz instead of scanning every tick:
+
+- 
+the scan falls from 60 to 400 × 500 × 2 × 15 ns = 6 ms/s;
+
+- 
+handoff falls to 88k × 0.2–0.5 µs = 17.6–44 ms/s;
+
+- 
+total 230–263 ms/s, 7.7–8.8 ms/frame.
+
+- 
+Send CPU ratio against the kit path: 955/382 = 2.5 to 2,014/611 = 3.3 unpatched; 955/300 = 3.2 to 2,014/357 = 5.6 patched.
+
+- 
+The sync residual assumes hull and shield leave kit sync fields, which is their code. If they stay, add 400 × 250 × 20 × 0.1 µs = 200 ms/s, i.e. 6.7 ms/frame.
+
+- 
+Network thread: 168k datagrams/s at 60 B, i.e. 0.17–0.67 s/s of that thread; 88k quantized, 0.09–0.35 s/s. Until patch 1, add 8k pilot packets per second.
+
+Worst send frame, with clients staggered so each frame serves 2/3 of them
+
+- 
+Sender work spread over frames (build + scan + copy + handoff + events): (252–309) ÷ 30 = 8.4–10.3 ms.
+
+- 
+Kit-tick work (residual + pilot writes + pilot packets + sync) on tick frames: (130–302) ÷ 20 = 6.5–15.1 ms.
+
+- 
+Worst frame: 14.9–25.4 ms unpatched, 10.8–12.7 ms patched, plus the AOI pass once a second.
+
+Egress
+
+Path | Per client | Per process | Datagrams/s | 
+Kit | 500 × 64 + 34 × 41 = 33,394 B/tick × 20 = 668 kB/s (5.3 Mbit/s), + pilots 0.6–2.2 | 267 MB/s (2.14 Gbit/s) | 272k | 
+Sender, 60 B | 500 × 12.5 × 65.7 = 411 kB/s (message 119: 436 kB/s) | 164 MB/s (1.31 Gbit/s) (message 119: 174 MB/s) | 168k | 
+Sender, quantized | 500 × 12.5 × 33.3 = 208 kB/s (message 119: 234 kB/s) | 83 MB/s (0.67 Gbit/s) | 88k | 
+Sender, quantized, 20/5 Hz tiers | 500 × 8.75 × 33.3 = 146 kB/s | 58 MB/s | | 
+
+- 
+The proposal's 64 kB/s budget allows 64,000 ÷ 33.3 = 1,922 updates/s per client when quantized.
+
+- 
+If 125 ships are within 1 km at the 10 Hz minimum, they use 1,250 updates/s.
+
+- 
+That leaves (1,922 − 1,250) ÷ 375 = 1.8 Hz for the other 375 ships.
+
+- 
+At their 60 B payload the budget allows only 64,000 ÷ 65.7 = 974 updates/s, which is less than the near tier alone needs. The budget cannot be met without quantization.
+
+### 5. Rest of the frame at 30 fps (for context, rate-corrected)
+
+Case (b), non-send terms
+
+Term | Arithmetic | ms/frame | 
+c0 | | 0.6 | 
+Ship presence e·n | 500 × 0.015 × 1–2 | 7.5–15.0 | 
+Seated pilots (new) | 400 × 0.005–0.02 | 2.0–8.0 | 
+Player owner work x_P | 400 × 0.010 × 1–2 | 4.0–8.0 | 
+AI owner work x_AI | 100 × 0.040 × 2 | 8.0 | 
+Hits + inbound | (700 × 20 µs + 8,000 × 2 µs) = 14 + 16 ms/s ÷ 30 | 1.0 | 
+Sum | | 23.1–40.6 | 
+
+- 
+Whole frame:
+
+- 
+with the patched sender: 33.1–52.5 ms (99–158 %);
+
+- 
+with the kit path: 54.9–107.7 ms.
+
+- 
+One-process cap at a mean of 80 % (26.7 ms), with everyone mutually visible and the patched sender: about 170–310 players + 100 AI E.
+
+- 
+Upper cost end at P = 170: 24.0 ms of other work + 2.8 ms of send = 26.7 ms.
+
+- 
+Lower cost end at P = 310: 20.2 + 6.3 = 26.5 ms.
+
+- 
+The cap rises as the average V per client falls.
+
+Case (a), non-send terms: 0.6 + 1.9–3.8 + 0.3–1.3 + 0.6–1.3 + 5.1 + 0.2 = 8.8–12.3 ms.
+
+- 
+With the kit path: 10.0–15.0 ms (30–45 %).
+
+- 
+With the sender: 9.3–13.3 ms (28–40 %).
+
+- 
+So one such fight fits a shared process.
+
+- 
+Two concurrent fights on one process. The sync pass and RPC-to-All loop over all players on the process, which adds cross terms:
+
+- 
+Kit path:
+
+- 
+The sync scan becomes 128 × 148 × 20 × 0.1 µs = 37.9 ms/s, instead of 2 × 9.5 ms/s.
+
+- 
+The RPC loop checks 64 extra connections per RPC: 960 RPCs/s × 64 × 20–50 ns = 1.2–3.1 ms/s E.
+
+- 
+Sends total 95–185 ms/s (3.2–6.2 ms/frame). Adding 2 × (8.8–12.3) − 0.6 ms of other work gives 20.2–30.2 ms (61–91 %).
+
+- 
+Sender:
+
+- 
+Sends total 35.5–60.3 ms/s (1.2–2.0 ms/frame).
+
+- 
+The whole frame is 18.2–26.0 ms (55–78 %).
+
+### 6. What this changes in the proposal
+
+- 
+The 30 Hz option is their baseline.
+
+- 
+This affects:
+
+- 
+Summary line 30 and decision line 39;
+
+- 
+the hot-host role at line 77;
+
+- 
+M3's "1.3–1.6×" gain at line 307;
+
+- 
+ladder level L4 at line 317;
+
+- 
+the kill gate at line 720 ("30 Hz and admission are the answer");
+
+- 
+Phase 4 scope at line 747;
+
+- 
+§7 question 1 (lines 769-771).
+
+- 
+There is no tick-rate reserve left, and L4 has no action.
+
+- 
+Replace L4 with "shrink V on the send side": cap the ships sent per client by priority (locks, attackers, wing and gun range first). With time dilation excluded, that is the only lever that cuts both CPU and bytes.
+
+- 
+Do not do this by cutting the AOI range. BubblePolicy's merge/split thresholds are a function of the AOI range, so a load-driven range cut would move those thresholds mid-fight.
+
+- 
+Drop the 60 Hz column.
+
+- 
+The per-second send cost is the same at 30 fps.
+
+- 
+Line 263's "three frames of each 20 Hz tick" becomes 1.5 frames. Stagger clients so each frame serves 2/3 of them.
+
+- 
+Run the sender on its own clock, with no catch-up ticks.
+
+- 
+Count the pilots.
+
+- 
+They add a presence term: 2–8 ms/frame in (b).
+
+- 
+Their recovery fields add to the sync scan, which covers every player on the process.
+
+- 
+They should not be written while seated.
+
+- 
+The M1 sender under their AOI.
+
+- 
+The proposal's "about 2.7 ms/frame at 60 Hz replacing 14–30 ms" (5–11×), and design A's 13.5×, become:
+
+- 
+2.5–3.3× in (b) at equal per-pair cost, 3.2–5.6× patched;
+
+- 
+2.3–2.8× in (a), 2.9–4.8× patched.
+
+- 
+Bytes fall only 1.5–1.6× at 60 B.
+
+- 
+The "52–65 kB/s, 26 MB/s" figures at line 272 need quantization inside their WriteState, plus a byte budget of about 2 Hz beyond 1 km. They also need framing: 26 B becomes 33.3 B on the wire.
+
+- 
+"No kit patch" still leaves 80–240 ms/s of kit loop in (b). I propose two VENDOR_PATCHES entries:
+
+- 
+no movement write for a seated passenger unless a flag (teleport, jump or dash) is pending;
+
+- 
+the kit loop iterates only kit-sent entities, for example a per-player subset kept up to date on Subscribe and Unsubscribe.
+
+- 
+A subclass cannot skip the send on its own. BGNM:129-137 couples it with base.OnServerUpdate, and the sync pass it would have to call again is private (StateSyncing.cs:366).
+
+- 
+The proposal's R-on-one-process table (lines 276-282), "30 Hz" column.
+
+- 
+Replace row A's "~24 ms (71 %)" with 33.1–52.5 ms (99–158 %).
+
+- 
+Rows B (~18 ms) and kit-character (~30 ms) rise by at least the pilot term (2–8 ms) and the sender difference. The patched sender is 10.0–11.9 ms against the proposal's 143 ÷ 30 + 0.6 ≈ 5.4 ms, a difference of 4.6–6.5 ms. That puts them at no less than about 25–33 ms (74–98 %) and 37–45 ms (110–134 %) E.
+
+- 
+Knock-on lines:
+
+- 
+Line 346 (W1, "about 20 ms of 33.3" at 30 Hz) must be re-run. The primary carries all 400 clients and pilots, so it takes the full patched sender and the pilot term.
+
+- 
+Line 365 ("≈ 1,350 at 30 Hz") holds only if e is pure per-frame work. If e is per-second or physics work, the figure is about 675 E.
+
+- 
+Line 369 ("300–470 kB/s untiered at 500 in view") becomes 657–668 kB/s at their 60 B, and 333 kB/s quantized.
+
+- 
+In (b), admission at about 170–310 players, AI workers, or a smaller V becomes the plan, not the fallback.
+
+- 
+Restate G1 (line 717).
+
+- 
+"≤ 3 ms/frame at 400 phantom clients" means 90 ms/s at 30 fps. The patched sender in (b) (300–357 ms/s) fails that by 3–4×.
+
+- 
+Set per-case figures in ms/s at the team's real V. For example A:
+
+- 
+≤ 30 ms/s at 64 clients × V 128;
+
+- 
+≤ 360 ms/s at 400 × 500 with the patches;
+
+- 
+tick-frame p95 within budget.
+
+- 
+100 kB/s per client at 60 B allows at most 100,000 ÷ 65.7 = 1,522 updates/s. That is V ≤ 122 at an average of 12.5 Hz, or V ≤ 108 at 14 Hz.
+
+- 
+Quantized, it allows 100,000 ÷ 33.3 = 3,003 updates/s, i.e. V ≤ 240 at 12.5 Hz.
+
+- 
+In (b), even a patched sender at their payload exceeds a 1 GbE link.
+
+- 
+Interface to agree before either side edits ShipMovementComponent.
+
+- 
+The ship handler stays registered on server and client (BGNM:584, :598).
+
+- 
+When the kit loop calls WriteServerState, it returns false for ships while the sender runs, so the kit skips them (BGNM:703-704).
+
+- 
+A separate WriteState(writer) is called by the sender once per ship per tick.
+
+- 
+It writes the complete message, including the [mode][flightMode][epoch] header.
+
+- 
+ReadServerStateAtClient reads exactly those bytes, because the kit's client read path trusts each handler to do so (§1).
+
+- 
+The sender treats the bytes as opaque. Tiers decide only when a ship's latest bytes are sent. Their sequence-based teleport stays inside the payload.
+
+- 
+Framing is a choice to make together:
+
+- 
+reuse EntityState 119: no client change, 7 B framing;
+
+- 
+or a new message: 3 B framing and a client reader of ours.
+
+- 
+This note's egress figures use 3 B; message 119 adds 6–13 %.
+
+- 
+Their 3 B per-message header costs 500 × 12.5 × 3 B = 18.75 kB/s per client in (b), about 9 % of a quantized entry. Packing mode and flightMode into one byte saves a third of that.
+
+### 7. What Phase 0 must measure
+
+- 
+c_pair for their ShipMovementComponent.WriteServerState, at P × V up to 400 × 500. It has never been measured beyond 4 clients.
+
+- 
+The kit loop residual per (player, subscribed ship) when the ship's WriteServerState returns false.
+
+- 
+Main-thread cost per ServerSendMessage, and LiteNetLib network-thread CPU against datagrams per second, on the target OS.
+
+- 
+Sender prototype costs:
+
+- 
+build (their WriteState called once), scan and copy;
+
+- 
+with and without 2 Hz re-tiering;
+
+- 
+with both framing options.
+
+- 
+Scripted 64+64 and 400+100 fights with their visible-range formula, measuring:
+
+- 
+real V per client, mean and p95;
+
+- 
+the fraction of ships within 1 km;
+
+- 
+pilots' neighbours within 80 m in X/Z;
+
+- 
+extra subscriptions from locks beyond the visible range.
+
+- 
+How e, x_P and x_AI split into per-frame, per-physics-step and per-tick work at 30/20/50.
+
+- 
+A seated pilot's per-frame cost and its dirty sync elements per second.
+
+- 
+Ship sync and event counts:
+
+- 
+dirty ship sync fields per tick, and whether hull and shield stay kit sync fields (+200 ms/s in (b) if they do);
+
+- 
+RPCs per shot and per hit;
+
+- 
+which object carries fire visuals.
+
+- 
+Tick-frame p95/p99, and how many frames run 2 or more logic ticks.
+
+- 
+Bytes on the wire including UDP/IP. Also reconcile DESIGN 0.53's 0.29 kB/s "per visible entity" (Docs/ServerMeshing/DESIGN.md:37).
+
+- 
+That run used the kit's default 80 m visible range (BaseInterestManager.cs:10; add-on band default Assets/ServerMeshing/Mesh/MeshMapNetworkManager_Ghosting.cs:42).
+
+- 
+The code implies 26–29 B per character entry per tick, i.e. 0.52–0.58 kB/s per subscribed entity at 20 Hz.
+
+- 
+So 0.29 kB/s is most likely per spawned entity, with about half of them subscribed. This is an inference E.
+
+### Part 2: The ship-sender interface
+
+Written from the kit code before your repo was cloned here. Where this part says your code is not on this machine, the reply in brief above answers the points the clone settles.
+
+Labels
+
+- 
+E means estimate. M means measured; nothing was measured for this answer.
+
+- 
+Every kit or add-on fact carries a file:line. "Team" marks the game team's own statements.
+
+- 
+Their code (ShipEntity, ShipMovementComponent, Game.Universe) is not on this machine. Conclusions that depend on it are marked [their code].
+
+- 
+No files were created or edited.
+
+Files cited, relative to C:\dev\Game Design\mmo-server-meshing\Assets\OpenMMORPG\:
+
+- 
+Core\Scripts\Networking\:
+
+- 
+BaseGameNetworkManager.cs (BGNM)
+
+- 
+BaseGameNetworkManager_FeatureHandlers.cs (FH)
+
+- 
+BaseGameNetworkManagerComponent.cs
+
+- 
+GameNetworkingConsts.cs
+
+- 
+GridManager\DefaultGridManagerComponent.cs (DGMC)
+
+- 
+GridManager\IBaseGridManagerComponent.cs
+
+- 
+AOI\JobifiedGridSpatialPartitioningAOI.cs (JGAOI)
+
+- 
+Implements\DefaultHitRegistrationManager.cs
+
+- 
+Core\Scripts\Gameplay\:
+
+- 
+Interfaces\IEntityMovementDataHandler.cs (IEMDH)
+
+- 
+EntityMovementSystems\EntityMovementDataBuffers.cs
+
+- 
+EntityMovementSystems\Implements\BuiltInEntityMovementFunctions3D.cs (BIEMF3D)
+
+- 
+BaseGameEntity.cs
+
+- 
+ThirdParty\LiteNetLibManager\Scripts\:
+
+- 
+LiteNetLibManager.cs, TransportHandler.cs, Utils\LogicUpdater.cs
+
+- 
+Extensions\NetDataWriterExtension.cs (NDWE)
+
+- 
+GameApi\LiteNetLibGameManager.cs (LNGM)
+
+- 
+GameApi\LiteNetLibGameManager.StateSyncing.cs (SS)
+
+- 
+GameApi\LiteNetLibIdentity.cs (LNI)
+
+- 
+GameApi\LiteNetLibPlayer.cs (LNP)
+
+- 
+GameApi\BaseInterestManager.cs, GameApi\RttCalculator.cs
+
+- 
+Plugins\LiteNetLib\NetConstants.cs
+
+### 0. Result in brief
+
+- 
+No client change is needed.
+
+- 
+The sender sends ordinary EntityState (msg 119) packets with exactly the kit's per-entity record layout.
+
+- 
+The client's existing dispatcher hands each record to the ship's ReadServerStateAtClient.
+
+- 
+Two conditions apply on their side (§4).
+
+- 
+The ship stays registered as a kit movement handler on server and client. Owner uploads and client reads both need that registration.
+
+- 
+While the sender owns the ship, its kit-facing WriteServerState returns false, and the kit skips the record (BGNM:703-704).
+
+- 
+The kit loop still visits every (client, ship) pair each tick (BGNM:695-700). That residual is small at the 64-player target. In the stress case it is about 6 ms per tick frame E, and only a kit patch removes it (§3).
+
+- 
+ShipMovementComponent gains one method, WriteState(sampleTimestamp, writer, out sendReliably). It has the same shape as WriteServerState (IEMDH:17).
+
+- 
+The sender calls it at most once per ship per build (normally once per 20 Hz tick) and copies the bytes unchanged to each recipient.
+
+- 
+The bytes describe the ship as of sampleTimestamp.
+
+- 
+Discrete events travel as state in every sample: teleport sequence, mode and epoch (flightMode only if it changes rarely).
+
+- 
+A DiscreteVersion counter marks the ship urgent: it goes to every subscriber on three builds in a row.
+
+- 
+No reliable channel is needed. A sendReliably flag remains as an escape hatch.
+
+- 
+Ownership.
+
+- 
+The game owns the policy (IShipSendPolicy), built by their P1 from our spec and reviewed by us, like BubblePolicy.
+
+- 
+The add-on owns the mechanism: budget, fairness, repeats, withholding, packet assembly and timing.
+
+- 
+Corrections to our own proposal:
+
+- 
+line 243: "not registered at all" is wrong (§3);
+
+- 
+lines 264 and 592: the per-client packet-header epoch is withdrawn (§7);
+
+- 
+line 263: the three-frame stagger assumed 60 fps (§5);
+
+- 
+line 251: 20 Hz error is 0.11 m at 30 fps (§5);
+
+- 
+line 272: the downlink was sized for 26 B records (§5).
+
+- 
+Their payload decides the stress downlink, not the interface.
+
+- 
+57 B + 3 B header = 60 B, making a 66 B record. That is 2.5× the 26 B we assumed.
+
+- 
+At 64 kB/s the stress case averages 940/499 ≈ 1.9 Hz per ship E.
+
+- 
+CPU E.
+
+- 
+64-player target: ≈ 0.8 ms on the worst frame.
+
+- 
+Stress case: ≈ 11 ms on tick frames (5.1 ms spread sender work + 6.0 ms kit residual). That is over the 6 ms gate proposed in §5, so G1 must measure the per-packet send cost and the residual.
+
+### 1. What the kit does today
+
+Server send
+
+- 
+Sends run from LogicUpdater.OnTick at updateFps, default 20 (LiteNetLibManager.cs:36, 155), subscribed at LiteNetLibManager.cs:221-222.
+
+- 
+The updater runs inside the manager's Update (LiteNetLibManager.cs:159-162), and after a stall it catches up with up to 5 ticks in one frame (LogicUpdater.cs:7, 96-109).
+
+- 
+At the team's 30 fps, ticks land on 2 of every 3 frames, with gaps alternating 33 ms and 67 ms.
+
+- 
+OnServerUpdate (BGNM:129-138) runs base first: the game-state sync (LNGM:111), then the interest update (LNGM:121). It then calls SendServerEntityMovementState when the grid is disabled (BGNM:133-134).
+
+- 
+For each player except the host (BGNM:674-677), the kit starts two packets. Each has WritePacket(EntityState) (packed ushort 119: TransportHandler.cs:90-96; GameNetworkingConsts.cs:25), PutPackedLong(writeTimestamp) and an int32 count placeholder (BGNM:683-694).
+
+- 
+For each subscribed object (BGNM:695-698), it:
+
+- 
+looks up the handler (699-700);
+
+- 
+resets the shared StateDataWriter (701);
+
+- 
+calls WriteServerState and skips the record on false (703-704).
+
+- 
+A record is PutPackedUInt(objectId), Put(int32 length), then the payload (708-710 reliable, 734-736 unreliable).
+
+- 
+Unreliable packets split at MAX_UNRELIABLE_PACKET_SIZE = 1020 (SS:12; BGNM:715-733), with an 8 B record-header estimate (717).
+
+- 
+Delivery is ReliableOrdered (747) or Unreliable (725, 758), both on MOVEMENT_DATA_CHANNEL = 2 (BaseGameEntity.cs:17).
+
+- 
+Consequence: WriteServerState runs once per (client, entity) pair per tick. That repeated serialization is what the sender removes. It is also the root of the teleport bug: the flags are cleared inside each call (BIEMF3D:1375-1378).
+
+Grid/job path (BGNM:767-945)
+
+- 
+It calls CreateMovementData for every subscribed handler (826-834) and writes the kit's quantized, yaw-only format itself (864; DGMC:105-127).
+
+- 
+No handler can opt out.
+
+- 
+In this repo it is off by default (DGMC:16-23).
+
+Client read
+
+- 
+HandleServerEntityStateAtClient (BGNM:589-618) is registered for msg 119 at FH:51.
+
+- 
+It reads the timestamp (592) and the int32 count (593). Then, per record, the packed objectId (596) and the int32 length (597).
+
+- 
+If no handler is found, it skips the record by length (599-605) and logs a warning (601).
+
+- 
+Otherwise it calls ReadServerStateAtClient(peerTimestamp, reader) (609); a throw is caught and the record skipped (611-616).
+
+- 
+After a successful read it does not re-seek. A handler that reads more or less than length corrupts the next header, and that header read is outside the try.
+
+- 
+The catch cannot see exceptions from an async void handler. C# posts those to the SynchronizationContext and the call returns normally. The kit's own reader is async void (BIEMF3D:1395).
+
+Uploads from owner-simulated player ships
+
+- 
+The client sends the driven vehicle's WriteClientState (BGNM:620-637; the sync entity is the vehicle, 639-660).
+
+- 
+The server looks the handler up in the same dictionary and requires handler.ConnectionId == sender (BGNM:579-587). The upload's peerTimestamp is passed through (582, 586).
+
+Subscriptions and spawns
+
+- 
+Subscribe calls identity.AddSubscriber, which raises onSubscriberAdded (LNP:40-47; LNI:691-699), and appends a spawn (LNP:46).
+
+- 
+The default AOI applies subscriptions in its LateUpdate every updateInterval = 1 s (JGAOI:18, 175-178, 248-333).
+
+- 
+The spawn goes out ReliableOrdered on the object's sync channel at the next tick's game-state sync (LNGM:111; SS:400, 451). It carries raw position and Euler angles only (SS:243-248).
+
+- 
+Kit movement records for an object sent before that are skipped by the client (BGNM:599-605).
+
+### 2. Item (1): payload, header and WriteState [their code]
+
+- 
+Payload. It stays theirs: [mode u8][flightMode u8][epoch u8] + today's ~57 B. Each mode has a fixed length, so the reader always consumes exactly length.
+
+- 
+The WriteState contract:
+
+- 
+Append only. Other ships' bytes precede and follow in the shared buffer. Never Reset or SetPosition. The sender truncates back to the start if it returns false.
+
+- 
+No side effects. A second call in the same build writes identical bytes.
+
+- 
+Discrete events are state, never flags cleared on write. A cleared flag would reproduce the kit bug at BIEMF3D:1375-1378.
+
+- 
+Describe the ship at sampleTimestamp.
+
+- 
+AI and parked rigidbodies were last stepped up to 20 ms earlier (50 Hz physics), so extrapolate by velocity to sampleTimestamp.
+
+- 
+A player-ship mirror holds the owner's last upload, stamped with the client's peerTimestamp (BGNM:582, 586). Extrapolate by sampleTimestamp − uploadTimestamp.
+
+- 
+Without this, observers trail by speed × staleness: 250 m/s × 20 ms = 5 m for AI; 125 m/s × (50 ms one-way + about 50 ms wait) ≈ 12.5 m for mirrors E.
+
+- 
+Return false to send nothing on this build, as the kit does before _isStarted (BIEMF3D:1340-1341).
+
+- 
+DiscreteVersion increments when the teleport sequence, mode or epoch takes a new value. Continuous motion never changes it.
+
+- 
+Include flightMode only if it changes rarely. Every increment costs 3 builds × all subscribers.
+
+- 
+Example E: 500 ships each switching flightMode once per 10 s → 50 × 399 × 3 ≈ 59,900 records/s. That is ≈ 150/s per client, or 16 % of the 940/s that 64 kB/s allows.
+
+- 
+IsAtRest is true when a velocity-extrapolating observer would see no change.
+
+- 
+Unknown modes cannot be skipped by the handler, which never sees length (IEMDH:15). Keep client and server builds in lockstep.
+
+- 
+Recommended Phase-0 kit hardening (record it in VENDOR_PATCHES): after BGNM:609, always run reader.SetPosition(positionBeforeRead + dataLength);. This makes every handler, including the kit's async void one, unable to corrupt the next record. The sender does not require it.
+
+### 3. Item (2): keeping the kit loop from also writing ships
+
+Not registering the ship is rejected. It would break two things:
+
+- 
+owner uploads: the lookup or the ConnectionId check fails at BGNM:584;
+
+- 
+client reads: records are skipped at BGNM:599-605.
+
+This corrects our proposal, line 243.
+
+Adopted: WriteServerState returns false while the sender owns the ship. The kit skips the record (BGNM:703-704).
+
+- 
+Use a bool cached at registration.
+
+- 
+Residual cost E. The loop still enumerates, looks up and calls into each (client, ship) pair (BGNM:695-703). At an assumed 30 ns per pair:
+
+- 
+target: 6,336 × 20 × 30 ns = 3.8 ms/s, or 0.19 ms per tick;
+
+- 
+stress: 199,600 × 20 × 30 ns = 120 ms/s, or 6.0 ms on each tick frame. It runs inside the kit's send, so the add-on cannot spread it.
+
+- 
+Removing ships from the server dictionary would not help. The loop would still enumerate and look up every subscribed id (695-700), and a lookup that misses costs about the same as one that hits.
+
+- 
+Only a kit patch that stops the loop visiting sender-owned objects removes the residual. One example: make the kit's send entity-major over the handlers it still owns, the way the sender works. Scope that patch only if G1 measures the residual as material.
+
+- 
+If upload routing is ever needed, a manager component can re-register the server msg-119 handler without subclassing. Components register after the kit (BGNM:193, 199-202), and registration overwrites (TransportHandler.cs:314).
+
+Precondition: the grid path must be disabled. The job path cannot skip a handler (BGNM:826-834, 864).
+
+- 
+The sender checks networkManager.GridManager.IsDisabled (BGNM:41, 119; interface IBaseGridManagerComponenent, IBaseGridManagerComponent.cs:7-9).
+
+- 
+This is the object the kit reads as DefaultGridManagerComponent.Instance (BGNM:133). Instance is only set at BGNM:260 (DGMC:54), after the components' OnStartServer (BGNM:252-255), so the sender cannot read it earlier.
+
+- 
+If the grid is enabled, Register returns false and logs an error; ships stay on the kit path.
+
+- 
+[their code] Confirm their build has the grid path off. This repo's default is off (DGMC:16-23), but their kit copy may differ. If it were on, their own message could not be on the wire today.
+
+Other points
+
+- 
+CreateMovementData (IEMDH:13) stays implemented and unused.
+
+- 
+Fallback. With no sender component on the prefab, WriteServerState simply calls WriteState: today's wire plus the Phase-0 header. Adding or removing the component is the A/B switch for G1.
+
+### 4. Item (3): fan-out in exactly the kit's record format
+
+Packet layout (one per client, per build, per delivery method):
+
+[packed ushort 119][packed long sampleTimestamp][int32 count] { [packed uint objectId][int32 length][length bytes] } × count
+
+Built only with public APIs:
+
+- 
+TransportHandler.WritePacket (TransportHandler.cs:90-96)
+
+- 
+PutPackedLong / PutPackedUInt (NDWE:161-215)
+
+- 
+Put(int) and Put(byte[], off, len) as at BGNM:709-710
+
+- 
+ServerSendMessage(conn, MOVEMENT_DATA_CHANNEL, method, writer) (LiteNetLibManager.cs:362-365)
+
+Rules
+
+- 
+The sender uses its own writers, not the kit's internal statics (EntityMovementDataBuffers.cs:7-10).
+
+- 
+Exact record size = packed objectId + 4 + length.
+
+- 
+The objectId packs to 1 B up to 240, 2 B up to 2,287, 3 B up to 67,823, 4 B up to 16,777,215, and 5 B above (NDWE:181-215).
+
+- 
+Ids are never reused (LNI:668-683), so a long-running process reaches 3-byte ids.
+
+- 
+The sender flushes before a packet would pass 1,020 B.
+
+- 
+The largest payload that fits is 1,020 − 12 − 9 = 999 B. A larger one is skipped and logged once.
+
+- 
+A packet never mixes builds.
+
+- 
+The host connection is skipped (BGNM:676-677).
+
+- 
+The sender's packets are separate messages from the kit's character packets (BGNM:589-618).
+
+Client change: none. Three conditions on their side [their code]:
+
+- 
+The ship's handler sits in the client dictionary under its objectId, which is the kit pattern (BIEMF3D:222-226).
+
+- 
+ReadServerStateAtClient consumes exactly length bytes, synchronously, before any await.
+
+- 
+It is not async void, or it catches internally. Otherwise the kit's catch never runs and the rest of the packet is misparsed (§1).
+
+Recipients. The sender walks identity.GetSubscribers() (LNI:726-729) and never adds recipients, so AOI and SubChannelId isolation are inherited unchanged (LNI:803-831; BaseInterestManager.cs:61-67). Subscription events (LNI:72-73, 695, 705) drive per-pair state.
+
+Per build
+
+- 
+At most once per Unity frame, so catch-up ticks send nothing twice.
+
+- 
+Hook LogicUpdater.OnTick in OnStartServer and unhook in OnStopServer.
+
+- 
+The manager subscribes first (LiteNetLibManager.cs:221-226), so the sender runs after the kit. Unhooking keeps that order across a stop and restart.
+
+- 
+Read ts = ServerTimestamp once.
+
+- 
+For each ship whose DiscreteVersion changed:
+
+- 
+mark it urgent for its current subscribers;
+
+- 
+re-classify all its pairs in this build, before anything is written.
+
+- 
+Ship-major pass. For each (ship, subscriber) pair:
+
+- 
+classify if due or dirty;
+
+- 
+skip it if Withheld;
+
+- 
+add credit (rate × elapsed);
+
+- 
+the pair is due if credit ≥ 1, an urgent repeat is pending, or a first-send is pending.
+
+- 
+If any pair of the ship is due, call WriteState once and add (slice, priority, staleness, urgent) to each due client's candidate list.
+
+- 
+Client-major pass. Urgent and reliable candidates first, then routine ones by priority and then staleness, up to the budget. Deferred candidates keep their credit.
+
+- 
+Spread each build's sends over this frame and the next. The header keeps the build timestamp. Pending records for a pair unsubscribed in between are dropped.
+
+### 5. Item (4): tiering, budget and who owns them
+
+Ownership
+
+- 
+Game: the IShipSendPolicy implementation (locks, attackers, wing or group, seats, supercruise, frame-change state). Their P1 builds it and we review it.
+
+- 
+Game (product decision): the per-client budget, set in the sender's inspector.
+
+- 
+Add-on: budget enforcement; the rule that urgent, reliable and first-send records always go; fairness and staleness; the at-rest keepalive cap of 0.2 Hz E; withholding; spreading.
+
+Default distance-only policy (the add-on fallback, also used in our tests), with R0 = 2 km:
+
+Condition | Rate | Priority | 
+Owner | 1 Hz keepalive (urgent always goes) | – | 
+d ≤ 0.5·R0 (1 km, gun range) | 20 Hz | 200 | 
+d ≤ R0 | 10 Hz | 150 | 
+Beyond R0 | 5 Hz | 100 | 
+
+The relevance set (locked target, locking me, attacker, wing or group, seated in this ship) gets 20 Hz at priority 255.
+
+Extrapolation error with a = 50 m/s² E. At 30 fps, 20 Hz builds alternate 33 ms and 67 ms gaps:
+
+Tier | 20 Hz | 10 Hz | 5 Hz | 2 Hz | 1 Hz | 
+Longest gap | 67 ms | 100 ms | 200 ms | 500 ms | 1 s | 
+½·a·gap² | 0.11 m | 0.25 m | 1.0 m | 6.25 m | 25 m | 
+With 50 ms one-way latency E | 0.34 m | 0.56 m | 1.56 m | 7.6 m | 27.6 m | 
+
+- 
+The kit's hit check allows the hitbox extent plus 2 m (DefaultHitRegistrationManager.cs:11, 161).
+
+- 
+Keep ships within weapon range at 10 Hz or more. [their code: their weapons may not use this check.]
+
+Visible range versus lock range. Team formula: 2 km + (own speed + fastest group speed in the bubble) × 1.25 s.
+
+- 
+All ships at combat speed: 2,000 + 250 × 1.25 = 2,312 m.
+
+- 
+All at boost: 2,000 + 500 × 1.25 = 2,625 m.
+
+- 
+Missile lock (3 km) is beyond both. The AOI must keep locked targets subscribed, because the sender only sends to subscribers.
+
+Byte arithmetic
+
+- 
+Record: 60 + 2 (ids 241–2,287) + 4 = 66 B (67 B once ids pass 2,287).
+
+- 
+Header: 1 + 7 (high word 416–417 zigzags to ~833 and packs to 2 B; low word up to 5 B) + 4 = 12 B.
+
+- 
+Records per packet: ⌊1,008 / 66⌋ = 15 (a packet of 1,002 B).
+
+- 
+One ship at 20 Hz costs one client 1,320 B/s.
+
+- 
+The budget counts EntityState bytes. Each datagram also carries 1 B of LiteNetLib header (NetConstants.cs:57) and 28 B of IPv4/UDP E: ≈ 2.3 kB/s at 64 kB/s.
+
+Downlink per client E. The AI count at the target was not given; 36 AI is assumed, so V = 99 other ships. The stress case assumes all 499 other ships subscribed and a relevance set of 20.
+
+Case | Records/s | Per client | Result | 
+Target, all at 20 Hz | 99 × 20 = 1,980 | ≈ 132 kB/s | – | 
+Target, tiered 30/50/20 % | 99 × 12 = 1,188 | ≈ 79 kB/s | 64 clients ≈ 5.1 MB/s (≈ 41 Mbit/s) | 
+Stress, 64 kB/s | 47/build = 940 | 64 kB/s | Rest (940 − 400)/479 = 1.1 Hz, ≈ 20 m | 
+Stress, 100 kB/s (G1 limit) | 74/build = 1,480 | 100 kB/s | Rest 2.3 Hz, ≈ 4.9 m | 
+Stress, 128 kB/s | 95/build = 1,900 | 128 kB/s | Rest 3.1 Hz, ≈ 2.6 m | 
+Stress, 128 kB/s, compact 29 B payload (35 B record) | 180/build = 3,600 | 128 kB/s | Rest 6.7 Hz, ≈ 0.56 m; 400 clients ≈ 410 Mbit/s | 
+
+- 
+The target fits at about 80 kB/s.
+
+- 
+The stress case needs a compact payload and a larger budget.
+
+- 
+A compact variant can be added later as a separate optional interface. The rule stays "at most once per variant per ship per build".
+
+CPU E. Assumed unit costs:
+
+- 
+pair check: 10 ns (array-indexed pair state, not a dictionary);
+
+- 
+classify: 50 ns;
+
+- 
+WriteState: 1 µs;
+
+- 
+record copy: 50 ns;
+
+- 
+send: 2 µs per packet;
+
+- 
+kit residual: 30 ns per pair per tick.
+
+Term | Target (64 clients, V = 99) | Stress (400 clients, V = 499, 64 kB/s) | 
+Pair checks | 1.3 ms/s | 40 ms/s | 
+Classify (5 Hz / 2 Hz) | 1.6 ms/s | 20 ms/s | 
+WriteState | 2.0 ms/s | 10 ms/s | 
+Copies | 3.8 ms/s | 19 ms/s | 
+Sends | 64 × 4 × 20 packets → 10 ms/s | 400 × 4 × 20 packets → 64 ms/s | 
+Sender total, spread over 30 frames | 19 ms/s = 0.63 ms/frame | 153 ms/s = 5.1 ms/frame | 
+Kit residual (tick frames only) | 0.19 ms per tick | 6.0 ms per tick | 
+Worst frame | ≈ 0.8 ms | ≈ 11.1 ms | 
+
+- 
+Without spreading, tick frames carry 1.5× the sender's average.
+
+- 
+A larger budget means more packets and so more CPU: at 128 kB/s the stress case sends ≈ 7 packets per build, so sends cost ≈ 112 ms/s.
+
+G1 restated for 33.3 ms frames. The proposal's 3 ms was 18 % of a 16.7 ms frame.
+
+- 
+Target (64 clients, shared process): sender + residual ≤ 3 ms p95 on tick frames (9 %). The estimate is 0.8 ms E.
+
+- 
+Stress (400 clients, dedicated process): ≤ 6 ms p95 on tick frames (18 %). The estimate is 11.1 ms E, so it fails at these unit costs.
+
+- 
+G1 must measure the per-packet send cost and the kit residual.
+
+- 
+The residual needs the kit patch in §3.
+
+- 
+Downlink: ≤ 100 kB/s per client (proposal line 717).
+
+### 6. Item (5): reliable and unreliable
+
+LiteNetLib's Unreliable delivery can drop, duplicate or reorder packets (NetConstants.cs:9-11).
+
+Record | Delivery | Why | 
+Routine sample | Unreliable | The next sample supersedes a lost one. | 
+Teleport sequence change, mode 0↔1 | Unreliable, urgent: every subscriber on the change build + 2 repeats | ReliableOrdered on channel 2 is shared with the kit's reliable records (BGNM:741-748); one loss delays all later reliable ones. Chance all 3 are lost (independent loss): 1e-6 at 1 %, 1.25e-4 at 5 % E. A loss burst of ~100 ms defeats it, but every later sample still carries the state. | 
+Frame change (epoch+1, mode 2) to the moving group's clients | Unreliable, every build until the ack | Repeating until the ack gives reliable delivery without head-of-line blocking. | 
+Withhold (both directions) | No records at all, not even urgent or first-send | Applies whenever the observer's applied frame is not known to be the ship's frame (see below). | 
+FrameChange control data, if separate | Their own ReliableOrdered message | – | 
+New subscriber | Nothing on a build in the tick of the subscription event; first state on the next 3 builds | The spawn is written only at the next tick's game-state sync (LNGM:111; SS:400, 451). It carries no velocity, epoch, sequence or mode (SS:243-248), and its ordering against unreliable movement is not guaranteed. | 
+sendReliably = true | ReliableOrdered EntityState packet, as at BGNM:706-712, 740-748 | Escape hatch. Counts against the budget and is never deferred. | 
+
+- 
+Withhold covers both directions:
+
+- 
+the moving group's ships, to observers outside the group;
+
+- 
+ships outside the moving group, to the group's clients, from the move until those pairs are unsubscribed.
+
+- 
+When visibility flips. The flip happens on the next AOI pass, up to 1 s later (JGAOI:18, 175-178), unless their code calls UpdateInterestManagementImmediate (JGAOI:163-167).
+
+- 
+Urgent records may exceed one build's budget by up to 1×. The rest moves to the next build, ahead of routine records.
+
+- 
+The kit teleport bug cannot happen on the sender path: WriteState runs once per build and clears nothing. Their Phase-0 kit patch is still needed for characters.
+
+### 7. Item (6): timestamps and the epoch
+
+Timestamps
+
+- 
+ServerTimestamp is Unix milliseconds on the server (LNGM:66-74; RttCalculator.cs:6).
+
+- 
+The client estimates server time as local time plus a ping-synced offset (RttCalculator.cs:7, 26-30).
+
+- 
+One sample timestamp per build goes in every packet header of that build, and the same value is passed to WriteState. The bytes describe the ship at that time (§2).
+
+- 
+Spreading and deferral never restamp. Restamping would add up to 250 m/s × 33 ms = 8.3 m of error.
+
+Epoch
+
+- 
+It is per ship, inside their header. The sender ignores its value and sees changes only through DiscreteVersion.
+
+- 
+It is 1 byte, compared wrap-safely: (sbyte)(incoming - applied) > 0 means newer.
+
+Client rules [their code]:
+
+- 
+Drop samples with an older epoch.
+
+- 
+Hold newer-epoch samples until the frame is applied.
+
+- 
+Drop duplicate or older samples by timestamp.
+
+- 
+Treat the first sample after a spawn as the baseline.
+
+- 
+Reset the last-accepted timestamp on an epoch change, on moving to another process, and on a backwards clock step.
+
+- 
+Another process may run on a host whose clock differs by its NTP offset, and the client re-derives its offset after reconnecting.
+
+- 
+Without the reset, the equivalent check (BIEMF3D:1417) silently drops samples.
+
+The per-client packet-header epoch (proposal lines 264, 592) is withdrawn. The client reads the timestamp and then the count (BGNM:592-593), so there is no spare byte without a client change.
+
+### 8. Item (7): code split and C# sketch
+
+Stays in their code:
+
+- 
+ShipMovementComponent: payload and header; WriteState (including extrapolation to the sample time); the fallback WriteServerState; ReadServerStateAtClient; the upload path; teleport sequence; epoch, FrameChange and ack; DiscreteVersion; IsAtRest; registration.
+
+- 
+The IShipSendPolicy implementation, including the two-way Withhold.
+
+- 
+The budget number.
+
+- 
+Keeping locked targets subscribed in the AOI.
+
+Add-on:
+
+- 
+the contracts file below;
+
+- 
+ShipStateSender, a BaseGameNetworkManagerComponent on the manager's GameObject (found through ManagerComponents, BGNM:123; OnStartServer at 252-255);
+
+- 
+DistanceShipSendPolicy (fallback only);
+
+- 
+G1 stats;
+
+- 
+test fakes.
+
+Compatibility. C# 9 on .NET Framework 4.7.1:
+
+- 
+No default interface members, no records, no init accessors.
+
+- 
+Readonly structs and in parameters are fine.
+
+- 
+The contracts depend only on LiteNetLib and LiteNetLibManager.
+
+// Add-on: Assets/ServerMeshing/Mesh/ShipSync/ShipSyncContracts.cs (proposed; not written)
+using LiteNetLib.Utils;
+using LiteNetLibManager;
+
+namespace MultiplayerARPG.MMO.Mesh.ShipSync
+{
+ /// <summary>
+ /// IShipStateSource is the game's side of the ship-sender contract, implemented by ShipMovementComponent.
+ /// The game owns every byte WriteState writes and how the client reads it; the sender decides only
+ /// when WriteState runs and which subscribers receive an unchanged copy of its bytes.
+ /// </summary>
+ public interface IShipStateSource
+ {
+ /// <summary>ObjectId is the ship's network object id and the record key in EntityState packets.</summary>
+ uint ObjectId { get; }
+
+ /// <summary>Identity is the ship's network identity. The sender reads its subscribers and ConnectionId (the owner); it never changes them.</summary>
+ LiteNetLibIdentity Identity { get; }
+
+ /// <summary>
+ /// DiscreteVersion changes whenever a field changes that every observer must see promptly: the teleport
+ /// sequence, the mode or the epoch (the flight mode only if it changes rarely). It never changes for motion.
+ /// </summary>
+ uint DiscreteVersion { get; }
+
+ /// <summary>IsAtRest is true when a velocity-extrapolating observer would see no change (parked, docked, stopped).</summary>
+ bool IsAtRest { get; }
+
+ /// <summary>
+ /// WriteState appends this ship's complete payload, header first ([mode][flightMode][epoch]), describing the
+ /// ship as of sampleTimestamp (extrapolated from the last physics step or the last owner upload).
+ /// It is called at most once per ship per build. It must only append (never Reset or SetPosition),
+ /// must not change state (a second call writes identical bytes), and must carry discrete events as state.
+ /// It returns false to send nothing on this build.
+ /// </summary>
+ /// <param name="sampleTimestamp">Server timestamp (ms) of this build; every packet carrying these bytes has it in its header.</param>
+ /// <param name="writer">Shared per-build buffer; other ships' bytes precede and follow these.</param>
+ /// <param name="sendReliably">True routes the record to the recipient's ReliableOrdered EntityState packet.</param>
+ bool WriteState(long sampleTimestamp, NetDataWriter writer, out bool sendReliably);
+ }
+
+ /// <summary>IShipStateRegistry is the sender's registration surface on the map network manager's GameObject.</summary>
+ public interface IShipStateRegistry
+ {
+ /// <summary>Register hands the ship's server-to-client state to the sender; false means it stays on the kit path (no sender, or grid path enabled).</summary>
+ bool Register(IShipStateSource ship);
+
+ /// <summary>Unregister forgets the ship on despawn or handoff.</summary>
+ void Unregister(IShipStateSource ship);
+
+ /// <summary>MarkRelevanceChanged re-classifies one pair on the next build (lock, attack, wing, seat).</summary>
+ void MarkRelevanceChanged(uint shipObjectId, long observerConnectionId);
+
+ /// <summary>MarkShipChanged re-classifies every pair of one ship on the next build (its group starts or ends a frame change).</summary>
+ void MarkShipChanged(uint shipObjectId);
+
+ /// <summary>MarkObserverChanged re-classifies every pair of one observer on the next build (its group starts a frame change, or it acknowledged one).</summary>
+ void MarkObserverChanged(long observerConnectionId);
+ }
+
+ /// <summary>ShipObserverContext describes one (ship, observer) pair when the sender asks the policy for a rate.</summary>
+ public readonly struct ShipObserverContext
+ {
+ public ShipObserverContext(long observerConnectionId, float distance, bool isOwner)
+ {
+ ObserverConnectionId = observerConnectionId;
+ Distance = distance;
+ IsOwner = isOwner;
+ }
+
+ /// <summary>ObserverConnectionId is the receiving client.</summary>
+ public long ObserverConnectionId { get; }
+
+ /// <summary>Distance is the 3D distance from the observer's player character (seated: at the seat) to the ship.</summary>
+ public float Distance { get; }
+
+ /// <summary>IsOwner is true when the observer simulates this ship.</summary>
+ public bool IsOwner { get; }
+ }
+
+ /// <summary>ShipSendRate is one observer's routine rate for one ship and its rank when that observer's budget is short.</summary>
+ public readonly struct ShipSendRate
+ {
+ /// <summary>
+ /// Withhold sends nothing, not even urgent or first-send records. Return it whenever the observer's applied
+ /// frame is not known to be the ship's frame: the observer's group is mid frame change and the ship is not in
+ /// that group, or the ship and the observer are in different frames and still subscribed.
+ /// </summary>
+ public static readonly ShipSendRate Withhold = new ShipSendRate(0, 0, true);
+
+ public ShipSendRate(byte hz, byte priority) : this(hz, priority, false) { }
+
+ private ShipSendRate(byte hz, byte priority, bool isWithheld)
+ {
+ Hz = hz;
+ Priority = priority;
+ IsWithheld = isWithheld;
+ }
+
+ /// <summary>Hz is 0, 1, 2, 5, 10 or 20 (clamped to the send rate); 0 still receives urgent and first-send records.</summary>
+ public byte Hz { get; }
+
+ /// <summary>Priority orders routine records when the budget is short; higher goes first.</summary>
+ public byte Priority { get; }
+
+ /// <summary>IsWithheld is true only for Withhold.</summary>
+ public bool IsWithheld { get; }
+ }
+
+ /// <summary>IShipSendPolicy decides routine rates. The game implements it; the first one found on the network manager's GameObject wins, else DistanceShipSendPolicy.</summary>
+ public interface IShipSendPolicy
+ {
+ /// <summary>Classify returns the rate for one pair; called at the classify rate and after any Mark call or DiscreteVersion change. Must not allocate.</summary>
+ ShipSendRate Classify(IShipStateSource ship, in ShipObserverContext observer);
+ }
+}
+
+// Their code, illustrative only.
+public partial class ShipMovementComponent : IEntityMovementDataHandler, IShipStateSource
+{
+ private IShipStateRegistry _registry;
+ private bool _senderOwnsState;
+
+ public void OnIdentityInitialize()
+ {
+ // Keep kit registration: uploads (BGNM:584) and client reads (BGNM:599) need it.
+ Entity.CurrentGameManager.EntityMovementDataHandlers.TryRemove(ObjectId, out _);
+ Entity.CurrentGameManager.EntityMovementDataHandlers.TryAdd(ObjectId, this);
+ if (!IsServer)
+ return;
+ _registry = Entity.CurrentGameManager.GetComponent<IShipStateRegistry>();
+ _senderOwnsState = _registry != null && _registry.Register(this);
+ }
+
+ public bool WriteServerState(long writeTimestamp, NetDataWriter writer, out bool shouldSendReliably)
+ {
+ shouldSendReliably = false;
+ if (_senderOwnsState)
+ return false; // kit skips: BGNM:703-704
+ return WriteState(writeTimestamp, writer, out shouldSendReliably);
+ }
+
+ public bool WriteState(long sampleTimestamp, NetDataWriter writer, out bool sendReliably)
+ {
+ sendReliably = false;
+ if (!_isStarted)
+ return false;
+ writer.Put(_mode);
+ writer.Put(_flightMode);
+ writer.Put(_epoch);
+ WritePayloadAt(writer, sampleTimestamp); // today's ~57 B, extrapolated to sampleTimestamp
+ return true;
+ }
+}
+
+- 
+OnNetworkDestroy calls Unregister.
+
+- 
+The sender is never switched off while the server runs; A/B is done by prefab only.
+
+- 
+The sender accepts Register at any time after its own Awake. Ships registered before the server starts are sent from the first build.
+
+### 9. Item (8): tests
+
+The add-on uses NUnit EditMode tests in Assets/ServerMeshing/Tests/Editor, namespace MultiplayerARPG.MMO.Mesh.Tests (e.g. MeshKitEditTests.cs), with TestCaseSource tables. Both sides test against a shared golden fixture: WriteState bytes for each header combination, checked into the add-on's tests.
+
+Their tests
+
+- 
+Determinism. Two calls give identical bytes and no state change. Cases: normal, pending teleport, mode 1, mode 2, epoch 255→0.
+
+- 
+Append only. A writer prefilled with junk keeps it.
+
+- 
+Sample time.
+
+- 
+Stored state at t0 with velocity v: WriteState(t0 + 20 ms) writes the position advanced by v × 20 ms.
+
+- 
+For a mirror, the advance is v × (sampleTimestamp − upload timestamp).
+
+- 
+Exact consumption, no escaping exception.
+
+- 
+For every mode, the reader ends exactly at length, with no await before the read ends.
+
+- 
+A malformed record never throws out of ReadServerStateAtClient.
+
+- 
+Fallback equivalence. Without the sender, WriteServerState equals WriteState. With the sender, it returns false and writes nothing.
+
+- 
+DiscreteVersion. It changes on sequence, mode and epoch changes (and flightMode if included), never on motion.
+
+- 
+Client rules. Older sequence or epoch dropped; newer epoch held until applied; duplicate or older timestamp dropped; first sample after a spawn accepted; timestamp reset on a process change.
+
+- 
+Policy table. Relevance classes, distances and supercruise; Withhold in both directions during a frame change and until unsubscribed.
+
+- 
+IsAtRest is correct.
+
+Our tests
+
+- 
+Byte-exact packet. A fake transport captures packets, and a parser copied from BGNM:589-618 reads them back.
+
+- 
+At most one WriteState per ship per build. Cases: P clients × V ships, and 5 catch-up ticks in one frame.
+
+- 
+Packet ≤ 1,020 B. Cases: records straddling the boundary; objectIds of every packed size; payloads of 999 and 1,000 B.
+
+- 
+Budget. Bytes per build ≤ budget + urgent overflow, and no pair starves beyond K builds.
+
+- 
+Urgent.
+
+- 
+Every subscriber gets 3 builds, and Withhold overrides that.
+
+- 
+A DiscreteVersion change re-classifies before any record of that build is written.
+
+- 
+MarkShipChanged and MarkObserverChanged re-classify every affected pair.
+
+- 
+New subscriber. Nothing on a build in the tick of the subscription event, then first sends on the next 3 builds. Unsubscribed pairs (including pending spread records) and other bubbles get nothing.
+
+- 
+Delivery. sendReliably → ReliableOrdered, everything else Unreliable. One build per packet; the header carries the build timestamp even when spread.
+
+- 
+Grid enabled. Register returns false and logs an error.
+
+- 
+Owner gets only urgent records plus the keepalive under the default policy.
+
+- 
+30 fps cadence. With a fake 33.3 ms frame clock and 50 ms ticks:
+
+- 
+a 20 Hz pair gets every build (33/67 ms gaps);
+
+- 
+a 10 Hz pair every 2nd build (100 ms);
+
+- 
+a 5 Hz pair every 4th build (200 ms).
+
+- 
+Stop/start. After StopServer/StartServer, the sender still runs after the kit's handler.
+
+Jointly: G1 on the rig, sender against the kit path, P ∈ {50, 100, 200, 400} × V ∈ {100, 300, 500}. Record:
+
+- 
+bytes per client;
+
+- 
+packets per second;
+
+- 
+per-packet send cost;
+
+- 
+sender time per frame (p95);
+
+- 
+the kit's SendServerEntityMovementState time per tick with ships registered and returning false (the residual).
+
+### 10. Open items: what depends on their code, and what to agree
+
+- 
+Confirm their ship data travels today as EntityState-119 records from WriteServerState. If it is actually a separate message type, the sender adopts that message instead.
+
+- 
+Confirm the grid path is disabled in their build (§3). Their kit copy's default may differ from this repo's.
+
+- 
+Vehicle ownership: Identity.ConnectionId must be the driver's connection (BGNM:584). IsOwner depends on it.
+
+- 
+The budget in bytes per second, and whether to add a compact payload variant for the stress case.
+
+- 
+The two-way Withhold during frame changes. Also:
+
+- 
+whether their code forces an interest pass at the flip (JGAOI:163-167) or waits up to 1 s;
+
+- 
+whether mode 2 carries the frame data itself or a separate reliable message does.
+
+- 
+Whether flightMode belongs in DiscreteVersion (§2).
+
+- 
+The client hardening at BGNM:609, recommended for Phase 0 and recorded in VENDOR_PATCHES.
+
+- 
+A kit patch to the loop at BGNM:695-704 if G1 shows the residual matters (stress estimate 6 ms per tick frame, E).
+
+- 
+Seated pilots, outside this interface. The kit still sends their character records to observers within 80 m:
+
+- 
+WriteServerState ignores whether movement is enabled (BIEMF3D:1337-1380);
+
+- 
+the handler stays registered (BIEMF3D:222-231) while movement is disabled when seated (BaseGameEntity.cs:365-372);
+
+- 
+the client snaps them to the seat anyway (BaseGameEntity.cs:448-461).
+This costs a little bandwidth and can be fixed in a later kit patch.
+
+Proposal file read: C:\Users\brend\AppData\Local\Temp\claude\C--dev-Game-Design-mmo-server-meshing\7cb7243d-6d65-4487-a82f-31711ade3249\scratchpad\bubble_proposal.md, §3.3 (lines 236-279), §4.6 (lines 587-608) and G1 (line 717). Corrections:
+
+- 
+Line 243: "not registered" does not work (§3).
+
+- 
+Lines 264, 592: the packet-header epoch is withdrawn (§7).
+
+- 
+Line 251: 20 Hz error is 0.11 m at 30 fps (§5).
+
+- 
+Line 263: the three-frame stagger assumed 60 fps; at 30 fps each tick spans 1.5 frames (§5).
+
+- 
+Line 272: 26 B records gave 52–65 kB/s. With 66 B records, the same 2,000–2,500 updates cost 132–165 kB/s.
+
+- 
+Line 717 (G1): restated per case for 33.3 ms frames (§5).
+
+### Part 3: BubblePolicy spec
+
+Written from the kit code before your repo was cloned here. Where this part says your code is not on this machine, the reply in brief above answers the points the clone settles.
+
+Labels. M = measured. E = estimate. A = an assumption the team should replace. (team) = a statement in the team's reply, taken as fact about their game.
+
+Paths.
+
+- 
+Kit/ = Assets/OpenMMORPG/
+
+- 
+LNS/ = Kit/ThirdParty/LiteNetLibManager/Scripts/
+
+- 
+LNL/ = LNS/GameApi/
+
+- 
+LNP/ = Kit/ThirdParty/LiteNetLibManager/Plugins/LiteNetLib/
+
+- 
+SPS/ = Kit/ThirdParty/SpatialPartitioningSystems/Scripts/
+
+- 
+AOI.cs = Kit/Core/Scripts/Networking/AOI/JobifiedGridSpatialPartitioningAOI.cs
+
+- 
+Move3D.cs = Kit/Core/Scripts/Gameplay/EntityMovementSystems/Implements/BuiltInEntityMovementFunctions3D.cs
+
+- 
+BGNM.cs = Kit/Core/Scripts/Networking/BaseGameNetworkManager.cs
+
+- 
+Grid.cs = Kit/Core/Scripts/Networking/GridManager/DefaultGridManagerComponent.cs
+
+- 
+Play/ = Kit/Core/Scripts/Gameplay/
+
+Nothing was edited. ShipEntity, ShipMovementComponent and Game.Universe are not on this machine. Wherever a conclusion depends on them, the text says so.
+
+### 0. What changes from proposal §4, and the kit facts this spec rests on
+
+Removed from §4:
+
+- 
+re-centring (T_rc);
+
+- 
+slot-class upgrades (S/M/L);
+
+- 
+whole-bubble rebases;
+
+- 
+the "FrameChange to every client of a bubble" message.
+
+What replaces them:
+
+- 
+Every change is a batch of per-group frame changes, in the team's order:
+
+- 
+the server moves each group in the plan frame;
+
+- 
+each client applies the new frame and acks;
+
+- 
+the batch's visibility flips once, on the last ack or at the deadline.
+
+- 
+A new anchor appears only as a new bubble.
+
+- 
+A merge is planned at once and visible within L_max.
+
+Numbers against §4 (at the team's A):
+
+- 
+D_merge: 11.1 km → 3.7–4.0 km
+
+- 
+D_split: 21.1 → 14.0 km
+
+- 
+J: 21.1 → 14.0 km
+
+- 
+D_nbr: 76.1 → 69 km
+
+- 
+D_cut,min: 41.1 → 34 km
+
+Kit facts (verified):
+
+# | Fact | Where | 
+K1 | The visible range belongs to the target. Each AOI pass queries a sphere around every spawned object, sized by that object's own range, and subscribes the player objects it finds. So observer o sees x iff d(o,x) ≤ A_x. "Either of p, q sees the other" iff d ≤ max(A_p, A_q) | AOI.cs:217-219, 261-281; LNL/BaseInterestManager.cs:56-59 | 
+K2 | Only player-owned objects are observers in the grid. AI and parked ships never observe, so AI–AI interaction is governed by gameplay ranges, not by the AOI | AOI.cs:183-201 | 
+K3 | On 3D maps the AOI is X/Z only. The grid is built with disableYAxis = true (AOI.cs:122, 143). Y is zeroed on objects (SPS/JobifiedGridSpatialPartitioningSystem.cs:70-75) and on the query centre (SPS/QuerySphereJob.cs:26-29). The distance test is at QuerySphereJob.cs:72. The spawn-time path uses 3D Vector3.Distance instead (BaseInterestManager.cs:30-53, 67, 72), so the kit already mixes the two | as cited | 
+K4 | Defaults: T_aoi = 1 s, cell 64 m, default range 80 m. VisibleRange can be set at runtime | AOI.cs:18, 15; BaseInterestManager.cs:10; LNL/LiteNetLibIdentity.cs:172 | 
+K5 | Sub-channel isolation. IsHideFrom hides across sub-channels, and damage across them is refused. AlwaysVisible bypasses the isolation: those objects are added to every player without a hide check | LiteNetLibIdentity.cs:803-831; Play/DamageableEntity.cs:414-419; bypass at AOI.cs:212-216, 316-322 and LiteNetLibIdentity.cs:790-795 | 
+K6 | Teleport bug (confirmed). IsTeleport is set at Move3D.cs:1361-1368 and cleared at :1377. The team cited :1376, which clears _sendingDash. _sendingJump (:1375) and _sendingDash (:1376) are cleared the same way, so IsJump and IsDash also reach only the first receiver. WriteServerState runs per (player, entity) (BGNM.cs:674, 703). The kit character state has no epoch field (Move3D.cs:1397), and a jump ≥ snapThreshold snaps (:1422) | as cited | 
+K7 | The driver owns the vehicle (Play/BaseGameEntity_MountFunctions.cs:105-107). Passengers send no movement (BGNM.cs:639-659). Seated characters are snapped to their seat every LateUpdate, on server and client (Play/BaseGameEntity.cs:397-419, 446-460). So seated characters need no epoch; unseated ones do | as cited | 
+K8 | The instigator EntityInfo is one cached object per entity (Play/BaseGameEntity.cs:216-223). It is refreshed only when GetInfo() runs (BasePlayerCharacterEntity.cs:111-117, BaseMonsterCharacterEntity.cs:153-159). Damage entities keep a reference to it and check the sub-channel on hit (Play/DamageEntities/BaseDamageEntity.cs:8, 98, 111; MissileDamageEntity.cs:377). VehicleEntity does not override GetInfo, so a kit vehicle as instigator has SubChannelId = "" (EntityInfo.cs:28). Once targets carry a bubble id, that damage is refused at DamageableEntity.cs:416. Whether this bites depends on their ShipEntity | as cited | 
+K9 | Hit-box rewind history is kept in sim coordinates | Play/DamageableHitBox.cs:177, 382-398 | 
+K10 | Two server send paths, chosen by DefaultGridManagerComponent.IsDisabled (BGNM.cs:133-136). The component is disabled by default (Grid.cs:22). Disabled: each handler's WriteServerState runs per (player, entity) (BGNM.cs:703), so ShipMovementComponent's own message is sent. Enabled: CreateMovementData runs per (player, entity) (BGNM.cs:786, 831) and clears the same flags (Move3D.cs:1329-1332). That path writes a character-shaped state (BGNM.cs:864), so the ship message and its epoch header would not be sent | as cited | 
+K11 | Rates. The AOI pass, the spawn/despawn flush and the movement sends all run in the logic tick at updateFps (LNS/LiteNetLibManager.cs:155, 159-162; LNL/LiteNetLibGameManager.cs:109-122; BGNM.cs:129-137). That is 20 Hz (team; kit demo Assets/BaseDemo/Prefabs/MapNetworkManager-CE.prefab:139), so T_aoi = 1 s = 20 ticks. A subscription queues a spawn and an unsubscription queues a despawn (LNL/LiteNetLibPlayer.cs:40-57). Both are sent at the next tick, reliable-ordered on the identity's channel, and spawns carry raw float positions (LNL/LiteNetLibGameManager.StateSyncing.cs:243-245, 446-451). LiteNetLib flushes sends every 15 ms (LNP/LiteNetManager.cs:113) | as cited | 
+
+Findings for the team, most important first:
+
+- 
+Missile lock (3 km) and AI detection (2.2 km) are longer than A0 = 2 km. Lock is also longer than the largest normal-space A, which is 2.625 km (§3).
+
+- 
+So the "must share a bubble" range is max(A, interaction range). For armed ships it is 3.0 km at every normal-space speed: the lock range sets D_merge, not the AOI.
+
+- 
+Separately, a pilot can lock a ship that the AOI does not show. The team must decide whether a lock requires visibility.
+
+- 
+The visibility flip must happen per batch, not per group (§2, B7).
+
+- 
+An unsubscription queues a despawn (K11). If the groups of one fight flip one by one, they despawn and respawn for each other.
+
+- 
+Each group still flips only after its own ack, as in the team's design.
+
+- 
+ShipEntity must override GetInfo to report its sub-channel (K8). Otherwise ship-instigated kit damage is refused once bubbles set SubChannelId. This depends on their code.
+
+- 
+Under the team's order, a moved group shares slot geometry with its target bubble before its visibility flips.
+
+- 
+Physics does not know sub-channels.
+
+- 
+Gameplay physics queries (lock, detection, weapons) must filter by SubChannelId, as kit damage does (DamageableEntity.cs:416). It matters only for stragglers (N1).
+
+- 
+Use 3D for both the AOI and the policy (§4).
+
+- 
+Phase 0 teleport patch: clear IsTeleport, IsJump and IsDash once per tick on both send paths. Alternatively, keep the grid manager disabled, which it must be anyway while the ship message carries the epoch (K10).
+
+- 
+Low cruise: if low cruise is flown inside a bubble, V_g,max becomes its speed. With R = 30 km the invariants fail above about 524 m/s (E, §3). If low cruise is faster than that, its entry must be a handoff.
+
+### 1. Inputs
+
+The policy is pure C#. Its only non-BCL type is Unity.Mathematics.double3.
+
+- 
+That package's asmdef does not exclude the engine, and math_unity_conversion.cs:1-2 uses UnityEngine (Library/PackageCache/com.unity.mathematics@19a9377c4ffa/Unity.Mathematics/).
+
+- 
+Whether an asmdef with noEngineReferences can reference it while using only double3 was not tested E. Plan on Unity EditMode tests.
+
+- 
+If the team wants the policy to run in a plain .NET test runner, replace double3 with a struct of three doubles.
+
+namespace Game.Universe
+{
+ public enum BubbleKind : byte { Dynamic, Persistent }
+ public enum DistanceMetric : byte { Xyz, Xz } // must equal the AOI's metric (§4)
+ public enum EngagementKind : byte { Lock, Aggro, MissileToTarget, Tow, Dock, Wing }
+
+ public readonly struct MemberIn { // every observable entity in a bubble
+ public readonly long MemberId, GroupId;
+ public readonly double3 U; // universe position = anchor + (sim - slot), in doubles
+ public readonly double3 Velocity; // m/s, universe
+ public readonly double AoiRange; // A_i as the AOI uses it now (AoiRange.Of for ships; 80 m kit default for characters)
+ public readonly double ActRange; // longest gameplay reach: gun 1 km, lock 3 km, AI detect 2.2 km, loot 0
+ }
+ public readonly struct GroupIn { // the atomic unit of a frame change (team): a ship plus its
+ public readonly long GroupId, BubbleId; // seated characters, its projectiles/missiles, towed objects
+ public readonly int Clients; // connections that must ack (pilot + passengers); 0 for AI/parked/wreck/loot
+ public readonly bool Movable; // false: unseated kit character, mid-handoff, jump tunnel, docked
+ public readonly long InTransitTo; // 0 = settled; else the target of a batch moved but not yet flipped
+ public readonly double InTransitSince;
+ }
+ public readonly struct BubbleIn {
+ public readonly long BubbleId; public readonly BubbleKind Kind; public readonly int HostId;
+ public readonly double3 Anchor; // never changes, by construction
+ public readonly double Roam; // R_b (30 km dynamic, team); planet r + h; a hot host may be larger
+ public readonly double CreatedAt;
+ public readonly double3[] Bodies; // persistent: >= 1 body node; dynamic: empty
+ }
+ public readonly struct EngagementIn { public readonly long MemberA, MemberB; public readonly EngagementKind Kind; }
+ public readonly struct ArrivalIn { public readonly long GroupId; public readonly MemberIn[] Members; public readonly int Clients; }
+
+ public sealed class PolicyInput {
+ public double Now; // server monotonic seconds: the only clock
+ public int LocalHostId;
+ public MemberIn[] Members; public GroupIn[] Groups; public BubbleIn[] Bubbles; // may include other hosts' bubbles, for conflict reports only
+ public EngagementIn[] Engagements;
+ public ArrivalIn? Arrival; // drop, login, respawn or jump exit, evaluated out of cycle
+ }
+
+ public static class AoiRange { // ONE implementation, used by the AOI updater (sets VisibleRange, LiteNetLibIdentity.cs:172) and by the policy
+ public static double Of(double ownSpeed, double fastestGroupSpeed, double roam, in AoiRangeConfig c)
+ => Math.Min(roam, c.A0 + (ownSpeed + fastestGroupSpeed) * c.Lead); // team: 2 km + (v + f) * 1.25 s, capped at the bubble's roam radius
+ }
+}
+
+Input semantics:
+
+- 
+Group speed is the largest member speed. f_b is the fastest group speed among the groups whose effective bubble is b.
+
+- 
+Effective bubble = InTransitTo if non-zero, else BubbleId.
+
+- 
+Frozen group: InTransitTo != 0 or !Movable.
+
+- 
+Supercruise ships are not passed in. They are in no bubble.
+
+- 
+Why the policy recomputes A. The policy uses max(A_i, its own value at reach speeds, §3).
+
+- 
+The recomputation also removes the lag between the AOI's 1 s pass and the policy check. Both directions of a mismatch are safe, because of the max.
+
+- 
+An input above AoiRange.Of(v_boost, v_boost, R_b) (2,625 m in normal space) is reported as AoiRangeMismatch. No speed the formula allows produces it, so a second implementation is in use.
+
+- 
+A tighter, two-sided check against current speeds is not used. It would fire after every merge and split, because f jumps by up to 250 m/s there (312.5 m of A, N4) while the AOI's value is up to T_aoi old.
+
+### 2. Outputs, state, and the procedure
+
+public readonly struct BubbleRef { public readonly long ExistingId, NewKey; } // exactly one non-zero
+public sealed class Batch { // all groups move in the plan frame; their visibility flips together, in one later server frame
+ public string Key; public BubbleRef Target; public long[] Groups; // sorted
+ public MoveReason Reason; public double Deadline; // Now + L_max
+}
+public enum MoveReason : byte { Merge, RoamExit, Split, OverflowCut, PersistentEdgeCut, ArrivalMerge }
+public sealed class NewBubble { public long Key; public double3 Anchor; public double Roam; public int HostId; } // Key = min moved group id
+public sealed class ArrivalPlacement { public BubbleRef Target; public double3 Point; public string[] WaitForBatches; public bool Hold; }
+public enum ReportKind : byte { CrossHostConflict, VetoCreated, VetoReleased, VetoHeld, VetoedWithinE, Overflow,
+ PersistentEdgeCut, Deferred, RoamOverrun, RoamBlocked, EngagementIgnored, DropIntoConflict, DropIntoCrossHost,
+ AoiRangeMismatch, PopInRisk }
+public readonly struct Report { public readonly ReportKind Kind; public readonly long A, B; public readonly double Value; }
+public sealed class Plan { public Batch[] Batches; public NewBubble[] NewBubbles; public ArrivalPlacement Arrival; public Report[] Reports; }
+
+public sealed class Veto { public long Id; public long[] SideA, SideB; public double CreatedAt; public MoveReason Cause; }
+public sealed class PolicyState { // everything kept between calls
+ public SortedDictionary<long, double> DetachedSince; // per group: split timers; a part's timer = max over its groups
+ public Veto[] Vetoes; // cannot-link constraints
+ public long NextVetoId; public double LastNow;
+}
+public sealed class PolicyResult { public string Error; public Plan Plan; public PolicyState Next; }
+
+public sealed class BubblePolicy {
+ public static BubblePolicy Create(BubblePolicyConfig c); // throws ArgumentException naming the violated invariant (tests C1-C8)
+ public BubbleThresholds Thresholds { get; } // derived values of §3
+ public PolicyResult Evaluate(PolicyInput input, PolicyState state); // pure; bad input -> Error set, Next = state
+}
+
+The plan has no operation that could move an anchor. Existing bubbles appear only as targets. Anchors appear only in NewBubble.
+
+Determinism rules:
+
+- 
+Every input array is sorted by id on entry.
+
+- 
+The grid is walked in cell-key order.
+
+- 
+Union-find roots are the minimum group id.
+
+- 
+Edges are sorted by (kind, length, id pair).
+
+- 
+Outputs are sorted by (reason, minimum group id).
+
+- 
+Doubles only. No Dictionary enumeration order, no clock reads, no randomness, no parallel reductions.
+
+Procedure (replaces §4.4):
+
+PolicyResult Evaluate(PolicyInput input, PolicyState st)
+{
+ if (Validate(input, st) is string err) return Rejected(err, st); // tests F1-F9
+ var s = Scene.Build(input); // effective bubble, frozen flag, f_b per effective bubble
+ var edges = new List<Edge>();
+ foreach (var (p, q) in s.CandidatePairs(cell: DSplitMax)) // 27 neighbours (9 in XZ)
+ {
+ if (p.Group == q.Group) continue;
+ double d = Dist(p, q); // config metric (§4)
+ if (p.Host != q.Host) { if (d <= DMerge(p, q)) Report(CrossHostConflict, p, q, d); continue; }
+ bool same = s.Eff(p) == s.Eff(q);
+ if (d <= (same ? DSplit(p, q) : DMerge(p, q))) edges.Add(Edge.Ship(p, q, d));
+ if (!same && d <= E(p, q) && !s.Vetoed(p, q)) Report(PopInRisk, p, q, d); // must stay 0
+ }
+ foreach (var b in s.LocalPersistent) // body links: capture R_in,b / keep R_out,b
+ foreach (var g in s.GroupsNear(b.Bodies, ROut(b)))
+ if (MinDist(g, b.Bodies) <= (s.Eff(g) == b.Id ? ROut(b) : RIn(b))) edges.Add(Edge.Body(g, b));
+ foreach (var l in input.Engagements) // unknown member, other host, or > EngagementMax
+ if (Valid(l)) edges.Add(Edge.Engagement(l)); else Report(EngagementIgnored, l);
+
+ var uf = new ConstrainedUnionFind(s, st.Vetoes); // cannot-link: a set holding a SideA group never
+ foreach (var e in edges.OrderBy(Kind != Engagement).ThenBy(Len).ThenBy(IdPair)) // joins one holding a SideB group
+ uf.TryUnion(e); // engagement across a veto releases it (report)
+
+ var plan = new PlanBuilder(input.Now, LMax);
+ foreach (var c in uf.Components().OrderBy(c => c.MinGroupId)) Resolve(c, plan, st);
+ var vetoes = ReleaseVetoes(st.Vetoes.Concat(plan.NewVetoes), s); // §2 veto rules below
+ return new PolicyResult(null, plan.Build(),
+ new PolicyState(plan.DetachedSince, vetoes, plan.NextVetoId, input.Now));
+}
+
+void Resolve(Component c, PlanBuilder plan, PolicyState st)
+{
+ var touched = c.EffectiveBubbles; // sorted
+ var keeperOf = touched.Where(b => Keeper(b) == c).ToList(); // Keeper: body node, else most clients, groups, min id
+ bool beyond = c.Groups.Any(g => DistToAnchor(g, Eff(g)) > ROut(Eff(g)));
+ if (touched.Count == 1 && keeperOf.Count == 1 && !beyond) return; // settled
+ if (touched.Count == 1 && keeperOf.Count == 0 && !beyond) // detached part: split timer
+ {
+ foreach (var g in c.Groups) plan.DetachedSince[g] = st.DetachedSince.GetValueOrDefault(g, plan.Now);
+ if (plan.Now - c.Groups.Max(g => plan.DetachedSince[g]) < T_SPLIT) return;
+ if (c.Groups.Any(Frozen)) { plan.Report(Deferred, c); return; } // timer kept
+ plan.Move(c.Groups, plan.NewBubbleAt(AabbCentre(c)), MoveReason.Split); return;
+ }
+ var home = ChooseHome(c, keeperOf); // merge (touched >= 2) or roam exit
+ switch (home.Kind)
+ {
+ case HomeKind.Existing: case HomeKind.New:
+ plan.Move(c.Groups.Where(g => Eff(g) != home.Id), home, touched.Count >= 2 ? Merge : RoamExit); break;
+ case HomeKind.Defer: plan.Report(Deferred, c); break; // a frozen group would have to move
+ case HomeKind.PersistentEdge: CutAway(c, IneligibleGroups(c, home), PersistentEdgeCut); break;
+ case HomeKind.None: CutLongestMstEdge(c, OverflowCut); break; // recursion: Resolve both halves
+ }
+}
+
+Home ChooseHome(Component c, List<Bubble> keeperOf)
+{
+ if (c.BodyBubble is Bubble b) // >1 body: cut on the body-body path first
+ return Eligible(c, b) ? Home.Existing(b) : Home.PersistentEdge(b); // persistent absorbs only with its body (team)
+ var best = keeperOf.Where(x => x.Kind == BubbleKind.Dynamic && Eligible(c, x))
+ .OrderBy(x => MoveCost(c, x)).ThenBy(x => x.CreatedAt).ThenBy(x => x.Id).FirstOrDefault();
+ if (best != null && MoveCost(c, best) < INF) return Home.Existing(best);
+ if (c.Groups.Any(Frozen)) return Home.Defer;
+ var (centre, rho) = AabbCentre(c); // order-independent
+ return rho <= R_IN ? Home.New(centre) : Home.None;
+}
+bool Eligible(Component c, Bubble x) => c.Groups.All(g => Eff(g) == x.Id
+ ? DistToAnchor(g, x) <= ROut(x) // staying tolerates R_out
+ : !Frozen(g) && DistToAnchor(g, x) <= (x.Kind == BubbleKind.Persistent ? ROut(x) : R_IN)); // entering a dynamic bubble needs R_in
+double MoveCost(Component c, Bubble x) => c.Groups.Where(g => Eff(g) != x.Id).Sum(g => Frozen(g) ? INF : 10 * g.Clients + 1);
+
+Plan rules:
+
+- 
+Each group appears in at most one batch per call. Each component produces at most one batch, plus recursion after a cut.
+
+- 
+In-transit groups count as members of their target bubble, and they are never re-planned.
+
+- 
+Merge homes are limited to bubbles the component keeps, meaning it holds their keeper. A merge of two detached parts gets a new bubble at once, instead of moving into one bubble and splitting out 30 s later.
+
+- 
+Cuts remove the longest MST edge that is not an engagement link (ties broken by id pair).
+
+- 
+Each cut adds a veto (SideA, SideB) and reports VetoCreated. If the cut edge is ≤ E, it also reports VetoedWithinE.
+
+- 
+If no cuttable edge is left, report Overflow and leave the component as it is. Members may then overrun R, which is reported as RoamOverrun.
+
+When a veto is released (checked each call, in id order):
+
+- 
+either side has no present group;
+
+- 
+the minimum distance between the sides is > D_split,max;
+
+- 
+an engagement link spans the two sides;
+
+- 
+the union of both sides would now have a feasible home (ChooseHome returns Existing or New).
+
+Without the last condition, a veto between two fleets chasing each other would never end.
+
+What the executor must guarantee. It follows the team's order: the server moves each group, each client applies the new frame and acks, and only then does visibility flip. The thresholds in §3 assume all of the following.
+
+- 
+Move: in the plan frame, for every group of the batch.
+
+- 
+Set Rigidbody.position (never MovePosition), then Physics.SyncTransforms.
+
+- 
+Move seated characters explicitly. The LateUpdate seat snap (K7) would be one frame late for hit checks.
+
+- 
+Shift hit-box histories (K9) and the batch's kit damage entities by Δ.
+
+- 
+Send each client its frame change.
+
+- 
+Leave SubChannelId unchanged.
+
+- 
+Drop every subscription between the batch and old-bubble entities outside it.
+
+- 
+Normally there are none: every old-bubble member within D_split of a mover is in the same component, hence in the batch. Only a cut leaves one.
+
+- 
+Without the drop, such an entity would receive the mover's new-slot positions until the next pass.
+
+- 
+Flip: once per batch.
+
+- 
+When every client of the batch has acked, or at Deadline, whichever comes first: set SubChannelId = target on every identity of the batch in one server frame, and call GetInfo() on each (K8).
+
+- 
+Groups with 0 clients need no ack. A batch of such groups only flips in the plan frame.
+
+- 
+Stragglers. A group whose ack misses the deadline flips alone when its ack arrives. It is reported.
+
+- 
+Until then it sits in the target slot, hidden by sub-channel.
+
+- 
+Gameplay physics queries must filter by SubChannelId.
+
+- 
+Resync it after 6 s (E, N1).
+
+- 
+It never flips before its ack: kit spawns carry raw floats (K11).
+
+- 
+Re-subscription of the batch against its new bubble.
+
+- 
+The next regular AOI pass is enough. §3 shows why the pass interval does not enter τ.
+
+- 
+For a late flip (a straggler, or a Deferred merge), a targeted re-subscription of the batch at the flip shortens the gap (N2).
+
+- 
+Never call UpdateInterestManagementImmediate in a frame where the regular pass is already scheduled:
+
+- 
+it clears and refills the grid (AOI.cs:182-203) while the pending jobs run until LateUpdate (AOI.cs:248-256);
+
+- 
+it overwrites that pass's per-object result lists (AOI.cs:217-218).
+
+- 
+At most one pass per frame, counting the regular one. Each costs ≤ 2 ms p99 (team).
+
+- 
+Spawns go out at the next 20 Hz tick either way (K11).
+
+- 
+Decoding during the transit window. The window runs from the move to the client's apply.
+
+- 
+Ship states and uploads carry the epoch (team's Phase 0 header), so both directions decode each sample in its own frame.
+
+- 
+Server to client: the frame change goes out in the plan frame, on the reliable-ordered channel that carries spawns (K11). Later reliable messages on that channel are then decoded after it. Unreliable kit character states are not ordered with it, which is harmless only for seated characters (K7).
+
+- 
+Client to server: other messages that carry positions (kit attack or skill) have no epoch. The server decodes them in the old frame until that client's ack and in the new frame after it. This is exact only if they travel on the ack's reliable-ordered channel. Otherwise they need an epoch field. This depends on their weapon code.
+
+- 
+In-transit reporting.
+
+- 
+The executor reports InTransitTo and InTransitSince from the move until the flip.
+
+- 
+It refuses a NewBubble when no slot is free. The policy then re-plans at the next check.
+
+- 
+It may give a new bubble the slot of a bubble that the same batch empties. Moving to another slot is still a frame change, never an anchor move.
+
+### 3. Thresholds as functions of A
+
+Parameters:
+
+Symbol | Meaning | Value | Source | 
+A0, T_lead | AOI base, lead | 2,000 m, 1.25 s | team | 
+cap | AOI cap | R_b of the entity's bubble (30,000 m dynamic) | team | 
+v_cruise, v_boost | normal-space speeds | 125, 250 m/s | team | 
+V_g,max / V_c,max | largest group speed / largest closing speed | 250 / 500 m/s | = v_boost / 2·v_boost | 
+a_max | ship acceleration | 50 m/s² | A, from proposal §3.3; team to supply | 
+Act | gun / lock / AI detect | 1,000 / 3,000 / 2,200 m | team | 
+t | policy check interval | 1 s (30 frames at 30 fps; 20 logic ticks at 20 Hz) | proposal. A cost ≤ 1 ms p99 at 600 groups is a target E | 
+L_max | deadline from the plan to the visibility flip | 1.0 s | A. One client: 0.300 (RTT p99, A) + 2 × 0.015 (LiteNetLib flush, K11) + 0.033 (server frame, team) + 0.017 (client frame at 60 fps, A) = 0.380 s E. A batch of n clients expects n·(1 − F(L_max)) stragglers: 64 × 0.01 = 0.64 if L_max is the per-client p99; 64 × 0.001 = 0.064 at p99.9 E. The team measures p50/p95/p99/p99.9 under load and sets L_max ≥ the per-client p99.9 | 
+T_aoi | AOI interval | 1 s | AOI.cs:18; K11; team | 
+T_spawn | subscription → spawn shown | 0.25 s | E: ≤ 0.050 (next 20 Hz tick) + 0.015 (flush) + 0.150 (one way, half the RTT p99) + 0.017 (client frame) = 0.232 s | 
+T_guard, T_split, T_roam | re-merge guard, split dwell, roam dwell | 20 s, 30 s, 30 s | proposal, team, new | 
+R, S | roam radius, slot spacing | 30 km, 70 km | team | 
+EngagementMax | longest engagement link honoured | 2·R_in = 44,000 m | new: the longest pair one bubble holds with its anchor at the midpoint | 
+N_max, T_h, T_report | drop-point move, hold horizon, report period | 5 km, 120 s, 5 s | proposal | 
+
+Formulas. p and q are members. X and Y are their effective bubbles. R_pq = max(R_X, R_Y).
+
+- 
+τ = t + L_max. T_aoi enters through the lead condition below, not through τ.
+
+- 
+v⁺ = min(v + a_max·τ, v_boost): the "reach speed". The same applies to f⁺, with f_pq = max(f_X, f_Y).
+
+- 
+A_pq,i = max(A_i(input), AoiRange.Of(v_i⁺, f_pq⁺, R_pq)), for i ∈ {p, q}.
+
+- 
+E_pq = max(A_pq,p, A_pq,q, Act_p, Act_q): the must-share-a-bubble range. It is symmetric because of K1.
+
+- 
+Δ(τ) = Σ_{i∈{p,q}} min(v_i·τ + ½·a_max·τ², v_boost·τ): the closing distance over τ.
+
+- 
+D_merge(p,q) = E_pq + Δ(τ)
+
+- 
+E_max(p,q) = max(AoiRange.Of(v_boost, v_boost, R_pq), Act_p, Act_q)
+
+- 
+D_split(p,q) = E_max(p,q) + V_c,max·(τ + T_guard). It is capability-specific and does not depend on current speed (see "Rejected" below).
+
+- 
+D_merge,max = max E_max + V_c,max·τ
+
+- 
+D_split,min = AoiRange.Of(v_boost, v_boost, R) + V_c,max·(τ + T_guard)
+
+- 
+R_out,b = R_b − 2·V_g,max·t; R_in,b = R_out,b − V_g,max·T_roam (§5)
+
+- 
+Body capture = R_in,b; body keep = R_out,b
+
+- 
+J = D_split (drop join)
+
+- 
+D_nbr = D_merge,max + V_c,max·(T_h + 2·T_report)
+
+- 
+D_cut,min = D_merge,max + V_c,max·60 s
+
+Why merges show no pop-in.
+
+- 
+Say the pair crosses D_merge at time t0.
+
+- 
+The check sees it by t0 + t, and the server moves the movers in that frame. The batch's visibility flips by t0 + t + L_max = t0 + τ.
+
+- 
+The distance closed over τ is ≤ Δ(τ). So at the flip, d ≥ D_merge − Δ = E_pq, which is ≥ max(A_p, A_q) at reach speeds and ≥ both interaction ranges.
+
+- 
+From the flip on, the pair is in one bubble at d ≥ A. That is the state of any pair born in one bubble.
+
+- 
+The next regular pass (≤ T_aoi later) subscribes it at d ≥ A − (v + f)·T_aoi = A0 + (v + f)·(T_lead − T_aoi).
+
+- 
+The spawn is then shown within T_spawn.
+
+- 
+So the kit's lead needs T_lead ≥ T_aoi + T_spawn: 1.25 ≥ 1 + 0.25, with 0.018 s to spare against the 0.232 s estimate E.
+
+- 
+This is why the pass interval (or a targeted re-subscription) is not added to τ.
+
+- 
+If the team changes T_aoi, T_lead must change with it.
+
+The guarantee fails only for a straggler past L_max, or for a Deferred merge (N2). Both are counted.
+
+Example values (τ = 2 s. The τ = 3 s rows are the option τ = 2t + L_max of N2):
+
+Quantity | Both at 125 m/s (f = 125) | Both at 250 m/s | Parked vs 250 m/s | 
+v⁺ | min(125 + 100, 250) = 225 | 250 | 100 / 250 | 
+A at reach speed | 2,000 + (225 + 225)·1.25 = 2,562.5 m (2,312.5 with a_max = 0) | 2,000 + 500·1.25 = 2,625 m | 2,437.5 / 2,625 | 
+E, armed pair (lock 3 km) | 3,000 m | 3,000 m | 3,000 m | 
+E, unarmed pair | 2,562.5 m | 2,625 m | 2,625 m | 
+Δ(2 s) | 2·min(250 + 100, 500) = 700 m | 2·min(500 + 100, 500) = 1,000 m | 100 + 500 = 600 m | 
+D_merge, armed | 3,700 m | 4,000 m | 3,600 m | 
+D_merge, unarmed | 3,262.5 m | 3,625 m | 3,225 m | 
+D_merge, armed, τ = 3 s | 3,000 + 2·min(375 + 225, 750) = 4,200 m | 3,000 + 1,500 = 4,500 m | — | 
+D_merge,max | 3,000 + 500·2 = 4,000 m (τ = 3 s: 4,500) | same | same | 
+D_split | 3,000 + 500·(2 + 20) = 14,000 m (unarmed, = D_split,min: 13,625; τ = 3 s: 14,500) | same | same | 
+Flap bound per pair | T_split + (D_split − D_merge,max)/V_c,max = 30 + 20 = 50 s per merge-and-split cycle (2 batches) | same | same | 
+J (drop join) | 14,000 m | same | same | 
+
+Rejected: a D_split that follows current speed. At the cruise closing speed it would be 3,700 + 250·20 = 8,700 m. Two ships split there that then boost would re-merge in (8,700 − 4,000)/500 = 9.4 s, which is less than T_guard.
+
+Low cruise (depends on the team's design). Everything above assumes no in-bubble speed above v_boost = 250 m/s. If low cruise is flown inside a bubble, V_g,max is its top speed V.
+
+- 
+With R = 30 km, t = L_max = 1 s, T_roam = 30 s, T_guard = 20 s:
+
+- 
+R_in = 30,000 − 2V − 30V = 30,000 − 32V;
+
+- 
+C7 needs 2·R_in ≥ 2,000 + 2.5V + 44V;
+
+- 
+so V ≤ 58,000/110.5 = 524.9 m/s E.
+
+- 
+At 1,000 m/s A, R_in = −2,000 m and Create throws C6.
+
+Placement and slot quantities:
+
+Quantity | Space it lives in | Value | Meaning | 
+D_nbr | universe; gap between member sets | 4,000 + 500·(120 + 10) = 69 km (36.2 km if sized for cruise closing: 3,700 + 250·130) | Bubbles closer than this must share a host (directory rule) | 
+D_cut,min | universe | 4,000 + 500·60 = 34 km (18.7 km at cruise) | Never offload across a smaller gap | 
+Anchor distance of neighbours | universe | Guaranteed neighbours only at anchors < D_nbr − 2·R_out = 69 − 59 = 10 km. Possible neighbours up to D_nbr + 2·R_out = 128 km | The directory must test member gaps, not anchor distances | 
+Slot spacing S | sim, per process | 70 km = 2·30 + 10 (team) | Physics separation only. Isolation is by SubChannelId | 
+Physics margin P | sim | 70 − 2·30 = 10 km | Must cover the longest physics query plus the overrun of a group that cannot be moved (RoamBlocked) or whose roam exit is deferred for more than one check. With lock/detect done by physics overlap (3 km): (10,000 − 3,000)/500 = 14 s for two such groups heading toward each other. 18 s if only 1 km gun raycasts reach that far (E; depends on their code). Ack stragglers do not count: the server moved them at the plan | 
+
+D_nbr ≈ S is only a numerical coincidence. The directory must never use slot spacing for placement.
+
+### 4. The merge predicate must match the AOI predicate: X/Z or 3D
+
+What the AOI predicate is today (K1–K3): a pass subscribes observer o to target x iff d_XZ(o, x) ≤ A_x. Because of sub-channel isolation (K5), the predicate matters only inside a bubble. So the policy's job is to put p and q in one bubble before they would satisfy the AOI predicate if they already shared one.
+
+That requires the same four things on both sides:
+
+- 
+the same metric;
+
+- 
+the same range owner (the pair max, K1);
+
+- 
+the same positions;
+
+- 
+the same range function (AoiRange.Of).
+
+Positions match automatically. sim = slot + (U − anchor) is a pure translation, so inside a bubble universe distances equal sim distances within the float step. That step is ≤ 3.1 cm within 500 km of the process origin (proposal §2.1).
+
+Must BubblePolicy use X/Z? Yes, while the AOI stays X/Z: consistency needs one metric. But X/Z is wrong for a 3D space game.
+
+Recommendation: switch both to 3D.
+
+- 
+One config switch, DistanceMetric, shared by the AOI and the policy.
+
+- 
+Roam (R, R_out, R_in), overflow radii (ρ) and the slot/physics checks are always 3D, whatever the switch. Float precision and physics are 3D.
+
+What breaks if they differ. Example: two ships 1 km apart in X/Z and 20 km apart vertically.
+
+- 
+Policy 3D, AOI X/Z:
+
+- 
+While they are in one bubble, the AOI subscribes them (d_XZ = 1 km ≤ A). Bytes are sent every tick, and each client shows a contact 20 km away.
+
+- 
+Once d_3D > D_split (14 km) for 30 s, the policy splits them. The contact vanishes from a client that was showing it: a visible pop-out.
+
+- 
+The same pair in two different bubbles is never merged. So whether a client sees that contact depends on bubble history, not on geometry.
+
+- 
+Across bubbles, nothing pops in: isolation hides everything.
+
+- 
+Policy X/Z, AOI 3D:
+
+- 
+It never under-merges, since d_XZ ≤ d_3D.
+
+- 
+But it merges vertically separated groups into "columns". Their 3D radius then overruns R_in, which forces overflow cuts across edges the X/Z metric calls short. VetoedWithinE fires for pairs that are really 20 km apart.
+
+- 
+Bubbles grow, and so do fan-out and batch sizes.
+
+- 
+Both X/Z: consistent, but every bubble is a column.
+
+- 
+A fleet stacked vertically is one bubble, sent in full.
+
+- 
+Roam (3D) and linking (X/Z) disagree, so overflow cuts appear.
+
+- 
+Both 3D: consistent and correct.
+
+Getting a 3D AOI without a kit patch. Add their own SpaceGridAOI : BaseInterestManager, a copy of the kit class with disableYAxis: false.
+
+- 
+The kit uses any BaseInterestManager on the network manager's GameObject (BGNM.cs:120-122).
+
+- 
+It has to be a copy, not a subclass: PrepareSystem is public but not virtual (AOI.cs:102), and _system is private (:22).
+
+- 
+Cell size in 3D ≈ A, about 3 km. A query spans 2A = 5.25 km:
+
+- 
+3 km cells: 2–3 cells per axis, 8–27 probes per query E;
+
+- 
+1 km cells: 6–7 cells per axis, 216–343 probes E;
+
+- 
+1 km cells in X/Z, for comparison: 36–49 probes E.
+
+- 
+The flat cell index is an int, x + GX·(y + GY·z) (SPS/QueryFunctions.cs:53). So GX·GY·GZ must stay below 2³¹ ≈ 2.1·10⁹:
+
+- 
+1 km cells over a 1,000 km cube give 10⁹, close to the limit;
+
+- 
+3 km cells give 334³ ≈ 3.7·10⁷.
+
+- 
+AOIMapBounds must cover every slot ± R in all three axes (AOI.cs:110-118).
+
+- 
+Objects outside the bounds are clamped into edge cells (SPS/UpdateGridJob.cs:30).
+
+- 
+A query whose extent lies wholly outside the bounds on an axis scans that whole axis: an out-of-range minimum cell resets to 0, an out-of-range maximum to the last cell (SPS/QuerySphereJob.cs:40-52).
+
+- 
+The 3D switch also removes the kit's own mismatch: 3D at spawn, X/Z per pass (K3).
+
+- 
+No AlwaysVisible on bubble entities (K5).
+
+- 
+Seated characters should carry their ship's A. At the default 80 m range, remote clients would see a ship whose pilot spawns only within 80 m (BaseInterestManager.cs:10).
+
+### 5. The roam boundary with fixed anchors
+
+Radii (3D, per bubble b with roam R_b):
+
+- 
+R_out,b = R_b − 2·V_g,max·t = 30,000 − 250·2 = 29,500 m.
+
+- 
+The first t covers the interval between checks.
+
+- 
+The second t is one check of slack for a roam exit that is Deferred or whose NewBubble is refused.
+
+- 
+The ack round trip does not count, because the server moves the group at the plan.
+
+- 
+A group past R_out,b at a check is therefore moved before it reaches R_b.
+
+- 
+R_in,b = R_out,b − V_g,max·T_roam = 29,500 − 7,500 = 22,000 m. This is the entry limit into a dynamic bubble.
+
+- 
+For a persistent bubble, R_in,b is the body capture radius, and R_out,b is the body keep radius and its entry limit.
+
+- 
+Planets: R_b = r + h (team), so R_out,b = R_b − 0.5 km and R_in,b = R_b − 8 km.
+
+- 
+EngagementMax = 2·R_in = 44 km. A longer engagement link is ignored and reported (EngagementIgnored).
+
+- 
+Config invariants (checked by Create):
+
+- 
+R_in > 0;
+
+- 
+2·R_in ≥ D_split, so any same-bubble pair fits in one bubble (44 ≥ 14 km);
+
+- 
+D_split > D_merge,max.
+
+Rule. Roam exit is per component, never per group. A group linked to others can only leave with them; otherwise the linked groups would lose sight of each other.
+
+- 
+If any group of a component is beyond R_out of its effective bubble, ChooseHome runs with that bubble ineligible for the groups that would stay.
+
+- 
+The component then goes to one of:
+
+- 
+an eligible bubble it keeps. This is the "neighbouring bubble" case, and it is exactly the merge case: an unlinked neighbour would only split it off again after 30 s;
+
+- 
+otherwise, a new bubble anchored at its AABB centre, if ρ ≤ R_in;
+
+- 
+otherwise, it is cut.
+
+- 
+The whole component moves in one batch: it moves in one frame and flips in one frame.
+
+Hysteresis, and why it cannot flap:
+
+- 
+Staying tolerates R_out. Entering a dynamic bubble needs R_in.
+
+- 
+After a roam exit, every member is within ρ ≤ R_in of the new anchor. The next roam exit needs a member to cover ≥ H = 7.5 km, which takes ≥ 30 s at boost.
+
+- 
+Returning to the old bubble needs a link to its keeper and a position within R_in of its anchor: again ≥ 7.5 km back inside, ≥ 30 s.
+
+- 
+Bound: ≤ 1 roam move per group per 30 s.
+
+- 
+A lone ship flying straight changes frame every 29,500/250 = 118 s at boost (236 s at cruise). That is ≤ 60/118 = 0.51 frame changes per client per minute E. Nothing is re-subscribed, because it is alone.
+
+Persistent bubbles (the body and the anchor never move):
+
+- 
+A persistent bubble is home only if its body node is in the component (team).
+
+- 
+A fight straddling R_out,b cannot move out: the body cannot move, and the edge members cannot enter a new bubble without losing the fight.
+
+- 
+The policy cuts the longest non-engagement MST edges on the paths from the body to the ineligible groups.
+
+- 
+It reports PersistentEdgeCut, plus VetoedWithinE if a cut edge is ≤ E.
+
+- 
+This is the one designed seam. Size R_b so that nothing is fought near it.
+
+- 
+A component with two bodies (a chain of ships between stations) is cut on the body-to-body path first.
+
+Hard limit:
+
+- 
+A group beyond R_b is reported as RoamOverrun. That is a group that cannot move (RoamBlocked), or a roam exit deferred or refused more than once.
+
+- 
+Ack stragglers never overrun: the server moved them at the plan.
+
+- 
+The physics margin gives ≤ 14 s (E, §3) before a physics query could reach the next slot. After that, the executor forces the move or the handoff and counts it.
+
+- 
+A hot host holding a single bubble may raise R_b, since Roam is a per-bubble input. At 100 km the float step is 7.8 mm (proposal §2.1). This makes whole-fight roam exits (N7) rarer.
+
+### 6. The §4.7 scenarios under per-group frame changes
+
+# | Changes? | What is different now | Resolution in this spec | 
+B1: closing from 150 km at 250 m/s | Yes: numbers, home choice | The trigger fires at D_merge = 4.0 km, after (150,000 − 4,000)/500 = 292 s. Detection comes by d ≥ 3.5 km and the flip by d ≥ 3.0 km = E. The AOI then subscribes by d ≥ 2,000 + 500·0.25 = 2,125 m. En route, each group roam-exits alone about twice (every 118 s), invisibly. With no re-centre, the home is the bubble that keeps its group within R_in (22 km) of its fixed anchor; otherwise a new bubble at the midpoint, in one batch | §2 ChooseHome, §3 | 
+B2: oscillation at a threshold | Yes: new roam band | Merge at 3.7–4.0 km. Split only after > 14 km for 30 s: ≤ 1 cycle per 50 s. At R_out: one exit, then re-entry only within R_in, ≥ 30 s later. Body: capture at R_in,b, keep at R_out,b (a 7.5 km band) | §3, §5 | 
+B3: drop between two bubbles | Yes: the merge takes up to L_max | The policy runs with Arrival. Hard links (≤ D_merge, or body capture): merge the component, choose the home as usual, and place the arrival there; WaitForBatches lists the batch. The drop hold (≤ 3 s, team) ends on the handoff ack AND the batch flip. L_max = 1 s fits. No hard links: join the bubble of the nearest member within J = 14 km if p is within R_in of its anchor. Otherwise move p ≤ N_max = 5 km toward that anchor. Otherwise create a new bubble at p. Never a veto on arrival: if the merge would need a cut, move p ≤ 5 km out of D_merge of everything (fixed direction order: away from the nearest member, then ±X, ±Y, ±Z). Otherwise Hold + DropIntoConflict (the admission queue) | §2, tests A1–A6 | 
+B4: chain A–B–C | Mechanism unchanged | Vetoes now come only from overflow and persistent-edge cuts. Kruskal with cannot-link; groups joining a side inherit it. Release when the gap > D_split, when the union has a home, or when an engagement link spans it | §2 veto rules | 
+B5: union above the envelope | Yes | No slot classes: overflow (ρ > R_in) means a cut. One batch per group per call. Frozen groups are never moved | §2 | 
+B6: merge across processes with players | Numbers only | Never planned: reported as CrossHostConflict. Placement keeps member gaps < D_nbr = 69 km on one host | §3 | 
+B7: mid-dogfight at merge time | Yes: the largest change | (a) The merge is not instant. During [plan, flip] (≤ L_max), the server has already moved the movers into the target slot but keeps their old SubChannelId. Each mover client stays in the old frame until it applies the change. Ship states and uploads carry the epoch (team's Phase 0 header). The frame change goes out in the plan frame, on the spawn channel (K11). Kit position-bearing uploads are decoded in the old frame until that client's ack; this is exact only on the ack's reliable-ordered channel, otherwise they need an epoch (depends on their weapon code). (b) An existing lock has both ends in one bubble (K5), so both ends move or both stay. A lock between a mover and a home member cannot start during the window: they are at d ≥ E ≥ 3 km until the flip, and the sub-channel hides them. (c) Shots in flight at the flip: kit damage entities keep a cached EntityInfo whose SubChannelId is stale until GetInfo() runs (K8). Without a refresh, damage from a missile fired just before the flip is refused against a target that flipped with it (DamageableEntity.cs:416). The executor shifts projectiles and hit-box histories by Δ at the move (K9) and refreshes GetInfo() at the flip. (d) The batch is the unit of the visibility flip. Per group, the ships of one fight would despawn and respawn for each other (K11). (e) Seated characters follow the seat snap on both sides (K7), so they need no epoch. The server moves them explicitly with their ship at the move. (f) Never the kit teleport: even after the team's patch (K6), it moves an entity inside its current frame and carries no epoch | §2 executor contract | 
+B8: dynamic bubble drifting into a station | Partly | The body rule is unchanged. The station edge is now a designed seam (PersistentEdgeCut), because neither the anchor nor the body can move | §5 | 
+B9: fleet dropping one ship at a time | Mostly unchanged | Arrivals need no frame change. They join within J = 14 km, and the drop point moves ≤ 5 km toward the fleet's anchor. Reservations remain the directory's job | B3 row | 
+B10: split during a fight | Yes: splits are batches | Engagement links block splits. D_split (14 km) ≫ E (3 km). Only the detached part moves; the keeper (most clients) never moves. AI targets must be entity references or universe doubles. Kit instigator refresh as in B7(c) | §2 Resolve | 
+B11: teleport past the roam radius | Replaced | A roam exit is a batch of the whole component, to a linked keeper's bubble or to a new bubble at its centre. No anchor moves; the home rule applies | §5 | 
+
+New scenarios introduced by per-group frame changes:
+
+# | Scenario | Resolution | 
+N1 | A client in a batch misses the deadline | The others flip at the deadline. The straggler's server position is already in the target slot, but its visibility stays old until its ack: it and its fight cannot see each other, like a lag spike. Counted. Physics does not know sub-channels. At d ≥ E = 3 km a 3 km overlap query can find it at once, and at 500 m/s closing it can touch a member after ≥ 3,000/500 = 6 s E. So gameplay physics queries filter by SubChannelId, and the executor resyncs the straggler after min(10 s epoch cap from proposal §4.2, 6 s) = 6 s E. Expected stragglers per batch: n·(1 − F(L_max)) (§3) | 
+N2 | A new plan meets an in-transit group | The in-transit group counts as a member of its target, and moving it is infinitely costly. Usually the newcomer simply moves into that target. When the component would need to move the frozen group, the plan is Deferred until the next check after that group flips: ≤ t = 1 s later, when its batch meets its deadline and L_max ≤ t. The flip then comes at d ≥ 3,000 − 500·1 = 2,500 m. With the next regular pass, the contact is subscribed at d ≥ 2,000 m and shown at ≥ 2,000 − 500·0.25 = 1,875 m, which is 125 m inside A0 E. With a targeted re-subscription at that late flip, it is shown at ≥ 2,375 m. Counted as Deferred. For zero exposure, set τ = 2t + L_max = 3 s: D_merge,max = 4.5 km, D_split = 14.5 km | 
+N3 | A group that cannot move (unseated kit character; mid-jump or mid-handoff) | Never in a batch. Its component is Deferred. A roam exit that is needed is RoamBlocked. Unseated kit characters in space should leave at a handoff moment (K6/K7) | 
+N4 | A-coupling: a fast group raises A for its whole bubble through f | A rises by ≤ 250·1.25 = 312.5 m, which can only trigger cascade merges. D_split does not depend on speed, so it cannot oscillate | 
+N5 | A group with several clients (passengers) | Its L is that of the slowest of its clients. Cost = 10 × clients + 1 | 
+N6 | A fight at a persistent edge | PersistentEdgeCut (§5). The metric decides whether R_b must grow | 
+N7 | A whole large fight must roam-exit | One large batch. Expected stragglers grow with batch size: n·(1 − F(L_max)), e.g. 0.064 per 64 clients at the p99.9 E. This is rare: the fight must drift more than 7.5 km past R_in as a whole. Mitigation: a larger R on a hot host. Log a histogram of batch sizes | 
+
+### 7. Table-driven tests for BubblePolicy (failure cases first)
+
+Form. NUnit [TestCaseSource] over a Dictionary<string, Case>, where Case = {config, a scene built with a small Scene builder, prior state, expected plan/state/reports}. EditMode tests.
+
+Scene defaults, unless a row says otherwise:
+
+- 
+τ = 2 s, a_max = 50;
+
+- 
+armed ships (Act = 3,000 m);
+
+- 
+dynamic bubbles on host 1 with R = 30 km;
+
+- 
+distances along X;
+
+- 
+metric Xyz.
+
+Config validation (Create throws, naming the invariant):
+
+ID | Case | Expected | 
+C1 | A0 ≤ 0, or T_lead < 0 | throws "A0/T_lead" | 
+C2 | v_boost ≤ 0, or v_cruise > v_boost | throws "speeds" | 
+C3 | t ≤ 0, L_max ≤ 0, or a_max < 0 | throws "times" | 
+C4 | T_guard ≤ 0 (D_split ≤ D_merge,max) | throws "D_split" | 
+C5 | T_split < 0, or T_roam ≤ 0 | throws "dwell" | 
+C6 | V_g,max·T_roam ≥ R_out (R_in ≤ 0), e.g. R = 8 km: R_out 7,500, R_in 0; or v_boost = 1,000 m/s at R = 30 km | throws "R_in" | 
+C7 | 2·R_in < D_split, e.g. R = 12 km: R_out 11,500, R_in 4,000, 2·R_in = 8,000 < 14,000 | throws "roam too small for D_split" | 
+C8 | Metric = Xz | accepted; roam still 3D (see T6) | 
+C9 | valid defaults | Thresholds equal §3 within 1e-9: D_merge,max 4,000; D_split 14,000; D_split,min 13,625; R_out 29,500; R_in 22,000; EngagementMax 44,000; J 14,000; D_nbr 69,000; D_cut,min 34,000 | 
+
+Input validation (Error set, plan empty, Next == state):
+
+ID | Case | Expected | 
+F1 | Now < state.LastNow | Error "clock" | 
+F2 | duplicate member, group or bubble id | Error "duplicate" | 
+F3 | member → unknown group; group → unknown bubble | Error "dangling" | 
+F4 | InTransitTo is an unknown bubble, or one on another host | Error "transit target" | 
+F5 | NaN or ∞ in U, Velocity, AoiRange or ActRange | Error "non-finite" | 
+F6 | persistent bubble without bodies; dynamic bubble with bodies | Error "bodies" | 
+F7 | Roam ≤ 0 | Error "roam" | 
+F8 | Arrival.GroupId collides with an existing group | Error "arrival id" | 
+F9 | a group's members straddle two bubbles | Error "group split" | 
+
+Must-not cases:
+
+ID | Case | Expected | 
+N1 | any scene | every existing bubble's anchor in the output equals the input; anchors occur only in NewBubble | 
+N2 | in-transit group beyond R_out and within D_merge of another bubble | not in any batch; Deferred if its component needs it moved | 
+N3 | Movable = false group beyond R_out | no batch; RoamBlocked | 
+N4 | two groups on different hosts, 1 km apart | no batch; one CrossHostConflict | 
+N5 | detached part at 20 km (> D_split) for 29.9 s | no batch; DetachedSince kept | 
+N6 | same, but an engagement link at 18 km (≤ EngagementMax = 44 km) ties it to the keeper | no split, no timer | 
+N7 | armed pair at 250 m/s, 4,001 m apart, different bubbles | no batch | 
+N8 | same-bubble pair at 13,999 m for 10 min | no timer, no batch | 
+N9 | settled scene, all within thresholds | empty plan; Next equals state except LastNow | 
+N10 | one scene needing a merge, a roam exit and a split that share groups | each group in exactly one batch | 
+N11 | engagement link to an unknown member; engagement link of 44,001 m | ignored; EngagementIgnored; no Error | 
+N12 | vetoed sides 5 km apart whose union still overflows | no merge; VetoHeld. At 2.9 km: VetoedWithinE | 
+N13 | arrival that would force an overflow cut | no veto created; p moved ≤ 5 km, or Hold + DropIntoConflict | 
+
+Thresholds (pure formula tests):
+
+ID | Case | Expected | 
+T1 | A at reach speeds for inputs 125/125; 250/250; a_max = 0 at 125; AoiRange.Of with v = 10⁵ and R_b = 30 km, then R_b = 10 km | 2,562.5; 2,625; 2,312.5; 30,000; 10,000 | 
+T2 | E: armed pair at 125 and at 250; unarmed pair | 3,000; 3,000; 2,562.5 / 2,625 | 
+T3 | D_merge: 125/125, 250/250, parked/250; with τ = 3 s | 3,700; 4,000; 3,600; 4,200 / 4,500 | 
+T4 | D_split at speeds 0, 125, 250 | 14,000 in all three (unarmed pair 13,625) | 
+T5 | parked unarmed pair 2,500 m apart, before and after a 250 m/s group joins one of their bubbles | before: no merge (D_merge 2,000 + 200·1.25 + 200 = 2,450); after: merge (2,000 + 350·1.25 + 200 = 2,637.5) | 
+T6 | Xz metric: 1 km apart in X/Z, 20 km vertically | merged under Xz; not merged under Xyz; roam uses 3D in both | 
+T7 | input AoiRange 3,000 m for a ship at 250/250 in a 30 km bubble; input 500 m below the recomputed reach value; seated character at 80 m | 3,000 used and AoiRangeMismatch; recomputed value used, no report; no report | 
+
+Merge:
+
+ID | Case | Expected | 
+M1 | AI group (bubble X) and player group (bubble Y) 3,999 m apart, 250 m/s | one batch: the AI group → Y (cost 1 < 11), reason Merge | 
+M2 | equal cost | the older bubble is home; if equally old, the lower id | 
+M3 | each mover would be 23 km from the other's anchor | both → a new bubble at the AABB centre; one batch; NewBubble.Key = min group id | 
+M4 | chain X–Y–Z, each link within D_merge | one home, one batch holding the movers from both other bubbles | 
+M5 | merge of two detached parts (keeper of neither bubble) | new bubble for the whole component | 
+M6 | in-transit group (target T) linked to group P in X; T eligible for P | P → T. If T is ineligible: Deferred, no batch | 
+M7 | a merge whose home would be a persistent bubble without its body in the component | the persistent bubble is never home | 
+
+Split:
+
+ID | Case | Expected | 
+S1 | part > D_split for 30.0 s | batch of the part → new bubble at its centre; keeper untouched | 
+S2 | keeper tie-breaks | most clients, then most groups, then min group id | 
+S3 | a group joins a part that has been detached for 25 s | the split waits 30 s from the join (max of the per-group timers) | 
+S4 | part re-links before 30 s | its groups are absent from Next.DetachedSince | 
+S5 | part holds a frozen group at 30 s | Deferred; timer kept; batch once the group is unfrozen | 
+
+Roam:
+
+ID | Case | Expected | 
+R1 | lone group 29,501 m from its anchor | batch → new bubble anchored at the group, RoamExit | 
+R2 | lone group at 29,499 m | nothing | 
+R3 | fight of 6 groups, one at 29,600 m | the whole component in one batch to a new bubble at its centre | 
+R4 | component with ρ > 22 km | cut at the longest non-engagement MST edge; VetoCreated; VetoedWithinE only if that edge ≤ E | 
+R5 | group oscillating ±1 km around R_out at 250 m/s over 120 s (4 calls/s simulated) | ≤ 1 roam move per 30 s | 
+R6 | group that left X, 21 km from X's anchor, linked to X's keeper | → X (entry within R_in). At 23 km: no entry into X | 
+R7 | group beyond R (hard) | RoamOverrun plus a batch | 
+
+Persistent:
+
+ID | Case | Expected | 
+P1 | group from a dynamic bubble within R_in,b of the body | moves into the persistent bubble | 
+P2 | group between R_in,b and R_out,b, unlinked to its members | no move (band) | 
+P3 | dynamic bubble drifting in; only part of it is linked to the body | only that component moves | 
+P4 | fight straddling R_out,b | PersistentEdgeCut, veto, report | 
+P5 | component holding two bodies | cut on the body-to-body path | 
+
+Arrival:
+
+ID | Case | Expected | 
+A1 | within D_merge of members of X and Y | merge batch; Arrival.Target = home; WaitForBatches = [that batch] | 
+A2 | 10 km from a member of X; p within R_in of X's anchor | join X, no batch | 
+A3 | within J of X's members; p 24 km from X's anchor | p moved 2 km toward the anchor, then join. At 28 km (a 6 km move needed): new bubble at p | 
+A4 | 15 km from every member | new bubble at p | 
+A5 | the merge would overflow | p moved ≤ 5 km out of D_merge, or Hold + DropIntoConflict | 
+A6 | other-host member within D_merge | p moved out if ≤ 5 km, else DropIntoCrossHost | 
+
+Vetoes:
+
+ID | Case | Expected | 
+V1 | sides > D_split apart | released | 
+V2 | the union now fits | released, then merged in the same call | 
+V3 | engagement link spans the sides | released + reported | 
+V4 | new group linked to side A, within D_merge of side B | not unioned with B | 
+V5 | one side has left entirely | dropped | 
+
+Determinism and invariants:
+
+ID | Case | Expected | 
+D1 | 100 random permutations of the input arrays | byte-identical Plan and Next | 
+D2 | Now = 0 vs Now = 10⁹ on a scene that does not depend on time | identical plan | 
+D3 | 1,000 seeded random scenes | after the plan is hypothetically applied: no same-host pair within D_merge sits in two bubbles unless it is vetoed, deferred or reported; every group is within R_out of its (new) anchor or reported; no batch holds a frozen group; each group is in ≤ 1 batch | 
+D4 | performance: 600 groups (500 in a 10 km sphere, 100 scattered) | Evaluate ≤ 1 ms p99 (target, E), with no allocations after warm-up. It pre-unions in cells of D_split,min/√3 = 13,625/√3 = 7,866 m (X/Z: /√2 = 9,634 m), only among groups of one effective bubble that hold no veto. It runs a sorted Kruskal only on components with a veto. Measure this in Phase 0 | 
+
+### What depends on the team's code (confirm before building)
+
+- 
+Group composition: which entities belong to a ship group (seated characters, missiles, drones, towed objects), and the Clients count per group.
+
+- 
+ShipEntity GetInfo (K8), and whether ship weapons use kit damage entities (the instigator refresh at the flip).
+
+- 
+Physics queries: whether lock and AI detection are physics queries, which sets the physics-margin budget (14 s vs 18 s). Whether gameplay physics queries filter by SubChannelId, which stragglers require (N1).
+
+- 
+Whether a lock needs visibility. Lock is 3 km; A is at most 2.625 km.
+
+- 
+The measured L per client (apply + ack, p50/p95/p99/p99.9 under load), which sets L_max at the p99.9 or above.
+
+- 
+Targeted re-subscription at late flips (stragglers, Deferred), or the regular pass only.
+
+- 
+Unseated kit characters: whether any exist in space bubbles (Movable = false).
+
+- 
+Station and planet R_b values.
+
+- 
+The send path: the grid manager stays disabled, or their ship sender replaces both kit paths. Otherwise the ship message and its epoch header are not sent (K10), and the teleport patch must cover both paths (K6).
+
+- 
+Low cruise: whether it is flown inside a bubble, and its top speed. Above about 524 m/s the invariants fail at R = 30 km (§3).
+
+- 
+Position-bearing client messages (attacks, skills, fire requests): which channel they use, and whether they need an epoch field (§2).
+

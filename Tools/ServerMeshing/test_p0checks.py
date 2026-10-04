@@ -5,6 +5,7 @@ from unittest import mock
 
 import p0cells
 import p0checks
+import p0results
 import rigrun
 
 SINCE = datetime.datetime(2026, 9, 26, 9, 59, 0)
@@ -105,8 +106,14 @@ def spec(**changes):
 
 class RunProblemsTests(unittest.TestCase):
     def test_refuses_a_family_without_checks(self):
-        with self.assertRaisesRegex(ValueError, "no checks for family 'fanout'"):
-            p0checks.run_problems(spec(family="fanout"), presence_run())
+        with self.assertRaisesRegex(ValueError, "no checks for family 'workerab'"):
+            p0checks.run_problems(spec(family="workerab"), presence_run())
+
+    def test_step_8b_families_are_refused(self):
+        for family in p0results.FAMILIES_8B:
+            with self.subTest(family), self.assertRaisesRegex(
+                    ValueError, f"no checks for family '{family}' yet: it needs stage 0b, step 8b"):
+                p0checks.run_problems(spec(family=family), presence_run())
 
     def test_refuses_an_unknown_layout(self):
         with self.assertRaisesRegex(ValueError, "layout 'thirds' is not one of"):
@@ -162,9 +169,16 @@ class RunProblemsTests(unittest.TestCase):
 
     def test_a_good_run_passes_every_family(self):
         run = presence_run()
-        for family in p0checks.FAMILY_CHECKS:
+        for family in set(p0checks.FAMILY_CHECKS) - set(p0results.FAMILIES_8B):
             with self.subTest(family):
-                self.assertEqual(p0checks.run_problems(spec(checks_family=family), run), [])
+                self.assertEqual(p0checks.run_problems(spec(checks_family=family, N=100), run),
+                                 ["no Prewarm burst with n 100 inside the measurement (bursts: none)"]
+                                 if family == "prewarm" else [])
+        for family in p0results.FAMILIES_8A:
+            with self.subTest(f"{family} checks"):
+                self.assertEqual(p0checks.FAMILY_CHECKS[family][:len(p0checks.COMMON)], p0checks.COMMON)
+                self.assertIn(p0checks.check_phantoms, p0checks.FAMILY_CHECKS[family])
+                self.assertIn(p0checks.check_v_move, p0checks.FAMILY_CHECKS[family])
 
     def test_checks_family_selects_the_target_tuple(self):
         slow = presence_run({"frames": 291})
@@ -204,6 +218,149 @@ class RunProblemsTests(unittest.TestCase):
         steered = spec(env={key: value for key, value in ENV.items() if key != "MESH_PUPPET_MOTION"})
         self.assertEqual(p0checks.check_puppets(steered, presence_run(e={"pup": None})), [])
         self.assertEqual(p0checks.check_coverage(steered, presence_run(e={"pup": None})), [])
+
+
+def record_0b(**windows):
+    """A p0cells0b.cell_record_0b of cell C with the given window lists (empty otherwise)."""
+    base = {name: [] for name in ("send", "sender", "phantom", "ships", "feeder", "sync_load", "monsters", "prewarm",
+                                  "steps")}
+    return dict(base, cell="C", **windows)
+
+
+def phantom(clock, bound=200, sink=0, vmove_n=10, vmove_mean=100.0):
+    return {"end": START + datetime.timedelta(seconds=clock), "seconds": 5.0, "bound_virtual": bound,
+            "bound_sink": sink, "vmove_n": vmove_n, "vmove_mean": vmove_mean, "vmove_p95": int(vmove_mean)}
+
+
+def monsters(clock, placed=200, alive=200):
+    return {"end": START + datetime.timedelta(seconds=clock), "seconds": 5.0, "cell": "C", "placed": placed,
+            "alive": alive, "awake": 190, "healed": 0, "respawned": 0, "gc0": 0}
+
+
+def send(clock, spawns_per_s):
+    return {"end": START + datetime.timedelta(seconds=clock), "seconds": 5.0,
+            "types": [{"type": 3, "calls": 0, "bytes": 0, "calls_per_s": spawns_per_s, "kb_per_s": 0.0, "us": 0.0}]}
+
+
+def burst(clock, n=100):
+    return {"end": START + datetime.timedelta(seconds=clock), "cell": "C", "kind": "kinematic", "n": n,
+            "per_frame": 0, "frames": 3, "spawn_ms": 12.5, "per_puppet_ms": 0.125, "after_frames": 120,
+            "over_budget": 0, "budget_ms": 33.33, "worst_ms": 40.0, "gc0": 0}
+
+
+def run_0b(c=None, e=None):
+    cells = {"C": {"p0b": c if c is not None else record_0b()}}
+    if e is not None:
+        cells["E"] = {"p0b": e}
+    return {"since": SINCE, "start": START, "end": END, "cells": cells}
+
+
+class Stage0bCheckTests(unittest.TestCase):
+    def test_check_phantoms(self):
+        env = dict(ENV, MESH_PHANTOM="virtual:200:eye:C")
+        cases = {
+            "a MESH_PHANTOM that does not parse": (dict(ENV, MESH_PHANTOM="virtual:200:eye"), record_0b(), None,
+                                                    ValueError),
+            "no Phantom window": (env, record_0b(), {}, ["C logged no Phantom window in the measurement with "
+                                                         "MESH_PHANTOM set"]),
+            "a window short of P": (env, record_0b(phantom=[phantom(5), phantom(10, bound=180)]), {},
+                                    ["C: 1 of 2 Phantom windows had other than 200 virtual phantoms bound "
+                                     "(10:00:10 180)"]),
+            "the step's P on a stepped row": (env, record_0b(phantom=[phantom(5, bound=100)]), {"step": 100}, []),
+            "sink phantoms": (dict(ENV, MESH_PHANTOM="sink:20:ship:C"), record_0b(phantom=[phantom(5, 0, 20)]), {}, []),
+            "every phantom bound": (env, record_0b(phantom=[phantom(5), phantom(10)]), {}, []),
+            "no phantoms": (ENV, record_0b(), {}, []),
+        }
+        for name, (value, rec, point, expected) in cases.items():
+            with self.subTest(name):
+                case = spec(family="observed", env=value, point=dict(point or {}), cells_read=["C", "E"])
+                run = run_0b(rec, record_0b())   # E binds no phantoms: MESH_PHANTOM names C only
+                if expected is ValueError:
+                    with self.assertRaisesRegex(ValueError, "MESH_PHANTOM: 'virtual:200:eye' has no cell field"):
+                        p0checks.check_phantoms(case, run)
+                else:
+                    self.assertEqual(p0checks.check_phantoms(case, run), expected)
+
+    def test_check_v_move(self):
+        cases = {
+            "no sampled window": (record_0b(phantom=[phantom(5, vmove_n=0)]),
+                                  ["no Phantom window sampled V move, expected a mean of at least 121.6 "
+                                   "(0.95 x 128)"]),
+            "below 0.95 x V": (record_0b(phantom=[phantom(5, vmove_mean=121.5)]),
+                               ["V move mean 121.5 is below 121.6 (0.95 x the expected 128)"]),
+            "at 0.95 x V, weighted by samples": (
+                record_0b(phantom=[phantom(5, vmove_n=30, vmove_mean=122.0), phantom(10, vmove_n=10,
+                                                                                     vmove_mean=120.4)]), []),
+        }
+        for name, (rec, expected) in cases.items():
+            with self.subTest(name):
+                self.assertEqual(p0checks.check_v_move(spec(family="targets", expected_v=128), run_0b(rec)), expected)
+        self.assertEqual(p0checks.check_v_move(spec(family="targets"), run_0b()), [])
+
+    def test_check_monsters(self):
+        cases = {
+            "no Monsters window": (record_0b(), None, ["no Monsters window in the measurement, expected 200 placed "
+                                                       "monsters"]),
+            "too few placed": (record_0b(monsters=[monsters(5, 150, 150)]), record_0b(monsters=[monsters(5, 40, 40)]),
+                               ["Monsters windows place 190 monsters (C 150, E 40), expected 200"]),
+            "one died": (record_0b(monsters=[monsters(5), monsters(10, alive=199)]), None,
+                         ["C: 1 of 2 Monsters windows had other than every placed monster alive (10:00:10 199 of "
+                          "200)"]),
+            "placed over two cells, all alive": (record_0b(monsters=[monsters(5, 150, 150)]),
+                                                 record_0b(monsters=[monsters(5, 50, 50)]), []),
+        }
+        for name, (c, e, expected) in cases.items():
+            with self.subTest(name):
+                case = spec(family="targets", placed=200, cells_read=["C", "E"])
+                self.assertEqual(p0checks.check_monsters(case, run_0b(c, e)), expected)
+        self.assertEqual(p0checks.check_monsters(spec(family="targets"), run_0b()), [])
+        self.assertEqual(p0checks.check_monsters(spec(family="targets", placed=0), run_0b()), [])
+
+    def test_check_prewarm(self):
+        with self.assertRaisesRegex(ValueError, "a prewarm spec needs N"):
+            p0checks.check_prewarm(spec(family="prewarm"), run_0b())
+        rise = [send(25, 2.0), send(30, 5.0), send(35, 400.0)]
+        cases = {
+            "no burst": ({}, record_0b(), ["no Prewarm burst with n 100 inside the measurement (bursts: none)"]),
+            "another n": ({}, record_0b(prewarm=[burst(32, 300)]),
+                          ["no Prewarm burst with n 100 inside the measurement (bursts: C n 300)"]),
+            "eyes without a rise": ({"eyes": True}, record_0b(prewarm=[burst(32)], send=rise[:2] + [send(35, 5.0)]),
+                                    ["C: Send t3 (spawn) calls did not rise within 2 s of the Prewarm burst at "
+                                     "10:00:32 (5.0/s before, 5.0/s after)"]),
+            "eyes without a Send window after": ({"eyes": True}, record_0b(prewarm=[burst(32)], send=rise[:2]),
+                                                 ["C: Send t3 (spawn) calls did not rise within 2 s of the Prewarm "
+                                                  "burst at 10:00:32 (5.0/s before, no window after)"]),
+            "the burst": ({}, record_0b(prewarm=[burst(32)]), []),
+            "eyes and a rise": ({"eyes": True}, record_0b(prewarm=[burst(32)], send=rise), []),
+        }
+        for name, (fields, rec, expected) in cases.items():
+            with self.subTest(name):
+                self.assertEqual(p0checks.check_prewarm(spec(family="prewarm", N=100, **fields), run_0b(rec)),
+                                 expected)
+
+
+class DroppedTickTests(unittest.TestCase):
+    """check_ticks on stage 0b families: drop-only windows tolerated up to a share (prewarm always); count misses fail."""
+
+    @staticmethod
+    def run_with(windows):
+        triples = [{"end": datetime.datetime(2026, 9, 26, 10, 0, 5 * k), "seconds": 5.0,
+                    "ticks": {"ticks": ticks, "dropped": dropped}} for k, (ticks, dropped) in enumerate(windows)]
+        return {"cells": {"C": {"p0": {"triples": triples, "saturated": set(), "ticks": None}}}}
+
+    def test_check_ticks_stage_0b(self):
+        clean, dropped, short = (100, 0), (98, 2), (97, 0)   # (ticks run, dropped): 98 + 2 make the 100
+        cases = {
+            "a window off by more than one tick fails a 0b family": ("targets", [clean] * 7 + [short], 1),
+            "drops in over a quarter of the windows fail a 0b family": ("targets", [clean] * 5 + [dropped] * 3, 1),
+            "a drop fails a stage 0a family": ("rates", [clean] * 7 + [dropped], 1),
+            "drops in a quarter of the windows pass a 0b family": ("targets", [clean] * 6 + [dropped] * 2, 0),
+            "drops never fail a prewarm run": ("prewarm", [dropped] * 8, 0),
+        }
+        for name, (family, windows, problems) in cases.items():
+            with self.subTest(name):
+                case = spec(family=family, cells_read=["C"])
+                self.assertEqual(len(p0checks.check_ticks(case, self.run_with(windows))), problems)
 
 
 class ExclusionTests(unittest.TestCase):

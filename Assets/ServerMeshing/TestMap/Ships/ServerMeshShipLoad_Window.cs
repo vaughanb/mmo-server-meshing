@@ -55,7 +55,7 @@ namespace MultiplayerARPG.MMO.Mesh
             ServerMeshShipCounters counters = ServerMeshShipCounters.Current;
             Census(counters);
             double now = Time.unscaledTimeAsDouble;
-            Logging.Log("Mesh", WindowLine(now - _windowStart, _mesh.OwnZoneId, counters, GC.CollectionCount(0) - _gcBase));
+            Logging.Log("Mesh", WindowLine(now - _windowStart, _mesh.OwnZoneId, counters, GC.CollectionCount(0) - _gcBase, _settings.HasParkSleep));
             StartWindow();
         }
 
@@ -78,7 +78,11 @@ namespace MultiplayerARPG.MMO.Mesh
                 else if (ship.Authority == ServerMeshShipAuthority.ServerAI)
                     counters.Ai++;
                 else if (ship.Authority == ServerMeshShipAuthority.Parked)
+                {
                     counters.Parked++;
+                    if (ship.ShipMovement.IsBodySleeping)
+                        counters.ParkedSleeping++;
+                }
                 else
                     counters.Mirror++;
                 if (ship.Authority == ServerMeshShipAuthority.ServerAI && ship.ShipPilot != null && ship.ShipPilot.OutsideRectangle)
@@ -111,10 +115,11 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>
         /// SettingLine is the load's setting line: its cell's planned AI, mirror and parked ships and pilots, the wire, scale,
         /// projectile mode, mirror velocity rule, self-acknowledgement (0 or 1) and AI prefab (enemy, or wave for
-        /// <paramref name="waveAi"/>), the area (minX,minZ,maxX,maxZ or none) and the prefab hash.
+        /// <paramref name="waveAi"/>), the park pin (" parkSleep 0|1" after aiPrefab, only when <paramref name="hasParkSleep"/>:
+        /// MESH_SHIP_PARK_SLEEP is set), the area (minX,minZ,maxX,maxZ or none) and the prefab hash.
         /// </summary>
         public static string SettingLine(string cell, int ai, int mirror, int parked, int pilots, ServerMeshShipWireKind wire, ServerMeshShipScale scale,
-            bool pooled, bool realMirrorVelocity, bool selfAck, bool waveAi, bool hasArea, Rect area, int prefabHash)
+            bool pooled, bool realMirrorVelocity, bool selfAck, bool waveAi, bool hasArea, Rect area, int prefabHash, bool hasParkSleep = false, bool parkSleep = false)
         {
             StringBuilder b = new StringBuilder(224);
             b.Append("Ships: cell ").Append(Printable(cell)).Append(" ai ").Append(Count(ai)).Append(" mirror ").Append(Count(mirror));
@@ -122,6 +127,8 @@ namespace MultiplayerARPG.MMO.Mesh
             b.Append(" | wire ").Append(WireName(wire)).Append(" scale ").Append(ScaleText(scale));
             b.Append(" projectiles ").Append(pooled ? "pooled" : "instantiate").Append(" mirrorVelocity ").Append(realMirrorVelocity ? "real" : "zero");
             b.Append(" selfAck ").Append(selfAck ? "1" : "0").Append(" aiPrefab ").Append(waveAi ? "wave" : "enemy");
+            if (hasParkSleep)
+                b.Append(" parkSleep ").Append(parkSleep ? "1" : "0");
             b.Append(" | area ");
             if (hasArea)
                 b.Append(Metres(area.xMin)).Append(',').Append(Metres(area.yMin)).Append(',').Append(Metres(area.xMax)).Append(',').Append(Metres(area.yMax));
@@ -134,9 +141,10 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>
         /// WindowLine is the Ships window line: every field always printed, zeros when empty (the patrol and mirror age
         /// percentiles print "none" when they have no sample), rates 0 when the window has no length, no NaN or negatives,
-        /// invariant and without braces. It sorts the counters' sample lists in place.
+        /// invariant and without braces; " | parked sleeping S of P" before gc0 only when <paramref name="parkSleepKey"/>
+        /// (MESH_SHIP_PARK_SLEEP is set). It sorts the counters' sample lists in place.
         /// </summary>
-        public static string WindowLine(double seconds, string cell, ServerMeshShipCounters c, long gc0)
+        public static string WindowLine(double seconds, string cell, ServerMeshShipCounters c, long gc0, bool parkSleepKey = false)
         {
             if (c == null)
                 throw new ArgumentNullException(nameof(c));
@@ -173,6 +181,8 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 b.Append(" p50 none ms frames none");
             }
+            if (parkSleepKey)
+                b.Append(" | parked sleeping ").Append(Count(c.ParkedSleeping)).Append(" of ").Append(Count(c.Parked));
             b.Append(" | gc0 ").Append(Count(gc0));
 
             return b.ToString();

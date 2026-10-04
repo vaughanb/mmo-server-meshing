@@ -286,6 +286,8 @@ class FitTests(unittest.TestCase):
             "two rate sets": (rows + presence_rows(arms=["idle"], rates={"fps": 30, "fixed_step_s": 0.02}),
                               "rows from two rate sets (60/0.03 and 30/0.02): fit one rate set at a time and convert "
                               "with block K"),
+            "two hosts": (rows + presence_rows(arms=["idle"], host="B"),
+                          "rows from two hosts (None and B): fit one machine at a time"),
             "two CPUs": (rows + presence_rows(arms=["idle"], cpu="Other CPU"),
                          "rows from two CPUs (Test CPU and Other CPU): fit one CPU at a time"),
             "two builds": (rows + presence_rows(arms=["idle"], build="b2"),

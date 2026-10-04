@@ -3,6 +3,7 @@
 The rig is a stand-in: p0blocks.run_spec returns synthetic rows on a fake clock, rigrun.now reads that clock, and
 Logs/p0 is a temporary folder, so no editor, database or real log is touched.
 """
+import argparse
 import contextlib
 import datetime
 import io
@@ -15,7 +16,10 @@ import p0blocks
 import p0load
 import p0plans
 import p0results
+import p0stepped
+import test_p0cells0b
 import test_p0geo
+import test_p0results
 
 START = datetime.datetime(2026, 9, 28, 10, 0, 0)
 
@@ -178,7 +182,7 @@ class BlockTests(unittest.TestCase):
                 rig = Rig(work=lambda spec: {1: 100.0, 2: 130.0, 3: 110.0}[spec["repeat"]])
                 history = earlier_rows([s for s in plan if s["repeat"] <= done_repeats], 180, rig.work)
                 session = self.session(["floor", "--resume", "--no-canary"], rig, history)
-                done = p0blocks.done_keys(history, "b1")
+                done = p0blocks.done_keys(history, "b1", None)
                 self.assertEqual(session.block([s for s in plan if s["key"] not in done], plan), 0)
                 self.assertEqual(len([s for s in rig.runs if s["repeat"] == 3]), 6)
                 self.assertIn("third repeats: 6", session.rep.lines)
@@ -225,7 +229,7 @@ class BlockTests(unittest.TestCase):
         history += earlier_rows(p0plans.canary_plan("check") + plan[:6], 90)
         rig = Rig(canaries=[106.0, 100.0, 100.0])
         session = self.session(["floor", "--resume"], rig, history)
-        done = p0blocks.done_keys(history, "b1")
+        done = p0blocks.done_keys(history, "b1", None)
         self.assertEqual(session.block([s for s in plan if s["key"] not in done], plan), 0)
         self.assertEqual(self.kinds(rig)[:6], [s["arm"] for s in plan[6:]])
         self.assertEqual(len([s for s in rig.runs if s.get("requeued")]), 12)
@@ -297,6 +301,161 @@ class BlockTests(unittest.TestCase):
             self.assertEqual(p0blocks.abgeo_block(session, session.args, frozenset()), 0)
         self.assertEqual(labels, ["b9-steered-b150", "b9-steered-b80", "b9-steered-b150"])
         self.assertEqual(len(session.mine), 18)
+
+
+class MachineTests(unittest.TestCase):
+    """Step 8a decision 1 and acceptance 4: rows of one build on hosts A and B never stand in for each other."""
+
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        patcher = mock.patch.object(p0blocks, "P0_LOGS", folder.name)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_resume_skips_only_this_hosts_rows(self):
+        plan = p0plans.floor_plan()[:4]
+        history = [dict(row, host="A") for row in earlier_rows(plan[:1], 60)]
+        history += [dict(row, host="B") for row in earlier_rows(plan[1:3], 60)]
+        self.assertEqual(p0blocks.done_keys(history, "b1", "A"), {plan[0]["key"]})
+        self.assertEqual(p0blocks.done_keys(history, "b1", "B"), {plan[1]["key"], plan[2]["key"]})
+        self.assertEqual(p0blocks.done_keys(history, "b2", "A"), set())
+
+    def session(self, history, host="A", cpu=None, canaries=()):
+        rig = Rig(canaries=canaries)
+        for target, name, value in ((p0blocks, "run_spec", rig.run_spec), (p0blocks.rigrun, "now", rig.now)):
+            patcher = mock.patch.object(target, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        args = argparse.Namespace(command="floor", no_canary=False)
+        return p0blocks.Session(args, "S", Rep(), {"build": "b1", "host": host, "cpu": cpu}, history), rig
+
+    def test_a_canary_is_judged_against_this_hosts_baseline(self):
+        history = [dict(baseline(), host="A"), dict(baseline(), host="B", metrics=[dict(baseline()["metrics"][0],
+                                                                                        value=120.0)])]
+        session, _ = self.session(history, canaries=[104.0])   # 4 % from A's 100, 5.5 % from a pooled 110
+        self.assertEqual(session.canary_once("test"), "ok")
+        self.assertIn("canary (test): C 104.0 ms/s against baseline 100.0 (4.0%): ok", session.rep.lines)
+        session, _ = self.session(history[1:], canaries=[104.0])
+        with self.assertRaises(p0blocks.Stopped) as caught:
+            session.canary_once("test")
+        self.assertEqual((caught.exception.code, caught.exception.reason),
+                         (2, "no baseline canary on build b1 host A: run p0load canary --baseline"))
+
+    def test_the_canary_state_and_the_rows_are_this_hosts(self):
+        recent = dict(baseline(end=(START - datetime.timedelta(minutes=30)).isoformat()), host="B")
+        session, _ = self.session([dict(baseline(), host="A"), recent])
+        self.assertEqual(session.last_canary, datetime.datetime(2026, 9, 28, 8, 0))   # A's, not B's recent one
+        self.assertEqual(session.ours(session.rows), [session.rows[0]])
+
+    def test_a_host_with_two_cpus_stops(self):
+        with self.assertRaises(p0blocks.Stopped) as caught:
+            self.session([dict(baseline(), host="A", cpu="X")], cpu="Y")
+        self.assertEqual((caught.exception.code, caught.exception.reason),
+                         (2, "host A ran on 2 CPUs (X and Y): give each machine its own host name"))
+
+
+def stepped_spec(steps=(50, 100), key="ks"):
+    return test_p0results.spec(family="fanout", key=key, stepped={"steps": list(steps), "hold": 40}, warmup=10,
+                               measure=110, cells_read=["C"])
+
+
+def step_rows(spec, accepted, since="2026-09-26T09:59:00", host=None):
+    """A stepped run's rows: accepted {P: bool} per planned step (a step left out has no row)."""
+    rows = []
+    for step, ok in accepted.items():
+        row = p0results.run_row(p0stepped.step_spec(spec, {"step": step}), None, {"build": "b1", "host": host},
+                                [] if ok else [f"C: step {step} failed"], None)
+        rows.append(dict(row, stepped_since=since, window_local={"since": since, "start": since, "end": since}))
+    return rows
+
+
+class SteppedTests(unittest.TestCase):
+    def patch(self, target, name, value):
+        patcher = mock.patch.object(target, name, value)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def stepped(self, lines, window=None, steps=(50, 100)):
+        self.patch(p0stepped.rigrun, "run_window", window or (lambda *a: (test_p0cells0b.START - datetime.timedelta(
+            seconds=60), test_p0cells0b.START, test_p0cells0b.END)))
+        self.patch(p0stepped.rigrun, "cell_lines", lambda *a: lines)
+        self.patch(p0stepped.rigrun, "cell_window", lambda *a: {})
+        self.patch(p0stepped.p0checks, "run_problems", lambda spec, run: [])
+        self.patch(p0stepped.p0checks, "exclusion", lambda spec, run: None)
+        with test_p0cells0b.fake_stage0b():
+            return p0stepped.run_stepped(stepped_spec(steps), Rep(), {"build": "b1", "host": "A"})
+
+    def test_a_run_that_raises_fails_every_step(self):
+        def fail(*_):
+            raise RuntimeError("Play ended during the measurement")
+        pairs = self.stepped([], window=fail)
+        self.assertEqual([(row["point"]["step"], row["accepted"], row["problems"], run) for row, run in pairs],
+                         [(50, False, ["Play ended during the measurement"], None),
+                          (100, False, ["Play ended during the measurement"], None)])
+
+    def test_one_row_per_step(self):
+        lines = [test_p0cells0b.step_line("09:59:50", 1, 2, 0, 50), test_p0cells0b.step_line("10:00:20", 2, 2, 50, 100)]
+        lines += test_p0cells0b.cell_lines()[2:]
+        pairs = self.stepped(lines)
+        rows = [row for row, _ in pairs]
+        self.assertEqual([(row["plan_key"], row["point"], row["accepted"], row["window_local"]["start"],
+                           row["window_local"]["end"]) for row in rows],
+                         [("ks", {"players": 60, "step": 50}, True, "2026-09-26T10:00:01", "2026-09-26T10:00:20"),
+                          ("ks", {"players": 60, "step": 100}, True, "2026-09-26T10:00:31", "2026-09-26T10:01:00")])
+        self.assertEqual({(row["stepped_since"], row["net_saturated"], row["stage"]) for row in rows},
+                         {("2026-09-26T09:59:00", None, "0b")})
+        self.assertEqual([len(run["cells"]["C"]["p0b"]["send"]) for _, run in pairs], [2, 0])
+        self.assertEqual(p0stepped.complete_keys(rows), {"ks"})
+
+    def test_a_step_without_a_window_is_a_failed_row(self):
+        pairs = self.stepped([test_p0cells0b.step_line("09:59:50", 1, 2, 0, 50)])
+        self.assertEqual([(row["point"]["step"], row["accepted"], row["problems"]) for row, _ in pairs],
+                         [(50, True, []), (100, False, ["step 2/2 (P 100) logged no Phantom step line"])])
+        self.assertEqual(p0stepped.complete_keys([row for row, _ in pairs]), set())
+
+    def test_step_spec(self):
+        window = {"step": 200, "start": test_p0cells0b.START, "end": test_p0cells0b.at("10:00:45")}
+        sub = p0stepped.step_spec(stepped_spec(), window)
+        self.assertEqual((sub["point"], sub["measure"], sub["key"]), ({"players": 60, "step": 200}, 45, "ks"))
+        self.assertEqual(p0stepped.step_spec(stepped_spec(), {"step": 50})["measure"], 0)
+
+    def test_a_stepped_run_is_done_only_with_every_step(self):
+        spec = stepped_spec()
+        cases = {
+            "a failed step": (step_rows(spec, {50: True, 100: False}), set()),
+            "a missing step": (step_rows(spec, {50: True}), set()),
+            "steps of two runs": (step_rows(spec, {50: True}) + step_rows(spec, {100: True}, "2026-09-26T11:00:00"),
+                                  set()),
+            "another host's run": (step_rows(spec, {50: True, 100: True}, host="B"), set()),
+            "a later complete run": (step_rows(spec, {50: True, 100: False}) + step_rows(
+                spec, {50: True, 100: True}, "2026-09-26T11:00:00"), {"ks"}),
+        }
+        for name, (rows, expected) in cases.items():
+            with self.subTest(name):
+                self.assertEqual(p0blocks.done_keys(rows, "b1", None), expected)
+
+    def test_the_verdict_needs_every_step(self):
+        spec = stepped_spec()
+        cases = {
+            "a failed step": ({50: True, 100: False}, 1,
+                              "not accepted: fanout main puppets-kinematic r1 (key ks): step 100: C: step 100 failed"),
+            "every step": ({50: True, 100: True}, 0, "1 of 1 planned runs accepted"),
+        }
+        for name, (accepted, code, line) in cases.items():
+            with self.subTest(name):
+                self.patch(p0blocks.p0stepped, "run_stepped",
+                           lambda spec, rep, context, accepted=accepted: [(row, None)
+                                                                         for row in step_rows(spec, accepted)])
+                folder = tempfile.TemporaryDirectory()
+                self.addCleanup(folder.cleanup)
+                self.patch(p0blocks, "P0_LOGS", folder.name)
+                args = argparse.Namespace(command="fanout", no_canary=True)
+                session = p0blocks.Session(args, "S", Rep(), {"build": "b1"}, [])
+                self.assertEqual(session.block([spec]), code)
+                self.assertIn(line, session.rep.lines)
+                written = p0results.read_rows(os.path.join(folder.name, "rig_fantasy_fanout_S.jsonl"))
+                self.assertEqual([row["point"]["step"] for row in written], [50, 100])
 
 
 if __name__ == "__main__":

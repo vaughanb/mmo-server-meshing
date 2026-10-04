@@ -36,6 +36,8 @@ namespace MultiplayerARPG.MMO.Mesh
         public int Mirror;
         /// <summary>Parked is the live Parked ships.</summary>
         public int Parked;
+        /// <summary>ParkedSleeping is the live Parked ships whose rigidbody PhysX reports asleep at the window's end.</summary>
+        public int ParkedSleeping;
         /// <summary>Phantom is the live ships owned by a client connection (phantom ships).</summary>
         public int Phantom;
         /// <summary>Pilots is the live seated-pilot characters this server spawned.</summary>
@@ -88,7 +90,7 @@ namespace MultiplayerARPG.MMO.Mesh
             PatrolSpeeds.Clear();
             MirrorAges.Clear();
             MirrorFrames.Clear();
-            Ships = Ai = Mirror = Parked = Phantom = Pilots = Seated = Outside = NotInSlot = Pending = 0;
+            Ships = Ai = Mirror = Parked = ParkedSleeping = Phantom = Pilots = Seated = Outside = NotInSlot = Pending = 0;
 
             Scans = Casts = Shots = Bolts = Hits = Respawns = ShieldWrites = RpcSends = Uploads = Stale = Bad = 0;
             PilotMs = EngineMs = CombatMs = BoltMs = MirrorMs = 0;

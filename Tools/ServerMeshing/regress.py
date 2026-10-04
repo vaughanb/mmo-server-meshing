@@ -96,7 +96,10 @@ ENV_KEYS = ["MESH_NO_MONSTER_HANDOFF", "MESH_FAULT_DIE_ON_NOTICE", "MESH_GHOST_L
             # step 7b's teleport self-ack and AI ship class
             "MESH_LOAD_SHIPS", "MESH_LOAD_SHIP_PILOTS", "MESH_SHIP_WIRE", "MESH_SHIP_SCALE", "MESH_SHIP_PROJECTILES",
             "MESH_SHIP_MIRROR_VELOCITY", "MESH_RIG_SHIPS", "MESH_PUPPET_FEEDER", "MESH_SYNC_LOAD",
-            "MESH_METER_RECORD_SIZES", "MESH_SHIP_SELF_ACK", "MESH_SHIP_AI_PREFAB"]
+            "MESH_METER_RECORD_SIZES", "MESH_SHIP_SELF_ACK", "MESH_SHIP_AI_PREFAB",
+            # Phase 0 step 8a (p0tools.ENV_REGISTRY via p0stage0b): pre-warm bursts, the parked-ship pin and placed
+            # monsters
+            "MESH_PREWARM", "MESH_SHIP_PARK_SLEEP", "MESH_MONSTER_PLACE"]
 EXTRA_ENV = {}   # --env KEY=VALUE from the command line, applied to every Play request of the run
 
 # Two-machine runs (--remote-cells): the named cells are served by the other machine, started and read over SSH by

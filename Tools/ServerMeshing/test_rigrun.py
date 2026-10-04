@@ -1,8 +1,10 @@
 """Unit tests for rigrun (python -m unittest discover -s Tools/ServerMeshing -p "test_*.py").
 
 start_problems, host_context, build_id, cell_lines, run_window and cell_window read the editor, PowerShell or the logs:
-the offline re-grade (test_abregrade) and the dry runs cover them, not these tests.
+the offline re-grade (test_abregrade) and the dry runs cover them, not these tests; run_window's call order and its
+on_play hook are checked here with every regress call faked (no editor).
 """
+import contextlib
 import copy
 import itertools
 import unittest
@@ -144,6 +146,55 @@ class CheckEnvTests(unittest.TestCase):
             for name, env in cases.items():
                 with self.subTest(name):
                     self.assertIsNone(rigrun.check_env(env))
+
+
+class RunWindowTests(unittest.TestCase):
+    """rigrun.run_window's order with every regress call faked: on_play runs once Play is up, before the warm-up, and an
+    exception it raises stops Play and is re-raised (step 8a decision 5)."""
+
+    def run_window(self, on_play=None):
+        calls = []
+
+        def note(name, result=None):
+            def call(*args, **kwargs):
+                calls.append(name)
+                return result
+            return call
+        fakes = {"kill_bots": note("kill_bots"), "kit_process_count": note("kit_process_count", 0),
+                 "db_reset": note("db_reset"), "request_play": note("request_play"), "wait_play": note("wait_play"),
+                 "play_still_running": note("play_still_running", True), "stop_play": note("stop_play", 0),
+                 "HOLD": "Z:/no such folder/hold"}
+        with contextlib.ExitStack() as stack:
+            for name, value in fakes.items():
+                stack.enter_context(mock.patch.object(rigrun.r, name, value))
+            stack.enter_context(mock.patch.object(rigrun.time, "sleep",
+                                                  lambda seconds: calls.append(f"sleep {seconds}")))
+            hook = None if on_play is None else (lambda play_start: (calls.append("on_play"), on_play(play_start)))
+            try:
+                return rigrun.run_window({"MESH_BAND": "80"}, 10, 40, rigrun.Report("test"), hook), calls
+            except RuntimeError as ex:
+                return ex, calls
+
+    def test_an_on_play_that_raises_stops_play(self):
+        def boom(play_start):
+            raise RuntimeError("the sink did not start")
+        error, calls = self.run_window(boom)
+        self.assertEqual(str(error), "the sink did not start")
+        self.assertEqual(calls, ["kill_bots", "kit_process_count", "db_reset", "request_play", "wait_play", "on_play",
+                                 "stop_play"])
+
+    def test_on_play_runs_after_play_is_up_before_the_warmup(self):
+        starts = []
+        (play_start, start, end), calls = self.run_window(starts.append)
+        self.assertEqual(calls, ["kill_bots", "kit_process_count", "db_reset", "request_play", "wait_play", "on_play",
+                                 "sleep 10", "sleep 40", "play_still_running", "stop_play"])
+        self.assertEqual(starts, [play_start])
+        self.assertTrue(play_start <= start <= end)
+
+    def test_without_on_play(self):
+        _, calls = self.run_window()
+        self.assertEqual(calls, ["kill_bots", "kit_process_count", "db_reset", "request_play", "wait_play", "sleep 10",
+                                 "sleep 40", "play_still_running", "stop_play"])
 
 
 if __name__ == "__main__":

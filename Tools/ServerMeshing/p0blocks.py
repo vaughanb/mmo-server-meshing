@@ -7,13 +7,15 @@ accept-a (rig parts, checks, overhead, the part C/D commands) and abgeo (abload 
     session = p0blocks.Session(args, stamp, rep, rigrun.host_context(), history)
     code = session.block(specs, plan)      # 0 every planned run accepted, 1 not; raises Stopped (exit 3)
     p0blocks.run_spec(spec, rep, context)  # (row, run) of one rig run; a run that raises is a failed run
+    p0blocks.run_rows(spec, rep, context)  # [(row, run)]: one, or one per step of a stepped run (decision 4)
 
 Canaries: a check canary drifted more than 5 % from its build's baseline, or not accepted, is repeated at once; a
 repeat that passes after a drift queues the runs since the last good canary again once, at the end (under --resume
 the earlier invocation's runs on this build since that canary too; third repeats are decided again instead); a second
 drift, two unaccepted canaries in a row or no pass in 3 tries stop the invocation (Stopped, exit 3). A block starts
 with a canary unless the newest canary on its build passed under 2 h ago. Third repeats are decided over the whole
-block plan and this build's rows only, so a resumed block still gets them.
+block plan and this build's rows only, so a resumed block still gets them. "This build" is always this machine,
+(build, host) (step 8a decision 1); a stepped run is done only when every one of its steps has an accepted row.
 """
 import datetime
 import glob
@@ -25,16 +27,15 @@ import abgrade
 import abload
 import p0accept
 import p0base
-import p0cells
-import p0checks
 import p0plans
 import p0results
+import p0stepped
 import regress as r
 import rigrun
 
 P0_LOGS = os.path.join(r.LOGS, "p0")
 ABLOAD = os.path.join(os.path.dirname(os.path.abspath(__file__)), "abload.py")
-CANARY_FAMILIES = ("rates", "presence", "density", "floor", "abgeo")
+CANARY_FAMILIES = ("rates", "presence", "density", "floor", "abgeo") + p0results.FAMILIES_8A
 CANARY_EVERY = datetime.timedelta(hours=2)
 CANARY_TRIES = 3
 PER_FRAME = "work_ms_per_measured_frame"   # derived for density's uncapped bridge, whose ms/s says nothing
@@ -85,20 +86,20 @@ def read_history(extra=()):
     return paths, p0results.read_rows(paths)
 
 
-def done_keys(rows, build):
-    """Plan keys with an accepted, non-drift run row on this build (--resume skips them)."""
-    return {row["plan_key"] for row in p0results.apply_drift(p0results.rows_of_type(rows, "run"))
-            if row.get("accepted") and row.get("build") == build and row.get("plan_key")}
+def done_keys(rows, build, host):
+    """Plan keys with a complete, non-drift run on this machine, (build, host) (--resume skips them)."""
+    runs = p0results.apply_drift(p0results.rows_of_type(rows, "run"))
+    return p0stepped.complete_keys([row for row in runs if p0results.machine(row) == (build, host)])
 
 
-def canary_state(rows, build):
-    """(last good, scheduling) window ends of this build's canaries: the newest canary that judged the machine good
+def canary_state(rows, build, host):
+    """(last good, scheduling) window ends of this machine's canaries: the newest canary that judged the machine good
     (an accepted baseline, or an accepted check that did not drift, per p0results.apply_drift), and the same when it is
     also the newest canary of all, else None (the newest drifted or was not accepted, so the next block needs a
     canary before its first run). Both None without a good canary."""
     canaries = sorted(((datetime.datetime.fromisoformat(row["window_local"]["end"]), row)
                        for row in p0results.apply_drift(rows) if row.get("family") == "canary"
-                       and row.get("build") == build and (row.get("window_local") or {}).get("end")),
+                       and p0results.machine(row) == (build, host) and (row.get("window_local") or {}).get("end")),
                       key=lambda canary: canary[0])
     good = [end for end, row in canaries
             if row.get("accepted") and (row.get("arm") == "baseline" or row.get("drift") is False)]
@@ -110,25 +111,21 @@ def canary_state(rows, build):
 def run_spec(spec, rep, context):
     """(row, run) of one planned rig run: its mesh-p0/1 row whatever happened and the run p0checks graded (None when
     it failed). A run that raises or cannot be graded is a failed run."""
-    maps = dict(r.ZONES)
     try:
         since, start, end = rigrun.run_window(spec["env"], spec["warmup"], spec["measure"], rep)
     except Exception as ex:  # one run's boundary: its row is written as failed, and the block goes on
         return p0results.run_row(spec, None, context, [str(ex)], "run failed"), None
-    run = {"since": since, "start": start, "end": end, "cells": {}}
-    try:
-        for cid in spec["cells_read"]:
-            run["cells"][cid] = {"structural": rigrun.cell_window(cid, maps[cid], since, start, end),
-                                 "p0": p0cells.cell_record(cid, rigrun.cell_lines(cid, maps[cid], since), start, end)}
-        problems, excluded = p0checks.run_problems(spec, run), p0checks.exclusion(spec, run)
-        return p0results.run_row(spec, run, context, problems, excluded), run
-    except Exception as ex:  # one run's boundary: a run whose logs cannot be graded is written as failed
-        return p0results.run_row(spec, dict(run, cells={}), context, [f"row not graded: {ex}"], "run failed"), None
+    return p0stepped.graded(spec, since, start, end, lambda: p0stepped.cell_lines(spec, since), context)
+
+
+def run_rows(spec, rep, context):
+    """[(row, run)] of one planned run: run_spec's one pair, or run_stepped's one per step."""
+    return p0stepped.run_stepped(spec, rep, context) if spec.get("stepped") else [run_spec(spec, rep, context)]
 
 
 def row_text(spec, row):
     """A run's report line: its spec, then 'accepted' with each cell's work ms/s, or why it was not accepted."""
-    point = " ".join(f"{key}={value}" for key, value in (spec.get("point") or {}).items())
+    point = " ".join(f"{key}={value}" for key, value in (row.get("point") or spec.get("point") or {}).items())
     head = f"{spec['family']} {spec['case']} {spec['arm']} {point} r{spec['repeat']} (key {spec['key']})"
     if row["accepted"]:
         work = ", ".join(f"{m['cell']} {m['value']:.1f}" for m in row["metrics"]
@@ -152,40 +149,51 @@ def with_frame_metric(rows):
 
 class Session:
     """One invocation's rig runs: the report, the host context, the JSONL files it appends to, every run row known
-    (Logs/p0 and this invocation's), the block plan and the canary state."""
+    (Logs/p0 and this invocation's), the block plan and the canary state. Its machine is (build, host) of the context;
+    Stopped (exit 2) when the history and the context state two CPUs for one host."""
 
     def __init__(self, args, stamp, rep, context, history):
         self.args, self.rep, self.context, self.build = args, rep, context, context["build"]
+        self.host, self.stamp = context.get("host"), stamp
         self.family = "accept" if args.command == "accept-a" else args.command
         self.rows = p0results.rows_of_type(history, "run")
+        problems = p0results.cpu_problems(self.rows + [context])
+        if problems:
+            raise Stopped(2, "; ".join(problems))
         self.mine = []          # indices into self.rows of this invocation's block rows
         self.plan = []          # the whole block plan (block()): the verdict counts every one of its keys
         self.since_good = []    # block specs run since the last good canary, earlier invocations' included (block())
         self.redecide = False   # the last checkpoint's canary drifted, so the third repeats are decided again
         self.canaries = args.command in CANARY_FAMILIES and not args.no_canary
-        self.rows_path = os.path.join(P0_LOGS, p0results.file_name(p0results.FAMILY_GAME[self.family], self.family,
-                                                                   stamp))
+        self.rows_path = self.path(p0results.FAMILY_GAME.get(self.family, "neutral"))
         self.canary_path = os.path.join(P0_LOGS, p0results.file_name("neutral", "canary", stamp))
-        self.last_good, self.last_canary = canary_state(self.rows, self.build)
+        self.last_good, self.last_canary = canary_state(self.rows, self.build, self.host)
+
+    def path(self, game):
+        """The JSONL file of this invocation's block rows of one game (a spec's own game names its file)."""
+        return os.path.join(P0_LOGS, p0results.file_name(game, self.family, self.stamp))
 
     def ours(self, rows):
-        """The rows of this invocation's build."""
-        return [row for row in rows if row.get("build") == self.build]
+        """The rows of this invocation's machine, (build, host)."""
+        return [row for row in rows if p0results.machine(row) == (self.build, self.host)]
 
     def run(self, spec, label):
-        """Runs one block spec, appends its row and notes it; returns (row, run)."""
-        row, run = run_spec(spec, self.rep, self.context)
+        """Runs one block spec (run_rows: one row, or one per step of a stepped spec), appends its rows to the file of
+        their game and notes them; returns the last (row, run)."""
+        pairs = run_rows(spec, self.rep, self.context)
+        row = pairs[0][0]
         if spec.get("third_reason") and row["accepted"]:
             rows = with_frame_metric(p0results.apply_drift(self.ours(self.rows) + [row]))
             try:
                 row["replaces_repeat"] = p0plans.replaced_repeat(spec, rows, THIRD[self.family][0])
             except ValueError as ex:
                 self.rep.note(f"    replaces_repeat not set (its fit falls back to delete-one-run groups): {ex}")
-        p0results.write_rows(self.rows_path, [row])
-        self.mine.append(len(self.rows))
-        self.rows.append(row)
-        self.rep.note(f"{label} {row_text(spec, row)}")
-        return row, run
+        for row, _ in pairs:
+            p0results.write_rows(self.path(row["game"]), [row])
+            self.mine.append(len(self.rows))
+            self.rows.append(row)
+            self.rep.note(f"{label} {row_text(spec, row)}")
+        return pairs[-1]
 
     def canary_once(self, why):
         """Runs one check canary and appends its row: "ok", "drift" (more than 5 % from the build's baseline) or
@@ -197,9 +205,10 @@ class Session:
         if not row["accepted"]:
             self.rep.note(f"canary ({why}) {row_text(spec, row)}")
             return "unaccepted"
-        baseline = p0results.canary_baselines(self.rows).get(row["build"])
+        baseline = p0results.canary_baselines(self.rows).get(p0results.machine(row))
         if baseline is None:
-            raise Stopped(2, f"no baseline canary on build {row['build'][:12]}: run p0load canary --baseline")
+            raise Stopped(2, f"no baseline canary on build {row['build'][:12]} host {row.get('host')}: run p0load "
+                             f"canary --baseline")
         work = p0results.canary_work(row)
         result = "drift" if p0base.drifted(work, baseline) else "ok"
         self.rep.note(f"canary ({why}): C {work:.1f} ms/s against baseline {baseline:.1f} "
@@ -256,7 +265,7 @@ class Session:
         metric, thresholds = THIRD[self.family]
         drifted = p0results.apply_drift(self.rows)
         ours = self.ours(drifted)
-        done = {row["plan_key"] for row in ours if row.get("accepted") and row.get("plan_key")}
+        done = p0stepped.complete_keys(ours)
         ran = {}
         for index in self.mine:
             ran.setdefault(drifted[index].get("plan_key"), []).append(drifted[index])
@@ -300,26 +309,25 @@ class Session:
         return self.verdict()
 
     def verdict(self):
-        """0 when, on this build and after canary drift, the last row of every plan key of the block (the whole plan, so
-        under --resume the runs an earlier invocation made count, and this invocation's runs, third repeats included)
-        is accepted, else 1 (each missed one listed)."""
+        """0 when, on this machine and after canary drift, the last run of every plan key of the block (the whole plan,
+        so under --resume the runs an earlier invocation made count, and this invocation's runs, third repeats
+        included) is accepted, every step of a stepped run, else 1 (each missed one listed)."""
         drifted = p0results.apply_drift(self.rows)
         by_key = {spec["key"]: spec for spec in self.plan}
         keys = list(dict.fromkeys(list(by_key) + [drifted[index].get("plan_key") for index in self.mine]))
-        wanted, mine, last = set(keys), set(self.mine), {}
-        for index, row in enumerate(drifted):
-            if row.get("plan_key") in wanted and (row.get("build") == self.build or index in mine):
-                last[row["plan_key"]] = row
+        wanted, mine = set(keys), set(self.mine)
+        last = dict(p0stepped.run_groups([row for index, row in enumerate(drifted) if row.get("plan_key") in wanted
+                                          and (self.ours([row]) or index in mine)]))
         missed = 0
         for key in keys:
-            row = last.get(key)
-            if row is None:
+            group = last.get(key)
+            if group is None:
                 spec = by_key[key]
                 self.rep.note(f"not run: {spec['family']} {spec['case']} {spec['arm']} r{spec['repeat']} (key {key})")
-            elif not row.get("accepted"):
-                reasons = "; ".join((row.get("problems") or []) + [row.get("excluded_reason") or ""]).strip("; ")
+            elif p0stepped.missing_steps(group):
+                row = group[0]
                 self.rep.note(f"not accepted: {row['family']} {row['case']} {row['arm']} r{row['repeat']} "
-                              f"(key {key}): {reasons}")
+                              f"(key {key}): {p0stepped.why_not(group)}")
             else:
                 continue
             missed += 1

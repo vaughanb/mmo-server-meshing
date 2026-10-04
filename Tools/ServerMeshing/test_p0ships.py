@@ -23,7 +23,8 @@ SHIPS_FIELDS = {
     "scans": 500, "casts": 7500, "shots": 300, "bolts": 600, "hits": 40, "respawns": 0, "shield_writes": 1500,
     "rpc_sends": 2400, "uploads": 0, "stale": 0, "bad": 0, "pilot_ms_per_s": 0.4, "engine_ms_per_s": 0.3,
     "combat_ms_per_s": 0.2, "bolts_ms_per_s": 0.9, "mirror_ms_per_s": 0.0, "gc0": 1, "pending": None, "patrol_n": None,
-    "mirror_age_n": None, "mirror_age_ms": None, "mirror_age_frames": None}
+    "mirror_age_n": None, "mirror_age_ms": None, "mirror_age_frames": None, "parked_sleeping": None,
+    "parked_total": None}
 # Step 7b's form of the same window: pending, a patrol count and the mirror feed age.
 SHIPS_7B_SAMPLE = (
     "Ships window 5.00 s: cell C ships 50 ai 50 mirror 0 parked 0 phantom 0 pilots 0 seated 0 outside 0 notInSlot 0 "
@@ -36,11 +37,13 @@ SHIPS_7B_EMPTY = (SHIPS_7B_SAMPLE.replace("patrol n 120 p50 1.05", "patrol n 0 p
                   .replace("mirror age n 40 p50 16.7 ms frames 1", "mirror age n 0 p50 none ms frames none"))
 SHIPS_7B_EMPTY_FIELDS = dict(SHIPS_7B_FIELDS, patrol_n=0, patrol_p50=None, mirror_age_n=0, mirror_age_ms=None,
                              mirror_age_frames=None)
+# Step 8a's parked sleeping group (MESH_SHIP_PARK_SLEEP set) before gc0, on both forms of the window.
+SHIPS_PARK_SAMPLE = SHIPS_7B_SAMPLE.replace(" | gc0 1", " | parked sleeping 12 of 200 | gc0 1")
 SETTINGS_SAMPLE = ("Ships: cell C ai 50 mirror 0 parked 0 pilots 0 | wire header56 scale 0.03 projectiles instantiate "
                    "mirrorVelocity real selfAck 0 aiPrefab enemy | area none | prefab hash -12345678")
 SETTINGS_FIELDS = {"cell": "C", "ai": 50, "mirror": 0, "parked": 0, "pilots": 0, "wire": "header56", "scale": "0.03",
                    "projectiles": "instantiate", "mirror_velocity": "real", "self_ack": 0, "ai_prefab": "enemy",
-                   "area": "none", "prefab_hash": -12345678}
+                   "area": "none", "prefab_hash": -12345678, "park_sleep": None}
 SETTINGS_7_SAMPLE = SETTINGS_SAMPLE.replace(" selfAck 0 aiPrefab enemy", "").replace("Velocity real", "Velocity zero")
 FEEDER_SAMPLE = ("Feeder window 5.00 s: ship 200 observed 0 | snapshots 20000 "
                  "| ms/s encode 0.30 decode 0.40 accept 0.50 pose 1.20 total 2.40 | us/snapshot 0.120 | gc0 0")
@@ -85,6 +88,12 @@ class WindowParserTests(unittest.TestCase):
             "no mirror age and speeds": (SHIPS_7B_EMPTY.replace("frames none", "frames 1"), None),
             "mirror age without frames": (SHIPS_7B_SAMPLE.replace(" frames 1", ""), None),
             "mirror age after gc0": (SHIPS_SAMPLE + " | mirror age n 40 p50 16.7 ms frames 1", None),
+            "parked sleeping after gc0": (SHIPS_7B_SAMPLE + " | parked sleeping 0 of 200", None),
+            "parked sleeping before the mirror age": (
+                SHIPS_PARK_SAMPLE.replace(" | parked sleeping 12 of 200", "")
+                .replace(" | mirror age", " | parked sleeping 12 of 200 | mirror age"), None),
+            "more sleeping than parked": (SHIPS_PARK_SAMPLE.replace("sleeping 12 of", "sleeping 201 of"), None),
+            "parked sleeping without a total": (SHIPS_PARK_SAMPLE.replace(" of 200", ""), None),
             "a sample": (SHIPS_SAMPLE, dict(SHIPS_FIELDS, end=None)),
             "a step 7b sample": (SHIPS_7B_SAMPLE, dict(SHIPS_7B_FIELDS, end=None)),
             "a step 7b log line": (stamped(SHIPS_7B_SAMPLE), dict(SHIPS_7B_FIELDS, end=END)),
@@ -96,6 +105,10 @@ class WindowParserTests(unittest.TestCase):
             "a log line": (stamped(SHIPS_SAMPLE), dict(SHIPS_FIELDS, end=END)),
             "trailing whitespace": (SHIPS_SAMPLE + "\r\n", dict(SHIPS_FIELDS, end=None)),
             "a named cell": (SHIPS_SAMPLE.replace("cell C ", "cell NE "), dict(SHIPS_FIELDS, cell="NE", end=None)),
+            "parked sleeping": (stamped(SHIPS_PARK_SAMPLE), dict(SHIPS_7B_FIELDS, parked_sleeping=12, parked_total=200,
+                                                                 end=END)),
+            "parked sleeping on a step 7 line": (SHIPS_SAMPLE.replace(" | gc0 1", " | parked sleeping 0 of 0 | gc0 1"),
+                                                 dict(SHIPS_FIELDS, parked_sleeping=0, parked_total=0, end=None)),
         }
         for name, (line, expected) in cases.items():
             with self.subTest(name):
@@ -111,12 +124,21 @@ class WindowParserTests(unittest.TestCase):
                                                                        " selfAck 0 aiPrefab enemy mirrorVelocity real"),
                                                None),
             "text after the hash": (SETTINGS_SAMPLE + " x", None),
+            "parkSleep without the 7b fields": (SETTINGS_7_SAMPLE.replace(" | area", " parkSleep 1 | area"), None),
+            "parkSleep before aiPrefab": (SETTINGS_SAMPLE.replace("selfAck 0 aiPrefab enemy",
+                                                                  "selfAck 0 parkSleep 1 aiPrefab enemy"), None),
+            "a parkSleep of 2": (SETTINGS_SAMPLE.replace("aiPrefab enemy", "aiPrefab enemy parkSleep 2"), None),
             "a sample": (SETTINGS_SAMPLE, dict(SETTINGS_FIELDS, end=None)),
             "a log line with wave and self-ack": (stamped(SETTINGS_SAMPLE.replace("selfAck 0 aiPrefab enemy",
                                                                                   "selfAck 1 aiPrefab wave")),
                                                   dict(SETTINGS_FIELDS, self_ack=1, ai_prefab="wave", end=END)),
             "a step 7 line": (SETTINGS_7_SAMPLE, dict(SETTINGS_FIELDS, mirror_velocity="zero", self_ack=None,
                                                       ai_prefab=None, end=None)),
+            "parkSleep 0": (SETTINGS_SAMPLE.replace("aiPrefab enemy", "aiPrefab enemy parkSleep 0"),
+                            dict(SETTINGS_FIELDS, park_sleep=0, end=None)),
+            "parkSleep 1 on a log line": (
+                stamped(SETTINGS_SAMPLE.replace("aiPrefab enemy", "aiPrefab enemy parkSleep 1")),
+                dict(SETTINGS_FIELDS, park_sleep=1, end=END)),
             "an area": (SETTINGS_SAMPLE.replace("area none", "area -30,-30,30.5,30"),
                         dict(SETTINGS_FIELDS, area="-30,-30,30.5,30", end=None)),
         }
@@ -169,6 +191,7 @@ class WindowParserTests(unittest.TestCase):
     def test_counts_are_int_and_the_rest_float(self):
         for parse, sample, ints in ((p0ships.parse_ships_window, SHIPS_SAMPLE, None),
                                     (p0ships.parse_ships_window, SHIPS_7B_SAMPLE, None),
+                                    (p0ships.parse_ships_window, SHIPS_PARK_SAMPLE, None),
                                     (p0ships.parse_feeder_window, FEEDER_SAMPLE, p0ships.FEEDER_WINDOW_INTS),
                                     (p0ships.parse_sync_load_window, SYNC_SAMPLE, p0ships.SYNC_LOAD_WINDOW_INTS),
                                     (p0ships.parse_bot_ships, BOT_SAMPLE, p0ships.BOT_SHIPS_INTS)):

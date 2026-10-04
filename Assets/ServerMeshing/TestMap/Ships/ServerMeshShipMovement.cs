@@ -110,6 +110,7 @@ namespace MultiplayerARPG.MMO.Mesh
             _scale = _ship != null && _ship.Scale != null ? _ship.Scale : settings != null ? settings.Scale : new ServerMeshShipScale(1f);
             _realMirrorVelocity = settings == null || settings.RealMirrorVelocity;
             _selfAck = settings != null && settings.SelfAck;
+            _parkPin = settings != null && settings.ParkSleep;
             // A pooled instance does not re-run Awake: the class's damping is applied at every spawn.
             ServerMeshShipClass shipClass = _ship != null ? _ship.ShipClass : ServerMeshShipClass.Base;
             if (_rigidbody != null)
@@ -155,6 +156,7 @@ namespace MultiplayerARPG.MMO.Mesh
             _lookDirection = _moveIntent = _steerInput = _moveInput = Vector3.zero;
             _boost = false;
             PuppetHeld = false;
+            ResetPark();
             ResetSender();
             if (_engine != null)
                 _engine.Reset();
@@ -197,6 +199,7 @@ namespace MultiplayerARPG.MMO.Mesh
             _netPosition = position;
             _netRotation = rotation;
             _netVelocity = _netAngularVelocity = Vector3.zero;
+            MoveParkedPose(position, rotation);
             if (_engine != null)
                 _engine.Reset();
         }
@@ -246,6 +249,7 @@ namespace MultiplayerARPG.MMO.Mesh
             _rigidbody.AddRelativeTorque(torque, ForceMode.Acceleration);
             _rigidbody.AddRelativeForce(force);
             ServerMeshShipCounters.Current.EngineMs += (System.Diagnostics.Stopwatch.GetTimestamp() - started) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            PinParked();
         }
 
         private void RefreshSimulationMode()

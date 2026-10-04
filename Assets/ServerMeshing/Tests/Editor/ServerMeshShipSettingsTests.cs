@@ -40,6 +40,8 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             yield return new TestCaseData(ServerMeshShipSettings.SelfAckKey, "on").SetName("TryResolve_WordSelfAck_FailsNamingTheKey");
             yield return new TestCaseData(ServerMeshShipSettings.AiPrefabKey, "base").SetName("TryResolve_JunkAiPrefab_FailsNamingTheKey");
             yield return new TestCaseData(ServerMeshShipSettings.AiPrefabKey, "Ship_Enemy").SetName("TryResolve_PrefabNameAiPrefab_FailsNamingTheKey");
+            yield return new TestCaseData(ServerMeshShipSettings.ParkSleepKey, "2").SetName("TryResolve_JunkParkSleep_FailsNamingTheKey");
+            yield return new TestCaseData(ServerMeshShipSettings.ParkSleepKey, "yes").SetName("TryResolve_WordParkSleep_FailsNamingTheKey");
             yield return new TestCaseData(ServerMeshShipSettings.SeedKey, "abc").SetName("TryResolve_JunkSeedWithAShipKey_FailsNamingTheKey");
             yield return new TestCaseData(ServerMeshShipSettings.AreaKey, "1,2").SetName("TryResolve_JunkAreaWithAShipKey_FailsNamingTheKey");
             yield return new TestCaseData(ServerMeshShipSettings.AreaKey, "0,0,-5").SetName("TryResolve_NegativeAreaWithAShipKey_FailsNamingTheKey");
@@ -86,6 +88,8 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             Assert.That(settings.RigShips, Is.False);
             Assert.That(settings.SelfAck, Is.False);
             Assert.That(settings.WaveAi, Is.False);
+            Assert.That(settings.HasParkSleep, Is.False);
+            Assert.That(settings.ParkSleep, Is.False);
             Assert.That(settings.AiClass.Name, Is.EqualTo(ServerMeshShipClass.Enemy.Name));
             Assert.That(settings.Seed, Is.EqualTo(12345));
             Assert.That(settings.HasArea, Is.False);
@@ -112,6 +116,24 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             yield return new TestCaseData(ServerMeshShipSettings.SelfAckKey, " 0 ", true, false, false).SetName("TryResolve_SelfAck0_DoesNot");
             yield return new TestCaseData(ServerMeshShipSettings.AiPrefabKey, "Wave", true, false, true).SetName("TryResolve_AiPrefabWaveAnyCase_IsWave");
             yield return new TestCaseData(ServerMeshShipSettings.AiPrefabKey, "ENEMY", true, false, false).SetName("TryResolve_AiPrefabEnemyAnyCase_IsEnemy");
+        }
+
+        private static IEnumerable<TestCaseData> ParkSleepCases()
+        {
+            yield return new TestCaseData(ServerMeshShipSettings.WireKey, "header56", false, false).SetName("TryResolve_ParkSleepUnset_NoParkFigures");
+            yield return new TestCaseData(ServerMeshShipSettings.ParkSleepKey, " 0 ", true, false).SetName("TryResolve_ParkSleep0_SetButUnpinned");
+            yield return new TestCaseData(ServerMeshShipSettings.ParkSleepKey, "1", true, true).SetName("TryResolve_ParkSleep1_Pinned");
+        }
+
+        [TestCaseSource(nameof(ParkSleepCases))]
+        public void TryResolve_ParkSleep(string key, string value, bool hasParkSleep, bool parkSleep)
+        {
+            ServerMeshShipSettings settings = ServerMeshShipSettings.TryResolve(Env(key, value), out string error);
+
+            Assert.That(error, Is.Null);
+            Assert.That(settings.AnyShipKey, Is.True);
+            Assert.That(settings.HasParkSleep, Is.EqualTo(hasParkSleep));
+            Assert.That(settings.ParkSleep, Is.EqualTo(parkSleep));
         }
 
         [TestCaseSource(nameof(SwitchCases))]
@@ -170,6 +192,15 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             yield return new TestCaseData(ServerMeshShipSettings.SelfAckKey, "0", true).SetName("AnyShipKey_SelfAckAlone_IsTrue");
             yield return new TestCaseData(ServerMeshShipSettings.AiPrefabKey, "enemy", true).SetName("AnyShipKey_AiPrefabAlone_IsTrue");
             yield return new TestCaseData(ServerMeshShipSettings.LoadKey, "   ", false).SetName("AnyShipKey_BlankLoad_IsFalse");
+            yield return new TestCaseData(ServerMeshShipSettings.ParkSleepKey, "0", true).SetName("AnyShipKey_ParkSleepAlone_IsTrue");
+            yield return new TestCaseData("MESH_PREWARM", "ship:100@30", true).SetName("AnyShipKey_PrewarmKindShip_IsTrue");
+            yield return new TestCaseData("MESH_PREWARM", " Ship:100@30/10", true).SetName("AnyShipKey_PrewarmKindShipAnyCase_IsTrue");
+            yield return new TestCaseData("MESH_PREWARM", "kinematic:100@30", false).SetName("AnyShipKey_PrewarmKindKinematic_IsFalse");
+            yield return new TestCaseData("MESH_PREWARM", "range:160@30", false).SetName("AnyShipKey_PrewarmKindRange_IsFalse");
+            yield return new TestCaseData("MESH_PREWARM", "shipyard:100@30", false).SetName("AnyShipKey_PrewarmKindStartingWithShip_IsFalse");
+            yield return new TestCaseData("MESH_PREWARM", "ship", false).SetName("AnyShipKey_PrewarmKindWithoutColon_IsFalse");
+            yield return new TestCaseData("MESH_PREWARM", "ship :100@30", true).SetName("AnyShipKey_PrewarmKindShipSpaceBeforeColon_IsTrue");
+            yield return new TestCaseData("MESH_PREWARM", "  SHIP  : 5@12", true).SetName("AnyShipKey_PrewarmKindShipSpacedCapitals_IsTrue");
         }
 
         [TestCaseSource(nameof(AnyShipKeyCases))]

@@ -247,7 +247,7 @@ class RatesSettingTests(unittest.TestCase):
 
 
 class EnvRegistryTests(unittest.TestCase):
-    def test_the_step_two_three_five_six_and_seven_keys(self):
+    def test_the_step_two_three_five_six_seven_and_eight_a_keys(self):
         self.assertEqual(set(p0tools.ENV_REGISTRY), {"MESH_WORK_BINS", "MESH_RATES", "MESH_UNCAPPED_CELLS",
                                                      "MESH_AOI_TIMING", "MESH_THREAD_CPU", "MESH_PROBE_BURN_TICK_MS",
                                                      "MESH_PUPPET_MOTION", "MESH_RIG_SERVER_ANIMATION",
@@ -264,7 +264,8 @@ class EnvRegistryTests(unittest.TestCase):
                                                      "MESH_SHIP_MIRROR_VELOCITY", "MESH_RIG_SHIPS",
                                                      "MESH_PUPPET_FEEDER", "MESH_SYNC_LOAD",
                                                      "MESH_METER_RECORD_SIZES", "MESH_SHIP_SELF_ACK",
-                                                     "MESH_SHIP_AI_PREFAB"})
+                                                     "MESH_SHIP_AI_PREFAB", "MESH_PREWARM", "MESH_SHIP_PARK_SLEEP",
+                                                     "MESH_MONSTER_PLACE"})
 
     def test_the_dropped_keys_read_after_was(self):
         cases = {
@@ -290,11 +291,14 @@ class EnvRegistryTests(unittest.TestCase):
 
     def test_registry_pending_and_dropped_keys_are_section_0_16(self):
         registry, pending, dropped = set(p0tools.ENV_REGISTRY), set(p0tools.PENDING_KEYS), set(p0tools.DROPPED_KEYS)
-        self.assertEqual((len(registry), len(pending), len(dropped)), (42, 6, 3))
+        self.assertEqual((len(registry), len(pending), len(dropped)), (45, 4, 3))
         self.assertEqual(registry | pending | dropped, SECTION_0_16_KEYS)
         self.assertEqual(registry & pending, set())
         self.assertEqual(registry & dropped, set())
         self.assertEqual(pending & dropped, set())
+
+    def test_regress_keys_are_65_distinct_keys(self):
+        self.assertEqual((len(regress.ENV_KEYS), len(set(regress.ENV_KEYS))), (65, 65))
 
     def test_no_pending_or_dropped_key_is_a_regress_key(self):
         for key in list(p0tools.PENDING_KEYS) + list(p0tools.DROPPED_KEYS):
@@ -302,8 +306,8 @@ class EnvRegistryTests(unittest.TestCase):
                 self.assertNotIn(key, regress.ENV_KEYS)
 
     def test_pending_keys_name_their_stage_and_step(self):
-        cases = {"MESH_SHIP_PARK_SLEEP": "stage 0b, step 8", "MESH_PREWARM": "stage 0b, step 8",
-                 "MESH_SHIP_JUMP_SECONDS": "stage 0c, step 9", "MESH_SPACES": "stage 0c, step 9"}
+        cases = {"MESH_SHIP_JUMP_SECONDS": "stage 0c, step 9", "MESH_MONSTER_CELL": "stage 0c, step 9",
+                 "MESH_DB_BURST": "stage 0c, step 9", "MESH_SPACES": "stage 0c, step 9"}
         for key, expected in cases.items():
             with self.subTest(key):
                 self.assertEqual(p0tools.PENDING_KEYS[key], expected)
@@ -312,9 +316,9 @@ class EnvRegistryTests(unittest.TestCase):
                 self.assertRegex(meaning, r"^stage 0[bc], step \d$")
 
 
-# The build sheet's §0.16, listed literally (step 7b's MESH_SHIP_SELF_ACK and MESH_SHIP_AI_PREFAB included), with step
-# 5's AREA, STAND and FIGHT and step 7's MESH_METER_RECORD_SIZES and MESH_SHIP_MIRROR_VELOCITY: 15 Mesh/ keys and 36
-# TestMap/ keys.
+# The build sheet's §0.16, listed literally (step 7b's MESH_SHIP_SELF_ACK and MESH_SHIP_AI_PREFAB and step 8a's
+# MESH_MONSTER_PLACE included), with step 5's AREA, STAND and FIGHT and step 7's MESH_METER_RECORD_SIZES and
+# MESH_SHIP_MIRROR_VELOCITY: 15 Mesh/ keys and 37 TestMap/ keys.
 SECTION_0_16_KEYS = {
     "MESH_PUPPET_MOTION", "MESH_WORK_BINS", "MESH_METER_SENDS", "MESH_SENDER", "MESH_SENDER_SOURCES",
     "MESH_SENDER_TIERS", "MESH_SENDER_R0", "MESH_SENDER_COMPACT", "MESH_SENDER_SPREAD", "MESH_SENDER_XZ",
@@ -326,7 +330,7 @@ SECTION_0_16_KEYS = {
     "MESH_SHIP_WIRE", "MESH_SHIP_SCALE", "MESH_SHIP_PROJECTILES", "MESH_SHIP_PARK_SLEEP", "MESH_SHIP_JUMP_SECONDS",
     "MESH_RIG_SHIPS", "MESH_PUPPET_FEEDER", "MESH_SYNC_LOAD", "MESH_PREWARM", "MESH_DB_BURST", "MESH_SPACES",
     "MESH_PHANTOM_AREA", "MESH_PHANTOM_STAND", "MESH_PHANTOM_FIGHT", "MESH_METER_RECORD_SIZES",
-    "MESH_SHIP_MIRROR_VELOCITY", "MESH_SHIP_SELF_ACK", "MESH_SHIP_AI_PREFAB"}
+    "MESH_SHIP_MIRROR_VELOCITY", "MESH_SHIP_SELF_ACK", "MESH_SHIP_AI_PREFAB", "MESH_MONSTER_PLACE"}
 
 BINS_SAMPLE = ("Work bins 5.00 s: tick 49:96 60:4 over:0 | nonaoi 49:95 over:0 | other 10:50 over:0 "
                "| kit 16:100 over:0 | send 12:100 over:0")

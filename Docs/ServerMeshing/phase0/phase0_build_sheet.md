@@ -258,12 +258,13 @@ This work was read-only. I created, edited, moved or deleted nothing in either r
 | `MESH_SHIP_PROJECTILES` | instantiate \| pooled | 7 |
 | `MESH_SHIP_SELF_ACK` | 0 \| 1 (default 0: only an owner acknowledges a teleport) | 7b |
 | `MESH_SHIP_AI_PREFAB` | enemy \| wave (default enemy: Ship_Enemy numbers) | 7b |
-| `MESH_SHIP_PARK_SLEEP` | 0 \| 1 | 7 |
+| `MESH_SHIP_PARK_SLEEP` | 0 \| 1 | 8a |
 | `MESH_SHIP_JUMP_SECONDS` | s | 7 |
 | `MESH_RIG_SHIPS` | 1 (bots register the prefab) | 7 |
 | `MESH_PUPPET_FEEDER` | `<kind>:<N>@<Hz>` | 7 |
 | `MESH_SYNC_LOAD` | `dirty:<D>,rpc:<R>` | 7 |
-| `MESH_PREWARM` | `<kind>:<N>@<t>[/<perFrame>]` | 7 |
+| `MESH_PREWARM` | `<kind>:<N>@<t>[/<perFrame>]` | 8a |
+| `MESH_MONSTER_PLACE` | `<n>@<x>,<z>,<r>[:passive][;...]` | 8a |
 | `MESH_DB_BURST` | `<N>@<t>` | 9 |
 | `MESH_SPACES` | S | 9 |
 
@@ -1141,7 +1142,7 @@ The band test only uses B/W, so the rig's 600 m ground carries to 8 km through B
 
 - **Header fields:**
   - `schema`, `team` (rig | space), **`game` (fantasy | space | neutral)** (gap J), `model` (geographic | spaces | none);
-  - `family`: presence, fanout, packets, density, rates, floor, prewarm, workerab, dbburst, abgeo, crossings, spaces, calibrate, fit; S1, S5 or S8 for the space team;
+  - `family`: presence, observed, fanout, targets, syncrpc, packets, density, rates, floor, prewarm, workerab, dbburst, abgeo, crossings, spaces, calibrate, fit; S1, S5 or S8 for the space team;
   - `case`, `arm`, `stage`, `repeat`, `seed`, `order`;
   - `started_utc`, `host`, `cpu`, `cores`, `os`, `power_plan`, `build` (manifest sha1), `kit_patches` (CE-11, CE-12 shape);
   - `rates` {fps, fixed_step_s, tick_hz}, `capped`;

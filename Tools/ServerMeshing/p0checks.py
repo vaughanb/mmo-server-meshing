@@ -5,6 +5,9 @@ Pure: every input is an argument. Accept-a's own acceptance checks are p0accept'
     p0checks.exclusion(spec, run)             # None, or why a usable run is still left out of fits (saturation)
     p0checks.check_rates(spec, run)           # one check alone; FAMILY_CHECKS lists them all
 
+Stage 0b families (step 8a) add the phantom, V move, monster and prewarm checks over each read cell's
+p0cells0b.cell_record_0b (run["cells"][cell]["p0b"]); step 8b's families raise, naming "stage 0b, step 8b".
+
 A run is {"since", "start", "end", "cells": {cell: {"structural": rigrun.cell_window(...), "p0":
 p0cells.cell_record(...)}}}; a spec is a p0plans RunSpec (layout None: the ten-cell rig as regress starts it). A run is
 accepted when it has no problems and exclusion gives None: one saturated window on a cell is dropped from that cell's
@@ -16,6 +19,9 @@ import math
 
 import p0base
 import p0cells
+import p0cells0b
+import p0phantom
+import p0results
 import p0tools
 import rigrun
 
@@ -27,6 +33,7 @@ FRAMES_SHARE = 0.02             # frames/s within 2 % of the cap
 PHYSICS_SLACK = 1.0             # physics steps/s within 1 of 1/step
 PUPPETS_WINDOW_S = 10.0         # the Puppets window rides on the Mesh stats line, every 10 s
 MIN_PUPPETS_WINDOWS = 4
+V_SHARE = 0.95                  # a run's V move mean must reach this share of the V its spec expects (decisions 7, 8)
 
 
 def _env(spec, key):
@@ -177,7 +184,7 @@ def check_instruments(spec, run):
             if not record["markers"]["aoi_timing"]:
                 problems.append(f"{cid} logged no 'AOI timing: installed' line with MESH_AOI_TIMING=1")
             off = [t for t in record["triples"] if not low <= t["ticks"]["aoi_passes"] <= high]
-            if off:
+            if off and not spec.get("saturation_probe"):   # a saturated frame loop skips AOI passes by design there
                 detail = ", ".join(f"{clock(t['end'])} {t['ticks']['aoi_passes']}" for t in off)
                 problems.append(f"{cid}: AOI passes outside {low} to {high} in {len(off)} of {len(record['triples'])} "
                                 f"windows ({detail})")
@@ -196,13 +203,26 @@ def tick_misses(triples):
     return misses
 
 
+DROPPED_TICK_SHARE_0B = 0.25   # stage 0b: windows that only dropped ticks fail the run above this share (prewarm: never)
+
+
 def check_ticks(spec, run):
     """Every unsaturated window of each read cell holds 100 ± 1 ticks (20 per second) and dropped none; a window
-    stating another budget than the first (p0cells.aggregate_work_ticks' problems) is a problem too."""
+    stating another budget than the first (p0cells.aggregate_work_ticks' problems) is a problem too. Stage 0b runs
+    load their cell near its limit, so there a window whose ticks run plus dropped make its count (98 + 2 of 100)
+    but that dropped ticks is tolerated in up to
+    DROPPED_TICK_SHARE_0B of the windows, and in a prewarm run always (the burst's dropped ticks are what it
+    measures); a window off by more than one tick still fails every family."""
     problems = []
     for cid, record in _records(spec, run):
         windows = _unsaturated(record)
         misses = tick_misses(windows)
+        if misses and spec["family"] in p0results.FAMILIES_0B:
+            counted = tick_misses([t for t in windows
+                                   if abs(t["ticks"]["ticks"] + t["ticks"]["dropped"] - round(TICK_HZ * t["seconds"])) > 1])
+            dropped_only = len(misses) - len(counted)
+            if spec["family"] == "prewarm" or dropped_only <= DROPPED_TICK_SHARE_0B * len(windows):
+                misses = counted
         if misses:
             problems.append(f"{cid}: {len(misses)} of {len(windows)} unsaturated windows missed {TICK_HZ} ticks/s "
                             f"± 1 tick with none dropped ({'; '.join(misses)})")
@@ -332,12 +352,118 @@ def check_frames(spec, run):
     return problems
 
 
+def _records_0b(spec, run):
+    """[(cell, cell_record_0b)] for the read cells that have one, in cells_read order."""
+    cells = run.get("cells") or {}
+    return [(cid, cells[cid]["p0b"]) for cid in spec["cells_read"] if (cells.get(cid) or {}).get("p0b") is not None]
+
+
+def check_phantoms(spec, run):
+    """With MESH_PHANTOM set, each read cell it binds on (its cell list, or every read cell for all) logged Phantom
+    windows in the measurement, every one with the planned phantoms bound: bound virtual (bound sink in sink mode)
+    equal to P, or to the step's P on a stepped run's row. Raises ValueError for a MESH_PHANTOM that does not parse."""
+    mode, count, _, cells, error = p0phantom.phantom_setting(spec["env"].get("MESH_PHANTOM"))
+    if error:
+        raise ValueError(f"MESH_PHANTOM: {error}")
+    if mode is None:
+        return []
+    want = (spec.get("point") or {}).get("step") or count
+    field, named = f"bound_{mode}", None if cells == "all" else {cell.lower() for cell in cells}
+    problems = []
+    for cid, record in _records_0b(spec, run):
+        if named is not None and cid.lower() not in named:
+            continue
+        windows = record["phantom"]
+        off = [w for w in windows if w[field] != want]
+        if not windows:
+            problems.append(f"{cid} logged no Phantom window in the measurement with MESH_PHANTOM set")
+        elif off:
+            detail = ", ".join(f"{clock(w['end'])} {w[field]}" for w in off)
+            problems.append(f"{cid}: {len(off)} of {len(windows)} Phantom windows had other than {want} {mode} "
+                            f"phantoms bound ({detail})")
+    return problems
+
+
+def check_v_move(spec, run):
+    """With spec["expected_v"], the V move mean over the read cells' Phantom windows (p0cells0b.v_move: weighted by
+    each window's samples) is at least 0.95 x expected_v (the targets and fan-out acceptance, decisions 7 and 8)."""
+    want = spec.get("expected_v")
+    if want is None:
+        return []
+    mean, _ = p0cells0b.v_move({"phantom": [w for _, record in _records_0b(spec, run) for w in record["phantom"]]})
+    need = V_SHARE * want
+    if mean is None:
+        return [f"no Phantom window sampled V move, expected a mean of at least {need:g} ({V_SHARE:g} x {want:g})"]
+    if not p0base.at_least(mean, need):
+        return [f"V move mean {mean:.1f} is below {need:g} ({V_SHARE:g} x the expected {want:g})"]
+    return []
+
+
+def check_monsters(spec, run):
+    """With spec["placed"] above 0 (MESH_MONSTER_PLACE runs), the read cells logged Monsters windows in the
+    measurement whose placed (each cell's last window, summed over the cells) is spec["placed"], and every window has
+    as many alive as placed."""
+    want = spec.get("placed")
+    if not want:
+        return []
+    found = [(cid, record["monsters"]) for cid, record in _records_0b(spec, run) if record["monsters"]]
+    if not found:
+        return [f"no Monsters window in the measurement, expected {want} placed monsters"]
+    placed = sum(windows[-1]["placed"] for _, windows in found)
+    per_cell = ", ".join(f"{cid} {windows[-1]['placed']}" for cid, windows in found)
+    problems = [] if placed == want else [f"Monsters windows place {placed} monsters ({per_cell}), expected {want}"]
+    for cid, windows in found:
+        short = [w for w in windows if w["alive"] != w["placed"]]
+        if short:
+            detail = ", ".join(f"{clock(w['end'])} {w['alive']} of {w['placed']}" for w in short)
+            problems.append(f"{cid}: {len(short)} of {len(windows)} Monsters windows had other than every placed "
+                            f"monster alive ({detail})")
+    return problems
+
+
+def _rate(value):
+    return "no window" if value is None else f"{value:.1f}/s"
+
+
+def check_prewarm(spec, run):
+    """A Prewarm burst line stamped inside the measurement on a read cell with n equal to spec["N"] (decision 11), and
+    with spec["eyes"] a rise in that cell's Send spawn-type calls (t3, SyncBaseLine) within 2 s of the burst
+    (p0cells0b.spawn_rise). Raises ValueError for a spec without N."""
+    if spec.get("N") is None:
+        raise ValueError("a prewarm spec needs N, the burst's size (step 8a decision 11)")
+    want, records = spec["N"], _records_0b(spec, run)
+    bursts = [(cid, burst) for cid, record in records for burst in record["prewarm"]]
+    matched = [(cid, burst) for cid, burst in bursts if abs(burst["n"] - want) <= p0base.EPS * max(1.0, abs(want))]
+    if not matched:
+        said = ", ".join(f"{cid} n {burst['n']:g}" for cid, burst in bursts) or "none"
+        return [f"no Prewarm burst with n {want:g} inside the measurement (bursts: {said})"]
+    if not spec.get("eyes"):
+        return []
+    cid, burst = matched[0]
+    before, after = p0cells0b.spawn_rise(dict(records)[cid]["send"], burst["end"])
+    if before is None or after is None or not p0base.above(after, before):
+        return [f"{cid}: Send t{p0cells0b.SPAWN_TYPE} (spawn) calls did not rise within 2 s of the Prewarm burst at "
+                f"{clock(burst['end'])} ({_rate(before)} before, {_rate(after)} after)"]
+    return []
+
+
+def _later_8b(spec, run):
+    family = spec.get("checks_family") or spec["family"]
+    raise ValueError(f"no checks for family {family!r} yet: it needs {p0results.LATER_8B}")
+
+
 COMMON = (check_structure, check_pairing, check_coverage, check_rates, check_instruments, check_ticks, check_band,
           check_motion, check_animation)
+STAGE_0B = (check_phantoms, check_v_move)
 FAMILY_CHECKS = {"canary": COMMON, "accept": COMMON, "density": COMMON, "floor": COMMON,
                  "rates": COMMON + (check_frames,),
                  "presence": COMMON + (check_puppets, check_puppet_count),
-                 "abgeo": tuple(check for check in COMMON if check is not check_motion) + (check_puppets,)}
+                 "abgeo": tuple(check for check in COMMON if check is not check_motion) + (check_puppets,),
+                 "observed": COMMON + STAGE_0B + (check_puppets, check_puppet_count, check_monsters),
+                 "fanout": COMMON + STAGE_0B, "targets": COMMON + STAGE_0B + (check_monsters,),
+                 "syncrpc": COMMON + STAGE_0B, "packets": COMMON + STAGE_0B,
+                 "prewarm": COMMON + STAGE_0B + (check_prewarm,),
+                 **{family: (_later_8b,) for family in p0results.FAMILIES_8B}}
 
 
 def run_problems(spec, run):
@@ -355,7 +481,10 @@ def run_problems(spec, run):
 def exclusion(spec, run):
     """None, or why the run is left out of fits and ratio verdicts: on some capped read cell, its selected windows
     are saturated as a span ('saturated (span) on C') or 2 or more of them are ('saturated in 3 of 12 windows on C').
-    Reasons of several cells are joined with '; '. A single saturated window is not a reason: p0cells drops it."""
+    Reasons of several cells are joined with '; '. A single saturated window is not a reason: p0cells drops it. A
+    saturation probe (spec["saturation_probe"], packets' saturation arm) is never excluded: saturating is its point."""
+    if spec.get("saturation_probe"):
+        return None
     reasons = []
     for cid, record in _records(spec, run):
         if cid in spec["uncapped"]:

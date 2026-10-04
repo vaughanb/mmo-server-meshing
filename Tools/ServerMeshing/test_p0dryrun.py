@@ -3,8 +3,10 @@ import unittest
 
 import p0dryrun
 import p0plans
+import p0plans0b
 import regress
 import test_p0plans
+import test_p0plans0b
 
 find, COARSE = test_p0plans.find, test_p0plans.COARSE
 
@@ -49,6 +51,20 @@ class PredictLoadTests(unittest.TestCase):
 
 
 class DryRunTests(unittest.TestCase):
+    def test_stage_0b_is_not_modelled(self):
+        with test_p0plans0b.new_keys():
+            fanout = p0plans0b.fanout_plan()
+            prewarm = p0plans0b.prewarm_plan()
+        for spec in (fanout[0], prewarm[0], test_p0plans0b.plans()["observed M"][0]):
+            with self.subTest(spec["family"]):
+                self.assertIsNone(p0dryrun.predict_load(spec))
+        lines = p0dryrun.dry_run_lines(fanout[:2] + prewarm[:1])
+        self.assertEqual(lines[1], f"[1/3] fanout main char-kit V=100 rates=30/0.02 r1 seed 1 key {fanout[0]['key']} | "
+                                   f"layout coarse | start C | read C | 10+388 s | steps 50,100,200,400 at 90 s each")
+        self.assertEqual([lines[3], lines[9]], ["    predicted (E) not modelled for phantoms, ships or monsters"] * 2)
+        self.assertTrue(lines[7].endswith("| read C | 45+60 s"))
+        self.assertEqual(lines[-1], "3 runs, about 16 min at 126 s per 45+60 run and 90 s per 25+40 run")
+
     def test_dry_run_lines(self):
         specs = p0plans.floor_plan()
         lines = p0dryrun.dry_run_lines(specs)
