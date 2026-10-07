@@ -22,7 +22,11 @@ namespace MultiplayerARPG.MMO.Mesh.Sync
         /// </summary>
         uint DiscreteVersion { get; }
 
-        /// <summary>IsAtRest is true when a velocity-extrapolating observer would see no change (parked, docked, stopped).</summary>
+        /// <summary>
+        /// IsAtRest is true when a velocity-extrapolating observer would see no change (parked, docked, stopped): linear speed
+        /// under 0.01 m/s, angular speed under 0.001 rad/s, and nothing pending (an unacknowledged teleport, a frame change
+        /// awaiting its ack). The sender decides before it writes, so a pending one-shot must never read as at rest.
+        /// </summary>
         bool IsAtRest { get; }
 
         /// <summary>

@@ -389,6 +389,11 @@ is needed by any of them; the registry of the few core touches stays in §17.*
 2. **In-grid explicit warp (secondary).** *Planned, not built:* there is no `WarpCharacter` override. A kit warp
    that lands a character on the wrong cell is corrected by the destination's first boundary tick, which hands it
    off by position (§9).
+   - **The game-facing form is contracted, not built** (2026-10-05, agreed with the space game): `IMeshHandoffService`
+     in `Mesh/MeshHandoffContracts.cs` — `RequestHandoff(entityId, destinationId)` → ticket; `HandoffCompleted`
+     (origin: Committed / Failed / RolledBack / Aborted) and `ArrivalCommitted` (destination, raised with the
+     ok-ack). Nothing implements it yet; the service comes in the slice after Phase 0. Its timings are today's (ack
+     guard 20 s, link-down grace 3 s, rollback hold 20 s, reservation 15 s, save retry 2 s).
 
 ### Sequence
 

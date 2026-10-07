@@ -54,7 +54,7 @@ This work was read-only. I created, edited, moved or deleted nothing in either r
    - CE-12 is still a prerequisite in two places:
      - the character kit-against-sender A/B, so that both arms send the same records to the same observers;
      - any entity that stays on the kit path.
-   - Its **shape** is a hard prerequisite. The clear must stay in the handler, keyed on the write timestamp. A post-pass after the kit loop would break the adapter (§0.9).
+   - Its shape is settled (2026-09-30, superseding the first draft of §0.9): the space team's post-pass, which the adapter's own pass makes safe (§0.9).
 4. **The space team's contract promise is kept.**
    - File `Mesh/Sync/MeshSyncContracts.cs` with its `.meta` GUID.
    - `IsAtRest` and the three Mark calls are included.
@@ -87,7 +87,7 @@ This work was read-only. I created, edited, moved or deleted nothing in either r
 | Fantasy open world (8 km × 8 km today) | Geographic X/Z cells, Dynamic per map | k and e for steered, kinematic and inert character puppets; awake monsters; N²; client-driven owners; crossings; geographic A/B with strips4 | Base cell, split depth, planner settings; slices 2b–6 re-planned (§8) |
 | Fantasy small maps (the user's "far smaller") | Static single cell, or at most one halving | Process floor at 30/60 fps; F1 town and F2 boss on one process; sender tiers; the map-size table | Per-map mode (Static/Dynamic), population caps, sender tiers, visible range |
 | Fantasy dungeons, interiors, instances | Isolated spaces (the add-on policy after Phase 0) | Per-space floor (B11), subscription bursts | Placement rules of the isolated-spaces policy |
-| Space star systems | Bubbles, whole bubbles per process | c_pair for ships, kit residual, per-packet and network-thread cost, ship puppet e and k, G1 and G2 at 30/20/50 | Bubble directory, BubblePolicy in the add-on, sender Phase 1; workers only if G3 passes |
+| Space star systems | Bubbles, whole bubbles per process | c_pair for ships, kit residual, per-packet and network-thread cost, ship puppet e and k, G1 and G2 at 30/20/50 | Bubble directory and placement, sender Phase 1 (BubblePolicy is the space game's, built from our spec, contract §L.11); workers only if G3 passes |
 
 ---
 
@@ -164,18 +164,16 @@ This work was read-only. I created, edited, moved or deleted nothing in either r
 - Findings go to the space team in writing (§9.2).
 
 **0.9 CE-12 (the space team's patch; our kit carries it).**
-- It is accepted only in the **stamp-in-handler** shape:
-  - one stamp per flag;
-  - the setter sets the stamp to -1;
-  - a write that finds the flag set with `stamp >= 0 && stamp != writeTimestamp` clears it;
-  - otherwise the write carries the flag and sets `stamp = writeTimestamp`;
-  - `CreateMovementData` keys on `LocalTick` (LNGM:75).
-- It includes NMEM's missing server-side `_sendingDash` clear (set at NMEM:348-350, cleared only at :523 and :552).
-- **A post-pass shape is refused.** The sender runs after the kit (`LiteNetLibManager.cs:221-226`). A post-pass would either never clear a wrapped handler, so IsTeleport goes on every record, or clear flags the sender has not yet sent.
-- Until CE-12 lands:
-  - the adapter is built and unit-tested;
-  - character rows report reliable-record counts separately and are flagged `ce12=absent`.
-- CE-12 goes in as `// MESH-EDIT: CE-12`, with a DESIGN §17 row and an upstream patch.
+- **Shape: the space team's post-pass** (their kit patch #9, accepted 2026-09-30; upstream patch 0006, PR #3, bb9895f).
+  The first draft of this section accepted only a stamp-in-handler shape; that was superseded and the space team was told
+  so again on 2026-10-05 (`space_reply_2026-10-05.md` A.3).
+  - The kit's send loops `Record` each `IEntityMovementServerStateFlags` handler whose write succeeded and `ConsumeAll`
+    after their last player; writes only read the flags.
+  - Why it is safe with the sender: the adapter's kit-facing `WriteServerState` returns false, so the kit loop never
+    records a wrapped handler. The sender runs its own `EntityMovementServerStateFlagsPass` (`MeshStateFanout`): `Begin`,
+    `Record` the inner handler after its one write, `ConsumeAll` after the fan-out. The two sets never overlap.
+- It includes NMEM's missing server-side `_sendingDash` clear (in its consume) and the `OnTeleport` interpolation reset.
+- CE-12 is marked `// MESH-EDIT: CE-12`, with a DESIGN §17 row and an upstream patch.
 
 **0.10 The load-report wire format is frozen.**
 - `MeshLoadReport` has no version, and Deserialize reads a trailing optional grid (`Mesh/MeshLoadReport.cs:97-103`).
@@ -198,7 +196,8 @@ This work was read-only. I created, edited, moved or deleted nothing in either r
 
 | Area | Names |
 |---|---|
-| **Mesh/** | `MeshSyncContracts.cs`: IMeshStateSource, IMeshCompactStateSource, IMeshStateRegistry, IMeshSendPolicy, MeshSendRate, MeshObserverContext, MeshStateVariant |
+| **Mesh/** | `MeshHandoffContracts.cs` (contract only, 2026-10-05): IMeshHandoffService, MeshHandoffResult, MeshHandoffOutcome, MeshArrivalInfo |
+| | `MeshSyncContracts.cs`: IMeshStateSource, IMeshCompactStateSource, IMeshStateRegistry, IMeshSendPolicy, MeshSendRate, MeshObserverContext, MeshStateVariant |
 | | `Sync/`: MeshStatePacketWriter, MeshStateFanout, MeshStateFanoutSettings, MeshStateFanoutCounters, IMeshStateTransport, IMeshStatePositions, MeshStateSender, MeshKitMovementStateSource, MeshDistanceSendPolicy, MeshStateSenderStats, MeshMovementHandlerSlots, IMeshReplaceableHandlerLayer |
 | | Top level: MeshPuppetMotion, MeshPuppetMotionSetting, MeshKinematicTrack, MeshKinematicCharacterBody, MeshTickWindow, MeshSendMeter, MeshSendWindow, MeshMeteredTransport, MeshMeteredTransportFactory, IMeshWrappedTransport, MeshTransportUnwrap |
 | **TestMap/** | ServerMeshRates, ServerMeshRatesSetting, ServerMeshTimedAoi, ServerMeshAoiCountdown, ServerMeshThreadCpu, ServerMeshThreadClass, ServerMeshKinematicWalk, ServerMeshServerAnimation, ServerMeshCe12Check |
@@ -1191,7 +1190,7 @@ The band test only uses B/W, so the rig's 600 m ground carries to 8 km through B
 
 **Bubble model (the space game):**
 - The bubble directory is built on Slice 2a's versioned ownership map (coordinator, store, recovery), with entries per bubble.
-- The add-on's game-neutral **isolated-spaces policy** comes from reply Part 3 and the 26 September update (A0 = 3 km). It serves bubbles as well as fantasy dungeons and interiors. Its placement rules use B11 and F.
+- The add-on's game-neutral **isolated-spaces policy** places whole spaces on processes: fantasy dungeons, interiors and instances, and the space game's bubbles. It never decides merges, splits, roam exits or arrivals: for bubbles that is the space game's `BubblePolicy` (built by them from our Part 3, contract §L.11), whose outputs (bubble created or released, member gaps for D_nbr, D_cut,min) are this policy's input. Its placement rules use B11 and F.
 - Sender Phase 1 in production adds:
   - byte budget, fairness and staleness;
   - the at-rest keepalive;
@@ -1230,12 +1229,12 @@ The band test only uses B/W, so the rig's 600 m ground carries to 8 km through B
    - Server animation on puppets is frozen.
    - Mounted puppets fall back to Steered.
 5. Send the contract as `MultiplayerARPG.MMO.Mesh.Sync`, with `MarkSourceChanged`?
-6. May the space team get a copy of the rig parts (phantom harness and ship stand-ins), so they can run B1, B2 and B7 on `ShipEntity`?
+6. ~~May the space team get a copy of the rig parts?~~ Yes (2026-10-05): they build their S9 load generator on a copy (`space_reply_2026-10-05.md` A.6).
 7. Machine B for two attended sessions; the link speed; the RAM available for bots.
 8. May we create meshburst001..200 rows in the MySQL database shared with Relics?
 
 **For the space team**
-1. CE-12 in the stamp-in-handler shape, including NMEM's server-side `_sendingDash` clear. No post-pass.
+1. ~~CE-12 in the stamp-in-handler shape.~~ Settled: their post-pass shape (§0.9).
 2. The header bit layout (mode and flightMode packing, the compact indicator) and the quantized layout, so the golden fixture can be filled.
 3. SMC:390 sends reliably forever for an unowned ship after `Teleport`, `AssignEntity` or `Respawn`, because the acknowledgement only changes on owner uploads (SMC:366-369).
 4. Accept the contract path, namespace and renames; implement `IsAtRest`; treat a NaN distance as near.
