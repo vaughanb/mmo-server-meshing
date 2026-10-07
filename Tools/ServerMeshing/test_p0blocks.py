@@ -376,18 +376,45 @@ class SteppedTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def stepped(self, lines, window=None, steps=(50, 100)):
-        self.patch(p0stepped.rigrun, "run_window", window or (lambda *a: (test_p0cells0b.START - datetime.timedelta(
-            seconds=60), test_p0cells0b.START, test_p0cells0b.END)))
+    def stepped(self, lines, window=None, steps=(50, 100), exclusion=lambda spec, run: None):
+        self.stops = []   # what the run's stop_when answered, asked once at the window's start
+
+        def played(*_, stop_when=None):
+            since = test_p0cells0b.START - datetime.timedelta(seconds=60)
+            if stop_when is not None:
+                self.stops.append(stop_when(since, test_p0cells0b.START))
+            return since, test_p0cells0b.START, test_p0cells0b.END
+        self.patch(p0stepped.rigrun, "run_window", window or played)
         self.patch(p0stepped.rigrun, "cell_lines", lambda *a: lines)
         self.patch(p0stepped.rigrun, "cell_window", lambda *a: {})
         self.patch(p0stepped.p0checks, "run_problems", lambda spec, run: [])
-        self.patch(p0stepped.p0checks, "exclusion", lambda spec, run: None)
+        self.patch(p0stepped.p0checks, "exclusion", exclusion)
         with test_p0cells0b.fake_stage0b():
             return p0stepped.run_stepped(stepped_spec(steps), Rep(), {"build": "b1", "host": "A"})
 
+    def test_a_rising_run_stops_after_a_saturated_step(self):
+        def saturated_at_50(spec, run):
+            return "saturated (span) on C" if spec["point"]["step"] == 50 else None
+        step = test_p0cells0b.step_line
+        cases = {  # steps, their lines, what stop_when answered, then (step, excluded_reason, measured) per row
+            "rising: stops, the later step is not measured": (
+                (50, 100), [step("09:59:50", 1, 2, 0, 50), step("10:00:20", 2, 2, 50, 100)], [True],
+                [(50, "saturated (span) on C", True),
+                 (100, "not measured: saturated at the earlier step P 50 on C", False)]),
+            "falling: never stops": (
+                (100, 50), [step("09:59:50", 1, 2, 0, 100), step("10:00:20", 2, 2, 100, 50)], [False],
+                [(100, None, True), (50, "saturated (span) on C", True)]),
+        }
+        for name, (steps, step_lines, stops, expected) in cases.items():
+            with self.subTest(name):
+                pairs = self.stepped(step_lines + test_p0cells0b.cell_lines()[2:], steps=steps,
+                                     exclusion=saturated_at_50)
+                self.assertEqual(self.stops, stops)
+                self.assertEqual([(row["point"]["step"], row["excluded_reason"], run is not None) for row, run in pairs],
+                                 expected)
+
     def test_a_run_that_raises_fails_every_step(self):
-        def fail(*_):
+        def fail(*_, **__):
             raise RuntimeError("Play ended during the measurement")
         pairs = self.stepped([], window=fail)
         self.assertEqual([(row["point"]["step"], row["accepted"], row["problems"], run) for row, run in pairs],

@@ -110,12 +110,19 @@ def canary_state(rows, build, host):
 
 def run_spec(spec, rep, context):
     """(row, run) of one planned rig run: its mesh-p0/1 row whatever happened and the run p0checks graded (None when
-    it failed). A run that raises or cannot be graded is a failed run."""
+    it failed). A run that raises or cannot be graded is a failed run. A canary's row also carries machine_state
+    (rigrun.MachineProbe: the Windows session and the CPU's mean % processor performance over the measurement)."""
+    probe = rigrun.MachineProbe(spec["warmup"], spec["measure"]) if spec["family"] == "canary" else None
     try:
-        since, start, end = rigrun.run_window(spec["env"], spec["warmup"], spec["measure"], rep)
+        since, start, end = rigrun.run_window(spec["env"], spec["warmup"], spec["measure"], rep,
+                                              on_play=probe.start if probe else None)
     except Exception as ex:  # one run's boundary: its row is written as failed, and the block goes on
-        return p0results.run_row(spec, None, context, [str(ex)], "run failed"), None
-    return p0stepped.graded(spec, since, start, end, lambda: p0stepped.cell_lines(spec, since), context)
+        row, run = p0results.run_row(spec, None, context, [str(ex)], "run failed"), None
+    else:
+        row, run = p0stepped.graded(spec, since, start, end, lambda: p0stepped.cell_lines(spec, since), context)
+    if probe:
+        row["machine_state"] = probe.state()
+    return row, run
 
 
 def run_rows(spec, rep, context):

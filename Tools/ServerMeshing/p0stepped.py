@@ -4,11 +4,14 @@ length. Split out of p0blocks (the ~500-line rule); p0blocks.run_rows chooses be
 
     p0stepped.graded(spec, since, start, end, lines, context)  # (row, run) of one run read over [start, end]
     p0stepped.run_stepped(spec, rep, context)                  # [(row, run)], one per planned step
+    p0stepped.SaturationStop(spec, context)                    # run_window's stop_when for a rising stepped run
     p0stepped.run_groups(rows) / complete_keys(rows)           # rows by run; plan keys with a complete run
 
 A stepped spec carries stepped = {"steps": [P1..Pn], "hold": seconds} (p0plans0b sets it, with warmup 10 s and the
 measure formula); its rows share the run's plan key, carry point.step = P, stepped (the spec's) and stepped_since (the
-Play start), and the run is done only when every step has an accepted row.
+Play start), and the run is done only when every step has an accepted row. A run whose steps rise ends once a step
+before the last is graded saturated: every later step only adds load, so each gets a row naming that step instead of a
+measurement (the even repeats' falling runs are measured whole).
 Unit tests: python -m unittest discover -s Tools/ServerMeshing -p "test_*.py"
 """
 import p0cells
@@ -54,14 +57,46 @@ def step_spec(spec, window):
                 measure=int(seconds) if seconds == int(seconds) else seconds)
 
 
+class SaturationStop:
+    """run_window's stop_when for a stepped run: True once a step whose window is complete (the next step's line is
+    logged) and that has only larger steps after it grades as excluded for saturation; step is then its P. A falling
+    or flat step list never stops, and a reading or grading error reads as False (the run goes on to its end)."""
+
+    def __init__(self, spec, context):
+        planned = list(spec["stepped"]["steps"])
+        self.spec, self.context, self.planned, self.seen, self.step = spec, context, planned, set(), None
+        self.rising = [all(later > p for later in planned[k + 1:]) for k, p in enumerate(planned)]
+
+    def __call__(self, since, start):
+        try:
+            lines = cell_lines(self.spec, since)
+            steps = next((found for found in (p0cells0b.phantom_steps(lines[cid]) for cid in self.spec["cells_read"])
+                          if found), [])
+            stamped = {step["i"] for step in steps}
+            for window in p0cells0b.step_windows(self.planned, steps, start, rigrun.now()):
+                k = window["index"]
+                if (k >= len(self.planned) or not self.rising[k - 1] or k + 1 not in stamped or window["problem"]
+                        or k in self.seen):
+                    continue
+                self.seen.add(k)
+                row, _ = graded(step_spec(self.spec, window), since, window["start"], window["end"], lines,
+                                self.context)
+                if "saturated" in (row["excluded_reason"] or ""):
+                    self.step = window["step"]
+                    return True
+        except Exception:  # a mid-run look that fails only means the run is not cut short
+            return False
+        return False
+
+
 def run_stepped(spec, rep, context):
     """[(row, run)] of one stepped run (spec["stepped"] = {"steps": [P..], "hold": s}; decision 4): one Play, then a
     row per planned step over its window (p0cells0b.step_windows, from the first read cell that logged Phantom step
     lines). A step without a window is a failed row naming why, and a run that raises fails every step. Every row
     carries stepped_since (the Play start: its run) and net_saturated (p0cells0b.net_saturated on the steps' cell)."""
-    planned = list(spec["stepped"]["steps"])
+    planned, stop = list(spec["stepped"]["steps"]), SaturationStop(spec, context)
     try:
-        since, start, end = rigrun.run_window(spec["env"], spec["warmup"], spec["measure"], rep)
+        since, start, end = rigrun.run_window(spec["env"], spec["warmup"], spec["measure"], rep, stop_when=stop)
         lines = cell_lines(spec, since)
         found = [(cid, p0cells0b.phantom_steps(lines[cid])) for cid in spec["cells_read"]]
         cell, steps = next(((cid, steps) for cid, steps in found if steps), (spec["cells_read"][0], []))
@@ -69,10 +104,15 @@ def run_stepped(spec, rep, context):
     except Exception as ex:  # one run's boundary: every step's row is written as failed
         return [(p0results.run_row(step_spec(spec, {"step": step}), None, context, [str(ex)], "run failed"), None)
                 for step in planned]
-    pairs = []
+    if stop.step is not None:
+        rep.note(f"    step P {stop.step} saturated: the run stopped there")
+    pairs, cut = [], next((window["index"] for window in windows if window["step"] == stop.step), None)
     for window in windows:
         sub = step_spec(spec, window)
-        if window["problem"]:
+        if cut is not None and window["index"] > cut:
+            reason = f"not measured: saturated at the earlier step P {stop.step} on {cell}"
+            pairs.append((p0results.run_row(sub, None, context, [], reason), None))
+        elif window["problem"]:
             pairs.append((p0results.run_row(sub, None, context, [window["problem"]], "run failed"), None))
         else:
             pairs.append(graded(sub, since, window["start"], window["end"], lines, context))

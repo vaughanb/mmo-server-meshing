@@ -49,10 +49,11 @@ and the space game) before slices 2b-6.
   `packets`, `prewarm`, `p0geom.py`, and the rig keys `MESH_MONSTER_PLACE`, `MESH_PREWARM`, `MESH_SHIP_PARK_SLEEP`;
   `phase0/accept_step8a.py` passes. **The 8a blocks b3-b8 are measured on A** (observed, targets, syncrpc, packets,
   prewarm on build 3d52e53 under host `BRENDOAIBOX`; fanout under `BRENDOAIBOX#2026-10-06b`, section 3). Open from
-  them: the packets saturation probe is already saturated at its first step (redesign its steps), S-stress does not fit
-  on A, and 17 fanout step rows (sender arms) were rejected by a false tick miss: a probe window one 30 fps frame over
-  5 s (5.03 s) expects 101 ticks, runs 100 and prints "1 dropped" by arithmetic, with no tick-cap frame. The check now
-  counts only a count off by more than 1 or a cap frame (`p0checks.tick_misses`); those runs need re-measuring.
+  them: S-stress does not fit on A, and 17 fanout step rows (sender arms) were rejected by a false tick miss: a probe
+  window one 30 fps frame over 5 s (5.03 s) expects 101 ticks, runs 100 and prints "1 dropped" by arithmetic, with no tick-cap frame. The check now
+  counts only a count off by more than 1 or a cap frame (`p0checks.tick_misses`); the 17 runs were re-measured
+  (2026-10-07, build 3867cc0) and all those steps passed. The packets saturation probe is moot on virtual phantoms
+  (no sockets: 0 datagrams), so the network-thread probe moves to 8b's sink arms. Draft: `stage0b_8a_results.md`.
   **8b, not started:** bots on B (the auto client connects to `localhost:7500`, so a login-address argument is needed,
   in its own installer since `ServerMeshAutoClient.cs` is not edited), `remoteb.py` bots (bots must not count as cells),
   the meshbot2..N registration with a position reset, accept-b (b1), calibrate (b2), crossings (b9; handoff_ready from
@@ -153,6 +154,7 @@ reliable records/s to 8 subscribers in a 100-AI fight). B also runs "Relics of I
   https://claude.ai/artifact/QzLEyLPTFxGuFq9mKHD1NB. Its §0.9 note on CE-12 is stale (the kit now carries the pass).
 - `step2_design.md` ... `step7_design.md`: per-step implementation contracts (decisions, files, tests, acceptance,
   critique logs); `step2_results.md`, `step3_results.md`; `stage0a_report.md`.
+- `stage0b_8a_results.md`: draft results of step 8a's blocks on A (data sets E0, E1, E1'), for the stage 0b report.
 - `surveys/`: code surveys behind steps 5-7 (`survey7/space.md` compares the build sheet with the space game's code).
 - `kit_patch_9_10_reply.md`: our replies to the space team on their kit patches #9/#10 (now 0006/0007).
 - `step7_space_questions.md`: open questions for the space team, plus two findings for them (the kit's frame-0

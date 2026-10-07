@@ -197,6 +197,58 @@ class RunWindowTests(unittest.TestCase):
                                  "sleep 40", "play_still_running", "stop_play"])
 
 
+class MachineProbeTests(unittest.TestCase):
+    """rigrun.MachineProbe with qwinsta and PowerShell faked: the current session line, the samples' mean, and None for
+    what cannot be read."""
+
+    class Proc:
+        def __init__(self, out):
+            self.out, self.killed = out, False
+
+        def communicate(self, timeout=None):
+            if self.out is None:
+                raise rigrun.subprocess.TimeoutExpired("powershell", timeout)
+            return self.out, ""
+
+        def kill(self):
+            self.killed = True
+
+    def probe(self, out, qwinsta=" SESSIONNAME USERNAME ID STATE\n>rdp-tcp#0   brend   1  Active\n console  2 Conn\n"):
+        proc, scripts = self.Proc(out), []
+        with mock.patch.object(rigrun.subprocess, "run", lambda *a, **k: mock.Mock(stdout=qwinsta)), \
+                mock.patch.object(rigrun.subprocess, "Popen", lambda args, **k: (scripts.append(args[-1]), proc)[1]):
+            probe = rigrun.MachineProbe(45, 60)
+            probe.start(None)
+            return probe.state(), proc, scripts
+
+    def test_machine_probe(self):
+        state, proc, scripts = self.probe("150.5 152.5 151")
+        self.assertEqual(state, {"session": "rdp-tcp#0 brend 1 Active", "perf_pct": 151.3})
+        self.assertIn("Start-Sleep -Seconds 45;", scripts[0])
+        self.assertIn("-SampleInterval 5 -MaxSamples 12", scripts[0])
+        state, proc, _ = self.probe(None, qwinsta="")
+        self.assertEqual((state, proc.killed), ({"session": None, "perf_pct": None}, True))
+        self.assertEqual(self.probe("")[0]["perf_pct"], None)
+
+
+class MeasureUntilTests(unittest.TestCase):
+    """rigrun.measure_until: naps of STOP_POLL_S, stop_when asked after each nap but the last, an early True ends it."""
+
+    def test_measure_until(self):
+        cases = {  # stop_when answers in order, then (naps, asks)
+            "never stops": ([False] * 5, ([20, 20, 5], 2)),
+            "stops after the first nap": ([True], ([20], 1)),
+            "stops after the second nap": ([False, True], ([20, 20], 2)),
+        }
+        for name, (answers, expected) in cases.items():
+            with self.subTest(name):
+                naps, asks = [], []
+                with mock.patch.object(rigrun.time, "sleep", naps.append):
+                    rigrun.measure_until("p", "s", 45, lambda *args: (asks.append(args), answers[len(asks) - 1])[1])
+                self.assertEqual((naps, len(asks)), expected)
+                self.assertTrue(all(args == ("p", "s") for args in asks))
+
+
 
 class MachineHostTests(unittest.TestCase):
     """rigrun.machine_host: COMPUTERNAME, plus #<epoch> from the epoch file; a malformed epoch is refused."""

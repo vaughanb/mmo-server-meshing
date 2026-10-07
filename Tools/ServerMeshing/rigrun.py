@@ -43,6 +43,7 @@ CUT_LENGTH = {"coarse": 0, "halves": 600, "grid": 4 * 600}   # metres of interna
 GROUND = 600.0
 PARK = (-290, 290)       # where db_reset leaves the test characters; no client logs in during these runs
 MONSTER_ENV = {"off": {"MESH_NO_MONSTERS": "1"}, "edge": {}, "all": {"MESH_MONSTER_AREAS": "all"}}
+STOP_POLL_S = 20           # run_window: seconds between stop_when calls during the measurement
 LINKED = re.compile(r"Neighbour zone (\S+) linked")   # MeshMapNetworkManager_Ghosting: a neighbour's link said hello
 
 # Four 150 m strips on registry ids, west to east; C and E keep the halves' cut at x = 0, and C is in every layout.
@@ -81,12 +82,14 @@ def now():
     return datetime.datetime.now().replace(microsecond=0)
 
 
-def run_window(env, warmup, measure, rep, on_play=None):
+def run_window(env, warmup, measure, rep, on_play=None, stop_when=None):
     """One Play session with no client: returns (play start, window start, window end) as datetimes. Play is always
     stopped, and a failure is raised to the caller only after that, so one broken run never leaves the editor playing.
     on_play, when given, is called as on_play(play start) once Play is up (after wait_play, before the warm-up), so
     what must start after Play (step 8b's sink and bots: leftover bots are killed first) starts there; an exception
-    it raises stops Play and is re-raised (step 8a decision 5)."""
+    it raises stops Play and is re-raised (step 8a decision 5). stop_when, when given, is asked as
+    stop_when(play start, window start) every STOP_POLL_S seconds of the measurement; True ends it there (a stepped
+    run whose step saturated), and the window end is that moment."""
     r.kill_bots()
     leftover = r.kit_process_count()
     if leftover:
@@ -105,7 +108,10 @@ def run_window(env, warmup, measure, rep, on_play=None):
             on_play(play_start)
         time.sleep(warmup)
         start = now()
-        time.sleep(measure)
+        if stop_when is None:
+            time.sleep(measure)
+        else:
+            measure_until(play_start, start, measure, stop_when)
         end = now()
         if not r.play_still_running():
             raise RuntimeError("Play ended, or another Play replaced it, during the measurement")
@@ -235,6 +241,54 @@ def kit_patch_texts():
 
 
 MACHINE_EPOCH_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "Logs", "p0", "MACHINE_EPOCH")
+
+
+PERF_COUNTER = r"\Processor Information(_Total)\% Processor Performance"
+
+
+class MachineProbe:
+    """What the machine was doing over one run's measurement, for a canary row's machine_state (A's canary moves with
+    states no setting names: idle, in use over RDP, night): start(play_start), an on_play, notes this Windows session
+    (qwinsta's current line, e.g. "rdp-tcp#0 brend 1 Active") and starts one PowerShell that waits out the warm-up, then
+    samples the CPU's % processor performance every 5 s over the measurement; state() reaps it and returns {"session",
+    "perf_pct"} (the samples' mean). It never fails a run: what it cannot read is None."""
+
+    def __init__(self, warmup, measure):
+        self.warmup, self.measure, self.proc, self.session = warmup, measure, None, None
+
+    def start(self, play_start):
+        try:
+            sessions = subprocess.run(["qwinsta"], capture_output=True, text=True).stdout.splitlines()
+            self.session = next((" ".join(line[1:].split()) for line in sessions if line.startswith(">")), None)
+            script = (f"Start-Sleep -Seconds {self.warmup}; (Get-Counter '{PERF_COUNTER}' -SampleInterval 5 "
+                      f"-MaxSamples {max(1, int(self.measure) // 5)} | ForEach-Object "
+                      "{ $_.CounterSamples[0].CookedValue }) -join ' '")
+            self.proc = subprocess.Popen(["powershell", "-NoProfile", "-Command", script], stdout=subprocess.PIPE,
+                                         stderr=subprocess.DEVNULL, text=True)
+        except OSError:
+            self.proc = None
+
+    def state(self):
+        perf = None
+        if self.proc is not None:
+            try:
+                values = [float(value) for value in self.proc.communicate(timeout=30)[0].split()]
+                perf = round(sum(values) / len(values), 1) if values else None
+            except (subprocess.TimeoutExpired, ValueError):
+                self.proc.kill()
+        return {"session": self.session, "perf_pct": perf}
+
+
+def measure_until(play_start, start, measure, stop_when):
+    """Sleeps out measure seconds in STOP_POLL_S naps, returning early once stop_when(play_start, start) is True (it is
+    not asked after the last nap). The naps count, not the clock, so the time stop_when takes only lengthens the run."""
+    left = measure
+    while left > 0:
+        nap = min(STOP_POLL_S, left)
+        time.sleep(nap)
+        left -= nap
+        if left > 0 and stop_when(play_start, start):
+            return
 
 
 def machine_host(epoch_file=MACHINE_EPOCH_FILE):
