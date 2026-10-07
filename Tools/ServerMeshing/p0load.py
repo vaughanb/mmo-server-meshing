@@ -14,7 +14,7 @@ report.
     python Tools/ServerMeshing/p0load.py observed --part O|R|SA|M|S
     python Tools/ServerMeshing/p0load.py fanout|targets|syncrpc|packets|prewarm
     python Tools/ServerMeshing/p0load.py accept-b|calibrate|crossings|jfull|workerab|dbburst|spaces   (refused)
-    common: --dry-run --resume --no-canary --warmup S --measure S
+    common: --dry-run --resume --no-canary --warmup S --measure S --keys K1,K2
 
 The plans are p0plans' (the step 4 contract's §H) and p0plans0b's (step 8a, decisions 6-11), run by p0blocks: each run
 is abload's protocol (rigrun.run_window), read per cell with rigrun.cell_window and p0cells.cell_record, graded by
@@ -38,6 +38,8 @@ after the block and again after a drifted canary. --resume skips planned runs wi
 machine (a stepped run: one per step; accept-a refuses it: it grades its runs together); the runs an earlier invocation
 made after the last good canary are queued again too when a canary drifts, and the verdict counts every planned run. The
 start canary runs unless the newest canary on this machine passed under 2 h ago. --no-canary skips the canaries.
+--keys runs only the named plan keys (a re-run of chosen runs; the verdict counts those) and refuses a key the plan
+does not hold; with --resume it still skips the complete ones.
 --dry-run prints the plan, every run's environment and predicted load (label E); it touches no editor, database,
 PowerShell or Temp file and writes nothing. report reads Logs/p0/*.jsonl (+ --import) and writes
 Logs/p0/report_<stamp>.md and Logs/p0/<team>_<game>_fit_<stamp>.jsonl (p0report.build_report); only the rig's rows are
@@ -226,6 +228,15 @@ def report_command(args):
     return 0
 
 
+def chosen_keys(plan, keys):
+    """The plan's specs whose plan key --keys names, in plan order; ValueError naming any key the plan does not hold."""
+    wanted = {key.strip() for key in keys.split(",") if key.strip()}
+    unknown = sorted(wanted - {spec["key"] for spec in plan})
+    if unknown or not wanted:
+        raise ValueError(f"--keys names {', '.join(unknown) or 'no key'}, not in this block's plan")
+    return [spec for spec in plan if spec["key"] in wanted]
+
+
 def build_parser():
     """The command line's parser: one subcommand per block, report and the refused later-stage families."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -239,6 +250,7 @@ def build_parser():
         p.add_argument("--no-canary", action="store_true", help="skip the scheduled canaries")
         p.add_argument("--warmup", type=int, default=None, help="warm-up seconds of every run (default: the plan's)")
         p.add_argument("--measure", type=int, default=None, help="measured seconds of every run (default: the plan's)")
+        p.add_argument("--keys", default=None, metavar="K1,K2", help="run only these plan keys (a re-run of chosen runs)")
         return p
 
     command("canary").add_argument("--baseline", action="store_true", help="the build's baseline (2 runs, +1)")
@@ -300,6 +312,8 @@ def main(argv=None):
         if args.command == "abgeo" and args.dry_run:
             return abgeo_dry_run(args, done)
         plan = [] if args.command == "abgeo" else block_plan(args)
+        if getattr(args, "keys", None):
+            plan = chosen_keys(plan, args.keys)
         specs = [spec for spec in plan if spec["key"] not in done]
         if args.dry_run:
             return dry_run(args, specs)

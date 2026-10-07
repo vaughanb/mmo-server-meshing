@@ -147,6 +147,13 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("66 runs, about", out)
         self.assertIn("    predicted (E) not modelled for phantoms, ships or monsters\n", out)
+        with new_keys():
+            keys = [spec["key"] for spec in p0load.block_plan(p0load.build_parser().parse_args(["fanout"]))][4:6]
+        code, out = p0load_main(["fanout", "--dry-run", "--keys", ",".join(reversed(keys))])
+        self.assertEqual(code, 0)
+        self.assertIn("\n2 runs, about", out)
+        code, out = p0load_main(["fanout", "--dry-run", "--keys", f"{keys[0]},zzz"])
+        self.assertEqual((code, out), (2, "refused: --keys names zzz, not in this block's plan\n"))
         with mock.patch.object(p0load.p0blocks, "read_history", return_value=([], [])):
             code, out = p0load_main(["observed", "--part", "S", "--dry-run", "--resume"])
         self.assertEqual(code, 0)
