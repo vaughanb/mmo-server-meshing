@@ -71,9 +71,9 @@ CANARY_FAMILIES = tuple(p0blocks.CANARY_FAMILIES) + tuple(family for family in p
 
 
 def this_host():
-    """The machine a row is keyed on beside its build (decision 1): rigrun.host_context's host, read without
-    PowerShell so --resume and a dry run can use it."""
-    return os.environ.get("COMPUTERNAME", "?")
+    """The machine a row is keyed on beside its build (decision 1): rigrun.host_context's host (with the machine epoch,
+    rigrun.machine_host), read without PowerShell so --resume and a dry run can use it."""
+    return rigrun.machine_host()
 
 
 def block_plan(args):

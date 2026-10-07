@@ -197,5 +197,40 @@ class RunWindowTests(unittest.TestCase):
                                  "sleep 40", "play_still_running", "stop_play"])
 
 
+
+class MachineHostTests(unittest.TestCase):
+    """rigrun.machine_host: COMPUTERNAME, plus #<epoch> from the epoch file; a malformed epoch is refused."""
+
+    def test_machine_host(self):
+        import os
+        import tempfile
+        cases = {
+            "an epoch with a space is refused": ("two words", RuntimeError),
+            "an epoch with '#' is refused": ("a#b", RuntimeError),
+            "no file keeps the host": (None, "HOSTX"),
+            "an empty file keeps the host": ("  " + chr(10), "HOSTX"),
+            "an epoch is appended": ("2026-10-06" + chr(10), "HOSTX#2026-10-06"),
+        }
+        old = os.environ.get("COMPUTERNAME")
+        os.environ["COMPUTERNAME"] = "HOSTX"
+        try:
+            for name, (text, expected) in cases.items():
+                with self.subTest(name), tempfile.TemporaryDirectory() as d:
+                    path = os.path.join(d, "MACHINE_EPOCH")
+                    if text is not None:
+                        with open(path, "w", encoding="utf-8") as f:
+                            f.write(text)
+                    if expected is RuntimeError:
+                        with self.assertRaises(RuntimeError):
+                            rigrun.machine_host(path)
+                    else:
+                        self.assertEqual(rigrun.machine_host(path), expected)
+        finally:
+            if old is None:
+                del os.environ["COMPUTERNAME"]
+            else:
+                os.environ["COMPUTERNAME"] = old
+
+
 if __name__ == "__main__":
     unittest.main()

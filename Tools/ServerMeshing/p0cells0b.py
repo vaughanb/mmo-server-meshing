@@ -262,7 +262,10 @@ def step_windows(planned, steps, start, end, settle=STEP_SETTLE):
             continue
         ramp = datetime.timedelta(seconds=max(0, step["b"] - step["a"]) / BIND_PER_S)
         low = max(step["end"] + ramp + settle, start)
-        high = min(following["end"] if following is not None else end, end)
+        # Stamps have whole-second resolution: a Phantom window stamped in the second the next step's line is logged
+        # already counts that step's binds (fanout 2026-10-05: 88 bound at the end of step 50), so the window ends a
+        # second earlier.
+        high = min(following["end"] - datetime.timedelta(seconds=1) if following is not None else end, end)
         if low >= high:
             window["problem"] = (f"step {index}/{len(planned)} (P {want}) has no time inside the measurement "
                                  f"(it starts {step['end']:%H:%M:%S}, ramps for {ramp.total_seconds():g} s and settles for "

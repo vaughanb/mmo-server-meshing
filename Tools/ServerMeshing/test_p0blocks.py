@@ -401,7 +401,7 @@ class SteppedTests(unittest.TestCase):
         rows = [row for row, _ in pairs]
         self.assertEqual([(row["plan_key"], row["point"], row["accepted"], row["window_local"]["start"],
                            row["window_local"]["end"]) for row in rows],
-                         [("ks", {"players": 60, "step": 50}, True, "2026-09-26T10:00:01", "2026-09-26T10:00:20"),
+                         [("ks", {"players": 60, "step": 50}, True, "2026-09-26T10:00:01", "2026-09-26T10:00:19"),
                           ("ks", {"players": 60, "step": 100}, True, "2026-09-26T10:00:31", "2026-09-26T10:01:00")])
         self.assertEqual({(row["stepped_since"], row["net_saturated"], row["stage"]) for row in rows},
                          {("2026-09-26T09:59:00", None, "0b")})

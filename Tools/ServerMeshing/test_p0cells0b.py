@@ -213,7 +213,7 @@ class StepWindowTests(unittest.TestCase):
                  for clock, i, a, b in (("09:59:40", 1, 0, 400), ("10:00:15", 2, 400, 200), ("10:00:35", 3, 200, 100))]
         self.assertEqual([(w["step"], w["start"], w["end"], w["problem"])
                           for w in p0cells0b.step_windows([400, 200, 100], steps, START, END)],
-                         [(400, START, at("10:00:15"), None), (200, at("10:00:25"), at("10:00:35"), None),
+                         [(400, START, at("10:00:14"), None), (200, at("10:00:25"), at("10:00:34"), None),
                           (100, at("10:00:45"), END, None)])
 
     def test_step_windows_wait_for_the_ramp(self):
@@ -223,7 +223,7 @@ class StepWindowTests(unittest.TestCase):
                  for clock, i, a, b in (("10:00:00", 1, 0, 800), ("10:00:40", 2, 800, 400))]
         self.assertEqual([(w["step"], w["start"], w["end"], w["problem"])
                           for w in p0cells0b.step_windows([800, 400], steps, START, END)],
-                         [(800, at("10:00:26"), at("10:00:40"), None), (400, at("10:00:50"), END, None)])
+                         [(800, at("10:00:26"), at("10:00:39"), None), (400, at("10:00:50"), END, None)])
 
     def test_phantom_steps_need_a_stamp(self):
         with fake_stage0b():

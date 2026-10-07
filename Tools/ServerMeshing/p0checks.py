@@ -184,7 +184,10 @@ def check_instruments(spec, run):
             if not record["markers"]["aoi_timing"]:
                 problems.append(f"{cid} logged no 'AOI timing: installed' line with MESH_AOI_TIMING=1")
             off = [t for t in record["triples"] if not low <= t["ticks"]["aoi_passes"] <= high]
-            if off and not spec.get("saturation_probe"):   # a saturated frame loop skips AOI passes by design there
+            # A saturation probe skips AOI passes by design; a prewarm burst stalls the frame loop for a pass or two in
+            # the windows around it, which is what it measures (b8, 2026-10-05: 650 at once, one window at 3 passes).
+            burst = spec["family"] == "prewarm" and len(off) <= PREWARM_AOI_WINDOWS
+            if off and not spec.get("saturation_probe") and not burst:
                 detail = ", ".join(f"{clock(t['end'])} {t['ticks']['aoi_passes']}" for t in off)
                 problems.append(f"{cid}: AOI passes outside {low} to {high} in {len(off)} of {len(record['triples'])} "
                                 f"windows ({detail})")
@@ -203,6 +206,7 @@ def tick_misses(triples):
     return misses
 
 
+PREWARM_AOI_WINDOWS = 2          # prewarm: windows around the burst allowed short of AOI passes
 DROPPED_TICK_SHARE_0B = 0.25   # stage 0b: windows that only dropped ticks fail the run above this share (prewarm: never)
 
 

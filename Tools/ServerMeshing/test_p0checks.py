@@ -363,6 +363,31 @@ class DroppedTickTests(unittest.TestCase):
                 self.assertEqual(len(p0checks.check_ticks(case, self.run_with(windows))), problems)
 
 
+class PrewarmAoiTests(unittest.TestCase):
+    """The AOI pass check lets a prewarm run have up to PREWARM_AOI_WINDOWS short windows (the burst); others none."""
+
+    @staticmethod
+    def run_with(passes):
+        triples = [{"end": datetime.datetime(2026, 9, 26, 10, 0, 5 * k), "seconds": 5.0,
+                    "ticks": {"ticks": 100, "dropped": 0, "aoi_passes": p}} for k, p in enumerate(passes)]
+        record = {"triples": triples, "saturated": set(), "ticks": None,
+                  "markers": {"aoi_timing": ["AOI timing: installed"], "tick_burn": []}}
+        return {"cells": {"C": {"p0": record}}}
+
+    def test_prewarm_burst_windows(self):
+        env = dict(ENV, MESH_AOI_TIMING="1")
+        cases = {
+            "three short windows fail a prewarm run": ("prewarm", [5] * 8 + [3] * 3, 1),
+            "one short window fails another 0b family": ("targets", [5] * 10 + [3], 1),
+            "two short windows pass a prewarm run": ("prewarm", [5] * 9 + [3] * 2, 0),
+        }
+        for name, (family, passes, problems) in cases.items():
+            with self.subTest(name):
+                case = spec(family=family, env=env, cells_read=["C"])
+                found = [p for p in p0checks.check_instruments(case, self.run_with(passes)) if "AOI passes" in p]
+                self.assertEqual(len(found), problems)
+
+
 class ExclusionTests(unittest.TestCase):
     def test_exclusion(self):
         two = {"changes": {5: {"sat": 25.0}, 8: {"sat": 25.0}}}

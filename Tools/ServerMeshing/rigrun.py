@@ -234,6 +234,25 @@ def kit_patch_texts():
     return texts
 
 
+MACHINE_EPOCH_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "Logs", "p0", "MACHINE_EPOCH")
+
+
+def machine_host(epoch_file=MACHINE_EPOCH_FILE):
+    """The host a row is keyed on: COMPUTERNAME, plus "#<epoch>" when Logs/p0/MACHINE_EPOCH names one. An epoch marks
+    a change of the machine's state that the canary shows but no setting names (2026-10-06 on A: the same build and
+    power plan read 68.6 ms/s for a day, then 80-83 after an editor restart and a reboot), so rows of two epochs are
+    keyed apart like two machines: never pooled, never resumed past, each with its own baseline."""
+    host = os.environ.get("COMPUTERNAME", "?")
+    try:
+        with open(epoch_file, encoding="utf-8") as f:
+            epoch = f.read().strip()
+    except FileNotFoundError:
+        return host
+    if epoch and any(ch.isspace() or ch == "#" for ch in epoch):
+        raise RuntimeError(f"{epoch_file}: an epoch is one word without '#', got {epoch!r}")
+    return f"{host}#{epoch}" if epoch else host
+
+
 def host_context():
     """Where the runs happen, for every JSONL run row: host, cpu, cores, logical, os, power_plan, build (build_id) and
     kit_patches ({"CE-6": "present", ...}). Runs PowerShell and powercfg and reads every Assets/**/*.cs, so it is called
@@ -245,7 +264,7 @@ def host_context():
     if power.returncode != 0:
         raise RuntimeError(f"powercfg /getactivescheme failed ({power.returncode}): "
                            f"{(power.stderr or power.stdout).strip()[:300]}")
-    return {"host": os.environ.get("COMPUTERNAME", "?"), "cpu": cpu_name(), "cores": int(counts[0]),
+    return {"host": machine_host(), "cpu": cpu_name(), "cores": int(counts[0]),
             "logical": int(counts[1]), "os": platform.platform(),
             "power_plan": p0results.parse_power_plan(power.stdout), "build": build_id(),
             "kit_patches": p0results.kit_patches(kit_patch_texts())}
