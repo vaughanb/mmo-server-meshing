@@ -46,9 +46,9 @@ class AcceptChecksTests(unittest.TestCase):
             "a bin p95 off the line's": ({"r60": {"changes": {3: {"ticks": 99}}}},
                                          ["r60: each window's Work bins p95 matches its Work ticks p95 within 0.05 ms "
                                           "(10:00:15 tick 3.05 vs 2.05 ms)"]),
-            "a dropped tick": ({"plain": {"changes": {2: {"dropped": 1}}}},
-                               ["plain: 100 ± 1 ticks per 5 s window, none dropped (10:00:10: 100 of 100 ticks, "
-                                "1 dropped)"]),
+            "a tick-cap frame": ({"plain": {"changes": {2: {"dropped": 1, "cap": 1}}}},
+                                 ["plain: 100 ± 1 ticks per 5 s window, no tick cap (10:00:10: 100 of 100 ticks, "
+                                  "1 dropped, cap 1)"]),
         }
         for name, (changes, expected) in cases.items():
             with self.subTest(name):

@@ -197,12 +197,15 @@ def check_instruments(spec, run):
 
 
 def tick_misses(triples):
-    """'10:00:05: 99 of 100 ticks, 1 dropped' for each window off 20 ticks/s by more than 1 tick or dropping any."""
+    """'10:00:05: 98 of 100 ticks, 2 dropped, cap 1' for each window off 20 ticks/s by more than 1 tick or holding a
+    frame that ran the kit's tick cap (where the kit drops its backlog). The line's own "dropped" is only expected minus
+    ticks, so a window one frame over 5 s (5.03 s: 100 of 101) reads "1 dropped" with nothing dropped: that is the ± 1."""
     misses = []
     for t in triples:
         want, wt = round(TICK_HZ * t["seconds"]), t["ticks"]
-        if abs(wt["ticks"] - want) > 1 or wt["dropped"]:
-            misses.append(f"{clock(t['end'])}: {wt['ticks']} of {want} ticks, {wt['dropped']} dropped")
+        cap = wt.get("cap", 0)
+        if abs(wt["ticks"] - want) > 1 or cap:
+            misses.append(f"{clock(t['end'])}: {wt['ticks']} of {want} ticks, {wt['dropped']} dropped, cap {cap}")
     return misses
 
 
@@ -211,7 +214,7 @@ DROPPED_TICK_SHARE_0B = 0.25   # stage 0b: windows that only dropped ticks fail 
 
 
 def check_ticks(spec, run):
-    """Every unsaturated window of each read cell holds 100 ± 1 ticks (20 per second) and dropped none; a window
+    """Every unsaturated window of each read cell holds 100 ± 1 ticks (20 per second) and no tick-cap frame; a window
     stating another budget than the first (p0cells.aggregate_work_ticks' problems) is a problem too. Stage 0b runs
     load their cell near its limit, so there a window whose ticks run plus dropped make its count (98 + 2 of 100)
     but that dropped ticks is tolerated in up to
@@ -229,7 +232,7 @@ def check_ticks(spec, run):
                 misses = counted
         if misses:
             problems.append(f"{cid}: {len(misses)} of {len(windows)} unsaturated windows missed {TICK_HZ} ticks/s "
-                            f"± 1 tick with none dropped ({'; '.join(misses)})")
+                            f"± 1 tick or hit the kit's tick cap ({'; '.join(misses)})")
         if record["ticks"] is not None:
             problems += [f"{cid}: {text}" for text in record["ticks"]["problems"]]
     return problems

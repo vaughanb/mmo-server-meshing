@@ -50,8 +50,9 @@ and the space game) before slices 2b-6.
   `phase0/accept_step8a.py` passes. **The 8a blocks b3-b8 are measured on A** (observed, targets, syncrpc, packets,
   prewarm on build 3d52e53 under host `BRENDOAIBOX`; fanout under `BRENDOAIBOX#2026-10-06b`, section 3). Open from
   them: the packets saturation probe is already saturated at its first step (redesign its steps), S-stress does not fit
-  on A, and **the state sender drops one tick about every 10 s** (27-40 % of windows, even at 22 % load; the kit sender
-  never does), which fails the dropped-tick check in several fanout arms; find it before writing the 0b results.
+  on A, and 17 fanout step rows (sender arms) were rejected by a false tick miss: a probe window one 30 fps frame over
+  5 s (5.03 s) expects 101 ticks, runs 100 and prints "1 dropped" by arithmetic, with no tick-cap frame. The check now
+  counts only a count off by more than 1 or a cap frame (`p0checks.tick_misses`); those runs need re-measuring.
   **8b, not started:** bots on B (the auto client connects to `localhost:7500`, so a login-address argument is needed,
   in its own installer since `ServerMeshAutoClient.cs` is not edited), `remoteb.py` bots (bots must not count as cells),
   the meshbot2..N registration with a position reset, accept-b (b1), calibrate (b2), crossings (b9; handoff_ready from

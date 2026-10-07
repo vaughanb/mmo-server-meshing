@@ -34,13 +34,13 @@ def stamped(clock, message):
 
 
 def window(clock, owned=0, puppets=0, fps=60, physics=33.3, ticks=100, dropped=0, passes=5, sat=0.0, tick_mean=5.0,
-           other_mean=1.0, bins=True, send=None, frames=None):
+           other_mean=1.0, bins=True, send=None, frames=None, cap=0):
     frames = fps * 5 if frames is None else frames
     budget, t0 = 1000 / fps, frames - ticks
     lines = [stamped(clock, f"Work window 5.00 s: frames {frames} work mean 5.000 ms p95 6.00 ms max 8.0 ms wait "
                             f"10.000 ms period {budget:.3f} ms budget {budget:.2f} ms sat {sat:.1f}% probe=Valid | "
                             f"owned players {owned} monsters 0 | puppets players {puppets} monsters 0 | clients 0 cpu 30%"),
-             stamped(clock, f"Work ticks 5.00 s: ticks {ticks} expected 100 dropped {dropped} cap 0 unclosed 0 | frames "
+             stamped(clock, f"Work ticks 5.00 s: ticks {ticks} expected 100 dropped {dropped} cap {cap} unclosed 0 | frames "
                             f"{frames} t0 {t0} t1 {ticks} t2 0 | tick frames mean {tick_mean:.3f} ms p95 2.05 ms p99 3.05 "
                             f"ms max 3.2 ms | nonaoi p95 2.05 ms p99 2.05 ms | aoi passes {passes} frames 5 mean 4.000 ms "
                             f"max 8.2 ms | other mean {other_mean:.3f} ms p95 0.55 ms | kit mean 0.812 ms p95 0.85 ms p99 "
@@ -141,9 +141,10 @@ class RunProblemsTests(unittest.TestCase):
                                ["C logged no 'AOI timing: installed' line with MESH_AOI_TIMING=1"]),
             "3 AOI passes": ({}, {"changes": {4: {"passes": 3}}}, {},
                              ["C: AOI passes outside 4 to 6 in 1 of 12 windows (10:00:20 3)"]),
-            "99 ticks with 1 dropped": ({}, {"changes": {6: {"ticks": 99, "dropped": 1}}}, {},
-                                        ["C: 1 of 12 unsaturated windows missed 20 ticks/s ± 1 tick with none dropped "
-                                         "(10:00:30: 99 of 100 ticks, 1 dropped)"]),
+            "99 ticks with 1 dropped and no cap (the ± 1)": ({}, {"changes": {6: {"ticks": 99, "dropped": 1}}}, {}, []),
+            "99 ticks on a tick-cap frame": ({}, {"changes": {6: {"ticks": 99, "dropped": 1, "cap": 1}}}, {},
+                                             ["C: 1 of 12 unsaturated windows missed 20 ticks/s ± 1 tick or hit the "
+                                              "kit's tick cap (10:00:30: 99 of 100 ticks, 1 dropped, cap 1)"]),
             "missing band line": ({}, {"drop": ("band",)}, {}, ["C logged no MESH_BAND line, expected 300 m"]),
             "motion line on a default arm": ({"env": no_motion}, {}, {},
                                              ["C logged a load motion line (motion kinematic, fight on) on a default arm"]),
@@ -343,10 +344,21 @@ class DroppedTickTests(unittest.TestCase):
     """check_ticks on stage 0b families: drop-only windows tolerated up to a share (prewarm always); count misses fail."""
 
     @staticmethod
-    def run_with(windows):
-        triples = [{"end": datetime.datetime(2026, 9, 26, 10, 0, 5 * k), "seconds": 5.0,
-                    "ticks": {"ticks": ticks, "dropped": dropped}} for k, (ticks, dropped) in enumerate(windows)]
+    def run_with(windows, seconds=5.0, cap=0):
+        triples = [{"end": datetime.datetime(2026, 9, 26, 10, 0, 5 * k), "seconds": seconds,
+                    "ticks": {"ticks": ticks, "dropped": dropped, "cap": cap}} for k, (ticks, dropped) in enumerate(windows)]
         return {"cells": {"C": {"p0": {"triples": triples, "saturated": set(), "ticks": None}}}}
+
+    def test_window_edge_is_not_a_drop(self):
+        """A window one 30 fps frame over 5 s expects 101 ticks; 100 with "1 dropped" and no cap frame is the ± 1 (the
+        fanout block of 2026-10-06 failed sender arms on these), while a cap frame always counts."""
+        edge = [(100, 0)] * 7 + [(100, 1)]
+        for family in ("rates", "targets"):
+            with self.subTest(family):
+                case = spec(family=family, cells_read=["C"])
+                self.assertEqual(p0checks.check_ticks(case, self.run_with(edge, seconds=5.03)), [])
+                self.assertEqual(len(p0checks.check_ticks(spec(family="rates", cells_read=["C"]),
+                                                          self.run_with(edge, seconds=5.03, cap=1))), 1)
 
     def test_check_ticks_stage_0b(self):
         clean, dropped, short = (100, 0), (98, 2), (97, 0)   # (ticks run, dropped): 98 + 2 make the 100

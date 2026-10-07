@@ -70,7 +70,7 @@ def _instrument_run(add, name, structural, record):
     add(probes and "Invalid" not in probes, f"{name}: the Work window line parses and the probe is not Invalid "
                                             f"({'/'.join(sorted(set(probes))) or 'no windows'})")
     misses = p0checks.tick_misses(triples)
-    add(triples and not misses, f"{name}: 100 ± 1 ticks per 5 s window, none dropped ({'; '.join(misses) or 'all'})")
+    add(triples and not misses, f"{name}: 100 ± 1 ticks per 5 s window, no tick cap ({'; '.join(misses) or 'all'})")
 
 
 def _rates_run(add, name, fps, step, share, record):
@@ -102,7 +102,7 @@ def _rates_run(add, name, fps, step, share, record):
 
 def accept_instrument_checks(runs, cell="C"):
     """Accept-a part A as [(ok, text)] over runs {name: run} named plain, r60, r60burn, r30, r30burn (a missing run
-    fails): at least 6 windows, no exceptions, probe not Invalid, 100 ± 1 ticks and none dropped; for r60 and r30 one
+    fails): at least 6 windows, no exceptions, probe not Invalid, 100 ± 1 ticks and no tick-cap frame; for r60 and r30 one
     Rates line as asked, the share of frames with a tick (1/3, 2/3 ± 0.02), physics 33.3 / 50 ± 1 steps/s, AOI passes
     5 ± 1, the tick decomposed on 95 % of ticks, thread CPU in cycles and within ± 5 % of the process; each burn run
     +2.000 ± 0.100 ms on tick frames and other frames within 0.15 ms; every Work ticks line of the instrumented runs has
