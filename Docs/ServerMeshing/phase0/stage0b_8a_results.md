@@ -1,4 +1,4 @@
-# Phase 0 stage 0b: step 8a's blocks on machine A (draft, 2026-10-07)
+# Phase 0 stage 0b: step 8a's blocks on machine A and step 8b's with B (draft, 2026-10-09)
 
 Draft results of the step 8a blocks (b3-b8 virtual parts: observed, targets, syncrpc, packets, prewarm, fanout),
 measured on machine A. It is not the DESIGN 0.74 row: that row is one stage-level row for all of stage 0b and waits for
@@ -139,12 +139,37 @@ group; fanout's top steps as in the table.
   (E1') and every such step was accepted.
 - Machine epochs: rows are keyed on `COMPUTERNAME#<epoch>` when `Logs/p0/MACHINE_EPOCH` names one (44ef586).
 - `p0load --keys` re-runs chosen planned runs (08c4158).
-- Not yet committed: a rising stepped run stops once a step is graded saturated (later steps get a "not measured" row),
-  and canary rows record `machine_state` (Windows session, mean % processor performance over the measurement).
+- A rising stepped run stops once a step is graded saturated (later steps get a "not measured" row), and canary rows
+  record `machine_state` (Windows session, mean % processor performance over the measurement) (5b7eac0).
+- Step 8b (715260e and after): an early-stopping run (b9's walks) is graded on the seconds it measured; the network
+  thread is read as `thread_ms_per_s{litenetlib}` + `{unnamed}`, because on A LiteNetLib's pre-start thread names do
+  not reach Windows and its CPU is filed as unnamed; accept-b part F runs 200 eyes (400 saturated A) and part E 30 s.
 
-## 5. Open for the stage 0b report
+## 5. Step 8b's blocks (A with B, build 87c4db6, 2026-10-08/09)
 
-- Step 8b's blocks, including the real network-thread probe (sink phantoms on B) that replaces the virtual one.
-- Why A's canary sits at ~69 at night and ~75 in the afternoon with A idle: the new `machine_state` field records the
-  session and CPU performance with every canary from now on.
+Machine B (BRENDOSERVER, the laptop) ran the bots (`meshbot2..101`, logging in to A with `-meshLoginAddress`) and the
+sink. B hosts 100 bots (all in the map within 142 s, ~1 GB free; 11 uploads/s per bot at 30 fps). Data sets: b1 A-D,
+b2 and b9 under `BRENDOAIBOX#2026-10-06b` (baseline 82.2, taken right after the build and smokes; canaries 79-81);
+b1 E-F, b7 and b10 under `BRENDOAIBOX#2026-10-08n` (baseline 76.8; canaries within 1.3 %). The first chain's b7 and b10
+were stopped by drift (the canary slid 83.7 → 76 over 2.5 h with RDP and CPU clock unchanged) and were re-run.
+
+| Block | Result |
+|---|---|
+| b1 accept-b | A: sink in matches Send wire (-0.0 %); B: eyeSeen 0, V 201, the bot sees no eye; C: sender records/s +0.1 % of the kit's with 2 bots; D: a ship bot sees 50 ships; E: CE-12 `shape=pass` (post-pass). F: meter cost 1.05 ms/s (≈ 0.2 %) but its 5-pair interval [-3.7, 5.8] reaches past 1 % of the work (4.5): **not shown**, needs more pairs. |
+| b2 J-lite (50) | **Gate J PASS** both arms: work kit 7.1 % / sender 0.3 %, bytes 3.9 / 3.6 %, V 4 %. |
+| b10 J-full (100) | **Gate J PASS** both arms: work kit 0.5 % / sender 4.0 %, bytes 0.9 / 1.0 %, V ≤ 0.1 %. |
+| b9 crossings | 844 handoffs, no rollback or failure. handoff_ready p50 / p95 / p99: 20 bots 467 / 567-700 / 700-833 ms; **50 bots 900-1,033 / 1,567-1,967 / 1,767-2,167 ms**: **Crossings half A FAIL** (p95 ≤ 1.0 s with 50 bots). Wake of a sleeping neighbour 4-5 s. Cost per crossing 9.8 ms of C + E work (interval 7.3-12.2, 3 pairs). Half B waits for stage 0c's B5. |
+| b7 sink cap | ship-sender-28, 100 sink phantoms + 400 AI, V 500, scale 0.5: ~58,000 datagrams/s; per datagram (sink − virtual), main thread 1.10 / 1.47 / 2.13 µs and network thread 4.75 / 4.94 / 5.26 µs at a 1,020 / 510 / 255 B cap. |
+| b7 network probe | eyes on the sink, V 100: network thread 38 / 67 / 125 / 236 ms/s at 6,200 / 12,400 / 24,700 / 47,000 datagrams/s (P 100-800): linear, **not saturated**; at ~5 µs per datagram A's network thread would saturate near 180,000 datagrams/s. |
+
+Caveats: the phantom runs' upload rate reads 0 in the rows (no metric for sink phantoms' uploads), so the upload match
+of gate J is unverified, though work and bytes match; handoff latency grows with how many cross at once (20 → 50 bots
+roughly doubles p50), which matters for the drain and split pacing of slices 2b/2c.
+
+## 6. Open for the stage 0b report
+
+- accept-b part F with more pairs.
+- Why handoff_ready grows with concurrent crossings (the 50-bot gate failure) before slices 2b/2c rely on it.
+- Why A's canary moves with time and activity: `machine_state` now records the session and CPU performance; the
+  2026-10-08 evening slide happened with both constant.
 - The prewarm oddities above.

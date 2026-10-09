@@ -54,15 +54,19 @@ and the space game) before slices 2b-6.
   counts only a count off by more than 1 or a cap frame (`p0checks.tick_misses`); the 17 runs were re-measured
   (2026-10-07, build 3867cc0) and all those steps passed. The packets saturation probe is moot on virtual phantoms
   (no sockets: 0 datagrams), so the network-thread probe moves to 8b's sink arms. Draft: `stage0b_8a_results.md`.
-  **8b, built on A (2026-10-08), not yet run with B:** contract `step8b_design.md` (rev 1, two critiques). Bots on B
+  **8b, built (715260e) and measured with B (2026-10-08/09); results in `stage0b_8a_results.md` §5:** gate J PASS at 50
+  and 100 bots; Crossings half A FAIL (handoff_ready p95 1.6-2.0 s with 50 bots crossing together; 0.6-0.7 s with 20);
+  ~5 µs of network thread per datagram, not saturated at 47,000/s; accept-b part F (meter overhead) not shown, needs
+  more pairs. B hosts 100 bots (`Logs/p0/bots_calibration.json`). Contract `step8b_design.md` (rev 1, two critiques). Bots on B
   log in to A with `-meshLoginAddress` (`TestMap/ServerMeshLoginAddress.cs`); `remoteb.py` bots-start/stop/count/fetch
   (`remotebots.py`, `remotessh.py`, `botpoints.py`); bots are `meshbot2` and up (meshbot stays the regress fixture),
   registered by `p0load register-bots` and placed by `provision.reset_bot_positions`; `p0peer.PeerSession` starts and
   stops B's bots and sink around each run and refuses to start while anything of ours is left on B; new subcommands
   `accept-b` (19 runs), `calibrate` (4), `crossings` (18), `jfull` (4, only if `calibrate-bots` finds B hosts 100
   bots), `packets --sink` (22), `register-bots`, `calibrate-bots`. Ship stand-ins now follow the space game's main
-  (IsAtRest with the angular and pending terms; unowned ships acknowledge a teleport at once). Next: deploy to B, the
-  smokes (contract "Acceptance" 3), then the blocks.
+  (IsAtRest with the angular and pending terms; unowned ships acknowledge a teleport at once). Before a B session the
+  user stops Relics of Imperium and `RelicTestServer` on B; each measuring chain takes its own baseline under a new
+  epoch (`Logs/p0/MACHINE_EPOCH`; 8b used `2026-10-06b` and `2026-10-08n`).
 - **Step 9 (stage 0c), not started:** database burst (the user permits creating test accounts), fantasy worker A/B,
   the isolated-spaces floor (the space game's bubbles), loss.
 - After Phase 0: the DESIGN 0.74 row (one stage-level row for stage 0b, like 0.73), then slices 2b-6.
