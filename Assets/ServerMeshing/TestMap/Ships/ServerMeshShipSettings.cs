@@ -31,8 +31,8 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>RigShipsKey makes the runner pass the bot argument: 1.</summary>
         public const string RigShipsKey = "MESH_RIG_SHIPS";
         /// <summary>
-        /// SelfAckKey is how an unowned ship's teleport is acknowledged: 0 (the default, the space game's rule: only an
-        /// owner's upload acknowledges) or 1 (step 7's two-tick self-acknowledgement).
+        /// SelfAckKey is how an unowned ship's teleport is acknowledged: 0 (the default, the space game's rule since step 8b:
+        /// at the teleport, and when its owner leaves with one pending) or 1 (step 7's two-tick self-acknowledgement).
         /// </summary>
         public const string SelfAckKey = "MESH_SHIP_SELF_ACK";
         /// <summary>AiPrefabKey is the class of ServerAI load ships: enemy (the default, Ship_Enemy) or wave (Ship_AI, the Base numbers).</summary>
@@ -94,7 +94,10 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>RigShips is true when MESH_RIG_SHIPS=1.</summary>
         public bool RigShips { get; private set; }
 
-        /// <summary>SelfAck is true when MESH_SHIP_SELF_ACK=1: an unowned ship acknowledges its own teleport after two ticks.</summary>
+        /// <summary>
+        /// SelfAck is true when MESH_SHIP_SELF_ACK=1: an unowned ship acknowledges its own teleport after two ticks (its
+        /// records go reliably until then). False, the default: an unowned ship acknowledges at the teleport (step 8b).
+        /// </summary>
         public bool SelfAck { get; private set; }
 
         /// <summary>WaveAi is true when MESH_SHIP_AI_PREFAB=wave: ServerAI load ships take the Base class (Ship_AI).</summary>

@@ -27,13 +27,13 @@ SCHEMA = "mesh-p0/1"
 ROW_TYPES = ("run", "summary", "fit", "gate", "prediction")
 FAMILIES_0A = ("canary", "accept", "rates", "presence", "density", "floor", "abgeo", "fit")
 FAMILIES_8A = ("observed", "fanout", "targets", "syncrpc", "packets", "prewarm")   # stage 0b, step 8a (decision 2)
-FAMILIES_8B, LATER_8B = ("accept-b", "calibrate", "crossings", "jfull"), "stage 0b, step 8b"   # refused in 8a
+FAMILIES_8B = ("accept-b", "calibrate", "crossings", "jfull")                    # stage 0b, step 8b (decision 10)
 FAMILIES_0B = frozenset(FAMILIES_8A + FAMILIES_8B)
 # A family's game when its spec names none (p0plans.GAMES; a spec's own game wins: observed S and ship arms are space).
 FAMILY_GAME = {"canary": "neutral", "accept": "neutral", "rates": "neutral", "floor": "neutral",
                "presence": "fantasy", "density": "fantasy", "abgeo": "fantasy", "observed": "fantasy",
                "fanout": "fantasy", "targets": "fantasy", "syncrpc": "space", "packets": "fantasy",
-               "prewarm": "fantasy"}
+               "prewarm": "fantasy", **{family: "fantasy" for family in FAMILIES_8B}}
 STAGE = {**{family: "0a" for family in FAMILIES_0A}, **{family: "0b" for family in sorted(FAMILIES_0B)}}
 GEOGRAPHIC = ("presence", "density", "abgeo")
 PREDICTION_FAMILY = "abgeo-prediction"   # rig_fantasy_abgeo-prediction_<stamp>.jsonl
@@ -152,12 +152,11 @@ def run_row(spec, run, context, problems, excluded_reason):
     0b family "p0b": p0cells0b.cell_record_0b}}} (None or partial for a failed run; a naive start is local time);
     context is rigrun.host_context() (peer_host and peer_cpu, the second machine of step 8b, None when absent). owned
     and puppets are Work window means summed over the read cells, keyed by MESH_LOAD_MOTION / MESH_PUPPET_MOTION;
-    density is m² per spawned character; stage 0b rows add p0cells0b's metrics and load fields. A third repeat's
+    density is m² per spawned character; stage 0b rows add p0cells0b's metrics and load fields, and step 8b's run-level
+    metrics (handoffs; run["peer"], p0cells0b.peer_record) and fields (p0cells0b.run_fields_0b). A third repeat's
     replaces_repeat and third_reason, and a stepped run's stepped, are copied from the spec when it sets them.
-    ValueError for a step 8b family, a family without a game, a bad MESH_RATES or MESH_BAND, or an unknown metric."""
+    ValueError for a family without a game, a bad MESH_RATES or MESH_BAND, or an unknown metric."""
     family = spec["family"]
-    if family in FAMILIES_8B:
-        raise ValueError(f"family '{family}' needs {LATER_8B}")
     game = spec.get("game") or FAMILY_GAME.get(family)
     if game is None:
         raise ValueError(f"family '{family}' has no game: give the spec a game or use one of {', '.join(FAMILY_GAME)}")
@@ -168,6 +167,9 @@ def run_row(spec, run, context, problems, excluded_reason):
     records_0b = {cid: cell["p0b"] for cid, cell in cells.items() if cell.get("p0b") is not None}
     metrics = [m for cid, record in records.items() for m in p0cells.cell_metrics(record, rates["fps"], cid)]
     metrics += [m for record in records_0b.values() for m in p0cells0b.cell_metrics_0b(record)]
+    if family in FAMILIES_0B and run.get("start") and run.get("end"):
+        metrics += p0cells0b.run_metrics_0b(spec, records_0b, run.get("peer"),
+                                            (run["end"] - run["start"]).total_seconds())
     unknown = sorted({metric_base(m["name"]) for m in metrics} - METRIC_NAMES)
     if unknown:
         raise ValueError(f"metric names {', '.join(unknown)} are not in p0results.METRIC_NAMES")
@@ -188,7 +190,8 @@ def run_row(spec, run, context, problems, excluded_reason):
                                     for cid, record in records.items() if record["dropped"]}})
     row.update(p0cells.load_fields(spec, env, records))
     if family in FAMILIES_0B:
-        row.update(p0cells0b.load_fields_0b(spec, records_0b))
+        row.update(p0cells0b.load_fields_0b(spec, records_0b, records))
+        row.update(p0cells0b.run_fields_0b(spec, records_0b, context))
     row["metrics"] = metrics
     row["windows"] = {cid: p0cells.window_rows(record) for cid, record in records.items()}
     row.update({field: spec[field] for field in THIRD_REPEAT_FIELDS + ("stepped",) if spec.get(field) is not None})

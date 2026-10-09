@@ -177,13 +177,16 @@ namespace MultiplayerARPG.MMO.Mesh
 
         /// <summary>
         /// TeleportShip moves the ship at once on the server: the teleport sequence goes up, transform and rigidbody take the
-        /// pose, velocities and the engine's spooled force are zeroed. Records go reliably until the sequence is acknowledged.
+        /// pose, velocities and the engine's spooled force are zeroed. An unowned ship acknowledges at once (AcknowledgesUnowned,
+        /// unless MESH_SHIP_SELF_ACK=1), so its records stay unreliable; an owned one's go reliably until its owner echoes it.
         /// </summary>
         public void TeleportShip(Vector3 position, Quaternion rotation)
         {
             if (!IsServer)
                 return;
             unchecked { _teleportSequence++; }
+            if (AcknowledgesUnowned(true, _selfAck, ConnectionId, _teleportSequence, _ackedSequence))
+                _ackedSequence = _teleportSequence;
             _teleportTick = Manager != null ? Manager.LocalTick : 0;
             transform.SetPositionAndRotation(position, rotation);
             if (_rigidbody != null)
@@ -397,9 +400,9 @@ namespace MultiplayerARPG.MMO.Mesh
 
         /// <summary>
         /// SelfAckDue is true when a server-owned ship should acknowledge its own teleport: only while <paramref name="enabled"/>
-        /// (MESH_SHIP_SELF_ACK=1; by default only an owner's upload acknowledges, as in the space game), the sequence is
-        /// unacknowledged and the logic tick has advanced by SelfAckTicks since the teleport, so a full send pass carried it
-        /// reliably.
+        /// (MESH_SHIP_SELF_ACK=1, step 7's rule; by default an unowned ship acknowledges at the teleport, AcknowledgesUnowned),
+        /// the sequence is unacknowledged and the logic tick has advanced by SelfAckTicks since the teleport, so a full send
+        /// pass carried it reliably.
         /// </summary>
         public static bool SelfAckDue(bool enabled, bool serverOwned, byte sequence, byte acknowledged, uint nowTick, uint teleportTick)
         {
@@ -452,7 +455,6 @@ namespace MultiplayerARPG.MMO.Mesh
                 return ServerMeshShipWire.Header56Bytes;
             return mode == ServerMeshShipWire.ModeCompact ? ServerMeshShipWire.Compact28Bytes : 0;
         }
-
 
         /// <summary>
         /// SteeringInputs is the space ship's P-steering toward <paramref name="lookDirection"/>: (pitch, yaw, roll), the

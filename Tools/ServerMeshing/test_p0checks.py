@@ -109,11 +109,12 @@ class RunProblemsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "no checks for family 'workerab'"):
             p0checks.run_problems(spec(family="workerab"), presence_run())
 
-    def test_step_8b_families_are_refused(self):
+    def test_step_8b_families_have_the_common_and_their_own_checks(self):
         for family in p0results.FAMILIES_8B:
-            with self.subTest(family), self.assertRaisesRegex(
-                    ValueError, f"no checks for family '{family}' yet: it needs stage 0b, step 8b"):
-                p0checks.run_problems(spec(family=family), presence_run())
+            with self.subTest(family):
+                self.assertEqual(p0checks.FAMILY_CHECKS[family],
+                                 p0checks.COMMON + p0checks.STAGE_0B + p0checks.p0checks8b.CHECKS_8B[family])
+                self.assertEqual(p0checks.run_problems(spec(family=family), presence_run()), [])
 
     def test_refuses_an_unknown_layout(self):
         with self.assertRaisesRegex(ValueError, "layout 'thirds' is not one of"):
@@ -170,7 +171,7 @@ class RunProblemsTests(unittest.TestCase):
 
     def test_a_good_run_passes_every_family(self):
         run = presence_run()
-        for family in set(p0checks.FAMILY_CHECKS) - set(p0results.FAMILIES_8B):
+        for family in p0checks.FAMILY_CHECKS:
             with self.subTest(family):
                 self.assertEqual(p0checks.run_problems(spec(checks_family=family, N=100), run),
                                  ["no Prewarm burst with n 100 inside the measurement (bursts: none)"]

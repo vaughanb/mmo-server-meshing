@@ -16,6 +16,11 @@ drift, two unaccepted canaries in a row or no pass in 3 tries stop the invocatio
 with a canary unless the newest canary on its build passed under 2 h ago. Third repeats are decided over the whole
 block plan and this build's rows only, so a resumed block still gets them. "This build" is always this machine,
 (build, host) (step 8a decision 1); a stepped run is done only when every one of its steps has an accepted row.
+
+Step 8b (decision 8): a spec with a peer runs with p0peer's PeerSession hooks (B's sink and bots started after Play and
+stopped before it ends; their problems make the row not accepted), and a spec with stop_after_outcomes ends once A's
+read cells logged that many handoff outcomes. A row whose peer may have left processes on B is written, then the
+invocation stops (Stopped, exit 3). When the block has any peer spec, B's bots and sink are stopped before each canary.
 """
 import datetime
 import glob
@@ -27,6 +32,7 @@ import abgrade
 import abload
 import p0accept
 import p0base
+import p0peer
 import p0plans
 import p0results
 import p0stepped
@@ -35,7 +41,7 @@ import rigrun
 
 P0_LOGS = os.path.join(r.LOGS, "p0")
 ABLOAD = os.path.join(os.path.dirname(os.path.abspath(__file__)), "abload.py")
-CANARY_FAMILIES = ("rates", "presence", "density", "floor", "abgeo") + p0results.FAMILIES_8A
+CANARY_FAMILIES = ("rates", "presence", "density", "floor", "abgeo") + p0results.FAMILIES_8A + p0results.FAMILIES_8B
 CANARY_EVERY = datetime.timedelta(hours=2)
 CANARY_TRIES = 3
 PER_FRAME = "work_ms_per_measured_frame"   # derived for density's uncapped bridge, whose ms/s says nothing
@@ -46,12 +52,9 @@ THIRD = {"floor": ("work_ms_per_s", p0plans.THIRD_REPEAT_THRESHOLDS["floor"]), "
 THIRD_RUNS = 2   # a third repeat runs at most twice in one invocation (again only after a drift excluded it)
 
 
-class Stopped(Exception):
-    """Stopped ends an invocation early: its exit code (2: abload refused; 3: the canary) and the reason printed."""
-
-    def __init__(self, code, reason):
-        super().__init__(reason)
-        self.code, self.reason = code, reason
+# Stopped ends an invocation early: its exit code (2: abload refused, B unreachable; 3: the canary, B kept processes)
+# and the reason printed. One class with p0peer's, which raises it from inside a run (p0peer cannot import this module).
+Stopped = p0peer.Stopped
 
 
 def listed_ints(text, flag):
@@ -108,20 +111,36 @@ def canary_state(rows, build, host):
     return last_good, last_good if newest_is_good else None
 
 
+def measured(spec, start, end):
+    """The spec a run is graded against: a run that may end early (stop_after_outcomes, b9's walks) has its coverage
+    checked against the seconds it measured, as a step's row is (p0stepped.step_spec); any other spec as planned."""
+    if not spec.get("stop_after_outcomes"):
+        return spec
+    seconds = (end - start).total_seconds()
+    return dict(spec, measure=int(seconds) if seconds == int(seconds) else seconds)
+
+
 def run_spec(spec, rep, context):
     """(row, run) of one planned rig run: its mesh-p0/1 row whatever happened and the run p0checks graded (None when
-    it failed). A run that raises or cannot be graded is a failed run. A canary's row also carries machine_state
-    (rigrun.MachineProbe: the Windows session and the CPU's mean % processor performance over the measurement)."""
+    it failed). A run that raises or cannot be graded is a failed run; Stopped (a peer's refusal before Play) is
+    raised. A canary's row also carries machine_state (rigrun.MachineProbe: the Windows session and the CPU's mean %
+    processor performance over the measurement). A spec with a peer runs with p0peer.window_hooks (the PeerSession's
+    on_play before the probe's), and its row carries the peer's problems and PEER_STOP (p0peer.mark_rows)."""
     probe = rigrun.MachineProbe(spec["warmup"], spec["measure"]) if spec["family"] == "canary" else None
+    peer, hooks = p0peer.window_hooks(spec, rep, probe.start if probe else None)
     try:
         since, start, end = rigrun.run_window(spec["env"], spec["warmup"], spec["measure"], rep,
-                                              on_play=probe.start if probe else None)
+                                              **dict({"on_play": None}, **hooks))
+    except Stopped:
+        raise
     except Exception as ex:  # one run's boundary: its row is written as failed, and the block goes on
         row, run = p0results.run_row(spec, None, context, [str(ex)], "run failed"), None
     else:
-        row, run = p0stepped.graded(spec, since, start, end, lambda: p0stepped.cell_lines(spec, since), context)
+        row, run = p0stepped.graded(measured(spec, start, end), since, start, end,
+                                    lambda: p0stepped.cell_lines(spec, since), context, peer)
     if probe:
         row["machine_state"] = probe.state()
+    p0peer.mark_rows([row], peer)
     return row, run
 
 
@@ -171,6 +190,7 @@ class Session:
         self.plan = []          # the whole block plan (block()): the verdict counts every one of its keys
         self.since_good = []    # block specs run since the last good canary, earlier invocations' included (block())
         self.redecide = False   # the last checkpoint's canary drifted, so the third repeats are decided again
+        self.peer = False       # the block plan has a peer spec (block()): B is quieted before every canary
         self.canaries = args.command in CANARY_FAMILIES and not args.no_canary
         self.rows_path = self.path(p0results.FAMILY_GAME.get(self.family, "neutral"))
         self.canary_path = os.path.join(P0_LOGS, p0results.file_name("neutral", "canary", stamp))
@@ -186,7 +206,8 @@ class Session:
 
     def run(self, spec, label):
         """Runs one block spec (run_rows: one row, or one per step of a stepped spec), appends its rows to the file of
-        their game and notes them; returns the last (row, run)."""
+        their game and notes them; returns the last (row, run). Raises Stopped (exit 3) after writing them when a row
+        carries p0peer.PEER_STOP (B may have kept a bot or the sink; the key is not written)."""
         pairs = run_rows(spec, self.rep, self.context)
         row = pairs[0][0]
         if spec.get("third_reason") and row["accepted"]:
@@ -195,16 +216,23 @@ class Session:
                 row["replaces_repeat"] = p0plans.replaced_repeat(spec, rows, THIRD[self.family][0])
             except ValueError as ex:
                 self.rep.note(f"    replaces_repeat not set (its fit falls back to delete-one-run groups): {ex}")
+        stop = None
         for row, _ in pairs:
+            stop = row.pop(p0peer.PEER_STOP, None) or stop
             p0results.write_rows(self.path(row["game"]), [row])
             self.mine.append(len(self.rows))
             self.rows.append(row)
             self.rep.note(f"{label} {row_text(spec, row)}")
+        if stop:
+            raise Stopped(3, stop)
         return pairs[-1]
 
     def canary_once(self, why):
         """Runs one check canary and appends its row: "ok", "drift" (more than 5 % from the build's baseline) or
-        "unaccepted". Raises Stopped (exit 2) when the build has no baseline."""
+        "unaccepted". Raises Stopped (exit 2) when the build has no baseline. With a peer in the block, B's bots and
+        sink are stopped first (p0peer.quiet_b: Stopped when one survives)."""
+        if self.peer:
+            p0peer.quiet_b(self.rep)
         spec = p0plans.canary_plan("check")[0]
         row, _ = run_spec(spec, self.rep, self.context)
         p0results.write_rows(self.canary_path, [row])
@@ -290,6 +318,7 @@ class Session:
         earlier invocation made after the last good canary are queued again with this one's after a drift; third
         repeats are decided over the whole plan once the queue is done, and again after a drifted canary."""
         self.plan = list(specs if plan is None else plan)
+        self.peer = any(spec.get("peer") for spec in self.plan)
         queue, decided = list(specs), self.family not in THIRD
         self.since_good = self.earlier_runs(self.plan, queue)
         if self.canaries and (self.last_canary is None or rigrun.now() - self.last_canary >= CANARY_EVERY):

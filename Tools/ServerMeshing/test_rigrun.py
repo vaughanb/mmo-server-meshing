@@ -152,7 +152,7 @@ class RunWindowTests(unittest.TestCase):
     """rigrun.run_window's order with every regress call faked: on_play runs once Play is up, before the warm-up, and an
     exception it raises stops Play and is re-raised (step 8a decision 5)."""
 
-    def run_window(self, on_play=None):
+    def run_window(self, on_play=None, before_play=None, after_play=None):
         calls = []
 
         def note(name, result=None):
@@ -170,10 +170,40 @@ class RunWindowTests(unittest.TestCase):
             stack.enter_context(mock.patch.object(rigrun.time, "sleep",
                                                   lambda seconds: calls.append(f"sleep {seconds}")))
             hook = None if on_play is None else (lambda play_start: (calls.append("on_play"), on_play(play_start)))
+            hooks = {name: (lambda name=name, call=call: (calls.append(name), call()))
+                     for name, call in (("before_play", before_play), ("after_play", after_play)) if call}
             try:
-                return rigrun.run_window({"MESH_BAND": "80"}, 10, 40, rigrun.Report("test"), hook), calls
+                return rigrun.run_window({"MESH_BAND": "80"}, 10, 40, rigrun.Report("test"), hook, **hooks), calls
             except RuntimeError as ex:
                 return ex, calls
+
+    def test_peer_hooks_that_raise_still_stop_play(self):
+        def boom():
+            raise RuntimeError("B: 3 bots still running")
+        cases = {  # (before_play, on_play, after_play), the error, the calls
+            "before_play raises: no Play is asked for": (
+                (boom, None, lambda: None), "B: 3 bots still running",
+                ["kill_bots", "kit_process_count", "db_reset", "before_play", "after_play", "stop_play"]),
+            "after_play raises: Play is stopped anyway": (
+                (lambda: None, None, boom), "B: 3 bots still running",
+                ["kill_bots", "kit_process_count", "db_reset", "before_play", "request_play", "wait_play", "sleep 10",
+                 "sleep 40", "play_still_running", "after_play", "stop_play"]),
+            "on_play raises: after_play still runs": (
+                (lambda: None, lambda t: boom(), lambda: None), "B: 3 bots still running",
+                ["kill_bots", "kit_process_count", "db_reset", "before_play", "request_play", "wait_play", "on_play",
+                 "after_play", "stop_play"]),
+        }
+        for name, ((before, on_play, after), message, expected) in cases.items():
+            with self.subTest(name):
+                error, calls = self.run_window(on_play, before, after)
+                self.assertEqual(str(error), message)
+                self.assertEqual(calls, expected)
+
+    def test_peer_hooks_in_order(self):
+        (play_start, start, end), calls = self.run_window(lambda t: None, lambda: None, lambda: None)
+        self.assertEqual(calls, ["kill_bots", "kit_process_count", "db_reset", "before_play", "request_play",
+                                 "wait_play", "on_play", "sleep 10", "sleep 40", "play_still_running", "after_play",
+                                 "stop_play"])
 
     def test_an_on_play_that_raises_stops_play(self):
         def boom(play_start):
@@ -282,6 +312,33 @@ class MachineHostTests(unittest.TestCase):
                 del os.environ["COMPUTERNAME"]
             else:
                 os.environ["COMPUTERNAME"] = old
+
+
+class HostContextTests(unittest.TestCase):
+    """host_context with every PowerShell, powercfg and file read stood in for: peer adds B's three fields."""
+
+    def context(self, peer):
+        power = mock.Mock(returncode=0, stdout="Power Scheme GUID: 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c  (High performance)")
+        b = {"peer_host": "MESHB", "peer_cpu": "B CPU", "clock_offset_s": -3.2}
+        with contextlib.ExitStack() as stack:
+            for target, name, value in ((rigrun.r, "ps", lambda script: "12 24"), (rigrun, "cpu_name", lambda: "A CPU"),
+                                        (rigrun.subprocess, "run", lambda *a, **k: power),
+                                        (rigrun, "kit_patch_texts", lambda: []), (rigrun, "build_id", lambda: "b1"),
+                                        (rigrun, "machine_host", lambda: "A"),
+                                        (rigrun.p0peer, "peer_context", lambda: dict(b))):
+                stack.enter_context(mock.patch.object(target, name, value))
+            return rigrun.host_context(peer)
+
+    def test_host_context(self):
+        cases = {"one machine": (False, None), "with machine B": (True, ("MESHB", "B CPU", -3.2))}
+        for name, (peer, expected) in cases.items():
+            with self.subTest(name):
+                context = self.context(peer)
+                self.assertEqual((context["host"], context["cpu"], context["cores"], context["build"]),
+                                 ("A", "A CPU", 12, "b1"))
+                got = tuple(context[k] for k in ("peer_host", "peer_cpu", "clock_offset_s")) if peer else None
+                self.assertEqual(got, expected)
+                self.assertEqual("peer_host" in context, peer)
 
 
 if __name__ == "__main__":

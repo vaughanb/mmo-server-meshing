@@ -175,18 +175,34 @@ class LoadFieldTests(unittest.TestCase):
             "no 0b lines and no spec fields": (
                 {"env": {}}, {"C": record([])},
                 {"kind": "character", "clients": {"real": 0, "phantom_virtual": 0, "phantom_sink": 0,
-                                                  "observer_kind": None},
+                                                  "observer_kind": None, "connected": None},
                  "v_move_mean": None, "v_move_p95": None, "payload_B": None, "scale": 1.0, "awake_monsters": None}),
             "eyes, ships and monsters": (
                 {"kind": "ship", "payload_B": 56, "scale": 0.5, "env": {"MESH_PHANTOM": "virtual:200:eye:C"}},
                 {"C": record(), "E": record([])},
                 {"kind": "ship", "clients": {"real": 0, "phantom_virtual": 200.0, "phantom_sink": 0,
-                                             "observer_kind": "eye"},
+                                             "observer_kind": "eye", "connected": None},
                  "v_move_mean": 100.0, "v_move_p95": 100, "payload_B": 56, "scale": 0.5, "awake_monsters": 190.0}),
         }
         for name, (spec, records, expected) in cases.items():
             with self.subTest(name):
                 self.assertEqual(p0cells0b.load_fields_0b(spec, records), expected)
+
+    def test_real_clients_come_from_the_work_windows(self):
+        sink = {"phantom": [dict(p0phantom.parse_phantom_window(test_p0phantom.PHANTOM_SAMPLE), bound_virtual=0,
+                                 bound_sink=20)]}
+        cases = {   # (0b records, 0a records' Work window clients) -> (real, connected)
+            "no Work windows": ({"C": record([])}, {"C": {"ticks": None}}, (0, None)),
+            "50 bots on C": ({"C": record([])}, {"C": {"ticks": {"clients": 50.0}}}, (50.0, 50.0)),
+            "bots over two cells": ({"C": record([])}, {"C": {"ticks": {"clients": 30.0}},
+                                                        "E": {"ticks": {"clients": 20.0}}}, (50.0, 50.0)),
+            "sink peers are not real": ({"C": dict(record([]), **sink)}, {"C": {"ticks": {"clients": 20.0}}},
+                                        (0.0, 20.0)),
+        }
+        for name, (records, records_0a, (real, connected)) in cases.items():
+            with self.subTest(name):
+                clients = p0cells0b.load_fields_0b({"env": {}}, records, records_0a)["clients"]
+                self.assertEqual((clients["real"], clients["connected"]), (real, connected))
 
 
 class StepWindowTests(unittest.TestCase):
@@ -261,6 +277,113 @@ class NetSaturationTests(unittest.TestCase):
         for name, (points, expected) in cases.items():
             with self.subTest(name):
                 self.assertEqual(p0cells0b.net_saturated(points), expected)
+
+
+def ack(clock, name="meshbot2Char", total=412, zone="E"):
+    return stamped(clock, f"Handoff ACK {name} by zone {zone}: registered 120 ms after the notice, {total} ms after "
+                          f"START (promoted=True)")
+
+
+HANDOFF_LINES = [
+    ack("10:00:05", total=300), "Handoff ACK meshbot9Char by zone E: registered 1 ms after the notice, 2 ms after START "
+    "(promoted=True)",   # no stamp: not an outcome
+    stamped("10:00:06", "Handoff ROLLBACK meshbot3Char -> zone E: no ack in 3s; the puppet is held 20s for the "
+                        "client's return"),
+    stamped("10:00:07", "Handoff ROLLBACK complete: meshbot3Char is back on C (its puppet promoted)"),
+    stamped("10:00:07", "Handoff ROLLBACK of 77 expired: its client never returned to C; a later login spawns it"),
+    stamped("10:00:08", "Handoff ACK for 77 by zone E after a rollback (promoted=True): committed after all"),
+    stamped("10:00:09", "Handoff FAILED meshbot4Char -> zone E: no reservation; releasing the demoted puppet here"),
+    stamped("10:00:10", "Handoff ABORTED meshbot5Char -> zone E: saved=False; character stays on C"),
+    stamped("10:00:11", "Wake requested for sleeping cell E (ServerMeshTestMap)"),
+    ack("10:00:13", name="meshbot6Char", total=2500.5),
+]
+
+
+class HandoffTests(unittest.TestCase):
+    def test_handoff_outcomes(self):
+        got = [(h["kind"], h["ms"], h["at"], h["name"], h["zone"]) for h in p0cells0b.handoff_outcomes(HANDOFF_LINES)]
+        self.assertEqual(got, [("ack", 300.0, at("10:00:05"), "meshbot2Char", "E"),
+                               ("rollback", None, at("10:00:06"), "meshbot3Char", "E"),
+                               ("fail", None, at("10:00:09"), "meshbot4Char", "E"),
+                               ("fail", None, at("10:00:10"), "meshbot5Char", "E"),
+                               ("ack", 2500.5, at("10:00:13"), "meshbot6Char", "E")])
+        self.assertEqual(p0cells0b.wake_stamps(HANDOFF_LINES), [{"at": at("10:00:11"), "cell": "E"}])
+        self.assertEqual(p0cells0b.handoff_outcomes(["Wake requested for sleeping cell E (x)"]), [])
+
+    def test_percentile(self):
+        cases = {"none": ([], 0.95, None), "one": ([7.0], 0.5, 7.0), "p50 of four": ([4, 1, 3, 2], 0.5, 2),
+                 "p95 of twenty": (list(range(1, 21)), 0.95, 19), "max": ([3, 9, 1], 1.0, 9)}
+        for name, (values, share, expected) in cases.items():
+            with self.subTest(name):
+                self.assertEqual(p0cells0b.percentile(values, share), expected)
+
+    def test_record_and_run_figures(self):
+        with fake_stage0b():
+            c = p0cells0b.cell_record_0b("C", HANDOFF_LINES, at("10:00:06"), at("10:00:12"))
+        self.assertEqual([(h["kind"], h["in_window"]) for h in c["handoffs"]],
+                         [("ack", False), ("rollback", True), ("fail", True), ("fail", True)])   # 10:00:13 is after end
+        self.assertEqual((len(c["wakes"]), c["ce12"]), (1, []))
+        e = dict(c, handoffs=[dict(h, in_window=True) for h in p0cells0b.handoff_outcomes([ack("10:00:13")])],
+                 wakes=[])
+        spec = {"family": "crossings", "cells_read": ["C", "E"], "peer": {"sink": None, "bots": {"n": 2}}}
+        metrics = {(m["name"], m["stat"]): (m["value"], m["cell"])
+                   for m in p0cells0b.run_metrics_0b(spec, {"C": c, "E": e}, None, 10.0)}
+        self.assertEqual(metrics[("latency_ms{handoff_ready}", "p50")], (300.0, "C+E"))
+        self.assertEqual(metrics[("latency_ms{handoff_ready}", "max")][0], 412.0)
+        self.assertEqual(metrics[("latency_ms{handoff_ready}", "n")][0], 2)
+        self.assertEqual(metrics[("handoff_outcomes{fail}", "total")][0], 2)
+        self.assertEqual(metrics[("crossings_per_s", "mean")][0], 0.1)   # one ACK inside 10 s
+        self.assertEqual(metrics[("latency_ms{wake}", "first")][0], 2000.0)   # 10:00:11 -> the ACK at 10:00:13
+        fields = p0cells0b.run_fields_0b(spec, {"C": c, "E": e}, {"clock_offset_s": 0.25})
+        self.assertEqual(fields, {"peer": spec["peer"], "clock_offset_s": 0.25,
+                                  "handoffs": {"ack": 2, "rollback": 1, "fail": 2, "ack_ms": [300.0, 412.0],
+                                               "wake_ms": 2000.0, "window_acks": 1}})
+        self.assertEqual(p0cells0b.run_fields_0b(dict(spec, peer=None), {"C": c}, {}), {})
+        for name, _ in metrics:
+            self.assertIn(name.split("{")[0], p0cells0b.METRIC_NAMES_0B | {"latency_ms"})
+
+
+class PeerTests(unittest.TestCase):
+    def test_shift_b_windows(self):
+        start, end = at("10:00:00"), at("10:01:00")
+
+        def window(clock):
+            return {"end": at(clock), "seconds": 5.0}
+        cases = {   # B's stamp, offset (B minus A) -> kept on A's clock?
+            "inside": ("10:00:30", 0.0, at("10:00:30")),
+            "B ahead by 3 s": ("10:00:33", 3.0, at("10:00:30")),
+            "B behind by 1.5 s": ("10:00:28.5", -1.5, at("10:00:30")),
+            "begins within 2 s of start": ("10:00:06", 0.0, None),
+            "begins 2 s after start": ("10:00:07", 0.0, at("10:00:07")),
+            "ends within 2 s of end": ("10:00:59", 0.0, None),
+            "ends 2 s before end": ("10:00:58", 0.0, at("10:00:58")),
+            "outside after the shift": ("10:01:05", 10.0, at("10:00:55")),
+        }
+        for name, (clock, offset, expected) in cases.items():
+            with self.subTest(name):
+                got = p0cells0b.shift_b_windows([window(clock)], offset, start, end)
+                self.assertEqual([w["end"] for w in got], [] if expected is None else [expected])
+        self.assertEqual(p0cells0b.shift_b_windows([{"end": None, "seconds": 5.0}], 0.0, start, end), [])
+
+    def test_peer_record_and_metrics(self):
+        utc = test_p0phantom.BOT_FIELDS["at"]
+        local = utc.astimezone().replace(tzinfo=None)
+        start, end = local - datetime.timedelta(seconds=30), local + datetime.timedelta(seconds=30)
+        sink_line = f" INFO Sink [{local:%Y-%m-%d %H:%M:%S}] - {test_p0phantom.SINK_SAMPLE}"
+        bot = ["In map at (0.0, 0.0, 0.0)", test_p0phantom.BOT_SAMPLE, "Exception in something"]
+        peer = p0cells0b.peer_record([sink_line], {"meshbot2": bot, "meshbot3": [test_p0phantom.BOT_SAMPLE]}, 0.0,
+                                     start, end)
+        self.assertEqual([w["end"] for w in peer["sink"]], [local])
+        self.assertEqual((peer["bots"]["meshbot2"]["in_map"], peer["bots"]["meshbot3"]["in_map"]), (True, False))
+        self.assertEqual(peer["bots"]["meshbot2"]["bad"]["Exception"], 1)
+        self.assertEqual([w["end"] for w in peer["bots"]["meshbot2"]["net"]], [local])
+        metrics = {(m["name"], m["stat"]): (m["value"], m["cell"])
+                   for m in p0cells0b.run_metrics_0b({"cells_read": ["C"]}, {}, peer, 60.0)}
+        self.assertEqual(metrics, {("bot_players_seen", "mean"): (200.0, "B"), ("bot_in_kBps", "mean"): (52.3, "B"),
+                                   ("bot_upload_pkt_per_s", "median"): (22.0, "B"), ("bots_in_map", "total"): (1, "B"),
+                                   ("sink_in_kBps", "mean"): (512.0, "B"), ("sink_in_pkt_per_s", "mean"): (1200.0, "B")})
+        late = p0cells0b.peer_record([sink_line], {}, 0.0, start, local + datetime.timedelta(seconds=1))
+        self.assertEqual(late["sink"], [])   # within 2 s of the end
 
 
 if __name__ == "__main__":

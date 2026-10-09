@@ -46,8 +46,9 @@ def predict_load(spec, monster_counts=None):
     expect["puppets"]; an abgeo spec (expect {}) takes its puppets from p0geo.layout_loads (spread load). Monsters use
     monster_counts {cell: {O_monster, U_monster}} when given, else abload's count for the spec's setting (MONSTERS)
     spread uniformly. Raises ValueError for a motion without a cost. A stage 0b spec (p0plans0b.FAMILIES) gives None:
-    its phantoms, ships, feeder, sender and placed monsters have no cost here, and a guess would be wrong."""
-    if spec["family"] in p0plans0b.FAMILIES:
+    its phantoms, ships, feeder, sender and placed monsters have no cost here, and a guess would be wrong; so does a
+    step 8b spec (one with a kind: p0plans0b._spec0b builds it), whose bots and sink peers have none either."""
+    if spec["family"] in p0plans0b.FAMILIES or spec.get("kind") is not None:
         return None
     env, cells = spec["env"], _cells(spec)
     owner, puppet = _motion(env, "MESH_LOAD_MOTION", OWNER_MS), _motion(env, "MESH_PUPPET_MOTION", PUPPET_MS)
@@ -79,11 +80,30 @@ def _predicted(cid, load):
     return text + (" (uncapped)" if load["uncapped"] else "") + (" [predicted saturated]" if load["saturated"] else "")
 
 
+def peer_text(spec):
+    """A step 8b spec's peer as the dry run prints it: the sink's peers and kind, the bots' users, mode and placement,
+    and a b9 walk's stop rule and far point."""
+    peer, parts = spec["peer"], []
+    if peer.get("sink"):
+        sink = peer["sink"]
+        parts.append(f"sink {sink['count']} {sink['kind']} peers" + (" with record sizes" if sink["sizes"] else ""))
+    if peer.get("bots"):
+        bots = peer["bots"]
+        parts.append(f"bots meshbot{bots['first']}..meshbot{bots['first'] + bots['n'] - 1} ({bots['n']}) "
+                     f"{bots['mode']} at {bots['placement']}, Bot net {bots['bot_net']} s"
+                     + (", -meshRigShips" if bots["rig_ships"] else ""))
+    if spec.get("stop_after_outcomes"):
+        parts.append(f"walk across the cut and back, stop at {spec['stop_after_outcomes']} handoff outcomes")
+    if "upload_hz" in spec:
+        parts.append(f"MESH_PHANTOM_UPLOAD_HZ {spec['upload_hz'] or 'not calibrated yet'}")
+    return "; ".join(parts) or "-"
+
+
 def dry_run_lines(specs, per_run_s=None, env_keys=None):
     """What p0load --dry-run prints: a header naming how many regress.ENV_KEYS keys no run sets (env_keys, default
     regress.ENV_KEYS through rigrun), then per run '[i/n] family case arm point rN seed S key K | layout L | start ...
     | read ... | W+M s' (a stepped run adds '| steps P1,..,Pn at H s each'), its env (the keys set, sorted) and
-    predict_load's figures (label E; NOT_MODELLED for a stage 0b spec), and a footer with the runs ("1 run", "12
+    predict_load's figures (label E; NOT_MODELLED for a stage 0b spec), a step 8b spec's peer (peer_text), and a footer with the runs ("1 run", "12
     runs") and minutes (p0plans.run_seconds)."""
     per_run_s = p0plans.RUN_SECONDS if per_run_s is None else per_run_s
     env_keys = rigrun.r.ENV_KEYS if env_keys is None else env_keys
@@ -100,6 +120,8 @@ def dry_run_lines(specs, per_run_s=None, env_keys=None):
                      f"{','.join(spec['cells_started'])} | read {','.join(spec['cells_read'])} | "
                      f"{spec['warmup']}+{spec['measure']} s{extra}")
         lines.append("    env: " + (" ".join(f"{key}={value}" for key, value in sorted(spec["env"].items())) or "-"))
+        if spec.get("peer"):
+            lines.append("    peer (B): " + peer_text(spec))
         loads = predict_load(spec)
         lines.append(f"    predicted {NOT_MODELLED}" if loads is None else
                      "    predicted (E): " + ", ".join(_predicted(cid, load) for cid, load in loads.items()))

@@ -43,7 +43,6 @@ def other_rows():
 class RunRowTests(unittest.TestCase):
     def test_refusals(self):
         cases = {
-            "a step 8b family": (spec(family="crossings"), "family 'crossings' needs stage 0b, step 8b"),
             "a family without a game": (spec(family="workerab"), "family 'workerab' has no game"),
             "a malformed MESH_RATES": (spec(rates="30/x"), "MESH_RATES step part 'x' is not a number of seconds"),
             "a malformed MESH_BAND": (spec(env={"MESH_BAND": "wide"}), "MESH_BAND 'wide' is not a number of metres"),
@@ -149,8 +148,8 @@ class RunRowTests(unittest.TestCase):
                                                     "payload_B", "scale", "awake_monsters", "peer_host", "peer_cpu",
                                                     "stepped", "point")},
                          {"stage": "0b", "game": "fantasy", "kind": "character",
-                          "clients": {"real": 0, "phantom_virtual": 200.0, "phantom_sink": 0,
-                                      "observer_kind": "character"},
+                          "clients": {"real": 0.0, "phantom_virtual": 200.0, "phantom_sink": 0,
+                                      "observer_kind": "character", "connected": 0.0},
                           "v_move_mean": 100.0, "v_move_p95": 100, "payload_B": None, "scale": 0.5,
                           "awake_monsters": 190.0, "peer_host": "B", "peer_cpu": None, "stepped": stepped,
                           "point": {"players": 60, "step": 50}})

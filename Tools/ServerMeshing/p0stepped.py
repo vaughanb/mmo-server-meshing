@@ -17,6 +17,7 @@ Unit tests: python -m unittest discover -s Tools/ServerMeshing -p "test_*.py"
 import p0cells
 import p0cells0b
 import p0checks
+import p0peer
 import p0results
 import regress as r
 import rigrun
@@ -28,15 +29,17 @@ def cell_lines(spec, since):
     return {cid: rigrun.cell_lines(cid, maps[cid], since) for cid in spec["cells_read"]}
 
 
-def graded(spec, since, start, end, lines, context):
+def graded(spec, since, start, end, lines, context, peer=None):
     """(row, run) of one run read over [start, end] (lines: {cell: its lines since Play}, or a function giving them):
     per read cell rigrun.cell_window, p0cells.cell_record (the fan-out saturation rule for family fanout) and, for a
-    stage 0b family, p0cells0b.cell_record_0b; graded by p0checks. A run whose logs cannot be read or graded is a
-    failed row (and None)."""
+    stage 0b family, p0cells0b.cell_record_0b; with a p0peer.PeerSession, run["peer"] = its record (B's sink and bot
+    logs on A's clock); graded by p0checks. A run whose logs cannot be read or graded is a failed row (and None)."""
     run, maps = {"since": since, "start": start, "end": end, "cells": {}}, dict(r.ZONES)
     fanout = spec["family"] == "fanout"
     try:
         lines = lines() if callable(lines) else lines
+        if peer is not None:
+            run["peer"] = peer.record(start, end)
         for cid in spec["cells_read"]:
             cell = {"structural": rigrun.cell_window(cid, maps[cid], since, start, end),
                     "p0": p0cells.cell_record(cid, lines[cid], start, end, fanout)}
@@ -93,17 +96,24 @@ def run_stepped(spec, rep, context):
     """[(row, run)] of one stepped run (spec["stepped"] = {"steps": [P..], "hold": s}; decision 4): one Play, then a
     row per planned step over its window (p0cells0b.step_windows, from the first read cell that logged Phantom step
     lines). A step without a window is a failed row naming why, and a run that raises fails every step. Every row
-    carries stepped_since (the Play start: its run) and net_saturated (p0cells0b.net_saturated on the steps' cell)."""
+    carries stepped_since (the Play start: its run) and net_saturated (p0cells0b.net_saturated on the steps' cell).
+    A spec with a peer runs with p0peer.window_hooks like p0blocks.run_spec, and every row gets its problems
+    (p0peer.mark_rows); Stopped (a peer's refusal before Play) is raised."""
     planned, stop = list(spec["stepped"]["steps"]), SaturationStop(spec, context)
+    peer, hooks = p0peer.window_hooks(spec, rep, stop_when=stop)
     try:
-        since, start, end = rigrun.run_window(spec["env"], spec["warmup"], spec["measure"], rep, stop_when=stop)
+        since, start, end = rigrun.run_window(spec["env"], spec["warmup"], spec["measure"], rep, **hooks)
         lines = cell_lines(spec, since)
         found = [(cid, p0cells0b.phantom_steps(lines[cid])) for cid in spec["cells_read"]]
         cell, steps = next(((cid, steps) for cid, steps in found if steps), (spec["cells_read"][0], []))
         windows = p0cells0b.step_windows(planned, steps, start, end)
+    except p0peer.Stopped:
+        raise
     except Exception as ex:  # one run's boundary: every step's row is written as failed
-        return [(p0results.run_row(step_spec(spec, {"step": step}), None, context, [str(ex)], "run failed"), None)
-                for step in planned]
+        pairs = [(p0results.run_row(step_spec(spec, {"step": step}), None, context, [str(ex)], "run failed"), None)
+                 for step in planned]
+        p0peer.mark_rows([row for row, _ in pairs], peer)
+        return pairs
     if stop.step is not None:
         rep.note(f"    step P {stop.step} saturated: the run stopped there")
     pairs, cut = [], next((window["index"] for window in windows if window["step"] == stop.step), None)
@@ -115,13 +125,14 @@ def run_stepped(spec, rep, context):
         elif window["problem"]:
             pairs.append((p0results.run_row(sub, None, context, [window["problem"]], "run failed"), None))
         else:
-            pairs.append(graded(sub, since, window["start"], window["end"], lines, context))
+            pairs.append(graded(sub, since, window["start"], window["end"], lines, context, peer))
     flags = p0cells0b.net_saturated([(window["step"], p0results.metric_value(row, "thread_ms_per_s{litenetlib}",
                                                                             "mean", cell),
                                       p0results.metric_value(row, "datagrams_per_s", "mean", cell))
                                      for window, (row, _) in zip(windows, pairs)])
     for (row, _), flag in zip(pairs, flags):
         row.update(stepped_since=since.isoformat(), net_saturated=flag)
+    p0peer.mark_rows([row for row, _ in pairs], peer)
     return pairs
 
 

@@ -254,7 +254,8 @@ class FitTests(unittest.TestCase):
         self.assertEqual(result["files"][f"report_{STAMP}.md"], result["markdown"])
         self.assertTrue(result["markdown"].startswith(f"# Phase 0 stage 0a report {STAMP}\n"))
         for heading in ("## Summary", "## Runs not accepted", "## Fits", "## Gates", "## Map-size table",
-                        "## Frozen abgeo predictions", "| Side (m) | B (m) | k |", "G1-F needs 0b (step 8b)"):
+                        "## Frozen abgeo predictions", "| Side (m) | B (m) | k |", "G1-F needs the stage 0b report",
+                        "Phantom validity (J) needs b2 or b10 rows"):
             with self.subTest(heading):
                 self.assertIn(heading, result["markdown"])
 
@@ -471,7 +472,8 @@ class ConstantTests(unittest.TestCase):
         stages = {stage.replace("stage ", "") for stage in p0plans.STAGE_LATER.values()}
         for name, need in p0report.PENDING_GATES:
             with self.subTest(name):
-                self.assertIn(need.replace(" (", ", ").rstrip(")"), stages)
+                self.assertTrue(need == p0report.STAGE_0B_REPORT or need.replace(" (", ", ").rstrip(")") in stages,
+                                need)
 
 
 if __name__ == "__main__":

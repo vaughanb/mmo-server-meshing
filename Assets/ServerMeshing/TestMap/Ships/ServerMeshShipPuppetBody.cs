@@ -19,8 +19,6 @@ namespace MultiplayerARPG.MMO.Mesh
     /// </summary>
     public sealed class ServerMeshShipPuppetBody : IEntityMovementDataHandler, IMeshCompactStateSource, IMeshSenderOwnedSource
     {
-        private const float RestSpeedSquared = 1e-6f;
-
         private static readonly List<EntityMovementForceApplier> s_noForceAppliers = new List<EntityMovementForceApplier>(0);
 
         private readonly uint _objectId;
@@ -63,8 +61,11 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>DiscreteVersion packs the last sample's teleport byte, flight state and epoch.</summary>
         public uint DiscreteVersion => ServerMeshShipMovement.PackDiscreteVersion(_sample.TeleportByte, _sample.FlightState, _sample.Epoch);
 
-        /// <summary>IsAtRest is true when the last sample's velocity is under 0.001 m/s.</summary>
-        public bool IsAtRest => _sample.Velocity.sqrMagnitude < RestSpeedSquared;
+        /// <summary>
+        /// IsAtRest is the space game's rule (ServerMeshShipMovement.AtRest) on the last sample's velocities: linear under
+        /// 0.01 m/s and angular under 0.001 rad/s. It has no pending term: a puppet never sends reliably.
+        /// </summary>
+        public bool IsAtRest => ServerMeshShipMovement.AtRest(_sample.Velocity, _sample.AngularVelocity, false);
 
         /// <summary>IsBegun is true between a successful Begin and End.</summary>
         public bool IsBegun => _isBegun;

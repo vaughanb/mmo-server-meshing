@@ -17,6 +17,9 @@ load-test bots (meshbot2..N) register and create their own characters on first l
 regress.py's db_reset calls provision() before every scenario, so each one starts from this state rather than from
 whatever the previous scenario left behind (a consumed stack, a looted yield, a saved summon).
 
+Phase 0 step 8b's bots (meshbot2..N) are not fixtures: reset_bot_positions(first, n, points) only moves their
+characters to a run's points (bot_points(n, placement), from botpoints), and refuses one it does not recognise.
+
 Safety: only the two rig accounts and their characters are ever written or deleted. A fixture name owned by another
 account, or party 1 led by someone else, stops the run before anything changes. Everything happens in one
 transaction. It refuses while the editor is in Play, because the database manager there keeps its own cache and
@@ -32,6 +35,7 @@ import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rigtools
+from botpoints import bot_points  # noqa: F401 -- step 8b's placements (decision 6), kept beside the reset
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 DB_CONFIG = os.path.join(ROOT, "Config", "mySqlConfig.json")
@@ -414,6 +418,61 @@ def create_schema(conn, name, sql_path=SCHEMA_SQL, log=print):
 
 def editor_is_playing(status_path=PLAY_STATUS):
     return rigtools.read_status_file(status_path).get("isPlaying") == "True"
+
+
+def bot_characters(cur, first, n):
+    """[(user, character id)] of meshbot<first>..meshbot<first+n-1>'s characters (<user>Char, each bot's own, on
+    ServerMeshTestMap); ProvisionError before any write for an unregistered bot, a missing character, a character of
+    that name owned by another account (refuse_foreign_owners' rule) or one on another map. Reads only."""
+    found = []
+    for user in (f"meshbot{k}" for k in range(first, first + n)):
+        cur.execute("select id from userlogin where username=%s", (user,))
+        accounts = [row[0] for row in cur.fetchall()]
+        cur.execute("select id, userId, currentMapName from characters where characterName=%s", (user + "Char",))
+        rows = cur.fetchall()
+        for character_id, user_id, _ in rows:
+            if user_id not in accounts[:1]:
+                raise ProvisionError(f"character {character_id} ({user}Char) belongs to account {user_id}, which is "
+                                     f"not {user}; not touching it")
+        if len(accounts) != 1 or len(rows) != 1:
+            raise ProvisionError(f"{len(accounts)} account(s) {user} and {len(rows)} character(s) {user}Char; "
+                                 "register the bots first (p0load register-bots)")
+        if rows[0][2] != MAP:
+            raise ProvisionError(f"{user}Char is on map {rows[0][2]}, not {MAP}; not touching it")
+        found.append((user, rows[0][0]))
+    return found
+
+
+def reset_bot_positions(first, n, points, connect=None, status_path=PLAY_STATUS):
+    """Saves step 8b's bots meshbot<first>..meshbot<first+n-1> at the run's points ((x, z[, ...]) each, on cell C's
+    channel) in one transaction, so a bot never starts where the last run left it (decision 6); returns n. Refuses
+    (ProvisionError) while the editor is in Play (as regress.db_reset), for first below 2 (meshbot is the regress
+    fixture), a point count other than n, and anything bot_characters refuses; only those characters are written.
+    connect opens the database (default db_connect); the connection is closed."""
+    if first < 2:
+        raise ProvisionError(f"meshbot{first}: step 8b's bots are meshbot2 and up (meshbot is the regress fixture)")
+    if n < 1 or len(points) != n:
+        raise ProvisionError(f"{len(points)} points for {n} bots")
+    if editor_is_playing(status_path):
+        raise ProvisionError("the editor is still in Play; the bots' positions can only be reset while it is stopped")
+    conn = (connect or db_connect)()
+    cur = conn.cursor()
+    try:
+        conn.begin()
+        for (user, character_id), point in zip(bot_characters(cur, first, n), points):
+            cur.execute("update characters set currentPositionX=%s, currentPositionY=0, currentPositionZ=%s, "
+                        "currentChannel='C' where id=%s and currentMapName=%s",
+                        (float(point[0]), float(point[1]), character_id, MAP))
+            if cur.rowcount != 1:
+                raise ProvisionError(f"the position of {user}Char ({character_id}) matched {cur.rowcount} rows")
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+        conn.close()
+    return n
 
 
 def main():

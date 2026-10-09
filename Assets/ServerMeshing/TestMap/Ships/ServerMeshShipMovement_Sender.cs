@@ -1,7 +1,7 @@
 // Server Meshing test rig — the stand-in ship's movement, sender part (Phase 0 step 7): the record it writes for the kit
 // and for the state sender, the registration retry, and the release hook. Modelled on the space game's
 // ShipMovementComponent.WriteServerState at commits 1a3a58d9 and c2eb4154 (read there, not copied): no rest or dirty
-// suppression, reliable (and never compact) while a teleport is unacknowledged.
+// suppression, reliable (and never compact) while a teleport is unacknowledged. IsAtRest follows commit 771ad38c (step 8b).
 using System.Collections.Generic;
 using LiteNetLib.Utils;
 using MultiplayerARPG.MMO.Mesh.Sync;
@@ -11,7 +11,10 @@ namespace MultiplayerARPG.MMO.Mesh
 {
     public sealed partial class ServerMeshShipMovement
     {
-        private const float RestSpeedSquared = 1e-6f;
+        /// <summary>RestSpeedSquared is the squared linear speed under which a ship may be at rest (0.01 m/s, the space game's RestSpeed).</summary>
+        public const float RestSpeedSquared = 1e-4f;
+        /// <summary>RestAngularSpeedSquared is the squared angular speed under which a ship may be at rest (0.001 rad/s, the space game's RestAngularSpeed).</summary>
+        public const float RestAngularSpeedSquared = 1e-6f;
         private const byte RigFlightState = 0;
 
         private static readonly List<EntityMovementForceApplier> s_noForceAppliers = new List<EntityMovementForceApplier>(0);
@@ -28,8 +31,29 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>DiscreteVersion packs the teleport sequence, the flight state (0 in the rig) and the epoch (see PackDiscreteVersion).</summary>
         public uint DiscreteVersion => PackDiscreteVersion(_teleportSequence, RigFlightState, _epoch);
 
-        /// <summary>IsAtRest is true for a parked ship whose rigidbody is still.</summary>
-        public bool IsAtRest => AuthorityOf() == ServerMeshShipAuthority.Parked && _rigidbody != null && _rigidbody.linearVelocity.sqrMagnitude < RestSpeedSquared;
+        /// <summary>
+        /// IsAtRest is the space game's rule (AtRest) for any ship: its best-known velocities, the dynamic rigidbody's while
+        /// this peer simulates it, else the last received ones (never the zeroed record velocity of a mirror), are under the
+        /// rest thresholds and no teleport is pending.
+        /// </summary>
+        public bool IsAtRest
+        {
+            get
+            {
+                bool body = _simulating && _rigidbody != null;
+                return AtRest(body ? _rigidbody.linearVelocity : _netVelocity, body ? _rigidbody.angularVelocity : _netAngularVelocity, TeleportPending);
+            }
+        }
+
+        /// <summary>
+        /// AtRest is the space game's IsAtRest (ShipMovementComponent, commit 771ad38c): false while
+        /// <paramref name="teleportPending"/>, else true when the linear speed is under 0.01 m/s and the angular speed under
+        /// 0.001 rad/s (squared: RestSpeedSquared, RestAngularSpeedSquared).
+        /// </summary>
+        public static bool AtRest(Vector3 velocity, Vector3 angularVelocity, bool teleportPending)
+        {
+            return !teleportPending && velocity.sqrMagnitude < RestSpeedSquared && angularVelocity.sqrMagnitude < RestAngularSpeedSquared;
+        }
 
         /// <summary>OnSenderReleased clears SentBySender and stops the registration retry; it never calls the registry.</summary>
         public void OnSenderReleased()
@@ -64,7 +88,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 ServerMeshShipWire.WriteLegacy54(writer, in sample);
             else
                 ServerMeshShipWire.WriteHeader56(writer, in sample);
-            sendReliably = _teleportSequence != _ackedSequence;
+            sendReliably = SendsReliably(_teleportSequence, _ackedSequence);
             CountMirrorAge(sampleTimestamp);
             return true;
         }
@@ -84,6 +108,9 @@ namespace MultiplayerARPG.MMO.Mesh
             return true;
         }
 
+        /// <summary>SendsReliably is true when the ship's records go reliably: while the teleport <paramref name="sequence"/> is not the <paramref name="acknowledged"/> one.</summary>
+        public static bool SendsReliably(byte sequence, byte acknowledged) => sequence != acknowledged;
+
         /// <summary>
         /// CompactAllowed is true when a compact record may be written: the wire is compact28 and the teleport
         /// <paramref name="sequence"/> equals the <paramref name="acknowledged"/> one.
@@ -102,7 +129,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 movementState = _netForward || _moveIntent.sqrMagnitude > 0.0001f ? (uint)MovementState.Forward : (uint)MovementState.None,
                 worldPosition = transform.position,
                 yAngle = transform.eulerAngles.y,
-                shouldSendReliably = _teleportSequence != _ackedSequence,
+                shouldSendReliably = SendsReliably(_teleportSequence, _ackedSequence),
             };
         }
 

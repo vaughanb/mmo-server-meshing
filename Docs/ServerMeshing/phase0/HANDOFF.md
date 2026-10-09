@@ -54,10 +54,15 @@ and the space game) before slices 2b-6.
   counts only a count off by more than 1 or a cap frame (`p0checks.tick_misses`); the 17 runs were re-measured
   (2026-10-07, build 3867cc0) and all those steps passed. The packets saturation probe is moot on virtual phantoms
   (no sockets: 0 datagrams), so the network-thread probe moves to 8b's sink arms. Draft: `stage0b_8a_results.md`.
-  **8b, not started:** bots on B (the auto client connects to `localhost:7500`, so a login-address argument is needed,
-  in its own installer since `ServerMeshAutoClient.cs` is not edited), `remoteb.py` bots (bots must not count as cells),
-  the meshbot2..N registration with a position reset, accept-b (b1), calibrate (b2), crossings (b9; handoff_ready from
-  the cells' `Handoff ACK … ms after START` lines), J-full (b10), b7's sink arms. Surveys: `surveys/survey8/`.
+  **8b, built on A (2026-10-08), not yet run with B:** contract `step8b_design.md` (rev 1, two critiques). Bots on B
+  log in to A with `-meshLoginAddress` (`TestMap/ServerMeshLoginAddress.cs`); `remoteb.py` bots-start/stop/count/fetch
+  (`remotebots.py`, `remotessh.py`, `botpoints.py`); bots are `meshbot2` and up (meshbot stays the regress fixture),
+  registered by `p0load register-bots` and placed by `provision.reset_bot_positions`; `p0peer.PeerSession` starts and
+  stops B's bots and sink around each run and refuses to start while anything of ours is left on B; new subcommands
+  `accept-b` (19 runs), `calibrate` (4), `crossings` (18), `jfull` (4, only if `calibrate-bots` finds B hosts 100
+  bots), `packets --sink` (22), `register-bots`, `calibrate-bots`. Ship stand-ins now follow the space game's main
+  (IsAtRest with the angular and pending terms; unowned ships acknowledge a teleport at once). Next: deploy to B, the
+  smokes (contract "Acceptance" 3), then the blocks.
 - **Step 9 (stage 0c), not started:** database burst (the user permits creating test accounts), fantasy worker A/B,
   the isolated-spaces floor (the space game's bubbles), loss.
 - After Phase 0: the DESIGN 0.74 row (one stage-level row for stage 0b, like 0.73), then slices 2b-6.

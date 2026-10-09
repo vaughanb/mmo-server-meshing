@@ -6,12 +6,14 @@ each cell's logs since Play began and decide whether the run can be used.
 
     rigrun.run_window(env, warmup, measure, rep)          # (play start, window start, window end); Play always stopped
     rigrun.run_window(env, warmup, measure, rep, on_play) # the same, calling on_play(play start) once Play is up
+    rigrun.run_window(..., before_play=f, after_play=g)   # step 8b's peer hooks: before request_play, before stop_play
     rigrun.cell_window(cell, map_id, since, start, end)   # a cell's work figures over the window, and what it logged
     rigrun.run_problems(cells, plan, results, measure)    # why a run cannot be used ([] when it can)
     rigrun.cell_lines(cell, map_id, since)                # every line a cell logged since Play began
     rigrun.start_problems()                               # why no run may start now ([] when one may)
     rigrun.check_env(env)                                 # refuses keys a Play request would drop or no code reads yet
     rigrun.host_context()                                 # host, CPU, cores, OS, power plan, build and kit patches
+    rigrun.host_context(peer=True)                        # plus machine B's peer_host, peer_cpu and clock_offset_s
 
 Layouts of the 600 x 600 m test ground (LAYOUTS, CUT_LENGTH): coarse (one cell), halves (two 300 x 600 m cells),
 grid (the registry's 3 x 3 of 200 m, no override) and strips4 (four 150 x 600 m strips W, C, E, NE, west to east).
@@ -28,6 +30,7 @@ import re
 import subprocess
 import time
 
+import p0peer
 import p0results
 import p0tools
 import regress as r
@@ -82,14 +85,18 @@ def now():
     return datetime.datetime.now().replace(microsecond=0)
 
 
-def run_window(env, warmup, measure, rep, on_play=None, stop_when=None):
+def run_window(env, warmup, measure, rep, on_play=None, stop_when=None, before_play=None, after_play=None):
     """One Play session with no client: returns (play start, window start, window end) as datetimes. Play is always
     stopped, and a failure is raised to the caller only after that, so one broken run never leaves the editor playing.
     on_play, when given, is called as on_play(play start) once Play is up (after wait_play, before the warm-up), so
     what must start after Play (step 8b's sink and bots: leftover bots are killed first) starts there; an exception
     it raises stops Play and is re-raised (step 8a decision 5). stop_when, when given, is asked as
     stop_when(play start, window start) every STOP_POLL_S seconds of the measurement; True ends it there (a stepped
-    run whose step saturated), and the window end is that moment."""
+    run whose step saturated), and the window end is that moment. Step 8b decision 8: before_play() is called after
+    db_reset and before request_play (B's leftovers stopped, the bots' positions reset; what it raises stops the run
+    before any Play), and after_play() once the run ends, however it ends, inside its own try/finally around
+    stop_play (B's bots and sink stopped and their logs fetched while Play still runs; Play is stopped even when it
+    raises)."""
     r.kill_bots()
     leftover = r.kit_process_count()
     if leftover:
@@ -102,6 +109,8 @@ def run_window(env, warmup, measure, rep, on_play=None, stop_when=None):
     play_start = now()
     try:
         r.db_reset(PARK, (0, 0), clear_buildings=True)
+        if before_play is not None:
+            before_play()
         r.request_play("none", 0, 0, env=env, enabled=False)
         r.wait_play(120)
         if on_play is not None:
@@ -116,7 +125,11 @@ def run_window(env, warmup, measure, rep, on_play=None, stop_when=None):
         if not r.play_still_running():
             raise RuntimeError("Play ended, or another Play replaced it, during the measurement")
     finally:
-        survivors = r.stop_play()
+        try:
+            if after_play is not None:
+                after_play()
+        finally:
+            survivors = r.stop_play()
     if survivors:
         raise RuntimeError(f"{survivors} rig process(es) outlived Play")
     return play_start, start, end
@@ -307,10 +320,12 @@ def machine_host(epoch_file=MACHINE_EPOCH_FILE):
     return f"{host}#{epoch}" if epoch else host
 
 
-def host_context():
+def host_context(peer=False):
     """Where the runs happen, for every JSONL run row: host, cpu, cores, logical, os, power_plan, build (build_id) and
-    kit_patches ({"CE-6": "present", ...}). Runs PowerShell and powercfg and reads every Assets/**/*.cs, so it is called
-    once per invocation and never in a dry run; a command that fails raises RuntimeError."""
+    kit_patches ({"CE-6": "present", ...}); with peer (a step 8b block) also peer_host, peer_cpu and clock_offset_s
+    (B's clock minus A's) from one SSH query to machine B (p0peer.peer_context; p0peer.Stopped, exit 2, when B does
+    not answer). Runs PowerShell and powercfg and reads every Assets/**/*.cs, so it is called once per invocation and
+    never in a dry run; a command that fails raises RuntimeError."""
     counts =r.ps(CORES_SCRIPT).split()
     if len(counts) != 2 or not all(count.isdigit() for count in counts):
         raise RuntimeError(f"Win32_Processor gave no core counts: {' '.join(counts)!r}")
@@ -318,7 +333,10 @@ def host_context():
     if power.returncode != 0:
         raise RuntimeError(f"powercfg /getactivescheme failed ({power.returncode}): "
                            f"{(power.stderr or power.stdout).strip()[:300]}")
-    return {"host": machine_host(), "cpu": cpu_name(), "cores": int(counts[0]),
-            "logical": int(counts[1]), "os": platform.platform(),
-            "power_plan": p0results.parse_power_plan(power.stdout), "build": build_id(),
-            "kit_patches": p0results.kit_patches(kit_patch_texts())}
+    context = {"host": machine_host(), "cpu": cpu_name(), "cores": int(counts[0]),
+               "logical": int(counts[1]), "os": platform.platform(),
+               "power_plan": p0results.parse_power_plan(power.stdout), "build": build_id(),
+               "kit_patches": p0results.kit_patches(kit_patch_texts())}
+    if peer:
+        context.update(p0peer.peer_context())
+    return context

@@ -1,8 +1,12 @@
-"""Unit tests for provision (python -m unittest discover -s Tools/ServerMeshing -p "test_*.py")."""
+"""Unit tests for provision and botpoints (python -m unittest discover -s Tools/ServerMeshing -p "test_*.py").
+
+No test opens a database or Config/mySqlConfig.json: queries go to FakeCursor stand-ins.
+"""
 import tempfile
 import os
 import unittest
 
+import botpoints
 import provision as p
 
 
@@ -217,6 +221,150 @@ class PlayStatusTests(unittest.TestCase):
                     with open(path, "w", encoding="utf-8") as f:
                         f.write(content)
                 self.assertEqual(p.editor_is_playing(path), expected)
+
+
+class BotPointsTests(unittest.TestCase):
+    def test_bot_points_refuses(self):
+        cases = {"an unknown placement": (5, "east", "placement 'east' is not one of"),
+                 "no bots, spread": (0, "spread", "0 bots"), "no bots, a column": (0, "west", "0 bots")}
+        for name, (n, placement, message) in cases.items():
+            with self.subTest(name), self.assertRaisesRegex(ValueError, message):
+                p.bot_points(n, placement)
+
+    def test_bot_points(self):
+        cases = {
+            "one bot spread": ((1, "spread"), [(0.0, 0.0)]),
+            "four bots spread": ((4, "spread"), [(-25.0, -25.0), (25.0, -25.0), (-25.0, 25.0), (25.0, 25.0)]),
+            "three bots spread": ((3, "spread"), [(-25.0, -25.0), (25.0, -25.0), (-25.0, 25.0)]),
+            "west": ((3, "west"), [(-30.0, -40.0), (-30.0, 0.0), (-30.0, 40.0)]),
+            "pace across the cut": ((2, "pace-cut"), [(-4.0, -40.0), (-4.0, 40.0)]),
+            "pace in the west": ((1, "pace-west"), [(-44.0, 0.0)]),
+            "two bots at the centre": ((2, "centre"), [(0.0, -2.0), (0.0, 2.0)]),
+            "one bot at the eye group's centre (moved there at Play)": ((1, "eye-centre"), [(0.0, 0.0)]),
+        }
+        for name, ((n, placement), expected) in cases.items():
+            with self.subTest(name):
+                self.assertEqual(p.bot_points(n, placement), expected)
+
+    def test_a_hundred_spread_bots_fill_the_square(self):
+        points = p.bot_points(100, "spread")
+        self.assertEqual(len(set(points)), 100)
+        self.assertEqual((min(points), max(points)), ((-45.0, -45.0), (45.0, 45.0)))
+        self.assertTrue(all(-50 < x < 50 and -50 < z < 50 for x, z in p.bot_points(50, "spread")))
+
+    def test_points_files(self):
+        cases = {
+            "a word": ("a,b\n", "points line 1: 'a,b' is not x,z"),
+            "one number": ("1\n", "points line 1: '1' is not x,z"),
+            "four numbers": ("1,2\n1,2,3,4\n", "points line 2"),
+            "not finite": ("nan,0\n", "points line 1"),
+        }
+        for name, (text, message) in cases.items():
+            with self.subTest(name), self.assertRaisesRegex(ValueError, message):
+                botpoints.parse_points(text)
+        points = [(-30.0, -40.0), (30.0, 12.5, -30.0)]
+        self.assertEqual(botpoints.format_points(points), "-30,-40\n30,12.5,-30\n")
+        self.assertEqual(botpoints.parse_points("# walk\n\n" + botpoints.format_points(points)), points)
+
+
+class FakeConn:
+    """FakeConn hands out one FakeCursor and records begin, commit, rollback and close."""
+
+    def __init__(self, cursor):
+        self.cur, self.calls = cursor, []
+
+    def cursor(self):
+        return self.cur
+
+    def __getattr__(self, name):
+        if name in ("begin", "commit", "rollback", "close"):
+            return lambda: self.calls.append(name)
+        raise AttributeError(name)
+
+
+class BotCursor(FakeCursor):
+    """Accounts and characters of the bots by name: accounts {user: [ids]}, characters {name: [(id, userId, map)]};
+    every update matches `rowcount` rows."""
+
+    def __init__(self, accounts, characters, rowcount=1):
+        super().__init__([])
+        self.accounts, self.characters, self.rowcount = accounts, characters, rowcount
+
+    def execute(self, sql, params=None):
+        self.statements.append((sql, params))
+        if "from userlogin" in sql:
+            self._rows = [(i,) for i in self.accounts.get(params[0], [])]
+        elif "from characters" in sql:
+            self._rows = list(self.characters.get(params[0], []))
+        else:
+            self._rows = []
+
+    def close(self):
+        pass
+
+
+def bots(first, n, map_name=p.MAP):
+    accounts = {f"meshbot{k}": [f"u{k}"] for k in range(first, first + n)}
+    characters = {f"meshbot{k}Char": [(f"c{k}", f"u{k}", map_name)] for k in range(first, first + n)}
+    return accounts, characters
+
+
+class ResetBotPositionsTests(unittest.TestCase):
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.status = os.path.join(folder.name, "PlayStatus.txt")
+
+    def reset(self, first, n, points, cursor, playing=False):
+        with open(self.status, "w", encoding="utf-8") as f:
+            f.write(f"isPlaying={playing}\n")
+        conn = FakeConn(cursor)
+        try:
+            return p.reset_bot_positions(first, n, points, connect=lambda: conn, status_path=self.status), conn
+        except p.ProvisionError as ex:
+            return ex, conn
+
+    def test_reset_bot_positions_refuses(self):
+        two = [(-30.0, -40.0), (-30.0, 40.0)]
+        accounts, characters = bots(2, 2)
+        cases = {
+            "the regress fixture": ((1, 2, two, BotCursor(*bots(1, 2))), "meshbot1: step 8b's bots are meshbot2 and up"),
+            "too few points": ((2, 2, two[:1], BotCursor(accounts, characters)), "1 points for 2 bots"),
+            "in Play": ((2, 2, two, BotCursor(accounts, characters), True), "the editor is still in Play"),
+            "an unregistered bot": ((2, 2, two, BotCursor({"meshbot2": ["u2"]},
+                                                          {"meshbot2Char": characters["meshbot2Char"]})),
+                                    "0 account\\(s\\) meshbot3 and 0 character\\(s\\) meshbot3Char; register"),
+            "a character before its account": ((2, 2, two, BotCursor({"meshbot2": ["u2"]}, characters)),
+                                               "character c3 \\(meshbot3Char\\) belongs to account u3"),
+            "a bot without its character": ((2, 2, two, BotCursor(accounts, {"meshbot2Char": characters["meshbot2Char"]})),
+                                            "1 account\\(s\\) meshbot3 and 0 character\\(s\\)"),
+            "a name owned by another account": (
+                (2, 2, two, BotCursor(accounts, dict(characters, meshbot3Char=[("x", "u-player", p.MAP)]))),
+                "character x \\(meshbot3Char\\) belongs to account u-player, which is not meshbot3"),
+            "a bot on another map": ((2, 2, two, BotCursor(*bots(2, 2, "ServerMeshTestMap2"))),
+                                     "meshbot2Char is on map ServerMeshTestMap2"),
+            "an update that matched nothing": ((2, 2, two, BotCursor(accounts, characters, rowcount=0)),
+                                               "the position of meshbot2Char \\(c2\\) matched 0 rows"),
+        }
+        for name, (call, message) in cases.items():
+            with self.subTest(name):
+                error, conn = self.reset(*call)
+                self.assertIsInstance(error, p.ProvisionError)
+                self.assertRegex(str(error), message)
+                self.assertNotIn("commit", conn.calls)
+                writes = [sql for sql, _ in call[3].statements if sql.lstrip().startswith("update")]
+                self.assertLessEqual(len(writes), 1 if "matched nothing" in name else 0)
+
+    def test_reset_bot_positions(self):
+        cursor = BotCursor(*bots(5, 2))
+        count, conn = self.reset(5, 2, [(-4.0, -40.0), (-4.0, 40.0, 4.0)], cursor)
+        self.assertEqual(count, 2)
+        self.assertEqual(conn.calls, ["begin", "commit", "close"])
+        updates = [(sql, params) for sql, params in cursor.statements if sql.startswith("update")]
+        self.assertEqual([params for _, params in updates], [(-4.0, -40.0, "c5", p.MAP), (-4.0, 40.0, "c6", p.MAP)])
+        self.assertTrue(all("update characters set currentPositionX=%s" in sql and "currentMapName=%s" in sql
+                            for sql, _ in updates))
+        self.assertTrue(all(sql.startswith(("select", "update")) for sql, _ in cursor.statements))
 
 
 if __name__ == "__main__":

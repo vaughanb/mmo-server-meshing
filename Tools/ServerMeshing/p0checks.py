@@ -6,7 +6,8 @@ Pure: every input is an argument. Accept-a's own acceptance checks are p0accept'
     p0checks.check_rates(spec, run)           # one check alone; FAMILY_CHECKS lists them all
 
 Stage 0b families (step 8a) add the phantom, V move, monster and prewarm checks over each read cell's
-p0cells0b.cell_record_0b (run["cells"][cell]["p0b"]); step 8b's families raise, naming "stage 0b, step 8b".
+p0cells0b.cell_record_0b (run["cells"][cell]["p0b"]); step 8b's add p0checks8b.CHECKS_8B (bots on the cell, b9's ACKs),
+and a spec's coverage_exempt cells (b9's asleep neighbour, started only when woken) skip the coverage checks.
 
 A run is {"since", "start", "end", "cells": {cell: {"structural": rigrun.cell_window(...), "p0":
 p0cells.cell_record(...)}}}; a spec is a p0plans RunSpec (layout None: the ten-cell rig as regress starts it). A run is
@@ -20,6 +21,7 @@ import math
 import p0base
 import p0cells
 import p0cells0b
+import p0checks8b
 import p0phantom
 import p0results
 import p0tools
@@ -34,6 +36,7 @@ PHYSICS_SLACK = 1.0             # physics steps/s within 1 of 1/step
 PUPPETS_WINDOW_S = 10.0         # the Puppets window rides on the Mesh stats line, every 10 s
 MIN_PUPPETS_WINDOWS = 4
 V_SHARE = 0.95                  # a run's V move mean must reach this share of the V its spec expects (decisions 7, 8)
+COVERAGE_TEXTS = ("'s work windows cover", " logged no work window")   # rigrun.run_problems' coverage problems
 
 
 def _env(spec, key):
@@ -86,7 +89,9 @@ def check_structure(spec, run):
     problems = [f"{cid} was not read" for cid in missing]
     read = [(cid, rects.get(cid)) for cid in spec["cells_read"] if cid not in missing]
     results = {cid: cells[cid]["structural"] for cid, _ in read}
-    problems += rigrun.run_problems(read, spec["plan"], results, spec["measure"], allow_uncapped=bool(spec["uncapped"]))
+    exempt = tuple(f"{cid}{text}" for cid in spec.get("coverage_exempt") or () for text in COVERAGE_TEXTS)
+    problems += [text for text in rigrun.run_problems(read, spec["plan"], results, spec["measure"],
+                                                      allow_uncapped=bool(spec["uncapped"])) if not text.startswith(exempt)]
     want = spec["expect"].get("links")
     if want is not None:
         for cid, _ in read:
@@ -124,6 +129,8 @@ def check_coverage(spec, run):
     puppet_cells = _puppet_cells(spec) if _env(spec, "MESH_PUPPET_MOTION") == "kinematic" else set()
     want_puppets = max(1, min(MIN_PUPPETS_WINDOWS, int((measure + 1) // PUPPETS_WINDOW_S) - 1))
     for cid, record in _records(spec, run):
+        if cid in (spec.get("coverage_exempt") or ()):
+            continue
         seconds = math.fsum(t["seconds"] for t in record["triples"])
         if not p0base.covered(seconds, measure, COVERAGE):
             problems.append(f"{cid}'s Work ticks windows cover {seconds:.0f} s of the {measure} s measurement, {need}")
@@ -454,11 +461,6 @@ def check_prewarm(spec, run):
     return []
 
 
-def _later_8b(spec, run):
-    family = spec.get("checks_family") or spec["family"]
-    raise ValueError(f"no checks for family {family!r} yet: it needs {p0results.LATER_8B}")
-
-
 COMMON = (check_structure, check_pairing, check_coverage, check_rates, check_instruments, check_ticks, check_band,
           check_motion, check_animation)
 STAGE_0B = (check_phantoms, check_v_move)
@@ -470,7 +472,7 @@ FAMILY_CHECKS = {"canary": COMMON, "accept": COMMON, "density": COMMON, "floor":
                  "fanout": COMMON + STAGE_0B, "targets": COMMON + STAGE_0B + (check_monsters,),
                  "syncrpc": COMMON + STAGE_0B, "packets": COMMON + STAGE_0B,
                  "prewarm": COMMON + STAGE_0B + (check_prewarm,),
-                 **{family: (_later_8b,) for family in p0results.FAMILIES_8B}}
+                 **{family: COMMON + STAGE_0B + p0checks8b.CHECKS_8B[family] for family in p0results.FAMILIES_8B}}
 
 
 def run_problems(spec, run):

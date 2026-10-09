@@ -109,8 +109,7 @@ class RefusalTests(unittest.TestCase):
             return p0plans0b.prewarm_plan()
 
     def test_later_stages_and_moved_observed(self):
-        cases = {"accept-b": "stage 0b, step 8b", "calibrate": "stage 0b, step 8b", "crossings": "stage 0b, step 8b",
-                 "jfull": "stage 0b, step 8b", "workerab": "stage 0c, step 9", "dbburst": "stage 0c, step 9",
+        cases = {"workerab": "stage 0c, step 9", "dbburst": "stage 0c, step 9",
                  "spaces": "stage 0c, step 9"}
         self.assertEqual(p0plans.STAGE_LATER, cases)
         for name, stage in cases.items():

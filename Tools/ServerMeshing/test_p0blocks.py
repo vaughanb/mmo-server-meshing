@@ -19,6 +19,7 @@ import p0results
 import p0stepped
 import test_p0cells0b
 import test_p0geo
+import test_p0peer
 import test_p0results
 
 START = datetime.datetime(2026, 9, 28, 10, 0, 0)
@@ -104,6 +105,19 @@ class BlockTests(unittest.TestCase):
 
     def kinds(self, rig):
         return ["canary" if spec["family"] == "canary" else spec["arm"] for spec in rig.runs]
+
+    def test_an_early_stopping_run_is_graded_on_what_it_measured(self):
+        start = datetime.datetime(2026, 10, 8, 20, 33, 13)
+        cases = {  # spec extras, seconds measured, measure graded against
+            "a walk that stopped after 2N outcomes": ({"stop_after_outcomes": 40}, 61, 61),
+            "a fractional window": ({"stop_after_outcomes": 40}, 60.5, 60.5),
+            "a plain run keeps its plan": ({}, 61, 140),
+        }
+        for name, (extra, seconds, want) in cases.items():
+            with self.subTest(name):
+                spec = dict({"measure": 140}, **extra)
+                end = start + datetime.timedelta(seconds=seconds)
+                self.assertEqual(p0blocks.measured(spec, start, end)["measure"], want)
 
     def test_canary_stops(self):
         cases = {
@@ -483,6 +497,137 @@ class SteppedTests(unittest.TestCase):
                 self.assertIn(line, session.rep.lines)
                 written = p0results.read_rows(os.path.join(folder.name, "rig_fantasy_fanout_S.jsonl"))
                 self.assertEqual([row["point"]["step"] for row in written], [50, 100])
+
+
+PEER = {"bots": {"first": 2, "n": 2, "mode": "stand", "placement": "west", "bot_net": None, "rig_ships": False},
+        "sink": None}
+
+
+class PeerTests(unittest.TestCase):
+    """Step 8b decision 8: B's hooks around a run, the row they mark, and the stop after a row whose B kept bots.
+    Machine B is test_p0peer.FakeB; run_window and the grading are stand-ins."""
+
+    def patch(self, target, name, value):
+        patcher = mock.patch.object(target, name, value)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return value
+
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.logs = folder.name
+        self.patch(p0blocks, "P0_LOGS", self.logs)
+        self.patch(p0blocks.p0peer.provision, "reset_bot_positions", mock.Mock())
+
+    def window(self, calls):
+        def run_window(env, warmup, measure, rep, on_play=None, stop_when=None, before_play=None, after_play=None):
+            calls.append(sorted(name for name, hook in (("on_play", on_play), ("stop_when", stop_when),
+                                                        ("before_play", before_play), ("after_play", after_play))
+                                if hook is not None))
+            try:
+                before_play()
+                on_play(test_p0cells0b.START)
+            finally:
+                after_play()
+            return test_p0cells0b.START, test_p0cells0b.START, test_p0cells0b.END
+        return run_window
+
+    def test_canary_families_hold_every_8b_family(self):
+        self.assertTrue(set(p0results.FAMILIES_8B) <= set(p0blocks.CANARY_FAMILIES))
+
+    def test_run_spec_marks_the_row(self):
+        cases = {  # B's bots left after the stop; the row's problems, accepted and peer stop
+            "B keeps two bots": (2, ["B: 2 bots survived"], False, "B: 2 bots survived"),
+            "B stops them": (0, [], True, None),
+        }
+        for name, (left, problems, accepted, stop) in cases.items():
+            with self.subTest(name):
+                b, calls = test_p0peer.FakeB(left=(0, 0)), []
+                answers = iter([0, left])     # before_play's stop, after_play's
+                self.patch(b, "stop_bots", lambda: next(answers))
+                self.patch(p0blocks.p0peer, "RemoteB", lambda: b)
+                self.patch(p0blocks.rigrun, "run_window", self.window(calls))
+                self.patch(p0blocks.p0stepped, "graded", lambda s, *a: (p0results.run_row(s, None, {}, [], None),
+                                                                        {"cells": {}}))
+                row, _ = p0blocks.run_spec(test_p0results.spec(peer=PEER), Rep(), {})
+                self.assertEqual(calls, [["after_play", "before_play", "on_play"]])
+                self.assertEqual((row["problems"], row["accepted"], row.get(p0blocks.p0peer.PEER_STOP)),
+                                 (problems, accepted, stop))
+                self.assertEqual([c[0] for c in b.calls if c[0].startswith("start")], ["start_bots"])
+
+    def test_run_spec_passes_a_refusal_on(self):
+        def refused(*a, **k):
+            raise p0blocks.Stopped(3, "B: 1 bot still running after being stopped")
+        self.patch(p0blocks.p0peer, "RemoteB", test_p0peer.FakeB)
+        self.patch(p0blocks.rigrun, "run_window", refused)
+        with self.assertRaises(p0blocks.Stopped) as caught:
+            p0blocks.run_spec(test_p0results.spec(peer=PEER), Rep(), {})
+        self.assertEqual(caught.exception.code, 3)
+        self.assertIs(p0blocks.Stopped, p0blocks.p0peer.Stopped)
+
+    def test_a_crossing_run_stops_on_its_outcomes(self):
+        calls = []
+
+        def run_window(env, warmup, measure, rep, on_play=None, stop_when=None, **hooks):
+            calls.append(stop_when)
+            return test_p0cells0b.START, test_p0cells0b.START, test_p0cells0b.END
+        self.patch(p0blocks.rigrun, "run_window", run_window)
+        self.patch(p0blocks.p0peer, "outcomes_stop", lambda spec, n: ("outcomes", n))
+        self.patch(p0blocks.p0stepped, "graded", lambda s, *a: (p0results.run_row(s, None, {}, [], None), None))
+        p0blocks.run_spec(test_p0results.spec(stop_after_outcomes=40), Rep(), {})
+        p0blocks.run_spec(test_p0results.spec(), Rep(), {})
+        self.assertEqual(calls, [("outcomes", 40), None])
+
+    def test_a_row_whose_b_kept_bots_is_written_then_stops(self):
+        rig = Rig()
+
+        def run_spec(spec, rep, context):
+            row, run = rig.run_spec(spec, rep, context)
+            if spec["repeat"] == 1:
+                row.update({p0blocks.p0peer.PEER_STOP: "B: 2 bots survived", "accepted": False,
+                            "problems": ["B: 2 bots survived"]})
+            return row, run
+        self.patch(p0blocks, "run_spec", run_spec)
+        self.patch(p0blocks.rigrun, "now", rig.now)
+        args = p0load.build_parser().parse_args(["floor", "--no-canary"])
+        session = p0blocks.Session(args, "S", Rep(), {"build": "b1"}, [baseline()])
+        with self.assertRaises(p0blocks.Stopped) as caught:
+            session.block(p0plans.floor_plan())
+        self.assertEqual((caught.exception.code, caught.exception.reason), (3, "B: 2 bots survived"))
+        written = p0results.read_rows(os.path.join(self.logs, "rig_neutral_floor_S.jsonl"))
+        self.assertEqual([(row["accepted"], p0blocks.p0peer.PEER_STOP in row) for row in written], [(False, False)])
+
+    def test_b_is_quieted_before_each_canary_of_a_peer_block(self):
+        cases = {"a block with a peer": (PEER, ["quiet", "canary", "idle", "quiet", "canary"]),
+                 "a block without one": (None, ["canary", "idle", "canary"])}
+        for name, (peer, expected) in cases.items():
+            with self.subTest(name):
+                rig, order = Rig(), []
+
+                def run_spec(spec, rep, context):
+                    order.append("canary" if spec["family"] == "canary" else spec["arm"])
+                    return rig.run_spec(spec, rep, context)
+                self.patch(p0blocks, "run_spec", run_spec)
+                self.patch(p0blocks.rigrun, "now", rig.now)
+                self.patch(p0blocks.p0peer, "quiet_b", lambda rep: order.append("quiet"))
+                args = p0load.build_parser().parse_args(["floor"])
+                session = p0blocks.Session(args, "S" + name[2], Rep(), {"build": "b1"}, [baseline()])
+                specs = [dict(spec, peer=peer) for spec in p0plans.floor_plan()[:1]]
+                self.assertEqual(session.block(specs), 0)
+                self.assertEqual(order, expected)
+
+    def test_a_stepped_run_gets_the_peer_hooks(self):
+        calls = []
+
+        def run_window(env, warmup, measure, rep, **hooks):
+            calls.append(sorted(hooks))
+            raise RuntimeError("Play ended during the measurement")
+        self.patch(p0stepped.rigrun, "run_window", run_window)
+        self.patch(p0blocks.p0peer, "RemoteB", test_p0peer.FakeB)
+        pairs = p0stepped.run_stepped(dict(stepped_spec(), peer=PEER), Rep(), {"build": "b1"})
+        self.assertEqual(calls, [["after_play", "before_play", "on_play", "stop_when"]])
+        self.assertEqual([row["accepted"] for row, _ in pairs], [False, False])
 
 
 if __name__ == "__main__":
