@@ -14,7 +14,7 @@ import p0plans0b
 import p0plans8b
 import rigrun
 
-COUNTS = {"accept-b": 19, "calibrate": 4, "jfull": 4, "packets --sink": 22, "crossings": 18}
+COUNTS = {"accept-b": 29, "calibrate": 4, "jfull": 4, "packets --sink": 22, "crossings": 18}
 FITS = {"build": "x", "tried": 100, "in_map": 100, "hosted": 100, "fits": True, "upload_pkt_per_s": 10.4,
         "upload_hz": 10}
 PEER_BOTS = ("first", "n", "mode", "placement", "bot_net", "rig_ships")
@@ -105,8 +105,8 @@ class PlanTests(unittest.TestCase):
         specs = p0plans8b.accept_b_plan()
         parts = [spec["accept_part"] for spec in specs]
         self.assertEqual({part: parts.count(part) for part in "ABCDEF"},
-                         {"A": 2, "B": 1, "C": 4, "D": 1, "E": 1, "F": 10})
-        self.assertEqual([spec["accept_part"] for spec in p0plans8b.accept_b_plan("f,a")], ["A"] * 2 + ["F"] * 10)
+                         {"A": 2, "B": 1, "C": 4, "D": 1, "E": 1, "F": 20})
+        self.assertEqual([spec["accept_part"] for spec in p0plans8b.accept_b_plan("f,a")], ["A"] * 2 + ["F"] * 20)
         by_part = {part: [spec for spec in specs if spec["accept_part"] == part] for part in "ABCDEF"}
         self.assertEqual([s["env"]["MESH_PHANTOM"] for s in by_part["A"]],
                          ["virtual:50:character:C", "sink:50:character:C"])
@@ -118,7 +118,7 @@ class PlanTests(unittest.TestCase):
         self.assertEqual((by_part["E"][0]["env"]["MESH_CE12_CHECK"], by_part["E"][0]["peer"]), ("1", None))
         meter = [(s["arm"], "MESH_METER_SENDS" in s["env"]) for s in by_part["F"]]
         self.assertEqual(set(meter), {("meter-off", False), ("meter-on", True)})
-        self.assertEqual([s["repeat"] for s in by_part["F"]], [1, 1, 2, 2, 3, 3, 4, 4, 5, 5])
+        self.assertEqual([s["repeat"] for s in by_part["F"]], [k for k in range(1, 11) for _ in (0, 1)])
 
     def test_gate_j_arms(self):
         for name, specs, p in (("calibrate", p0plans8b.calibrate_plan(FITS), 50),
@@ -171,7 +171,7 @@ class PlanTests(unittest.TestCase):
 
 class CommandTests(unittest.TestCase):
     def test_dry_runs_print_the_plans(self):
-        for argv, count in ((["accept-b"], 19), (["calibrate"], 4), (["jfull"], 4), (["packets", "--sink"], 22),
+        for argv, count in ((["accept-b"], 29), (["calibrate"], 4), (["jfull"], 4), (["packets", "--sink"], 22),
                             (["crossings"], 18), (["packets"], 24)):
             with self.subTest(argv):
                 code, out = p0load_main(argv + ["--dry-run"], FITS)
@@ -183,7 +183,7 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("jfull is not planned: no bot calibration", out)
         self.assertIn("MESH_PHANTOM_UPLOAD_HZ not calibrated yet", p0load_main(["calibrate", "--dry-run"])[1])
-        self.assertIn("11 runs, about", p0load_main(["accept-b", "--parts", "E,F", "--dry-run"])[1])
+        self.assertIn("21 runs, about", p0load_main(["accept-b", "--parts", "E,F", "--dry-run"])[1])
 
     def test_procedures(self):
         cases = {"no bots": (["register-bots", "--n", "0", "--dry-run"], 2, "refused: --n 0"),

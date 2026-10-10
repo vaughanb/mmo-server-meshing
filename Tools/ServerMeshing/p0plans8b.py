@@ -30,8 +30,9 @@ CE12_TIMING = (40, 30)           # step 6 gate 8: 300 frames of retries after th
 #                                  Threads windows cover the measure (20 s left one short, 2026-10-08)
 # b1 (decision 11)
 A_PHANTOMS, A_VIEW, EYES, EYE_VIEW, C_PLAYERS, C_AREA, C_BOTS, C_PAIRS = 50, 100, 50, 200, 50, "0,0,25", 2, 2
-# F: 200 eyes (step 5 used 400 on B; at 60/0.03 on A, 400 saturated cell C in all 10 runs, 2026-10-08)
-D_SHIPS, D_SCALE, D_SEEN, F_PAIRS, F_EYES, F_VIEW = "C:40:mirror,C:10:parked", 0.5, 45, 5, 200, 100
+# F: 200 eyes (step 5 used 400 on B; at 60/0.03 on A, 400 saturated cell C in all 10 runs, 2026-10-08) and 10
+# pairs (5 left the interval [-3.7, 5.8] ms/s around a 1.05 mean, wider than the 1 % bound)
+D_SHIPS, D_SCALE, D_SEEN, F_PAIRS, F_EYES, F_VIEW = "C:40:mirror,C:10:parked", 0.5, 45, 10, 200, 100
 # b2 and b10 (decisions 12, 15): the 100 x 100 m square centred on (0, 0), sender tiers 20/20/20
 CALIBRATE_P, JFULL_P, SQUARE, J_ARMS = 50, 100, "0,0,100,100", (
     ("kit", {}), ("char-sender", dict(p0plans0b.SENDER_ON, MESH_SENDER_TIERS=p0plans0b.PARITY)))

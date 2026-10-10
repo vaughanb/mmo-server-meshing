@@ -158,9 +158,30 @@ were stopped by drift (the canary slid 83.7 → 76 over 2.5 h with RDP and CPU c
 | b1 accept-b | A: sink in matches Send wire (-0.0 %); B: eyeSeen 0, V 201, the bot sees no eye; C: sender records/s +0.1 % of the kit's with 2 bots; D: a ship bot sees 50 ships; E: CE-12 `shape=pass` (post-pass). F: meter cost 1.05 ms/s (≈ 0.2 %) but its 5-pair interval [-3.7, 5.8] reaches past 1 % of the work (4.5): **not shown**, needs more pairs. |
 | b2 J-lite (50) | **Gate J PASS** both arms: work kit 7.1 % / sender 0.3 %, bytes 3.9 / 3.6 %, V 4 %. |
 | b10 J-full (100) | **Gate J PASS** both arms: work kit 0.5 % / sender 4.0 %, bytes 0.9 / 1.0 %, V ≤ 0.1 %. |
-| b9 crossings | 844 handoffs, no rollback or failure. handoff_ready p50 / p95 / p99: 20 bots 467 / 567-700 / 700-833 ms; **50 bots 900-1,033 / 1,567-1,967 / 1,767-2,167 ms**: **Crossings half A FAIL** (p95 ≤ 1.0 s with 50 bots). Wake of a sleeping neighbour 4-5 s. Cost per crossing 9.8 ms of C + E work (interval 7.3-12.2, 3 pairs). Half B waits for stage 0c's B5. |
+| b9 crossings | 844 handoffs, no rollback or failure. handoff_ready p50 / p95 / p99: 20 bots 467 / 567-700 / 700-833 ms; **50 bots 900-1,033 / 1,567-1,967 / 1,767-2,167 ms**: measured **over the 1.0 s bound** with 50 bots, but B's clients were CPU-bound (see the diagnosis below): **Crossings half A not decided**. Wake of a sleeping neighbour 4-5 s. Cost per crossing 9.8 ms of C + E work (interval 7.3-12.2, 3 pairs). Half B waits for stage 0c's B5. |
 | b7 sink cap | ship-sender-28, 100 sink phantoms + 400 AI, V 500, scale 0.5: ~58,000 datagrams/s; per datagram (sink − virtual), main thread 1.10 / 1.47 / 2.13 µs and network thread 4.75 / 4.94 / 5.26 µs at a 1,020 / 510 / 255 B cap. |
 | b7 network probe | eyes on the sink, V 100: network thread 38 / 67 / 125 / 236 ms/s at 6,200 / 12,400 / 24,700 / 47,000 datagrams/s (P 100-800): linear, **not saturated**; at ~5 µs per datagram A's network thread would saturate near 180,000 datagrams/s. |
+
+**accept-b part F re-run** (10 pairs, 200 eyes, 2026-10-09): meter cost 1.09 ms/s (0.25 % of 442), 95 % interval
+[-2.6, 4.7] against a 4.4 ms/s bound: **MARGINAL** (upper end 1.07 %; one pair at +10.4 ms/s). Its closing canary read
+71.5 against the 00:50 baseline 76.8 (DRIFT), while the block's own canaries moved 3.2 % (73.9 → 71.5); the pairs
+alternate, so the drift largely cancels in their differences.
+
+**Crossings latency diagnosis** (2026-10-09, `Logs/p0/crossdiag/`, 2 repeats per arm, B's % processor time sampled
+every 2 s over SSH; handoff_ready split from the destination's millisecond trace into client = notice → the client's
+enter-game request, and server = request → registered):
+
+| Arm | B CPU p50 | handoff_ready p50 / p95 | client p50 | destination server p50 |
+|---|---|---|---|---|
+| 20 bots | ~40 % | 333-367 / 400-633 ms | 233-267 ms | 68-98 ms |
+| 20 bots + 30 phantoms beside them on C | 60-71 % | 467-534 / 800-833 ms | 367-434 ms | ~100 ms |
+| 50 bots | 91 % (max 97 %) | 1,033-1,067 / 1,833-2,000 ms | 767-798 ms | 168-201 ms |
+
+The origin's part (START → notice, the save included) is flat at 100-133 ms; the cells stay under 10 % busy (C and E
+45-80 ms/s). handoff_ready follows B's CPU: at 50 bots B's 50 headless clients are CPU-bound, so the 50-bot figure
+measures the rig's client machine, not the handoff. **Crossings half A is not decidable on this rig** (it needs 50
+clients that are not CPU-starved: a second client machine, or lighter bots); what the servers add is ~100-230 ms
+(origin plus destination) at these loads.
 
 Caveats: the phantom runs' upload rate reads 0 in the rows (no metric for sink phantoms' uploads), so the upload match
 of gate J is unverified, though work and bytes match; handoff latency grows with how many cross at once (20 → 50 bots
@@ -168,8 +189,9 @@ roughly doubles p50), which matters for the drain and split pacing of slices 2b/
 
 ## 6. Open for the stage 0b report
 
-- accept-b part F with more pairs.
-- Why handoff_ready grows with concurrent crossings (the 50-bot gate failure) before slices 2b/2c rely on it.
+- Crossings half A with 50 clients that are not CPU-bound (B saturates at 50 bots).
+- Drift judged against a block's own opening canary instead of an hours-old baseline (A's canary moves several % over
+  hours; within a block it stays near 3 %).
 - Why A's canary moves with time and activity: `machine_state` now records the session and CPU performance; the
   2026-10-08 evening slide happened with both constant.
 - The prewarm oddities above.
