@@ -112,6 +112,7 @@ class BlockTests(unittest.TestCase):
         cases = {  # spec extras, seconds measured, measure graded against
             "a walk that stopped after 2N outcomes": ({"stop_after_outcomes": 40}, 61, 61),
             "a fractional window": ({"stop_after_outcomes": 40}, 60.5, 60.5),
+            "a burst that stopped once the drain emptied": ({"stop_after_drain": True}, 75, 75),
             "a plain run keeps its plan": ({}, 61, 140),
         }
         for name, (extra, seconds, want) in cases.items():
@@ -571,6 +572,36 @@ class PeerTests(unittest.TestCase):
 
     def test_canary_families_hold_every_8b_family(self):
         self.assertTrue(set(p0results.FAMILIES_8B) <= set(p0blocks.CANARY_FAMILIES))
+        self.assertTrue({"dbburst", "workerab", "spaces", "packets"} <= set(p0blocks.CANARY_FAMILIES))
+        self.assertEqual(len(set(p0blocks.CANARY_FAMILIES)), len(p0blocks.CANARY_FAMILIES))
+
+    def test_run_spec_runs_the_burst_session(self):
+        changed = "burst: 1 row(s) changed after Play stopped: meshburst0001Char"
+        cases = {  # failure first: (run_window fails, after_stop's problems), (after_stop called, accepted, problems)
+            "the run fails": ((True, []), (False, False, ["Play ended during the measurement"])),
+            "a row changed after Play": ((False, [changed]), (True, False, [changed])),
+            "clean": ((False, []), (True, True, [])),
+        }
+        for name, ((fails, problems), (stopped, accepted, row_problems)) in cases.items():
+            with self.subTest(name):
+                calls, seen = [], []
+
+                def run_window(env, warmup, measure, rep, **hooks):
+                    calls.append(sorted(hooks))
+                    if fails:
+                        raise RuntimeError("Play ended during the measurement")
+                    return test_p0cells0b.START, test_p0cells0b.START, test_p0cells0b.END
+
+                def after_stop(session, problems=problems):
+                    seen.append(session.n)
+                    session.problems += problems
+                self.patch(p0blocks.rigrun, "run_window", run_window)
+                self.patch(p0blocks.p0peer.p0burst.BurstSession, "after_stop", after_stop)
+                self.patch(p0blocks.p0stepped, "graded", lambda s, *a: (p0results.run_row(s, None, {}, [], None), None))
+                row, _ = p0blocks.run_spec(test_p0results.spec(burst_rows=50), Rep(), {})
+                self.assertEqual(calls, [["after_play", "before_play", "on_play", "stop_when"]])
+                self.assertEqual((seen, row["accepted"], row["problems"]), ([50] if stopped else [], accepted,
+                                                                           row_problems))
 
     def test_run_spec_marks_the_row(self):
         cases = {  # B's bots left after the stop; the row's problems, accepted and peer stop

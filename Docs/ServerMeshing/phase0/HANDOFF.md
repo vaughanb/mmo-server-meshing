@@ -70,8 +70,11 @@ and the space game) before slices 2b-6.
   own opening canary (5 %), which is judged against the build's baseline at 10 % (`p0blocks.START_DRIFT`; rows record
   `drift_reference`); a new epoch and baseline (`Logs/p0/MACHINE_EPOCH`; 8b used `2026-10-06b`, `2026-10-08n`) are due
   only when an opening canary is more than 10 % off.
-- **Step 9 (stage 0c), not started:** database burst (the user permits creating test accounts), fantasy worker A/B,
-  the isolated-spaces floor (the space game's bubbles), loss.
+- **Step 9 (stage 0c), built on A (2026-10-09), smokes pass; blocks not yet run:** contract `step9_design.md` (rev 2,
+  two critiques); `p0load dbburst` (21 runs; 800 burst accounts `meshburst0001..0800@meshburst.invalid`, approved by
+  the user), `workerab` (14), `spaces` (18), `packets --loss` (9; clumsy on B, the user's choice). Smokes
+  (`phase0/accept_step9.py`): 50 burst ready p50 526 ms, 0 errors, drained; forwarded hits p50 ~43 ms; spaces own 30,
+  other 0; 5 % loss resends ~8 % of sent (≈ 2p).
 - After Phase 0: the DESIGN 0.74 row (one stage-level row for stage 0b, like 0.73), then slices 2b-6.
 
 ## 2. Moving the measurements to A

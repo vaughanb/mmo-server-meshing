@@ -81,8 +81,8 @@ def _predicted(cid, load):
 
 
 def peer_text(spec):
-    """A step 8b spec's peer as the dry run prints it: the sink's peers and kind, the bots' users, mode and placement,
-    and a b9 walk's stop rule and far point."""
+    """A step 8b spec's peer as the dry run prints it: the sink's peers and kind, the bots' users, mode, placement and
+    stagger (when not 1 s), clumsy's profile on B (step 9), and a b9 walk's stop rule and far point."""
     peer, parts = spec["peer"], []
     if peer.get("sink"):
         sink = peer["sink"]
@@ -91,7 +91,10 @@ def peer_text(spec):
         bots = peer["bots"]
         parts.append(f"bots meshbot{bots['first']}..meshbot{bots['first'] + bots['n'] - 1} ({bots['n']}) "
                      f"{bots['mode']} at {bots['placement']}, Bot net {bots['bot_net']} s"
-                     + (", -meshRigShips" if bots["rig_ships"] else ""))
+                     + (", -meshRigShips" if bots["rig_ships"] else "")
+                     + (f", stagger {bots['stagger']} s" if bots.get("stagger", 1) != 1 else ""))
+    if peer.get("impair"):
+        parts.append(f"clumsy {peer['impair']} on B (remoteb impair)")
     if spec.get("stop_after_outcomes"):
         parts.append(f"walk across the cut and back, stop at {spec['stop_after_outcomes']} handoff outcomes")
     if "upload_hz" in spec:
@@ -111,7 +114,8 @@ def dry_run_lines(specs, per_run_s=None, env_keys=None):
     lines = [f"every other regress.ENV_KEYS key is cleared ({len(set(env_keys) - used)} keys)"]
     for index, spec in enumerate(specs, 1):
         point = " ".join(f"{key}={value}" for key, value in spec["point"].items()) or "-"
-        extra = "".join(f" | {name} {spec[name]}" for name in ("checks_family", "third_reason") if spec.get(name))
+        extra = "".join(f" | {name} {spec[name]}" for name in ("checks_family", "third_reason", "burst_rows",
+                                                               "stop_after_drain") if spec.get(name))
         if spec.get("stepped"):
             steps = ",".join(str(step) for step in spec["stepped"]["steps"])
             extra += f" | steps {steps} at {spec['stepped']['hold']:g} s each"

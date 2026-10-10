@@ -20,7 +20,9 @@ block plan and this build's rows only, so a resumed block still gets them. "This
 Step 8b (decision 8): a spec with a peer runs with p0peer's PeerSession hooks (B's sink and bots started after Play and
 stopped before it ends; their problems make the row not accepted), and a spec with stop_after_outcomes ends once A's
 read cells logged that many handoff outcomes. A row whose peer may have left processes on B is written, then the
-invocation stops (Stopped, exit 3). When the block has any peer spec, B's bots and sink are stopped before each canary.
+invocation stops (Stopped, exit 3). When the block has any peer spec, B's bots, sink and clumsy are stopped before each
+canary. Step 9 (decision 4): a spec with burst_rows also gets p0burst's A-only session (the rows reset before Play,
+the drain stop_when, updateAt unchanged after the stop).
 """
 import datetime
 import glob
@@ -41,7 +43,9 @@ import rigrun
 
 P0_LOGS = os.path.join(r.LOGS, "p0")
 ABLOAD = os.path.join(os.path.dirname(os.path.abspath(__file__)), "abload.py")
-CANARY_FAMILIES = ("rates", "presence", "density", "floor", "abgeo") + p0results.FAMILIES_8A + p0results.FAMILIES_8B
+FAMILIES_9 = ("dbburst", "workerab", "spaces")   # stage 0c, step 9 decision 14 (c4 is packets --loss)
+CANARY_FAMILIES = (("rates", "presence", "density", "floor", "abgeo") + p0results.FAMILIES_8A + p0results.FAMILIES_8B
+                   + FAMILIES_9)
 CANARY_EVERY = datetime.timedelta(hours=2)
 CANARY_TRIES = 3
 # A block's canaries are judged against the block's own reference (its opening canary, or the newest good canary when
@@ -126,9 +130,10 @@ def canary_state(rows, build, host):
 
 
 def measured(spec, start, end):
-    """The spec a run is graded against: a run that may end early (stop_after_outcomes, b9's walks) has its coverage
-    checked against the seconds it measured, as a step's row is (p0stepped.step_spec); any other spec as planned."""
-    if not spec.get("stop_after_outcomes"):
+    """The spec a run is graded against: a run that may end early (stop_after_outcomes, b9's walks; stop_after_drain,
+    c1's bursts) has its coverage checked against the seconds it measured, as a step's row is
+    (p0stepped.step_spec); any other spec as planned."""
+    if not (spec.get("stop_after_outcomes") or spec.get("stop_after_drain")):
         return spec
     seconds = (end - start).total_seconds()
     return dict(spec, measure=int(seconds) if seconds == int(seconds) else seconds)
@@ -138,10 +143,12 @@ def run_spec(spec, rep, context):
     """(row, run) of one planned rig run: its mesh-p0/1 row whatever happened and the run p0checks graded (None when
     it failed). A run that raises or cannot be graded is a failed run; Stopped (a peer's refusal before Play) is
     raised. A canary's row also carries machine_state (rigrun.MachineProbe: the Windows session and the CPU's mean %
-    processor performance over the measurement). A spec with a peer runs with p0peer.window_hooks (the PeerSession's
-    on_play before the probe's), and its row carries the peer's problems and PEER_STOP (p0peer.mark_rows)."""
+    processor performance over the measurement). A spec runs with p0peer.window_session's hooks: a peer's (the
+    PeerSession's on_play before the probe's) and, when it sets burst_rows, the burst session's (step 9 decision 4: the
+    burst rows reset before Play, the drain stop, and the updateAt read before the stop and, here, after it); its row
+    carries their problems and PEER_STOP (p0peer.mark_rows)."""
     probe = rigrun.MachineProbe(spec["warmup"], spec["measure"]) if spec["family"] == "canary" else None
-    peer, hooks = p0peer.window_hooks(spec, rep, probe.start if probe else None)
+    peer, burst, hooks = p0peer.window_session(spec, rep, probe.start if probe else None)
     try:
         since, start, end = rigrun.run_window(spec["env"], spec["warmup"], spec["measure"], rep,
                                               **dict({"on_play": None}, **hooks))
@@ -150,11 +157,13 @@ def run_spec(spec, rep, context):
     except Exception as ex:  # one run's boundary: its row is written as failed, and the block goes on
         row, run = p0results.run_row(spec, None, context, [str(ex)], "run failed"), None
     else:
+        if burst is not None:
+            burst.after_stop()
         row, run = p0stepped.graded(measured(spec, start, end), since, start, end,
                                     lambda: p0stepped.cell_lines(spec, since), context, peer)
     if probe:
         row["machine_state"] = probe.state()
-    p0peer.mark_rows([row], peer)
+    p0peer.mark_rows([row], peer, burst)
     return row, run
 
 

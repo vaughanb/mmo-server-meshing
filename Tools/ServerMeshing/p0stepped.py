@@ -16,6 +16,7 @@ Unit tests: python -m unittest discover -s Tools/ServerMeshing -p "test_*.py"
 """
 import p0cells
 import p0cells0b
+import p0cells0c
 import p0checks
 import p0peer
 import p0results
@@ -31,9 +32,11 @@ def cell_lines(spec, since):
 
 def graded(spec, since, start, end, lines, context, peer=None):
     """(row, run) of one run read over [start, end] (lines: {cell: its lines since Play}, or a function giving them):
-    per read cell rigrun.cell_window, p0cells.cell_record (the fan-out saturation rule for family fanout) and, for a
-    stage 0b family, p0cells0b.cell_record_0b; with a p0peer.PeerSession, run["peer"] = its record (B's sink and bot
-    logs on A's clock); graded by p0checks. A run whose logs cannot be read or graded is a failed row (and None)."""
+    per read cell rigrun.cell_window, p0cells.cell_record (the fan-out saturation rule for family fanout), for a
+    stage 0b or 0c family p0cells0b.cell_record_0b, and for a step 9 family or MESH_NET_STATS=1 p0cells0c.cell_record_0c;
+    with MESH_DB_SAVES_PROBE=1, run["saves"] = the editor's DB saves windows (p0cells0c.editor_lines); with a
+    p0peer.PeerSession, run["peer"] = its record (B's sink and bot logs on A's clock); graded by p0checks. A run whose
+    logs cannot be read or graded is a failed row (and None)."""
     run, maps = {"since": since, "start": start, "end": end, "cells": {}}, dict(r.ZONES)
     fanout = spec["family"] == "fanout"
     try:
@@ -43,9 +46,13 @@ def graded(spec, since, start, end, lines, context, peer=None):
         for cid in spec["cells_read"]:
             cell = {"structural": rigrun.cell_window(cid, maps[cid], since, start, end),
                     "p0": p0cells.cell_record(cid, lines[cid], start, end, fanout)}
-            if spec["family"] in p0results.FAMILIES_0B:
+            if spec["family"] in p0results.STAGED:
                 cell["p0b"] = p0cells0b.cell_record_0b(cid, lines[cid], start, end)
+            if spec["family"] in p0results.FAMILIES_0C or spec["env"].get("MESH_NET_STATS") == "1":
+                cell["p0c"] = p0cells0c.cell_record_0c(cid, lines[cid], start, end)
             run["cells"][cid] = cell
+        if spec["env"].get("MESH_DB_SAVES_PROBE") == "1":
+            run["saves"] = p0cells0c.saves_record(p0cells0c.editor_lines(since), start, end)
         problems, excluded = p0checks.run_problems(spec, run), p0checks.exclusion(spec, run)
         return p0results.run_row(spec, run, context, problems, excluded), run
     except Exception as ex:  # one run's boundary: a run whose logs cannot be graded is written as failed

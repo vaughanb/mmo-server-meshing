@@ -5,7 +5,6 @@ subprocess refuses (setUpModule), so no test reaches B, the editor or the databa
 """
 import contextlib
 import datetime
-import json
 import os
 import subprocess
 import tempfile
@@ -45,10 +44,11 @@ class Rep:
 
 
 class FakeB:
-    """Machine B: records each call; left = (bots, sinks) after a stop; raising = {method: exception}."""
+    """Machine B: records each call; left = (bots, sinks) after a stop; clumsy = (running, left after a stop);
+    raising = {method: exception}."""
 
-    def __init__(self, left=(0, 0), raising=None, state=None, matches=(True, "aa", "aa"), logs=()):
-        self.calls, self.left, self.raising = [], left, raising or {}
+    def __init__(self, left=(0, 0), raising=None, state=None, matches=(True, "aa", "aa"), logs=(), clumsy=(0, 0)):
+        self.calls, self.left, self.raising, self.clumsy = [], left, raising or {}, clumsy
         self.state_value = state if state is not None else {"cells": 0, "relics": 0, "relic_service": "Stopped",
                                                             "bots": 0, "host": "MESHB", "cpu": "B CPU",
                                                             "clock": datetime.datetime(2026, 10, 7, 9, 0, 7, tzinfo=UTC),
@@ -90,6 +90,17 @@ class FakeB:
         self._call("fetch")
         return []
 
+    def clumsy_count(self):
+        self._call("clumsy_count")
+        return self.clumsy[0]
+
+    def stop_impair(self):
+        self._call("stop_impair")
+        return self.clumsy[1]
+
+    def start_impair(self, profile):
+        self._call("start_impair", profile)
+
 
 def spec(peer=None, env=None, **extra):
     return dict({"family": "crossings", "env": env or {}, "cells_read": ["C", "E"], "peer": peer}, **extra)
@@ -107,13 +118,23 @@ class QuietTests(unittest.TestCase):
             "bots survive": (FakeB(left=(2, 0)), 3, "B: 2 bots still running after being stopped"),
             "a sink survives": (FakeB(left=(0, 1)), 3, "B: 1 sink still running after being stopped"),
             "both survive": (FakeB(left=(1, 2)), 3, "B: 1 bot and 2 sinks still running after being stopped"),
+            "clumsy survives": (FakeB(clumsy=(1, 1)), 3, "B: 1 clumsy process(es) still running after being stopped"),
+            "a bot and clumsy survive": (FakeB(left=(1, 0), clumsy=(2, 2)), 3,
+                                         "B: 1 bot and 2 clumsy process(es) still running after being stopped"),
+            "B does not answer the clumsy stop": (
+                FakeB(clumsy=(1, 0), raising={"stop_impair": remotessh.Unreachable("gone")}), 2,
+                "B is unreachable: gone"),
+            "a leftover clumsy is stopped": (FakeB(clumsy=(1, 0)), None, None),
             "B is quiet": (FakeB(), None, None),
         }
         for name, (b, code, reason) in cases.items():
             with self.subTest(name):
                 if code is None:
-                    p0peer.quiet_b(Rep(), b)
-                    self.assertEqual(names(b), ["stop_bots", "stop_sink"])
+                    rep = Rep()
+                    p0peer.quiet_b(rep, b)
+                    found = b.clumsy[0]
+                    self.assertEqual(names(b), ["stop_bots", "stop_sink", "clumsy_count"] + ["stop_impair"] * bool(found))
+                    self.assertEqual(any("clumsy" in line for line in rep.lines), bool(found))
                     continue
                 with self.assertRaises(p0peer.Stopped) as caught:
                     p0peer.quiet_b(Rep(), b)
@@ -266,6 +287,69 @@ class SessionTests(unittest.TestCase):
                 session.after_play()
                 self.assertEqual((session.problems, session.stop_reason, names(b)), (problems, reason, calls))
 
+    def test_impair_refuses(self):
+        cases = {"an unknown profile": "loss9", "off": "off"}
+        for name, profile in cases.items():
+            with self.subTest(name), self.assertRaisesRegex(ValueError, f"peer impair '{profile}' is not one of"):
+                p0peer.PeerSession(spec({"sink": SINK, "impair": profile}), Rep(), FakeB())
+
+    def test_on_play_starts_clumsy_after_the_sink(self):
+        cases = {  # failure first: FakeB, the exception, its code (Stopped) or message
+            "no admin on B": (FakeB(raising={"start_impair": p0peer.remoteb.NoAdmin("not elevated")}), p0peer.Stopped,
+                              2),
+            "clumsy fails": (FakeB(raising={"start_impair": RuntimeError("did not stay up")}), RuntimeError,
+                             "did not stay up"),
+            "clumsy runs": (FakeB(), None, None),
+        }
+        for name, (b, error, detail) in cases.items():
+            with self.subTest(name):
+                rep = Rep()
+                session = p0peer.PeerSession(spec({"sink": SINK, "bots": BOTS, "impair": "loss1"},
+                                                  {"MESH_PHANTOM": "sink:50:character:C"}), rep, b)
+                with fake_time({"C": [PORT_LINE]}):
+                    if error is None:
+                        session.on_play(PLAY)
+                    else:
+                        with self.assertRaises(error) as caught:
+                            session.on_play(PLAY)
+                calls = names(b)
+                self.assertEqual(calls[:2], ["start_sink", "start_impair"])
+                self.assertTrue(session.impair_started)
+                if error is p0peer.Stopped:
+                    self.assertEqual(caught.exception.code, detail)
+                    self.assertIn("c4 (packet loss) must be skipped", caught.exception.reason)
+                elif error is not None:
+                    self.assertIn(detail, str(caught.exception))
+                if error is None:
+                    self.assertEqual(calls, ["start_sink", "start_impair", "start_bots"])
+                    self.assertIsNotNone(session.impair_on)
+                    self.assertTrue(any(line.startswith("    B: impairment on (loss1) at ") for line in rep.lines))
+                else:
+                    self.assertIsNone(session.impair_on)
+
+    def test_after_play_stops_clumsy_first(self):
+        cases = {  # failure first: FakeB, problems, stop_reason
+            "clumsy survives": (FakeB(clumsy=(1, 1)), ["B: 1 clumsy process(es) survived"],
+                                "B: 1 clumsy process(es) survived"),
+            "the stop fails, the bots stop anyway": (
+                FakeB(left=(2, 0), raising={"stop_impair": RuntimeError("timed out")}),
+                ["B: impair-stop failed: timed out", "B: 2 bots survived"],
+                "B: impair-stop failed: timed out; B: 2 bots survived"),
+            "clean": (FakeB(), [], None),
+        }
+        for name, (b, problems, reason) in cases.items():
+            with self.subTest(name):
+                session = p0peer.PeerSession(spec({"sink": SINK, "impair": "loss5"}), Rep(), b)
+                session.started = session.impair_started = True
+                session.after_play()
+                self.assertEqual((session.problems, session.stop_reason), (problems, reason))
+                self.assertEqual(names(b)[:3], ["stop_impair", "stop_bots", "stop_sink"])
+        b = FakeB()
+        session = p0peer.PeerSession(spec({"sink": SINK, "impair": "loss5"}), Rep(), b)
+        session.started = True     # Play up, but on_play failed before clumsy: nothing to stop on that side
+        session.after_play()
+        self.assertNotIn("stop_impair", names(b))
+
     def test_after_play_before_any_start_does_nothing(self):
         b = FakeB(left=(3, 0))
         session = p0peer.PeerSession(spec({"bots": BOTS}), Rep(), b)
@@ -361,116 +445,6 @@ class ContextTests(unittest.TestCase):
         for name, (b, expected) in cases.items():
             with self.subTest(name):
                 self.assertEqual(p0peer.start_problems(b), expected)
-
-
-BOT_NET = ("[MeshAuto] Bot net window 5.00 s: in 52.3 kB/s 120 pkt/s out 3.1 kB/s {} pkt/s | hops 0 | rtt 1 ms "
-           "| players seen 49 | at 2026-10-07T16:00:{:02d}Z")
-
-
-def bot_log(rates):
-    return ["[MeshAuto] In map at (-4.0, 0.1, 0.0)"] + [BOT_NET.format(rate, 5 * i) for i, rate in enumerate(rates)]
-
-
-class CalibrationTests(unittest.TestCase):
-    def test_bot_upload_rate(self):
-        cases = {
-            "no window": ({"meshbot2": ["In map at"]}, (None, 0)),
-            "only the skipped windows": ({"meshbot2": bot_log([90, 90])}, (None, 0)),
-            "medians of medians": ({"meshbot2": bot_log([90, 90, 20, 22, 21]), "meshbot3": bot_log([0, 0, 30, 30]),
-                                    "meshbot4": bot_log([0, 0, 10])}, (21.0, 3)),
-        }
-        for name, (lines, expected) in cases.items():
-            with self.subTest(name):
-                self.assertEqual(p0peer.bot_upload_rate(lines), expected)
-
-    def test_calibration_record(self):
-        state = dict(FakeB().state_value, bots=100)
-        cases = {  # (in map, hosted), fits
-            "not all in the map": ((98, 100), False),
-            "some exited": ((100, 97), False),
-            "all fit": ((100, 100), True),
-        }
-        for name, ((arrived, hosted), fits) in cases.items():
-            with self.subTest(name):
-                record = p0peer.calibration_record("b1", 100, arrived, 180, dict(state, bots=hosted),
-                                                   {"meshbot2": bot_log([0, 0, 20.6])})
-                self.assertEqual((record["fits"], record["upload_pkt_per_s"], record["upload_hz"], record["hosted"],
-                                  record["free_memory_MB"], record["peer_host"]),
-                                 (fits, 20.6, 21, hosted, 40000, "MESHB"))
-                self.assertEqual(p0peer.hosts(record, 100), fits)
-        self.assertFalse(p0peer.hosts(None, 100))
-
-    def test_read_calibration(self):
-        with tempfile.TemporaryDirectory() as folder:
-            path = os.path.join(folder, "bots_calibration.json")
-            self.assertIsNone(p0peer.read_calibration("b1", path=path))
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump({"build": "b1", "peer_host": "MESHB", "fits": True, "tried": 100}, f)
-            cases = {"another build": (("b2", None), False), "another B": (("b1", "OTHER"), False),
-                     "this build, any B": (("b1", None), True), "this build and B": (("b1", "MESHB"), True)}
-            for name, ((build, host), found) in cases.items():
-                with self.subTest(name):
-                    self.assertEqual(p0peer.read_calibration(build, host, path) is not None, found)
-
-    @contextlib.contextmanager
-    def editor(self):
-        calls = []
-
-        def note(name, result=None):
-            return lambda *a, **k: (calls.append(name), result)[1]
-        with contextlib.ExitStack() as stack:
-            for name, result in (("kill_bots", None), ("kit_process_count", 0), ("request_play", None),
-                                 ("wait_play", None), ("stop_play", 0)):
-                stack.enter_context(mock.patch.object(p0peer.r, name, note(name, result)))
-            stack.enter_context(fake_time())
-            yield calls
-
-    def test_register_bots(self):
-        with tempfile.TemporaryDirectory() as folder:
-            logs = []
-            for user in ("meshbot2", "meshbot3", "meshbot4", "meshbot5", "meshbot6", "meshbot7"):
-                logs.append(os.path.join(folder, user + ".log"))
-                with open(logs[-1], "w", encoding="utf-8") as f:
-                    f.write("In map at (-50, 0, 0)\n" if user != "meshbot4" else "Logged in\n")
-            b, rep = FakeB(logs=logs), Rep()
-            with self.editor() as calls:
-                registered = p0peer.register_bots(6, rep, b)
-        self.assertEqual(registered, ["meshbot2", "meshbot3", "meshbot5", "meshbot6", "meshbot7"])
-        self.assertEqual(calls, ["kill_bots", "kit_process_count", "request_play", "wait_play", "stop_play"])
-        starts = [call[1:4] for call in b.calls if call[0] == "start_bots"]
-        self.assertEqual(starts, [(2, 5, "stand"), (7, 1, "stand")])
-        self.assertIn("meshbot2..meshbot6: 4 of 5 in map (not: meshbot4)", rep.lines)
-        self.assertEqual(rep.lines[-1], "registered 5 of 6")
-
-    def test_register_bots_stops_when_b_keeps_bots(self):
-        b = FakeB()
-        answers = iter([0, 2, 2])     # quiet_b's stop, the group's stop, the cleanup's stop
-        with self.editor() as calls, mock.patch.object(b, "stop_bots", lambda: next(answers)):
-            with self.assertRaises(p0peer.Stopped) as caught:
-                p0peer.register_bots(2, Rep(), b)
-        self.assertEqual((caught.exception.code, caught.exception.reason), (3, "B: 2 bots survived bots-stop"))
-        self.assertEqual(calls[-1], "stop_play")
-
-    def test_calibrate_bots(self):
-        with tempfile.TemporaryDirectory() as folder:
-            logs = []
-            for k in range(2, 6):
-                logs.append(os.path.join(folder, f"meshbot{k}.log"))
-                with open(logs[-1], "w", encoding="utf-8") as f:
-                    f.write("\n".join(bot_log([0, 0, 20])) + "\n")
-            b = FakeB(state=dict(FakeB().state_value, bots=4), logs=logs)
-            path = os.path.join(folder, "p0", "bots_calibration.json")
-            with self.editor() as calls, mock.patch.object(p0peer.provision, "reset_bot_positions") as reset, \
-                    mock.patch.object(p0peer, "build_id", lambda: "b1"):
-                record = p0peer.calibrate_bots(Rep(), 4, b, path)
-            with open(path, encoding="utf-8") as f:
-                self.assertEqual(json.load(f), record)
-        reset.assert_called_once_with(2, 4, [(-25.0, -25.0), (25.0, -25.0), (-25.0, 25.0), (25.0, 25.0)])
-        self.assertEqual((record["build"], record["tried"], record["in_map"], record["fits"], record["upload_hz"]),
-                         ("b1", 4, 4, True, 20))
-        self.assertEqual(calls[-1], "stop_play")
-        self.assertEqual([c[1:] for c in b.calls if c[0] == "start_bots"][0][2:], ("pace", reset.call_args[0][2], 5,
-                                                                                   None, 1))
 
 
 if __name__ == "__main__":

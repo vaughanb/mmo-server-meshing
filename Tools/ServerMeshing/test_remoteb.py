@@ -13,6 +13,7 @@ from unittest import mock
 
 import remoteb
 import remotebots
+import remoteimpair
 import remotessh
 
 DIR = r"C:\MeshTest\Server"
@@ -326,6 +327,104 @@ class StateTests(unittest.TestCase):
                          (2, 3, "pace", 5.0, 2, None))
         for command in ("bots-start", "bots-stop", "bots-count", "bots-fetch", "status", "deploy"):
             self.assertIn(command, remoteb.COMMANDS)
+
+
+FACTS = "admin=True\nclumsy=True"
+
+
+class ImpairTests(unittest.TestCase):
+    """Step 9 decision 12: clumsy's profiles, its launch script, and starting, counting and stopping it on B."""
+    ARGS = remotessh.defaults(host="b", a_ip=A_IP, dir=DIR, clumsy=r"C:\MeshTest\clumsy")
+
+    def test_profiles(self):
+        cases = {
+            "loss1 drops 1 %": ("loss1", ["--drop", "on", "--drop-chance", "1.0"]),
+            "loss5 drops 5 %": ("loss5", ["--drop", "on", "--drop-chance", "5.0"]),
+            "off does nothing": ("off", []),
+        }
+        for name, (profile, options) in cases.items():
+            with self.subTest(name):
+                self.assertEqual(remoteb.PROFILES[profile], options)
+        self.assertIs(remoteb.PROFILES, remoteimpair.PROFILES)
+
+    def test_impair_script(self):
+        loss1, loss5 = (remoteimpair.impair_script(r"C:\MeshTest\clumsy", A_IP, p) for p in ("loss1", "loss5"))
+        self.assertEqual(loss1, ["@echo off", r'cd /d "C:\MeshTest\clumsy"',
+                                 f'clumsy.exe --filter "udp and (ip.DstAddr == {A_IP} or ip.SrcAddr == {A_IP})" '
+                                 "--drop on --drop-chance 1.0"])
+        self.assertEqual(loss1[:2] + [loss1[2].split('" ')[0]], loss5[:2] + [loss5[2].split('" ')[0]])  # one filter
+        with self.assertRaises(KeyError):
+            remoteimpair.impair_script(r"C:\MeshTest\clumsy", A_IP, "loss9")
+
+    def test_facts(self):
+        command = remoteimpair.facts_command(r"C:\MeshTest\clumsy")
+        self.assertNotIn('"', command)
+        self.assertIn(r"Test-Path 'C:\MeshTest\clumsy\clumsy.exe'", command)
+        cases = {"nothing printed": ("", {"admin": False, "clumsy": False}),
+                 "not elevated": ("admin=False\nclumsy=True", {"admin": False, "clumsy": True}),
+                 "both": ("noise\n" + FACTS, {"admin": True, "clumsy": True})}
+        for name, (text, expected) in cases.items():
+            with self.subTest(name):
+                self.assertEqual(remoteimpair.parse_facts(text), expected)
+        self.assertEqual(remoteimpair.clumsy_dir(remotessh.defaults()), remoteimpair.CLUMSY_DIR)
+
+    def start(self, answers, profile="loss1", launched="rc=0 pid=7"):
+        commands, scripts = [], []
+
+        def launch(args, name, body):
+            scripts.append((name, body))
+            return launched
+        with mock.patch.object(remotessh, "ssh", ran(answers, commands)), \
+                mock.patch.object(remotessh, "launch_detached", launch), \
+                mock.patch.object(remoteimpair.time, "sleep", lambda s: None):
+            return remoteimpair.start_impair(self.ARGS, profile), commands, scripts
+
+    def test_start_impair_refuses(self):
+        cases = {  # failure first: (answers, profile, launch output), error, message
+            "an unknown profile": (([], "loss9", "x"), ValueError, "impair profile 'loss9' is not one of"),
+            "off is no start": (([], "off", "x"), ValueError, "impair profile 'off'"),
+            "not elevated": ((["admin=False\nclumsy=True"], "loss1", "x"), remoteimpair.NoAdmin, "not elevated"),
+            "no clumsy.exe": ((["admin=True\nclumsy=False"], "loss1", "x"), RuntimeError, "no clumsy.exe in"),
+            "the script not copied": (([FACTS, "0"], "loss1", None), RuntimeError, "could not copy impair.cmd"),
+            "clumsy did not stay up": (([FACTS, "0", "0"], "loss1", "rc=0 pid=7"), RuntimeError,
+                                       "clumsy did not stay up \\(rc=0 pid=7\\)"),
+        }
+        for name, ((answers, profile, launched), error, message) in cases.items():
+            with self.subTest(name), self.assertRaisesRegex(error, message):
+                self.start(answers, profile, launched)
+        self.assertTrue(issubclass(remoteimpair.NoAdmin, RuntimeError))
+
+    def test_start_impair(self):
+        launched, commands, scripts = self.start([FACTS, "0", "1"])
+        self.assertEqual(launched, "rc=0 pid=7")
+        self.assertEqual(commands[1:], [remotessh.stop_command(remoteimpair.STOP_CLUMSY, remoteimpair.IS_CLUMSY),
+                                        remotessh.count_command(remoteimpair.IS_CLUMSY)])
+        self.assertEqual(scripts, [("impair.cmd", remoteimpair.impair_script(r"C:\MeshTest\clumsy", A_IP, "loss1"))])
+
+    def test_stop_and_count(self):
+        commands = []
+        with mock.patch.object(remotessh, "ssh", ran(["1", "2"], commands)):
+            self.assertEqual(remoteb.stop_impair(self.ARGS), 1)
+            self.assertEqual(remoteb.clumsy_count(self.ARGS), 2)
+        self.assertIn("'*impair.cmd*'", remoteimpair.STOP_CLUMSY)
+        self.assertIn(remoteimpair.IS_CLUMSY, remoteimpair.STOP_CLUMSY)
+        self.assertTrue(commands[0].startswith(remotessh.NOT_THIS_SESSION))
+
+    def test_cmd_impair(self):
+        cases = {  # failure first: (profile, stop_impair's count, start_impair's error), exit code
+            "an unknown profile": (("loss9", 0, None), 2),
+            "clumsy survives off": (("off", 1, None), 1),
+            "no admin": (("loss1", 0, remoteimpair.NoAdmin("not elevated")), 1),
+            "clumsy fails": (("loss1", 0, RuntimeError("did not stay up")), 1),
+            "off": (("off", 0, None), 0),
+            "on": (("loss1", 0, None), 0),
+        }
+        for name, ((profile, left, error), code) in cases.items():
+            with self.subTest(name), mock.patch.object(remoteimpair, "stop_impair", lambda args: left), \
+                    mock.patch.object(remoteimpair, "start_impair", mock.Mock(side_effect=error)), \
+                    mock.patch("builtins.print"):
+                args = remoteb.build_parser().parse_args(["impair", "--profile", profile])
+                self.assertEqual(remoteb.cmd_impair(args), code)
 
 
 if __name__ == "__main__":

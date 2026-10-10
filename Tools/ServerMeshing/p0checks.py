@@ -7,7 +7,8 @@ Pure: every input is an argument. Accept-a's own acceptance checks are p0accept'
 
 Stage 0b families (step 8a) add the phantom, V move, monster and prewarm checks over each read cell's
 p0cells0b.cell_record_0b (run["cells"][cell]["p0b"]); step 8b's add p0checks8b.CHECKS_8B (bots on the cell, b9's ACKs),
-and a spec's coverage_exempt cells (b9's asleep neighbour, started only when woken) skip the coverage checks.
+and a spec's coverage_exempt cells (b9's asleep neighbour, started only when woken) skip the coverage checks; step 9's
+families and packets' Net stats add p0checks9.CHECKS_9 and check_net_stats.
 
 A run is {"since", "start", "end", "cells": {cell: {"structural": rigrun.cell_window(...), "p0":
 p0cells.cell_record(...)}}}; a spec is a p0plans RunSpec (layout None: the ten-cell rig as regress starts it). A run is
@@ -22,6 +23,7 @@ import p0base
 import p0cells
 import p0cells0b
 import p0checks8b
+import p0checks9
 import p0phantom
 import p0results
 import p0tools
@@ -231,7 +233,7 @@ def check_ticks(spec, run):
     for cid, record in _records(spec, run):
         windows = _unsaturated(record)
         misses = tick_misses(windows)
-        if misses and spec["family"] in p0results.FAMILIES_0B:
+        if misses and spec["family"] in p0results.STAGED:
             counted = tick_misses([t for t in windows
                                    if abs(t["ticks"]["ticks"] + t["ticks"]["dropped"] - round(TICK_HZ * t["seconds"])) > 1])
             dropped_only = len(misses) - len(counted)
@@ -470,9 +472,10 @@ FAMILY_CHECKS = {"canary": COMMON, "accept": COMMON, "density": COMMON, "floor":
                  "abgeo": tuple(check for check in COMMON if check is not check_motion) + (check_puppets,),
                  "observed": COMMON + STAGE_0B + (check_puppets, check_puppet_count, check_monsters),
                  "fanout": COMMON + STAGE_0B, "targets": COMMON + STAGE_0B + (check_monsters,),
-                 "syncrpc": COMMON + STAGE_0B, "packets": COMMON + STAGE_0B,
+                 "syncrpc": COMMON + STAGE_0B, "packets": COMMON + STAGE_0B + (p0checks9.check_net_stats,),
                  "prewarm": COMMON + STAGE_0B + (check_prewarm,),
-                 **{family: COMMON + STAGE_0B + p0checks8b.CHECKS_8B[family] for family in p0results.FAMILIES_8B}}
+                 **{family: COMMON + STAGE_0B + p0checks8b.CHECKS_8B[family] for family in p0results.FAMILIES_8B},
+                 **{family: COMMON + STAGE_0B + p0checks9.CHECKS_9[family] for family in p0results.FAMILIES_0C}}
 
 
 def run_problems(spec, run):

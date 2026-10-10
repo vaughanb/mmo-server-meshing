@@ -12,21 +12,23 @@ report.
     python Tools/ServerMeshing/p0load.py abgeo [--subs 1,2,3] [--without-predictions]
     python Tools/ServerMeshing/p0load.py report [--import FILE ...] [--predict abgeo] [--bridge SHA | --build SHA] [--host NAME]
     python Tools/ServerMeshing/p0load.py observed --part O|R|SA|M|S
-    python Tools/ServerMeshing/p0load.py fanout|targets|syncrpc|packets [--sink]|prewarm
+    python Tools/ServerMeshing/p0load.py fanout|targets|syncrpc|packets [--sink | --loss]|prewarm
     python Tools/ServerMeshing/p0load.py accept-b [--parts A,B,C,D,E,F]|calibrate|crossings|jfull     (with machine B)
     python Tools/ServerMeshing/p0load.py register-bots|calibrate-bots [--n 100] [--dry-run]   (one-off, with B)
-    python Tools/ServerMeshing/p0load.py workerab|dbburst|spaces   (refused)
+    python Tools/ServerMeshing/p0load.py dbburst [--parts burst,sustained,calibration]|workerab [--fallback]|spaces
     common: --dry-run --resume --no-canary --warmup S --measure S --keys K1,K2
 
 The plans are p0plans' (the step 4 contract's §H), p0plans0b's (step 8a, decisions 6-11) and p0plans8b's (step 8b,
 decisions 11-15: accept-b, calibrate, crossings, jfull and packets --sink, with B's bots and sink; p0load8b holds their
-arguments, refusals and block runners), run by p0blocks: each run
+arguments, refusals and block runners) and p0plans9's (step 9: dbburst, workerab, spaces and packets --loss; p0load9
+holds theirs), run by p0blocks: each run
 is abload's protocol (rigrun.run_window), read per cell with rigrun.cell_window and p0cells.cell_record, graded by
 p0checks, and appended as a mesh-p0/1 row to Logs/p0/rig_<game>_<family>_<stamp>.jsonl whatever happened (a run that
 raises is a failed run; the block goes on). Each run's line is also kept in Logs/p0/rig_<family>_<stamp>.txt. abgeo runs
 abload once per sub-block (its rows go to Logs/p0/rig_fantasy_abgeo_<stamp>.jsonl) and needs frozen predictions (report
---predict abgeo) unless --without-predictions. Stage 0c's families are refused, naming the step that builds
-them; presence --observed is refused, pointing at observed. A step 8b command refuses to start unless machine B is
+--predict abgeo) unless --without-predictions. A family a later stage builds (p0plans.STAGE_LATER, none since step
+9) is refused; presence --observed is refused, pointing at observed. dbburst's calibration part and packets --loss need
+machine B too. A step 8b command refuses to start unless machine B is
 ready (p0peer.start_problems); calibrate and jfull need this build's bot calibration (calibrate-bots). A stage 0b spec carries its own game
 (rig_<game>_<family>_<stamp>.jsonl), and a stepped run (fanout, packets saturation) has warm-up 10 s and measures its
 steps' holds and bind ramps + 20 s.
@@ -68,8 +70,10 @@ import p0blocks
 import p0dryrun
 import p0plans
 import p0load8b
+import p0load9
 import p0plans0b
 import p0plans8b
+import p0plans9
 import p0report
 import p0results
 import rigrun
@@ -77,8 +81,9 @@ import rigrun
 HERE = os.path.dirname(os.path.abspath(__file__))
 FIXTURE = os.path.join(HERE, "fixtures", "abload_chain3_20260925")
 # p0blocks' canaried families and step 8a's (decision 11: every new family is canaried)
-CANARY_FAMILIES = tuple(p0blocks.CANARY_FAMILIES) + tuple(family for family in p0plans0b.FAMILIES + p0plans8b.FAMILIES
-                                                          if family not in p0blocks.CANARY_FAMILIES)
+CANARY_FAMILIES = tuple(p0blocks.CANARY_FAMILIES) + tuple(
+    family for family in p0plans0b.FAMILIES + p0plans8b.FAMILIES + p0plans9.FAMILIES
+    if family not in p0blocks.CANARY_FAMILIES)
 
 
 def this_host():
@@ -114,6 +119,8 @@ def block_plan(args):
         specs = p0plans0b.targets_plan()
     elif command == "syncrpc":
         specs = p0plans0b.syncrpc_plan()
+    elif command in p0load9.COMMANDS or p0load9.loss(args):
+        specs = p0load9.block_plan_9(args)
     elif command in p0load8b.COMMANDS or (command == "packets" and args.sink):
         specs = p0load8b.block_plan_8b(args)
     elif command == "packets":
@@ -171,6 +178,8 @@ def dry_run(args, specs):
                      "gets a third run after the block")
     if p0load8b.two_machine(args):
         lines += p0load8b.dry_run_notes(args, specs)
+    if args.command in p0load9.COMMANDS or p0load9.loss(args):
+        lines += p0load9.dry_run_notes(args, specs)
     if args.command == "accept-a":
         lines += [f"accept-a {part} {label}: {'python -u ' if python else ''}{' '.join(argv)}"
                   + (" (rerun once if it fails)" if part == "C" else "")
@@ -282,8 +291,11 @@ def build_parser():
                                      help="b3 O, R, SA; b4 M; b5 S")
     for name in ("fanout", "targets", "syncrpc", "prewarm"):
         command(name)
-    command("packets").add_argument("--sink", action="store_true", help="b7's sink arms with machine B (step 8b)")
+    p = command("packets")
+    p.add_argument("--sink", action="store_true", help="b7's sink arms with machine B (step 8b)")
+    p.add_argument("--loss", action="store_true", help="c4's loss arms with machine B and clumsy (step 9)")
     p0load8b.add_commands(command, sub)
+    p0load9.add_commands(command)
     p = command("abgeo")
     p.add_argument("--subs", default="1,2,3")
     p.add_argument("--without-predictions", action="store_true", help="run without frozen predictions")
@@ -344,9 +356,9 @@ def run_command(args, specs, done, plan):
     """Runs a block on the rig after its preconditions (specs: the plan less the runs --resume skips); the report
     file is written whatever happens."""
     problems = rigrun.start_problems()
-    peer = p0load8b.two_machine(args)
+    peer = p0load8b.two_machine(args) or p0load9.two_machine(args)
     if peer and not problems:
-        problems += p0load8b.run_refusals(args, plan)
+        problems += (p0load9.run_refusals if p0load9.two_machine(args) else p0load8b.run_refusals)(args, plan)
     try:
         history = p0blocks.read_history()[1]
     except p0results.SchemaError as ex:
@@ -382,6 +394,8 @@ def run_command(args, specs, done, plan):
             code = p0blocks.abgeo_block(session, args, done)
         elif args.command == "accept-b":
             code = p0load8b.accept_b_block(session, specs)
+        elif args.command in p0load9.COMMANDS or p0load9.loss(args):
+            code = p0load9.run_block(session, specs, plan)
         elif args.command == "packets" and args.sink:
             code = p0load8b.packets_sink_block(session, specs, plan)
         else:

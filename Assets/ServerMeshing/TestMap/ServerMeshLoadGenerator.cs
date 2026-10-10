@@ -180,7 +180,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 }
                 GameInstance.SetupByMetaData(entity, metaDataId);
                 data.CloneTo(entity);
-                mesh.Assets.NetworkSpawn(spawnObj);
+                mesh.Assets.NetworkSpawn(ServerMeshSpaceTags.Tag(spawnObj, false));
                 entity.ForceMakeCaches();
                 entity.FillEmptySlots();
                 entity.CurrentHp = entity.MaxHp;
@@ -456,7 +456,7 @@ namespace MultiplayerARPG.MMO.Mesh
             for (int i = 0; i < n; ++i)
             {
                 BaseMonsterCharacterEntity monster = s_hits[i].GetComponentInParent<BaseMonsterCharacterEntity>();
-                if (monster == null || monster == (object)self || monster.IsDead() || MeshIdentity.IsGhostEntity(monster))
+                if (monster == null || monster == (object)self || monster.IsDead() || ServerMeshFightGhosts.Skips(monster))
                     continue;
                 float d = Vector3.Distance(position, monster.EntityTransform.position);
                 if (d < distance) { distance = d; target = monster; }

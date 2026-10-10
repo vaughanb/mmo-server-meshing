@@ -43,7 +43,7 @@ def other_rows():
 class RunRowTests(unittest.TestCase):
     def test_refusals(self):
         cases = {
-            "a family without a game": (spec(family="workerab"), "family 'workerab' has no game"),
+            "a family without a game": (spec(family="nonesuch"), "family 'nonesuch' has no game"),
             "a malformed MESH_RATES": (spec(rates="30/x"), "MESH_RATES step part 'x' is not a number of seconds"),
             "a malformed MESH_BAND": (spec(env={"MESH_BAND": "wide"}), "MESH_BAND 'wide' is not a number of metres"),
         }

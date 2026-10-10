@@ -99,7 +99,11 @@ ENV_KEYS = ["MESH_NO_MONSTER_HANDOFF", "MESH_FAULT_DIE_ON_NOTICE", "MESH_GHOST_L
             "MESH_METER_RECORD_SIZES", "MESH_SHIP_SELF_ACK", "MESH_SHIP_AI_PREFAB",
             # Phase 0 step 8a (p0tools.ENV_REGISTRY via p0stage0b): pre-warm bursts, the parked-ship pin and placed
             # monsters
-            "MESH_PREWARM", "MESH_SHIP_PARK_SLEEP", "MESH_MONSTER_PLACE"]
+            "MESH_PREWARM", "MESH_SHIP_PARK_SLEEP", "MESH_MONSTER_PLACE",
+            # Phase 0 step 9 (p0tools.ENV_REGISTRY via p0cells0c): the database burst and the editor's save probe, the
+            # monster cell, fighters hitting ghosts, forwarded-hit timing, isolated spaces and LiteNetLib's statistics
+            "MESH_DB_BURST", "MESH_DB_SAVES_PROBE", "MESH_MONSTER_CELL", "MESH_FIGHT_GHOSTS", "MESH_FORWARD_TIMING",
+            "MESH_SPACES", "MESH_NET_STATS", "MESH_MONSTER_AWAKE"]
 EXTRA_ENV = {}   # --env KEY=VALUE from the command line, applied to every Play request of the run
 
 # Two-machine runs (--remote-cells): the named cells are served by the other machine, started and read over SSH by

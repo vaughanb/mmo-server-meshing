@@ -10,8 +10,8 @@ so B needs nothing but the OpenSSH server, the build unpacked somewhere, and thi
     python Tools/ServerMeshing/remoteb.py fetch      copy B's zone logs into Logs/remote/ for grading here
     python Tools/ServerMeshing/remoteb.py deploy     copy this machine's server build to B (after rebuilding it)
     python Tools/ServerMeshing/remoteb.py clearmarkers   delete B's one-shot fault markers before a crash test
-    python Tools/ServerMeshing/remoteb.py impair --profile loss2   degrade B's UDP link to A (see PROFILES)
-    python Tools/ServerMeshing/remoteb.py impair --profile off      stop degrading it
+    python Tools/ServerMeshing/remoteb.py impair --profile loss2   degrade B's UDP link to A (remoteimpair.PROFILES)
+    python Tools/ServerMeshing/remoteb.py impair --profile off      stop degrading it (clumsy outlives SSH: always do)
     python Tools/ServerMeshing/remoteb.py sink-start --sink-port 7770 [--sink-count 50] [--sink-base 9000] [--sink-sizes]
                                          start the phantom sink (Phase 0 step 5) against A's cell on that port
                                          (--sink-sizes: its Sink window adds record sizes, Phase 0 step 7)
@@ -30,6 +30,7 @@ remotessh, the bots in remotebots (the ~500-line rule); their names used here st
     remoteb.state_problems(state)      # why no step 8b run may use B as it is ([] when it may)
     remoteb.deployed_matches(args)     # (matches, sha256 here, sha256 on B) of Assembly-CSharp.dll
     remoteb.start_sink(args, port, count, base, sizes) / stop_sink(args) / fetch(args)
+    remoteb.start_impair(args, profile) / clumsy_count(args) / stop_impair(args)   # clumsy (remoteimpair)
 """
 import argparse
 import datetime
@@ -41,28 +42,13 @@ import sys
 import time
 
 import remotebots
+import remoteimpair
 import remotessh
 # Re-exported for remoteb's callers and tests; calls go through remotessh.<name>, so one patch reaches them all.
 from remotessh import (CRLF, DEFAULTS, IS_BOT, IS_CELL, IS_SINK, NOT_THIS_SESSION, ROOT, SINK_FLAG,  # noqa: F401
                        SINK_SIZES_FLAG, STOP_BOTS, STOP_CELLS, STOP_SINK, Unreachable, clean, count_command,
                        stop_command)
-
-# Link impairment, for the faults a datacentre actually produces: brief loss, jitter, reordering. Steady tens of
-# milliseconds is deliberately NOT here -- cells are co-located, so that is a case this deployment never meets.
-#
-# The filter is UDP ONLY and scoped to A. SSH is TCP, so the control channel this is driven over stays clean even
-# at high loss; scoping to A's address leaves B's own loopback and anything else it does alone.
-PROFILES = {
-    "off":       [],
-    "lag5":      ["--lag", "on", "--lag-time", "5"],                       # a busy switch, both directions
-    "loss05":    ["--drop", "on", "--drop-chance", "0.5"],
-    "loss2":     ["--drop", "on", "--drop-chance", "2.0"],
-    "loss5":     ["--drop", "on", "--drop-chance", "5.0"],
-    "jitter":    ["--lag", "on", "--lag-time", "20", "--drop", "on", "--drop-chance", "0.5"],
-    "reorder":   ["--ood", "on", "--ood-chance", "5.0"],
-    "nasty":     ["--lag", "on", "--lag-time", "20", "--drop", "on", "--drop-chance", "5.0",
-                  "--ood", "on", "--ood-chance", "5.0"],
-}
+from remoteimpair import PROFILES, NoAdmin, clumsy_count, start_impair, stop_impair  # noqa: F401 (p0peer's names)
 
 
 def running(args):
@@ -204,48 +190,30 @@ def cmd_clearmarkers(args):
 
 
 def cmd_impair(args):
-    """Start, change or stop clumsy on B so its UDP traffic to A is degraded.
+    """Start, change or stop clumsy on B so its UDP traffic to and from A is degraded (remoteimpair).
 
-    clumsy holds the impairment only while it runs, so a profile change is stop-then-start, and stopping it (or the
-    process dying) restores the link. That is the property worth having: a crashed harness cannot leave the network
-    quietly broken for the next run.
+    clumsy is started outside this SSH session's job object, so it keeps running after the session ends, and after a
+    crashed harness too: the link stays degraded until `impair --profile off` (or p0peer.quiet_b, which every peer
+    run and every canary of a peer block calls first) stops it. clumsy holds the impairment only while it runs, so
+    stopping it restores the link and a profile change is stop-then-start.
     """
     if args.profile not in PROFILES:
         print("profiles: " + ", ".join(sorted(PROFILES)))
         return 2
-    remotessh.ssh(args, "Get-Process clumsy -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue")
     if args.profile == "off":
-        print("impairment off")
-        return 0
-    if not os.path.exists(os.path.expanduser("~/.ssh/meshtest_ed25519")):
-        pass    # key presence is checked by ssh itself; kept simple here
-    udp_filter = f"udp and (ip.DstAddr == {args.a_ip} or ip.SrcAddr == {args.a_ip})"
-    options = " ".join(PROFILES[args.profile])
-    body = ["@echo off", 'cd /d "' + args.clumsy + '"',
-            f'clumsy.exe --filter "{udp_filter}" {options}']
-    script = CRLF.join(body + [""])
-    local = os.path.join(ROOT, "Logs", "impair.cmd")
-    os.makedirs(os.path.dirname(local), exist_ok=True)
-    with open(local, "w", newline="") as f:
-        f.write(script)
-    remote_cmd = args.clumsy + "\\impair.cmd"
-    r = subprocess.run(["scp", "-i", args.key, "-o", "BatchMode=yes", local, f"{args.user}@{args.host}:{remote_cmd}"],
-                       capture_output=True, text=True, timeout=120)
-    if r.returncode != 0:
-        print("could not copy the impair script:", clean(r.stderr)[:200])
+        left = remoteimpair.stop_impair(args)
+        print("impairment off" if not left else f"impairment NOT off: {left} clumsy process(es) still running")
+        return 0 if not left else 1
+    try:
+        remoteimpair.start_impair(args, args.profile)
+    except remoteimpair.NoAdmin as ex:
+        print(f"{ex}; run the SSH user as an administrator on B")
         return 1
-    # Same job-object escape as a cell: clumsy must outlive this SSH session.
-    command = ("$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments "
-               "@{ CommandLine = '" + remote_cmd + "'; CurrentDirectory = '" + args.clumsy + "' }; "
-               "'rc=' + $r.ReturnValue + ' pid=' + $r.ProcessId")
-    out, err, _ = remotessh.ssh(args, command)
-    time.sleep(3)
-    running_out, _, _ = remotessh.ssh(args, "(Get-Process clumsy -ErrorAction SilentlyContinue).Count")
-    if running_out.strip() in ("", "0"):
-        print("clumsy did not stay up:", (out or err)[:200])
-        print("it needs administrator rights on B to load the WinDivert driver")
+    except RuntimeError as ex:
+        print(ex)
         return 1
-    print(f"impairment '{args.profile}' on: {options} over [{udp_filter}]")
+    print(f"impairment '{args.profile}' on: {' '.join(PROFILES[args.profile])} over "
+          f"[{remoteimpair.udp_filter(args.a_ip)}]")
     return 0
 
 
@@ -458,7 +426,7 @@ def build_parser():
                     help="bots-start: -meshRigShips for every bot (p0ships.rig_ship_bot_args' value)")
     ap.add_argument("--stagger", type=int, default=1, help="bots-start: whole seconds between two bots (default 1)")
     ap.add_argument("--profile", default="off", help="impairment profile: " + ", ".join(sorted(PROFILES)))
-    ap.add_argument("--clumsy", default=os.environ.get("MESH_B_CLUMSY", r"C:\MeshTest\clumsy"),
+    ap.add_argument("--clumsy", default=os.environ.get("MESH_B_CLUMSY", remoteimpair.CLUMSY_DIR),
                     help="where clumsy lives on B")
     ap.add_argument("--cell", default="E")
     ap.add_argument("--port", type=int, default=8001)

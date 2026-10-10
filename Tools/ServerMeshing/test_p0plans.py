@@ -3,6 +3,7 @@ import collections
 import hashlib
 import json
 import unittest
+from unittest import mock
 
 import p0plans
 import p0results
@@ -55,11 +56,13 @@ class RefusalTests(unittest.TestCase):
         for name, stage in p0plans.STAGE_LATER.items():
             with self.subTest(name):
                 self.assertIn(stage, p0plans.later_refusal(name))
-        for name in ("accept-b", "calibrate", "crossings", "jfull"):   # built in step 8b: no longer refused
+        self.assertEqual(p0plans.STAGE_LATER, {})   # step 9 built stage 0c's families: nothing is refused now
+        for name in ("accept-b", "calibrate", "crossings", "jfull", "dbburst", "workerab", "spaces"):
             with self.subTest(name), self.assertRaisesRegex(ValueError, f"'{name}' is not a later-stage family"):
                 p0plans.later_refusal(name)
-        self.assertEqual(p0plans.later_refusal("spaces"), "p0load spaces needs stage 0c, step 9; no runs are built for "
-                                                          "it yet")
+        with mock.patch.dict(p0plans.STAGE_LATER, {"nextstep": "stage 0d, step 10"}):
+            self.assertEqual(p0plans.later_refusal("nextstep"), "p0load nextstep needs stage 0d, step 10; no runs are "
+                                                                "built for it yet")
         with self.assertRaisesRegex(ValueError, "'fanout' is not a later-stage family"):
             p0plans.later_refusal("fanout")
         self.assertEqual(p0plans.OBSERVED_REFUSAL,

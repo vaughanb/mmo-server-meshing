@@ -714,6 +714,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 handoffMonsters = false;
                 Logging.Log("Mesh", "MESH_NO_MONSTER_HANDOFF=1: monster handoff disabled on this cell");
             }
+            MonsterCellOnStartServer();
             // Test rig toggle: MESH_GHOST_LEAD=<seconds> overrides the ghost steering lead (0 = puppets trail by a snapshot).
             string leadEnv = System.Environment.GetEnvironmentVariable("MESH_GHOST_LEAD");
             if (!string.IsNullOrEmpty(leadEnv) && float.TryParse(leadEnv, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float leadSeconds))
@@ -826,6 +827,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 MeshBoundaryTick();
                 GhostingUpdate();
                 LoadTick();
+                ForwardTimingTick();
             }
             else
             {

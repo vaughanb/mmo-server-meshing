@@ -22,6 +22,7 @@ import statistics
 import p0base
 import p0cells
 import p0cells0b
+import p0cells0c
 
 SCHEMA = "mesh-p0/1"
 ROW_TYPES = ("run", "summary", "fit", "gate", "prediction")
@@ -29,13 +30,17 @@ FAMILIES_0A = ("canary", "accept", "rates", "presence", "density", "floor", "abg
 FAMILIES_8A = ("observed", "fanout", "targets", "syncrpc", "packets", "prewarm")   # stage 0b, step 8a (decision 2)
 FAMILIES_8B = ("accept-b", "calibrate", "crossings", "jfull")                    # stage 0b, step 8b (decision 10)
 FAMILIES_0B = frozenset(FAMILIES_8A + FAMILIES_8B)
+FAMILIES_0C = frozenset(("dbburst", "workerab", "spaces"))                     # stage 0c, step 9 (decision 14)
+STAGED = FAMILIES_0B | FAMILIES_0C   # families read with p0cells0b's records (and p0cells0c's for step 9)
 # A family's game when its spec names none (p0plans.GAMES; a spec's own game wins: observed S and ship arms are space).
 FAMILY_GAME = {"canary": "neutral", "accept": "neutral", "rates": "neutral", "floor": "neutral",
                "presence": "fantasy", "density": "fantasy", "abgeo": "fantasy", "observed": "fantasy",
                "fanout": "fantasy", "targets": "fantasy", "syncrpc": "space", "packets": "fantasy",
-               "prewarm": "fantasy", **{family: "fantasy" for family in FAMILIES_8B}}
-STAGE = {**{family: "0a" for family in FAMILIES_0A}, **{family: "0b" for family in sorted(FAMILIES_0B)}}
-GEOGRAPHIC = ("presence", "density", "abgeo")
+               "prewarm": "fantasy", **{family: "fantasy" for family in FAMILIES_8B}, "dbburst": "neutral",
+               "workerab": "fantasy", "spaces": "neutral"}
+STAGE = {**{family: "0a" for family in FAMILIES_0A}, **{family: "0b" for family in sorted(FAMILIES_0B)},
+         **{family: "0c" for family in sorted(FAMILIES_0C)}}
+MODELS = {"presence": "geographic", "density": "geographic", "abgeo": "geographic", "spaces": "spaces"}
 PREDICTION_FAMILY = "abgeo-prediction"   # rig_fantasy_abgeo-prediction_<stamp>.jsonl
 TEAM, STAGE_0A, TICK_HZ, CANARY_CELL = "rig", "0a", 20, "C"
 CONTEXT_FIELDS = ("host", "cpu", "cores", "logical", "os", "power_plan", "build", "kit_patches")
@@ -62,7 +67,7 @@ METRIC_NAMES = frozenset((
     "downlink_wire_kBps_per_client", "entity_state_kBps_per_client", "datagrams_per_s_per_client", "rate_hz_by_tier",
     "reliable_records_per_s", "thread_ms_per_s", "process_cores", "mem_MB", "link_kBps_in", "link_kBps_out",
     "latency_ms", "frames_per_s", "physics_steps_per_s", "ticks_per_s", "puppet_count", "puppet_steer_m",
-    "puppet_snaps", "puppet_unobserved_poses_per_s", "puppet_fallbacks")) | p0cells0b.METRIC_NAMES_0B
+    "puppet_snaps", "puppet_unobserved_poses_per_s", "puppet_fallbacks")) | p0cells0b.METRIC_NAMES_0B     | p0cells0c.METRIC_NAMES_0C
 
 OWNER_KINDS = ("steered", "steered_nofight", "kinematic", "inert", "monster")
 PUPPET_KINDS = ("steered", "kinematic", "inert", "monster", "monster_steered", "monster_kinematic")
@@ -148,12 +153,14 @@ def cpu_problems(rows):
 
 def run_row(spec, run, context, problems, excluded_reason):
     """One rig run as a run row, accepted or not (§5's fields plus the contract's additions). spec is a p0plans
-    RunSpec; run is {"since", "start", "end", "cells": {cell: {"structural", "p0": p0cells.cell_record, and for a stage
-    0b family "p0b": p0cells0b.cell_record_0b}}} (None or partial for a failed run; a naive start is local time);
+    RunSpec; run is {"since", "start", "end", "cells": {cell: {"structural", "p0": p0cells.cell_record, for a stage
+    0b or 0c family "p0b": p0cells0b.cell_record_0b, and for step 9's "p0c": p0cells0c.cell_record_0c}}, and a dbburst
+    run's "saves" (p0cells0c.saves_record)} (None or partial for a failed run; a naive start is local time);
     context is rigrun.host_context() (peer_host and peer_cpu, the second machine of step 8b, None when absent). owned
     and puppets are Work window means summed over the read cells, keyed by MESH_LOAD_MOTION / MESH_PUPPET_MOTION;
     density is m² per spawned character; stage 0b rows add p0cells0b's metrics and load fields, and step 8b's run-level
-    metrics (handoffs; run["peer"], p0cells0b.peer_record) and fields (p0cells0b.run_fields_0b). A third repeat's
+    metrics (handoffs; run["peer"], p0cells0b.peer_record) and fields (p0cells0b.run_fields_0b), step 9's p0cells0c's
+    (model: the spec's, else MODELS'). A third repeat's
     replaces_repeat and third_reason, and a stepped run's stepped, are copied from the spec when it sets them.
     ValueError for a family without a game, a bad MESH_RATES or MESH_BAND, or an unknown metric."""
     family = spec["family"]
@@ -165,9 +172,12 @@ def run_row(spec, run, context, problems, excluded_reason):
     cells = run.get("cells") or {}
     records = {cid: cell["p0"] for cid, cell in cells.items() if cell.get("p0") is not None}
     records_0b = {cid: cell["p0b"] for cid, cell in cells.items() if cell.get("p0b") is not None}
+    records_0c = {cid: cell["p0c"] for cid, cell in cells.items() if cell.get("p0c") is not None}
     metrics = [m for cid, record in records.items() for m in p0cells.cell_metrics(record, rates["fps"], cid)]
     metrics += [m for record in records_0b.values() for m in p0cells0b.cell_metrics_0b(record)]
-    if family in FAMILIES_0B and run.get("start") and run.get("end"):
+    metrics += [m for record in records_0c.values() for m in p0cells0c.cell_metrics_0c(record)]
+    metrics += p0cells0c.run_metrics_0c(spec, records_0c, run.get("saves")) if records_0c else []
+    if family in STAGED and run.get("start") and run.get("end"):
         metrics += p0cells0b.run_metrics_0b(spec, records_0b, run.get("peer"),
                                             (run["end"] - run["start"]).total_seconds())
     unknown = sorted({metric_base(m["name"]) for m in metrics} - METRIC_NAMES)
@@ -175,7 +185,7 @@ def run_row(spec, run, context, problems, excluded_reason):
         raise ValueError(f"metric names {', '.join(unknown)} are not in p0results.METRIC_NAMES")
     start, problems = run.get("start"), list(problems)
     row = {"schema": SCHEMA, "row": "run", "team": TEAM, "game": game,
-           "model": "geographic" if family in GEOGRAPHIC else "none", "family": family, "case": spec["case"],
+           "model": spec.get("model") or MODELS.get(family, "none"), "family": family, "case": spec["case"],
            "arm": spec["arm"], "stage": STAGE.get(family, STAGE_0A), "repeat": spec["repeat"], "seed": spec["seed"],
            "order": spec["order"], "plan_key": spec.get("key"), "point": spec.get("point") or {},
            "started_utc": None if start is None else start.astimezone(datetime.timezone.utc).isoformat(),
@@ -189,9 +199,10 @@ def run_row(spec, run, context, problems, excluded_reason):
                 "dropped_windows": {cid: [_iso(end) for end in record["dropped"]]
                                     for cid, record in records.items() if record["dropped"]}})
     row.update(p0cells.load_fields(spec, env, records))
-    if family in FAMILIES_0B:
+    if family in STAGED:
         row.update(p0cells0b.load_fields_0b(spec, records_0b, records))
         row.update(p0cells0b.run_fields_0b(spec, records_0b, context))
+        row.update(p0cells0c.run_fields_0c(records_0c, run.get("saves")))
     row["metrics"] = metrics
     row["windows"] = {cid: p0cells.window_rows(record) for cid, record in records.items()}
     row.update({field: spec[field] for field in THIRD_REPEAT_FIELDS + ("stepped",) if spec.get(field) is not None})

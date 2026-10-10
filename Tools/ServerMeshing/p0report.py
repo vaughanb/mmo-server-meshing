@@ -12,7 +12,8 @@ summarised), one build of them with --build and one host with host (rows of two 
 and a host's rows must state one CPU); the build check (two rig builds pool only with --bridge and p0results.bridge_ok);
 summaries; the fits: block K's rates, density and the N² form (fixed before any
 grid is fitted), floor and λ, presence (with q only when density's q interval excludes 0), the refit at 60/0.03; the
-0a gates (p0gates) and step 8b's J and Crossings half A (p0checks8b.gates_8b); the frozen abgeo predictions (--predict abgeo); the map-size table. Only run rows are fitted:
+0a gates (p0gates), step 8b's J and Crossings half A (p0checks8b.gates_8b) and step 9's Database and Crossings half B's
+B5 term (p0checks9.gates_9); the frozen abgeo predictions (--predict abgeo); the map-size table. Only run rows are fitted:
 summary, fit and gate rows of earlier reports are ignored, and prediction rows feed only G-GEO (b). A fit the rows
 cannot make is printed as "not fitted: <reason>" and the gates that need it give NO VERDICT with that reason.
 Unit tests: python -m unittest discover -s Tools/ServerMeshing -p "test_*.py"
@@ -22,6 +23,7 @@ import re
 
 import p0base
 import p0checks8b
+import p0checks9
 import p0gates
 import p0geo
 import p0markdown
@@ -34,13 +36,15 @@ RATE_ARMS, RATE_KINDS = ("idle", "steered", "kinematic", "inert"), ("steered", "
 ANIMATION_OFF_POINT, PUPPET_ARMS = 200, ("puppets-steered", "puppets-kinematic")
 BRIDGE_053_MS = 47.1     # 0.53's C at 500 players in 200 m, uncapped at 60 fps: ms per measured frame
 # Step 8b gives gate rows for J (b2, b10) and Crossings half A (b9) (p0checks8b.gates_8b, step8b_design.md decision 20);
-# the stage 0b fits and the remaining gates come with the stage 0b report, half B of Crossings and Database with 0c.
+# step 9 Database and Crossings half B's B5 term (p0checks9.gates_9, step9_design.md decisions 5, 14); the stage 0b fits
+# and the remaining gates come with the stage 0b report.
 STAGE_0B_REPORT = "the stage 0b report"
 PENDING_GATES = (("G1-F", STAGE_0B_REPORT), ("G2-F", STAGE_0B_REPORT), ("G3-F (O)", STAGE_0B_REPORT),
-                 ("Crossings (B10) half B, the crossing rate against B5", "0c (step 9)"), ("Database", "0c (step 9)"),
                  ("space gates (G1-S, G2-S, G3-S, kill for ships)", STAGE_0B_REPORT))
 STEP_8B_GATES = (("Phantom validity (J)", "b2 or b10 rows (p0load calibrate, jfull)"),
-                 ("Crossings (B10) half A", "b9 walk rows (p0load crossings)"))
+                 ("Crossings (B10) half A", "b9 walk rows (p0load crossings)"),
+                 ("Database", "c1 dbburst rows (p0load dbburst)"),
+                 ("Crossings (B10) half B", "c1 sustained rows (p0load dbburst)"))
 FIT_ORDER = ("rates: block K's rate decomposition per arm, then the per-entity split per kind",
              "density: n2_form (q·Q or q·N²), then the density fit",
              "floor: c0 and λ per rate set (2 repeats: the t(1) interval, runs as groups beside it)",
@@ -381,7 +385,7 @@ def build_report(rows, stamp, bridge=None, predict=None, predict_points=(), layo
     presence = _presence_fits(out, runs, density, bridged)
     refit = _refit(out, runs, density, bridged)
     out["gates"] = p0gates.evaluate_gates(runs, {"presence": presence, "refit": refit}, predictions, layouts,
-                                          monster_counts) + p0checks8b.gates_8b(runs)
+                                          monster_counts) + p0checks8b.gates_8b(runs) + p0checks9.gates_9(runs)
     prediction_error = None
     if predict == "abgeo":
         try:

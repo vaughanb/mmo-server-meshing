@@ -469,11 +469,10 @@ class ConstantTests(unittest.TestCase):
         for name, (ours, theirs) in cases.items():
             with self.subTest(name):
                 self.assertEqual(ours, theirs)
-        stages = {stage.replace("stage ", "") for stage in p0plans.STAGE_LATER.values()}
-        for name, need in p0report.PENDING_GATES:
+        for name, need in p0report.PENDING_GATES:   # step 9 evaluates Database and Crossings half B (gates_9)
             with self.subTest(name):
-                self.assertTrue(need == p0report.STAGE_0B_REPORT or need.replace(" (", ", ").rstrip(")") in stages,
-                                need)
+                self.assertEqual(need, p0report.STAGE_0B_REPORT)
+        self.assertEqual([name for name, _ in p0report.STEP_8B_GATES][2:], ["Database", "Crossings (B10) half B"])
 
 
 if __name__ == "__main__":

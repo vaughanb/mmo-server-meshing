@@ -247,7 +247,7 @@ class RatesSettingTests(unittest.TestCase):
 
 
 class EnvRegistryTests(unittest.TestCase):
-    def test_the_step_two_three_five_six_seven_and_eight_a_keys(self):
+    def test_the_step_two_three_five_six_seven_eight_a_and_nine_keys(self):
         self.assertEqual(set(p0tools.ENV_REGISTRY), {"MESH_WORK_BINS", "MESH_RATES", "MESH_UNCAPPED_CELLS",
                                                      "MESH_AOI_TIMING", "MESH_THREAD_CPU", "MESH_PROBE_BURN_TICK_MS",
                                                      "MESH_PUPPET_MOTION", "MESH_RIG_SERVER_ANIMATION",
@@ -265,7 +265,9 @@ class EnvRegistryTests(unittest.TestCase):
                                                      "MESH_PUPPET_FEEDER", "MESH_SYNC_LOAD",
                                                      "MESH_METER_RECORD_SIZES", "MESH_SHIP_SELF_ACK",
                                                      "MESH_SHIP_AI_PREFAB", "MESH_PREWARM", "MESH_SHIP_PARK_SLEEP",
-                                                     "MESH_MONSTER_PLACE"})
+                                                     "MESH_MONSTER_PLACE", "MESH_DB_BURST", "MESH_DB_SAVES_PROBE",
+                                                     "MESH_MONSTER_CELL", "MESH_FIGHT_GHOSTS", "MESH_FORWARD_TIMING",
+                                                     "MESH_SPACES", "MESH_NET_STATS", "MESH_MONSTER_AWAKE"})
 
     def test_the_dropped_keys_read_after_was(self):
         cases = {
@@ -291,14 +293,14 @@ class EnvRegistryTests(unittest.TestCase):
 
     def test_registry_pending_and_dropped_keys_are_section_0_16(self):
         registry, pending, dropped = set(p0tools.ENV_REGISTRY), set(p0tools.PENDING_KEYS), set(p0tools.DROPPED_KEYS)
-        self.assertEqual((len(registry), len(pending), len(dropped)), (45, 4, 3))
-        self.assertEqual(registry | pending | dropped, SECTION_0_16_KEYS)
+        self.assertEqual((len(registry), len(pending), len(dropped)), (53, 1, 3))
+        self.assertEqual(registry | pending | dropped, SECTION_0_16_KEYS | STEP_9_KEYS)
         self.assertEqual(registry & pending, set())
         self.assertEqual(registry & dropped, set())
         self.assertEqual(pending & dropped, set())
 
-    def test_regress_keys_are_65_distinct_keys(self):
-        self.assertEqual((len(regress.ENV_KEYS), len(set(regress.ENV_KEYS))), (65, 65))
+    def test_regress_keys_are_73_distinct_keys(self):
+        self.assertEqual((len(regress.ENV_KEYS), len(set(regress.ENV_KEYS))), (73, 73))
 
     def test_no_pending_or_dropped_key_is_a_regress_key(self):
         for key in list(p0tools.PENDING_KEYS) + list(p0tools.DROPPED_KEYS):
@@ -306,8 +308,8 @@ class EnvRegistryTests(unittest.TestCase):
                 self.assertNotIn(key, regress.ENV_KEYS)
 
     def test_pending_keys_name_their_stage_and_step(self):
-        cases = {"MESH_SHIP_JUMP_SECONDS": "stage 0c, step 9", "MESH_MONSTER_CELL": "stage 0c, step 9",
-                 "MESH_DB_BURST": "stage 0c, step 9", "MESH_SPACES": "stage 0c, step 9"}
+        cases = {"MESH_SHIP_JUMP_SECONDS": "stage 0c, step 9"}
+        self.assertEqual(set(p0tools.PENDING_KEYS), set(cases))
         for key, expected in cases.items():
             with self.subTest(key):
                 self.assertEqual(p0tools.PENDING_KEYS[key], expected)
@@ -315,6 +317,10 @@ class EnvRegistryTests(unittest.TestCase):
             with self.subTest(key):
                 self.assertRegex(meaning, r"^stage 0[bc], step \d$")
 
+
+# Step 9's keys beyond §0.16 (step9_design.md decision 14): the save probe, ghost targets, forwarded-hit timing and
+# LiteNetLib's statistics.
+STEP_9_KEYS = {"MESH_DB_SAVES_PROBE", "MESH_FIGHT_GHOSTS", "MESH_FORWARD_TIMING", "MESH_NET_STATS", "MESH_MONSTER_AWAKE"}
 
 # The build sheet's §0.16, listed literally (step 7b's MESH_SHIP_SELF_ACK and MESH_SHIP_AI_PREFAB and step 8a's
 # MESH_MONSTER_PLACE included), with step 5's AREA, STAND and FIGHT and step 7's MESH_METER_RECORD_SIZES and

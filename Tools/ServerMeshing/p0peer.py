@@ -1,15 +1,19 @@
 """Phase 0 step 8b's second machine (step8b_design.md decisions 5, 7, 8, 9): the peer session that starts and stops B's
 bots and phantom sink around one rig run, B's context for the rows, the bots' one-off registration and calibration,
 and the crossings block's stop_when. Drives B through remoteb and remotebots (one SSH command at a time) and A's
-editor through regress; it never imports rigrun (rigrun.host_context imports this module).
+editor through regress; it never imports rigrun (rigrun.host_context imports this module). Step 9 (step9_design.md
+decisions 4 and 12) adds clumsy on B (peer["impair"]; quiet_b stops a leftover one) and composes p0burst's A-only
+burst session (spec["burst_rows"]) into the same hooks. B's driver (RemoteB, quiet_b, Stopped) is p0remote, and the
+bots' registration and calibration are p0calibration; both are re-exported here.
 
-    peer = p0peer.PeerSession(spec, rep)       # spec["peer"] = {"sink": {...} | None, "bots": {...} | None}
+    peer = p0peer.PeerSession(spec, rep)       # spec["peer"] = {"sink": {...} | None, "bots": {...} | None, "impair"}
     peer.before_play() / on_play(t) / after_play()   # rigrun.run_window's hooks; peer.problems, peer.stop_reason
-    peer, hooks = p0peer.window_hooks(spec, rep, on_play, stop_when)   # run_window's keyword arguments, composed
-    p0peer.mark_rows(rows, peer)               # peer problems into the rows (not accepted), PEER_STOP when B kept some
+    peer, burst, hooks = p0peer.window_session(spec, rep, on_play, stop_when)   # run_window's arguments, composed
+    peer, hooks = p0peer.window_hooks(spec, rep, on_play, stop_when)            # the same without the burst session
+    p0peer.mark_rows(rows, peer, burst)        # problems into the rows (not accepted), PEER_STOP when B kept some
     p0peer.peer_context()                      # {"peer_host", "peer_cpu", "clock_offset_s"}: one SSH query, cached
     p0peer.start_problems()                    # why no step 8b run may start with B as it is ([] when one may)
-    p0peer.quiet_b(rep)                        # B's bots and sink stopped (before a canary); Stopped when any survive
+    p0peer.quiet_b(rep)                        # B's bots, sink, clumsy stopped (before a canary); Stopped if any live
     p0peer.register_bots(n, rep)               # meshbot2..meshbot<n+1> log in once (and register themselves)
     p0peer.calibrate_bots(rep, n=100)          # Logs/p0/bots_calibration.json: hosted, free memory, upload pkt/s
     p0peer.read_calibration(build, host=None)  # that record when made on this build (and B host), else None
@@ -17,21 +21,20 @@ editor through regress; it never imports rigrun (rigrun.host_context imports thi
 
 A spec's bots: {"first": K >= 2, "n": N, "mode": stand|pace|walk|..., "placement": botpoints.PLACEMENTS, "bot_net":
 seconds or None, "rig_ships": bool, and optionally "stagger" (default 1 s) and "walk_x" (walk mode's target; default
-the start x mirrored across the cut, x = 0)}; its sink: {"count": P, "kind": k, "sizes": bool, optionally "base"}.
+the start x mirrored across the cut, x = 0)}; its sink: {"count": P, "kind": k, "sizes": bool, optionally "base"};
+its impair: a remoteb.PROFILES name other than "off" (clumsy started after the sink, stopped first in after_play).
 The bots start at botpoints.bot_points(N, placement) (provision.reset_bot_positions before Play) and walk to the same
 points (stand, pace), or to (walk_x, z) and back to x (walk). clock_offset_s is B's clock minus A's: a B-stamped line
 happened at its stamp minus the offset on A's clock.
 Unit tests: python -m unittest discover -s Tools/ServerMeshing -p "test_*.py"
 """
 import datetime
-import hashlib
-import json
 import os
 import re
-import statistics
 import time
 
 import botpoints
+import p0burst
 import p0cells0b
 import p0phantom
 import p0ships
@@ -41,72 +44,14 @@ import regress as r
 import remoteb
 import remotebots
 import remotessh
+# B as the session drives it, and the bots' registration and calibration (step 8b decisions 5 and 7): split out (the
+# ~500-line rule), every name importable here.
+from p0remote import POLL_S, RemoteB, Stopped, plural, quiet_b  # noqa: F401
+from p0calibration import (CALIBRATION, bot_upload_rate, build_id, calibrate_bots, calibration_record,  # noqa: F401
+                           hosts, read_calibration, register_bots, wait_in_map)
 
-CALIBRATION = os.path.join(r.LOGS, "p0", "bots_calibration.json")
 PEER_STOP = "peer_stop"     # a row key run_spec sets and Session.run pops: B kept processes, so the invocation stops
 PORT_WAIT_S = 120           # on_play: how long the sink waits for its cell's "Phantoms: cell C port N" line
-POLL_S = 5                  # how often a wait looks again
-GROUP, GROUP_WAIT_S, REGISTER_X = 5, 90, -50.0          # decision 5: groups of 5, 90 s each, the west side
-CALIBRATION_WAIT_S, CALIBRATION_MEASURE_S = 240, 60     # decision 7: all in map within 4 min, then a minute measured
-BOT_NET_S, SKIP_WINDOWS = 5, 2   # Bot net window seconds; each bot's first windows (login, walk-in) are not its rate
-
-
-class Stopped(Exception):
-    """Stopped ends an invocation early: its exit code (2: refused, B unreachable; 3: B kept processes, a canary) and
-    the reason printed. p0blocks.Stopped is this class."""
-
-    def __init__(self, code, reason):
-        super().__init__(reason)
-        self.code, self.reason = code, reason
-
-
-class RemoteB:
-    """Machine B as the peer session drives it: remoteb's and remotebots' functions over one set of connection
-    settings (remotessh.defaults() unless given)."""
-
-    def __init__(self, args=None):
-        self.args = args or remotessh.defaults()
-
-    def state(self):
-        return remoteb.state(self.args)
-
-    def deployed_matches(self):
-        return remoteb.deployed_matches(self.args)
-
-    def stop_bots(self):
-        return remotebots.stop_bots(self.args)
-
-    def stop_sink(self):
-        return remoteb.stop_sink(self.args)
-
-    def start_sink(self, port, peers, base=None, sizes=False):
-        return remoteb.start_sink(self.args, port, peers, base, sizes)
-
-    def start_bots(self, first, n, mode, points, bot_net=None, rig_ships=None, stagger=1):
-        return remotebots.start_bots(self.args, first, n, mode, points, bot_net, rig_ships, stagger)
-
-    def fetch_bots(self):
-        return remotebots.fetch_bots(self.args)
-
-    def fetch(self):
-        return remoteb.fetch(self.args)
-
-
-def plural(count, word):
-    return f"{count} {word}{'' if count == 1 else 's'}"
-
-
-def quiet_b(rep, b=None):
-    """Stops B's bots and sink and checks none is left: Stopped(3) when one survives, Stopped(2) when B does not
-    answer. Before every peer run and every canary of a block with peers (B idle while A's canary measures)."""
-    b = b or RemoteB()
-    try:
-        bots, sinks = b.stop_bots(), b.stop_sink()
-    except remotessh.Unreachable as ex:
-        raise Stopped(2, f"B is unreachable: {ex}") from ex
-    if bots or sinks:
-        left = " and ".join(plural(c, w) for c, w in ((bots, "bot"), (sinks, "sink")) if c)
-        raise Stopped(3, f"B: {left} still running after being stopped")
 
 
 def walk_points(points, mode, walk_x=None):
@@ -171,17 +116,25 @@ def _lines(path):
 
 
 class PeerSession:
-    """B's part of one run (decision 8). before_play: B's bots and sink stopped and none left (quiet_b), then the
-    bots' saved positions reset. on_play: the sink started on its cell's port, then the bots, staggered; a failure
-    raises (run_window stops Play). after_play: bots and sink stopped, their logs fetched (Logs/remote/bots/,
-    Logs/remote/); it never raises: what failed is in problems (the rows are not accepted), and stop_reason is set
-    when a process may have survived (the invocation stops after the row is written)."""
+    """B's part of one run (decision 8). before_play: B's bots, sink and clumsy stopped and none left (quiet_b), then
+    the bots' saved positions reset. on_play: the sink started on its cell's port, then clumsy when the peer names an
+    impair profile (step 9 decision 12: impair_on is A's local time once it runs, noted "impairment on"), then the
+    bots, staggered; a failure raises (run_window stops Play), and B's SSH session without administrator rights raises
+    Stopped(2): c4 is skipped. run_window sleeps the warm-up after on_play returns, so the measurement always opens at
+    least the warm-up after "impairment on". after_play: clumsy stopped first, then (its own try/finally) bots and sink
+    stopped and their logs fetched (Logs/remote/bots/, Logs/remote/); it never raises: what failed is in problems (the
+    rows are not accepted), and stop_reason is set when a process may have survived (the invocation stops after the
+    row is written)."""
 
     def __init__(self, spec, rep, b=None):
         peer = spec.get("peer") or {}
         self.spec, self.rep, self.b = spec, rep, b or RemoteB()
-        self.sink, self.bots = peer.get("sink"), peer.get("bots")
+        self.sink, self.bots, self.impair = peer.get("sink"), peer.get("bots"), peer.get("impair")
+        if self.impair is not None and (self.impair not in remoteb.PROFILES or self.impair == "off"):
+            raise ValueError(f"peer impair {self.impair!r} is not one of "
+                             + ", ".join(p for p in remoteb.PROFILES if p != "off"))
         self.problems, self.stop_reason, self.started = [], None, False
+        self.impair_started, self.impair_on = False, None
         self.points = botpoints.bot_points(self.bots["n"], self.bots["placement"]) if self.bots else []
 
     def before_play(self):
@@ -199,6 +152,8 @@ class PeerSession:
             port = wait_port(play_start, cell)
             self.b.start_sink(port, self.sink["count"], self.sink.get("base"), bool(self.sink.get("sizes")))
             self.rep.note(f"    B: sink of {self.sink['count']} peers on cell {cell} port {port}")
+        if self.impair:
+            self._start_impair()
         if self.bots:
             bots, points = self.bots, self.points
             if bots["placement"] == "eye-centre":
@@ -211,9 +166,39 @@ class PeerSession:
             self.rep.note(f"    B: meshbot{bots['first']}..meshbot{bots['first'] + bots['n'] - 1} {bots['mode']} at "
                           f"{bots['placement']}")
 
+    def _start_impair(self):
+        self.impair_started = True   # after_play stops whatever this leaves behind
+        try:
+            self.b.start_impair(self.impair)
+        except remoteb.NoAdmin as ex:
+            raise Stopped(2, f"B: clumsy cannot start ({ex}); c4 (packet loss) must be skipped and the report says "
+                             "why (step 9 decision 12)") from ex
+        self.impair_on = datetime.datetime.now()
+        self.rep.note(f"    B: impairment on ({self.impair}) at {self.impair_on:%H:%M:%S}")
+
+    def _stopped(self, reason):
+        """A process B may have kept: a problem, and the invocation's stop reason (joined to an earlier one)."""
+        self.problems.append(reason)
+        self.stop_reason = reason if not self.stop_reason else f"{self.stop_reason}; {reason}"
+
     def after_play(self):
         if not self.started:
             return
+        try:
+            if self.impair_started:
+                try:
+                    left = self.b.stop_impair()
+                except Exception as ex:  # B's link state is unknown: the invocation stops after this row
+                    self._stopped(f"B: impair-stop failed: {ex}")
+                else:
+                    if left:
+                        self._stopped(f"B: {left} clumsy process(es) survived")
+                    else:
+                        self.rep.note("    B: impairment off")
+        finally:
+            self._stop_peers()
+
+    def _stop_peers(self):
         left = {}
         for what, stop in (("bots", self.b.stop_bots), ("sink", self.b.stop_sink)):
             try:
@@ -224,8 +209,7 @@ class PeerSession:
         alive = [plural(count, word) for count, word in ((left["bots"], "bot"), (left["sink"], "sink"))
                  if not isinstance(count, str) and count]
         if failed or alive:
-            self.stop_reason = "B: " + "; ".join(failed + ([" and ".join(alive) + " survived"] if alive else []))
-            self.problems.append(self.stop_reason)
+            self._stopped("B: " + "; ".join(failed + ([" and ".join(alive) + " survived"] if alive else [])))
         if self.bots:
             self._fetch("bots-fetch", self.b.fetch_bots, True)
         self._fetch("fetch", self.b.fetch, bool(self.sink))
@@ -254,39 +238,83 @@ class PeerSession:
                 self.rep.note(f"    B: {what} failed: {ex}")
 
 
-def window_hooks(spec, rep, on_play=None, stop_when=None):
-    """(peer, the keyword arguments for rigrun.run_window): a PeerSession when spec has a peer (else None), whose
-    before_play and after_play are passed and whose on_play runs before the given on_play (one on_play calling both);
-    stop_when is outcomes_stop when spec sets stop_after_outcomes, else the given one. Hooks that are None are left
-    out."""
+def _chain(calls):
+    """One hook calling each of calls in turn; the call itself when there is one, None when there is none."""
+    calls = [call for call in calls if call is not None]
+    if len(calls) <= 1:
+        return calls[0] if calls else None
+
+    def chained(*args):
+        for call in calls:
+            call(*args)
+    return chained
+
+
+def _each(calls):
+    """Like _chain, each call in its own try/finally (one that raises never skips the next)."""
+    calls = [call for call in calls if call is not None]
+    if len(calls) <= 1:
+        return calls[0] if calls else None
+
+    def each(rest=tuple(calls)):
+        try:
+            rest[0]()
+        finally:
+            if len(rest) > 1:
+                each(rest[1:])
+    return each
+
+
+def _any(stops):
+    """One stop_when, True once any of stops is (each asked every time); the stop itself when there is one."""
+    stops = [stop for stop in stops if stop is not None]
+    if len(stops) <= 1:
+        return stops[0] if stops else None
+    return lambda play_start, start: any([stop(play_start, start) for stop in stops])
+
+
+def window_session(spec, rep, on_play=None, stop_when=None):
+    """(peer, burst, the keyword arguments for rigrun.run_window). peer: a PeerSession when spec has a peer, else
+    None; burst: a p0burst.BurstSession when spec sets burst_rows (step 9 decision 4; A only), else None, whose
+    after_stop the caller calls once run_window has returned (Play stopped). on_play runs the peer's, then the given
+    one; before_play the peer's, then the burst's (the burst rows reset out of Play; what provision refuses raises
+    Stopped(2)); after_play the burst's (its first updateAt read), then the peer's, each in its own try/finally;
+    stop_when is outcomes_stop when spec sets stop_after_outcomes, else the given one, alongside the burst's drain stop
+    (True once either is). Hooks that are None are left out."""
     peer = PeerSession(spec, rep) if spec.get("peer") else None
-    calls = [call for call in (peer.on_play if peer else None, on_play) if call is not None]
-    hooks = {}
-    if len(calls) == 1:
-        hooks["on_play"] = calls[0]
-    elif calls:
-        def both(play_start):
-            for call in calls:
-                call(play_start)
-        hooks["on_play"] = both
-    if peer:
-        hooks.update(before_play=peer.before_play, after_play=peer.after_play)
-    if spec.get("stop_after_outcomes"):
-        hooks["stop_when"] = outcomes_stop(spec, spec["stop_after_outcomes"])
-    elif stop_when is not None:
-        hooks["stop_when"] = stop_when
+    burst = p0burst.BurstSession(spec, rep) if spec.get("burst_rows") else None
+    burst_before = None
+    if burst is not None:
+        def burst_before():
+            try:
+                burst.before_play()
+            except provision.ProvisionError as ex:
+                raise Stopped(2, f"burst rows: {ex}") from ex
+    stop = outcomes_stop(spec, spec["stop_after_outcomes"]) if spec.get("stop_after_outcomes") else stop_when
+    hooks = {"on_play": _chain([peer.on_play if peer else None, on_play]),
+             "before_play": _chain([peer.before_play if peer else None, burst_before]),
+             "after_play": _each([burst.after_play if burst else None, peer.after_play if peer else None]),
+             "stop_when": _any([stop, burst.stop_when if burst else None])}
+    return peer, burst, {name: hook for name, hook in hooks.items() if hook is not None}
+
+
+def window_hooks(spec, rep, on_play=None, stop_when=None):
+    """(peer, the keyword arguments for rigrun.run_window): window_session without its burst session (the burst's
+    hooks are in; its after_stop and problems reach a caller only through window_session)."""
+    peer, _, hooks = window_session(spec, rep, on_play, stop_when)
     return peer, hooks
 
 
-def mark_rows(rows, peer):
-    """The rows with the peer's problems added (each such row not accepted) and PEER_STOP set when the peer has a
-    stop_reason; rows unchanged without a peer."""
-    for row in rows if peer is not None else []:
-        if peer.problems:
-            row["problems"] = list(row.get("problems") or []) + list(peer.problems)
-            row["accepted"] = False
-        if peer.stop_reason:
-            row[PEER_STOP] = peer.stop_reason
+def mark_rows(rows, peer, *others):
+    """The rows with the problems of the peer and of any other session (a p0burst.BurstSession) added (each such row
+    not accepted), and PEER_STOP set when one has a stop_reason; rows unchanged when every session is None."""
+    for session in (peer,) + others:
+        for row in rows if session is not None else []:
+            if session.problems:
+                row["problems"] = list(row.get("problems") or []) + list(session.problems)
+                row["accepted"] = False
+            if session.stop_reason:
+                row[PEER_STOP] = session.stop_reason
     return rows
 
 
@@ -350,152 +378,3 @@ def outcomes_stop(spec, n, count=None):
         except Exception:  # a mid-run look that fails only means the run is not cut short
             return False
     return stop_when
-
-
-def wait_in_map(b, users, timeout):
-    """The users whose fetched bot log says 'In map at', once all do or after timeout seconds (polled every POLL_S)."""
-    deadline = time.monotonic() + timeout
-    while True:
-        time.sleep(POLL_S)
-        try:
-            paths = {os.path.splitext(os.path.basename(path))[0]: path for path in b.fetch_bots()}
-        except RuntimeError:   # no log yet: scp matched nothing
-            paths = {}
-        arrived = [user for user in users if user in paths and remotebots.in_map(paths[user])]
-        if len(arrived) == len(users) or time.monotonic() >= deadline:
-            return arrived
-
-
-def _play_up():
-    """A Play with no client and no load, after A's leftover rig processes are killed (run_window's first steps)."""
-    r.kill_bots()
-    if r.kit_process_count() and r.kill_all_kit_processes():
-        raise RuntimeError("leftover rig processes survived being killed")
-    r.request_play("none", 0, 0, env={}, enabled=False)
-    r.wait_play(120)
-
-
-def _stop_all(b, rep):
-    """B's bots stopped (a failure noted, never raised), then A's Play."""
-    try:
-        left = b.stop_bots()
-        if left:
-            rep.note(f"  ! B: {plural(left, 'bot')} survived bots-stop")
-    except Exception as ex:  # cleanup: Play must still stop
-        rep.note(f"  ! B: bots-stop failed: {ex}")
-    r.stop_play()
-
-
-def register_bots(n, rep, b=None):
-    """Decision 5 (one-off, outside measurement): Play up with no load, then meshbot2..meshbot<n+1> in groups of 5,
-    standing on the west side (x = -50), each group stopped once every bot logged 'In map at' (or after 90 s); a bot
-    whose login fails registers itself and creates <user>Char. Returns the users that reached the map; notes
-    'registered k of N'. Idempotent. Stopped when B is unreachable or keeps bots."""
-    if n < 1:
-        raise ValueError(f"register {n} bots: at least 1")
-    b = b or RemoteB()
-    quiet_b(rep, b)
-    registered = []
-    _play_up()
-    try:
-        for first in range(2, n + 2, GROUP):
-            k = min(GROUP, n + 2 - first)
-            users = [remotebots.bot_user(i) for i in range(first, first + k)]
-            b.start_bots(first, k, "stand", botpoints.column_points(k, REGISTER_X), stagger=1)
-            arrived = wait_in_map(b, users, GROUP_WAIT_S)
-            left = b.stop_bots()
-            registered += arrived
-            missing = [user for user in users if user not in arrived]
-            rep.note(f"{users[0]}..{users[-1]}: {len(arrived)} of {k} in map"
-                     + (f" (not: {', '.join(missing)})" if missing else ""))
-            if left:
-                raise Stopped(3, f"B: {plural(left, 'bot')} survived bots-stop")
-    finally:
-        _stop_all(b, rep)
-    rep.note(f"registered {len(registered)} of {n}")
-    return registered
-
-
-def build_id():
-    """The sha1 hex of the player build's manifest (rigrun.build_id's value, which this module cannot import)."""
-    if not os.path.exists(r.BUILD_MANIFEST):
-        return ""
-    with open(r.BUILD_MANIFEST, "rb") as f:
-        return hashlib.sha1(f.read()).hexdigest()
-
-
-def bot_upload_rate(lines_by_bot, skip=SKIP_WINDOWS):
-    """(median over bots of each bot's median Bot net window out pkt/s, how many bots had a window), each bot's first
-    `skip` windows left out; (None, 0) when none had one."""
-    per_bot = []
-    for lines in lines_by_bot.values():
-        windows = [w for w in (p0phantom.parse_bot_net_window(line) for line in lines) if w][skip:]
-        if windows:
-            per_bot.append(statistics.median(w["out_packets_per_s"] for w in windows))
-    return (round(statistics.median(per_bot), 2) if per_bot else None), len(per_bot)
-
-
-def calibration_record(build, tried, arrived, in_map_s, state, lines_by_bot):
-    """The bots_calibration.json record (decision 7): tried, in_map (bots that logged 'In map at' within
-    CALIBRATION_WAIT_S) and in_map_s (seconds until all did, None if not all), hosted (bots running on B after the
-    measurement), free_memory_MB, upload_pkt_per_s (bot_upload_rate) and upload_hz (it rounded: b2/b10's
-    MESH_PHANTOM_UPLOAD_HZ), and fits: every bot tried was in the map in time and still running."""
-    rate, measured = bot_upload_rate(lines_by_bot)
-    hosted = state.get("bots")
-    return {"build": build, "written_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
-            "peer_host": state.get("host") or None, "tried": tried, "in_map": arrived, "in_map_s": in_map_s,
-            "wait_s": CALIBRATION_WAIT_S, "hosted": hosted, "free_memory_MB": state.get("free_mb"),
-            "upload_pkt_per_s": rate, "upload_hz": None if rate is None else int(round(rate)),
-            "bots_measured": measured, "fits": arrived == tried and hosted == tried}
-
-
-def calibrate_bots(rep, n=100, b=None, path=CALIBRATION):
-    """Decision 7's bot smoke: meshbot2..meshbot<n+1> pace at the spread points (Bot net windows every 5 s) with Play
-    up and no load; waits until all are in the map (4 min at most), measures a minute, reads B's state and the bots'
-    logs, stops them and Play, and writes the calibration_record to path. Returns the record."""
-    b = b or RemoteB()
-    users = [remotebots.bot_user(k) for k in range(2, n + 2)]
-    points = botpoints.bot_points(n, "spread")
-    quiet_b(rep, b)
-    provision.reset_bot_positions(2, n, points)
-    _play_up()
-    try:
-        started = time.monotonic()
-        b.start_bots(2, n, "pace", points, bot_net=BOT_NET_S, stagger=1)
-        arrived = wait_in_map(b, users, CALIBRATION_WAIT_S)
-        in_map_s = round(time.monotonic() - started) if len(arrived) == n else None
-        rep.note(f"{len(arrived)} of {n} bots in the map" + (f" after {in_map_s} s" if in_map_s is not None else ""))
-        time.sleep(CALIBRATION_MEASURE_S)
-        state = b.state()
-        lines = {}
-        for log in b.fetch_bots():
-            with open(log, encoding="utf-8", errors="replace") as f:
-                lines[os.path.splitext(os.path.basename(log))[0]] = f.read().splitlines()
-    finally:
-        _stop_all(b, rep)
-    record = calibration_record(build_id(), n, len(arrived), in_map_s, state, lines)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(record, f, indent=2)
-        f.write("\n")
-    rep.note(f"calibration: {record['hosted']} bots hosted, {record['free_memory_MB']} MB free, "
-             f"{record['upload_pkt_per_s']} pkt/s per bot up; fits {n}: {record['fits']}")
-    return record
-
-
-def read_calibration(build, host=None, path=CALIBRATION):
-    """The calibration record when the file exists and was written on this build with B named host (its peer_host;
-    None: whichever B wrote it, as a dry run must, never asking B), else None."""
-    try:
-        with open(path, encoding="utf-8") as f:
-            record = json.load(f)
-    except FileNotFoundError:
-        return None
-    if not isinstance(record, dict):
-        return None
-    return record if record.get("build") == build and (host is None or record.get("peer_host") == host) else None
-
-
-def hosts(record, n):
-    """Whether a calibration record says B hosts n bots (b10 plans P 100 only then)."""
-    return bool(record) and bool(record.get("fits")) and (record.get("tried") or 0) >= n

@@ -206,6 +206,21 @@ def jfull_plan(calibration, force=False):
     return _j_plan("jfull", "J-full", JFULL_P, calibration)
 
 
+def cap_spec(mode, size, repeat, case=None, arm="ship-sender-28-tiered", extra=None, point_extra=None, peer_extra=None):
+    """b7's cap point (decision 13): ship-sender-28 tiered at scale 0.5, 100 ship phantoms (sink: on B) and 400 AI
+    ships (V 500) at MESH_SENDER_PACKET_BYTES size, 30/0.02; case cap-sink or cap by mode unless given. Step 9's loss
+    arms (p0plans9) reuse it with their own case, arm, keys, point fields and peer fields."""
+    env = p0plans0b._merged(p0ships.scaled_env(p0plans0b.TARGET_SCALE), p0plans0b.SHIP_EXTRA["ship-sender-28-tiered"],
+                            {"MESH_PHANTOM": f"{mode}:{CAP_SINK_P}:ship:C",
+                             "MESH_LOAD_SHIPS": f"C:{p0plans0b.PACKET_V - CAP_SINK_P}:ai",
+                             "MESH_SENDER_PACKET_BYTES": str(size)}, extra or {})
+    point = dict({"P": CAP_SINK_P, "V": p0plans0b.PACKET_V, "packet_bytes": size, "rates": SPACE_RATES,
+                  "scale": p0plans0b.TARGET_SCALE}, **(point_extra or {}))
+    peer = dict(_peer(sink(CAP_SINK_P, "ship")), **(peer_extra or {})) if mode == "sink" else None
+    return _spec8b("packets", case or ("cap-sink" if mode == "sink" else "cap"), arm, point, repeat, "space", "ship",
+                   env, SPACE_RATES, peer)
+
+
 def packets_sink_plan(repeats=3):
     """b7's sink arms (family packets; decision 13) at 30/0.02. cap-sink: ship-sender-28 tiered at scale 0.5 with 100
     sink ship phantoms on B and 400 AI ships (V 500) x MESH_SENDER_PACKET_BYTES {1020, 510, 255}; cap: the same
@@ -214,16 +229,7 @@ def packets_sink_plan(repeats=3):
     MESH_THREAD_CPU=1, one unstepped run each (sink mode refuses steps), a saturation probe. 22 runs by default."""
     def cap(mode):
         def make(size, repeat):
-            env = p0plans0b._merged(p0ships.scaled_env(p0plans0b.TARGET_SCALE),
-                                    p0plans0b.SHIP_EXTRA["ship-sender-28-tiered"],
-                                    {"MESH_PHANTOM": f"{mode}:{CAP_SINK_P}:ship:C",
-                                     "MESH_LOAD_SHIPS": f"C:{p0plans0b.PACKET_V - CAP_SINK_P}:ai",
-                                     "MESH_SENDER_PACKET_BYTES": str(size)})
-            point = {"P": CAP_SINK_P, "V": p0plans0b.PACKET_V, "packet_bytes": size, "rates": SPACE_RATES,
-                     "scale": p0plans0b.TARGET_SCALE}
-            return _spec8b("packets", "cap-sink" if mode == "sink" else "cap", "ship-sender-28-tiered", point, repeat,
-                           "space", "ship", env, SPACE_RATES,
-                           _peer(sink(CAP_SINK_P, "ship")) if mode == "sink" else None)
+            return cap_spec(mode, size, repeat)
         return repeats, p0plans0b.PACKET_BYTES, make
 
     def probe(p):

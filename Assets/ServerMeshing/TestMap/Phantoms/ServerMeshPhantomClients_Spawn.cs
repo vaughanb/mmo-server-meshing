@@ -145,7 +145,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 _log.Error($"Phantoms error: cell {_cell}: {ServerMeshPhantomSettings.ENV_PAYLOAD}=input needs a CharacterControllerEntityMovement on the player entity; {id} not spawned");
                 return null;
             }
-            mesh.Assets.NetworkSpawn(spawnObj, 0, owner);
+            mesh.Assets.NetworkSpawn(ServerMeshSpaceTags.Tag(spawnObj, owner >= 0), 0, owner);
             entity.ForceMakeCaches();
             entity.FillEmptySlots();
             entity.CurrentHp = entity.MaxHp;

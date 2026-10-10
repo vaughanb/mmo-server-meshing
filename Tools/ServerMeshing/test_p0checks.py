@@ -106,8 +106,8 @@ def spec(**changes):
 
 class RunProblemsTests(unittest.TestCase):
     def test_refuses_a_family_without_checks(self):
-        with self.assertRaisesRegex(ValueError, "no checks for family 'workerab'"):
-            p0checks.run_problems(spec(family="workerab"), presence_run())
+        with self.assertRaisesRegex(ValueError, "no checks for family 'nonesuch'"):
+            p0checks.run_problems(spec(family="nonesuch"), presence_run())
 
     def test_step_8b_families_have_the_common_and_their_own_checks(self):
         for family in p0results.FAMILIES_8B:

@@ -302,7 +302,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 // Switched on before the base class discovers the active areas below, so each area has one owner.
                 foreach (MonsterSpawnArea area in FindObjectsByType<MonsterSpawnArea>(inactive, FindObjectsSortMode.None))
                 {
-                    if (!noMonsters && resolved && MeshCell.Same(world.OwnerOf(OwnCell, area.transform.position), OwnCell))
+                    if (!noMonsters && resolved && MonsterAreaOwnedHere(area.transform.position))
                     {
                         if (!area.gameObject.activeSelf) { area.gameObject.SetActive(true); switchedOn++; }
                         kept++;
@@ -768,7 +768,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 int mask = 0;
                 for (int i = 0; i < NeighbourCount; ++i)
                 {
-                    if ((liveMask & (1 << i)) != 0 && DistanceToSharedEdge(pos, i) <= ghostBandWidth)
+                    if ((liveMask & (1 << i)) != 0 && (DistanceToSharedEdge(pos, i) <= ghostBandWidth || StreamsEveryCharacterTo(i)))
                         mask |= 1 << i;
                 }
                 string meshId = entry.meshId;
@@ -2758,7 +2758,7 @@ namespace MultiplayerARPG.MMO.Mesh
             if (id == null || string.IsNullOrEmpty(id.OwnerZoneId) || !_linkClients.TryGetValue(id.OwnerZoneId, out MeshLinkClient link))
                 return;
             link.SendGhostHit(BuildGhostHit(targetMeshId, position, fromPosition, instigator, damageAmounts, weapon, skill, skillLevel));
-            if (traceHandoffTiming)
+            if (!NoteForwardedHit(targetMeshId) && traceHandoffTiming)
                 Logging.Log("Mesh", $"Hit on ghost {ghost.entity.CharacterName} ({targetMeshId}) forwarded to zone {id.OwnerZoneId}");
         }
 
@@ -2835,7 +2835,7 @@ namespace MultiplayerARPG.MMO.Mesh
             int hpBefore = target.CurrentHp;
             target.ApplyDamage((HitBoxPosition)msg.hitBoxPosition, msg.fromPosition, instigator, damageAmounts, msg.hasWeapon ? msg.weapon : CharacterItem.Empty, skill, msg.skillLevel, msg.randomSeed);
             int dealt = Mathf.Max(0, hpBefore - target.CurrentHp);
-            if (traceHandoffTiming)
+            if (traceHandoffTiming && !s_forwardTiming)
                 Logging.Log("Mesh", $"Forwarded hit applied to {target.CharacterName} ({msg.targetMeshId}): {hpBefore} -> {target.CurrentHp}");
 
             if (_neighbourZoneByConnection.TryGetValue(connectionId, out string fromZone) && _linkClients.TryGetValue(fromZone, out MeshLinkClient back))
@@ -3272,6 +3272,7 @@ namespace MultiplayerARPG.MMO.Mesh
 
         internal void OnGhostHitResult(GhostHitResultMessage msg)
         {
+            NoteForwardedResult(msg.targetMeshId);
             if (!IsServer || !_ghosts.TryGetValue(msg.targetMeshId, out MeshGhost ghost) || ghost.entity == null)
                 return;
             ghost.entity.CurrentHp = msg.currentHp;
@@ -3459,7 +3460,7 @@ namespace MultiplayerARPG.MMO.Mesh
             EntityInfo instigator = ResolveInstigator(msg.instigatorMeshId);
             int hpBefore = stat.CurrentHp;
             stat.ApplyDamage((HitBoxPosition)msg.hitBoxPosition, msg.fromPosition, instigator, damageAmounts, msg.hasWeapon ? msg.weapon : CharacterItem.Empty, skill, msg.skillLevel, msg.randomSeed);
-            if (traceHandoffTiming)
+            if (traceHandoffTiming && !s_forwardTiming)
                 Logging.Log("Mesh", $"Forwarded hit applied to static ({msg.targetMeshId}) by {msg.instigatorMeshId}: {hpBefore} -> {stat.CurrentHp}");
         }
 

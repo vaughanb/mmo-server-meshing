@@ -36,7 +36,7 @@ MAP_ONE = tuple(cid for cid, _, _ in rigrun.GRID_IDS)                 # the regi
 GAMES = {"canary": "neutral", "accept": "neutral", "rates": "neutral", "floor": "neutral", "presence": "fantasy",
          "density": "fantasy", "abgeo": "fantasy", "observed": "fantasy", "fanout": "fantasy", "targets": "fantasy",
          "syncrpc": "space", "packets": "fantasy", "prewarm": "fantasy", "accept-b": "fantasy", "calibrate": "fantasy",
-         "crossings": "fantasy", "jfull": "fantasy"}
+         "crossings": "fantasy", "jfull": "fantasy", "dbburst": "neutral", "workerab": "fantasy", "spaces": "neutral"}
 KINEMATIC = {"MESH_LOAD_MOTION": "kinematic"}
 CANARY_ARMS, CANARY_RATES, CANARY_PLAYERS = ("baseline", "check"), "30/0.02", 200
 RATE_POINTS = ("30/0.03", "30/0.02", "60/0.03", "60/0.02")   # block K's rate points, ascending
@@ -60,7 +60,7 @@ ABGEO = ((1, "b9-main", ("--puppets", "kinematic", "--players", "150,250", "--mo
          (3, "b9-steered-b80", ("--puppets", "steered", "--players", "250", "--monsters", "all",
                                 "--layouts", "halves,strips4", "--bands", "80", "--repeats", "3")))
 ABGEO_COMMON = ("--instrument", "--order", "repeat-major", "--rates", "60/0.03")
-STAGE_LATER = {"workerab": "stage 0c, step 9", "dbburst": "stage 0c, step 9", "spaces": "stage 0c, step 9"}
+STAGE_LATER = {}   # every Phase 0 family has its plans (step 9 built stage 0c's: p0plans9); later_refusal stays for the next
 OBSERVED_REFUSAL = "presence --observed has moved: use p0load observed --part O (or R, SA, M, S)"
 THIRD_SHARE, BASELINE_SHARE = 0.10, 0.025
 # Utilisation 0.95 is 950 ms/s at any frame rate (ms/frame over the budget is ms/s over 1000).

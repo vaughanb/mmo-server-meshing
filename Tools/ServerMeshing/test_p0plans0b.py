@@ -109,13 +109,12 @@ class RefusalTests(unittest.TestCase):
             return p0plans0b.prewarm_plan()
 
     def test_later_stages_and_moved_observed(self):
-        cases = {"workerab": "stage 0c, step 9", "dbburst": "stage 0c, step 9",
-                 "spaces": "stage 0c, step 9"}
-        self.assertEqual(p0plans.STAGE_LATER, cases)
-        for name, stage in cases.items():
+        self.assertEqual(p0plans.STAGE_LATER, {})   # step 9 builds workerab, dbburst and spaces (p0plans9)
+        for name in ("workerab", "dbburst", "spaces"):
             with self.subTest(name):
-                self.assertEqual(p0load_main([name]),
-                                 (2, f"refused: p0load {name} needs {stage}; no runs are built for it yet\n"))
+                code, out = p0load_main([name, "--dry-run"])
+                self.assertEqual(code, 0)
+                self.assertNotIn("refused", out)
         code, out = p0load_main(["presence", "--observed"])
         self.assertEqual((code, out), (2, f"refused: {p0plans.OBSERVED_REFUSAL}\n"))
         self.assertIn("use p0load observed", out)
