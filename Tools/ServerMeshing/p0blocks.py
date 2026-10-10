@@ -44,6 +44,11 @@ ABLOAD = os.path.join(os.path.dirname(os.path.abspath(__file__)), "abload.py")
 CANARY_FAMILIES = ("rates", "presence", "density", "floor", "abgeo") + p0results.FAMILIES_8A + p0results.FAMILIES_8B
 CANARY_EVERY = datetime.timedelta(hours=2)
 CANARY_TRIES = 3
+# A block's canaries are judged against the block's own reference (its opening canary, or the newest good canary when
+# that one is skipped), 5 % (p0base.drifted); the opening canary is judged against the build's baseline at
+# START_DRIFT: A's canary moves 7-10 % over hours (time of day, activity) while a block's own canaries stay within ~3 %
+# (2026-10-08/09), so an hours-old baseline stopped blocks whose runs were comparable among themselves.
+START_DRIFT = 0.10
 PER_FRAME = "work_ms_per_measured_frame"   # derived for density's uncapped bridge, whose ms/s says nothing
 # (key metric, thresholds) of the blocks with 2-repeat arms. The bridge is uncapped, so saturation thresholds skip it;
 # block K has 2 repeats only when run with --repeats 2 (third_repeat acts on {1, 2} points alone).
@@ -93,6 +98,15 @@ def done_keys(rows, build, host):
     """Plan keys with a complete, non-drift run on this machine, (build, host) (--resume skips them)."""
     runs = p0results.apply_drift(p0results.rows_of_type(rows, "run"))
     return p0stepped.complete_keys([row for row in runs if p0results.machine(row) == (build, host)])
+
+
+def good_canary_work(rows, build, host, end):
+    """The C work ms/s of this machine's accepted canary whose window ended at end (a datetime), else None."""
+    for row in rows:
+        if (row.get("family") == "canary" and row.get("accepted") and p0results.machine(row) == (build, host)
+                and (row.get("window_local") or {}).get("end") == end.isoformat()):
+            return p0results.canary_work(row)
+    return None
 
 
 def canary_state(rows, build, host):
@@ -195,6 +209,12 @@ class Session:
         self.rows_path = self.path(p0results.FAMILY_GAME.get(self.family, "neutral"))
         self.canary_path = os.path.join(P0_LOGS, p0results.file_name("neutral", "canary", stamp))
         self.last_good, self.last_canary = canary_state(self.rows, self.build, self.host)
+        # The block's drift reference: None until its opening canary passes (canary_once), unless a good canary under
+        # CANARY_EVERY old will stand in for it (block() then skips the opening canary).
+        self.reference = None
+        if self.last_canary is not None and rigrun.now() - self.last_canary < CANARY_EVERY:
+            work = good_canary_work(self.rows, self.build, self.host, self.last_canary)
+            self.reference = None if work is None else (work, f"the canary at {self.last_canary:%H:%M:%S}")
 
     def path(self, game):
         """The JSONL file of this invocation's block rows of one game (a spec's own game names its file)."""
@@ -228,28 +248,40 @@ class Session:
         return pairs[-1]
 
     def canary_once(self, why):
-        """Runs one check canary and appends its row: "ok", "drift" (more than 5 % from the build's baseline) or
-        "unaccepted". Raises Stopped (exit 2) when the build has no baseline. With a peer in the block, B's bots and
-        sink are stopped first (p0peer.quiet_b: Stopped when one survives)."""
+        """Runs one check canary and appends its row: "ok", "drift" or "unaccepted". Until the block has a reference
+        a canary is held against the build's baseline at START_DRIFT, and the first that passes becomes the block's
+        reference; later ones are held against that reference at 5 %. The row records what it was judged against
+        (drift_reference: work, threshold, from) so p0results.apply_drift judges it the same way. Raises Stopped (exit
+        2) when the build has no baseline. With a peer in the block, B's bots and sink are stopped first
+        (p0peer.quiet_b: Stopped when one survives)."""
         if self.peer:
             p0peer.quiet_b(self.rep)
         spec = p0plans.canary_plan("check")[0]
         row, _ = run_spec(spec, self.rep, self.context)
+        baseline = p0results.canary_baselines(self.rows).get(p0results.machine(row))
+        if row["accepted"] and baseline is not None:
+            if self.reference is None:
+                reference, threshold, source = baseline, START_DRIFT, "baseline"
+            else:
+                (reference, source), threshold = self.reference, 0.05
+            row["drift_reference"] = {"work": reference, "threshold": threshold, "from": source}
         p0results.write_rows(self.canary_path, [row])
         self.rows.append(row)
         if not row["accepted"]:
             self.rep.note(f"canary ({why}) {row_text(spec, row)}")
             return "unaccepted"
-        baseline = p0results.canary_baselines(self.rows).get(p0results.machine(row))
         if baseline is None:
             raise Stopped(2, f"no baseline canary on build {row['build'][:12]} host {row.get('host')}: run p0load "
                              f"canary --baseline")
         work = p0results.canary_work(row)
-        result = "drift" if p0base.drifted(work, baseline) else "ok"
-        self.rep.note(f"canary ({why}): C {work:.1f} ms/s against baseline {baseline:.1f} "
-                      f"({abs(work - baseline) / baseline:.1%}): {'DRIFT' if result == 'drift' else 'ok'}")
+        result = "drift" if p0base.drifted(work, reference, threshold) else "ok"
+        self.rep.note(f"canary ({why}): C {work:.1f} ms/s against {source} {reference:.1f} "
+                      f"({abs(work - reference) / reference:.1%}, limit {threshold:.0%}): "
+                      f"{'DRIFT' if result == 'drift' else 'ok'}")
         if result == "ok":
             self.last_good = self.last_canary = rigrun.now()
+            if self.reference is None:
+                self.reference = (work, f"the block's opening canary {self.last_canary:%H:%M:%S}")
         return result
 
     def canary(self, why):

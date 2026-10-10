@@ -34,7 +34,9 @@ steps' holds and bind ramps + 20 s.
 Canaries (Decision 17: coarse C, 200 kinematic owners, 30/0.02) around rates, presence, density, floor, abgeo and the
 stage 0b blocks (CANARY_FAMILIES), into Logs/p0/rig_neutral_canary_<stamp>.jsonl: one at the start (unless a canary on
 this build is under 2 h old), one before any run once 2 h have passed, one at the end (abgeo: one after each sub-block).
-A canary drifted more than 5 % from its build's baseline, or not accepted, is repeated at once; if the repeat passes
+The block's opening canary is judged against its build's baseline at 10 % and becomes the block's reference;
+later canaries are judged against that reference at 5 % (a good canary under 2 h old stands in for a skipped
+opening one). A canary that drifted, or was not accepted, is repeated at once; if the repeat passes
 after a drift, the runs since the last good canary are queued again once at the end (abgeo: that sub-block). Two drifts,
 or two unaccepted canaries in a row, stop p0load (exit 3). They need a baseline on this machine (build and host; canary
 --baseline: 2 runs, a third when they differ by more than 2.5 %). floor, density's bridge and rates --repeats 2 (2

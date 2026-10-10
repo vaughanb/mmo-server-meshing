@@ -432,8 +432,10 @@ def _with_problem(row, text):
 
 def apply_drift(rows, threshold=0.05):
     """A new list of the rows (changed ones copied) with canary drift applied. Each accepted canary check row gets
-    "drift": whether |w - baseline|/baseline is above the threshold (w its C work ms/s, baseline the mean accepted
-    baseline of its machine, (build, host)), or None with a note when either is missing. Every other accepted run row
+    "drift": whether |w - reference|/reference is above its threshold, w its C work ms/s; the reference and threshold
+    are the row's drift_reference when it has one (p0blocks: the block's opening canary at 5 %, or the baseline at
+    START_DRIFT for that opening canary), else the mean accepted baseline of its machine, (build, host), at threshold;
+    None with a note when either is missing. Every other accepted run row
     whose next accepted check canary on its machine (by window_local.end) drifted becomes accepted false,
     excluded_reason "drift", with a problems entry; an unjudged next canary adds a note; no later canary adds "no
     canary after this run" (still accepted). Rows without window_local are left alone."""
@@ -441,7 +443,9 @@ def apply_drift(rows, threshold=0.05):
     baselines = canary_baselines(out)
     checks = []
     for row in _canaries(out, "check"):
-        baseline, work = baselines.get(machine(row)), canary_work(row)
+        given = row.get("drift_reference") or {}
+        baseline, work = given.get("work", baselines.get(machine(row))), canary_work(row)
+        limit, against = given.get("threshold", threshold), given.get("from", "its build's baseline")
         at = (row.get("window_local") or {}).get("end")
         if baseline is None or work is None:
             what = (f"no accepted baseline canary on build {row.get('build')} host {row.get('host')}"
@@ -451,9 +455,9 @@ def apply_drift(rows, threshold=0.05):
             text = f"the canary at {at} after this run could not be judged: {what}"
         else:
             share = _share(work, baseline)
-            row["drift"] = p0base.above(share, threshold)
-            text = (f"drift: the canary at {at} read {work:.1f} ms/s on {CANARY_CELL} against its build's baseline "
-                    f"{baseline:.1f} ms/s ({share:.1%}, above {threshold:.0%})")
+            row["drift"] = p0base.above(share, limit)
+            text = (f"drift: the canary at {at} read {work:.1f} ms/s on {CANARY_CELL} against {against} "
+                    f"{baseline:.1f} ms/s ({share:.1%}, above {limit:.0%})")
         if at is not None:
             checks.append((datetime.datetime.fromisoformat(at), row, text))
     checks.sort(key=lambda check: check[0])

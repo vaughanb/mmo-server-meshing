@@ -66,8 +66,10 @@ and the space game) before slices 2b-6.
   `accept-b` (19 runs), `calibrate` (4), `crossings` (18), `jfull` (4, only if `calibrate-bots` finds B hosts 100
   bots), `packets --sink` (22), `register-bots`, `calibrate-bots`. Ship stand-ins now follow the space game's main
   (IsAtRest with the angular and pending terms; unowned ships acknowledge a teleport at once). Before a B session the
-  user stops Relics of Imperium and `RelicTestServer` on B; each measuring chain takes its own baseline under a new
-  epoch (`Logs/p0/MACHINE_EPOCH`; 8b used `2026-10-06b` and `2026-10-08n`).
+  user stops Relics of Imperium and `RelicTestServer` on B. Since 2026-10-09 a block's canaries are judged against its
+  own opening canary (5 %), which is judged against the build's baseline at 10 % (`p0blocks.START_DRIFT`; rows record
+  `drift_reference`); a new epoch and baseline (`Logs/p0/MACHINE_EPOCH`; 8b used `2026-10-06b`, `2026-10-08n`) are due
+  only when an opening canary is more than 10 % off.
 - **Step 9 (stage 0c), not started:** database burst (the user permits creating test accounts), fantasy worker A/B,
   the isolated-spaces floor (the space game's bubbles), loss.
 - After Phase 0: the DESIGN 0.74 row (one stage-level row for stage 0b, like 0.73), then slices 2b-6.

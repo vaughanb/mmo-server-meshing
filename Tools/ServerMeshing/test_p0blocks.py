@@ -12,6 +12,7 @@ import tempfile
 import unittest
 from unittest import mock
 
+import p0base
 import p0blocks
 import p0load
 import p0plans
@@ -119,12 +120,47 @@ class BlockTests(unittest.TestCase):
                 end = start + datetime.timedelta(seconds=seconds)
                 self.assertEqual(p0blocks.measured(spec, start, end)["measure"], want)
 
+    def test_canaries_are_judged_against_the_blocks_reference(self):
+        cases = {  # canaries (start, every 2 h, end), what the rig ran, and the report's canary lines
+            "a slow slide within the block passes (8 % from the baseline, 4 % from the opening canary)": (
+                [96.0, 92.0, 92.0], 3, ["against baseline 100.0 (4.0%, limit 10%): ok",
+                                        "against the block's opening canary", "(4.2%, limit 5%): ok"]),
+            "6 % from the opening canary drifts even within 10 % of the baseline": (
+                [100.0, 106.0, 101.0, 100.0], 5, ["(6.0%, limit 5%): DRIFT"]),
+        }
+        for name, (canaries, ran, texts) in cases.items():
+            with self.subTest(name):
+                rig = Rig(canaries=list(canaries), minutes=50)
+                session = self.session(["floor"], rig)
+                self.assertEqual(session.block(p0plans.floor_plan()[:6]), 0)
+                self.assertEqual(self.kinds(rig).count("canary"), ran)
+                lines = " | ".join(session.rep.lines)
+                for text in texts:
+                    self.assertIn(text, lines)
+                checks = [row for row in session.rows if row.get("family") == "canary" and row.get("arm") == "check"]
+                self.assertEqual(checks[0]["drift_reference"], {"work": 100.0, "threshold": 0.1, "from": "baseline"})
+                self.assertEqual({row["drift_reference"]["threshold"] for row in checks[1:]}, {0.05})
+                drifted = p0results.apply_drift(session.rows)
+                self.assertEqual([row.get("drift") for row in drifted if row.get("arm") == "check"],
+                                 [p0base.drifted(p0results.canary_work(row), row["drift_reference"]["work"],
+                                                 row["drift_reference"]["threshold"]) for row in checks])
+
+    def test_a_skipped_opening_canary_lends_its_reading(self):
+        history = [baseline(), check(96.0, 30)]
+        rig = Rig(canaries=[92.0])
+        session = self.session(["floor"], rig, history)
+        self.assertEqual(session.reference[0], 96.0)
+        self.assertEqual(session.block(p0plans.floor_plan()[:2]), 0)
+        self.assertEqual(self.kinds(rig), ["idle", "idle", "canary"])
+        self.assertTrue(any("(4.2%, limit 5%): ok" in line for line in session.rep.lines))
+
     def test_canary_stops(self):
         cases = {
-            "two drifts": ([106.0, 94.0], "machine state changed: the canary drifted twice"),
+            "two drifts (the opening canary's limit is START_DRIFT)": ([112.0, 88.0],
+                                                                      "machine state changed: the canary drifted twice"),
             "two unaccepted canaries": ([None, None], "the canary cannot run: two canaries in a row were not accepted"),
-            "drift, unaccepted, drift": ([106.0, None, 110.0], "machine state changed: the canary drifted twice"),
-            "no pass in three tries": ([None, 106.0, None], "the canary did not pass in 3 tries (unaccepted, drift, "
+            "drift, unaccepted, drift": ([112.0, None, 115.0], "machine state changed: the canary drifted twice"),
+            "no pass in three tries": ([None, 112.0, None], "the canary did not pass in 3 tries (unaccepted, drift, "
                                                             "unaccepted)"),
         }
         for name, (works, reason) in cases.items():
@@ -349,7 +385,7 @@ class MachineTests(unittest.TestCase):
                                                                                         value=120.0)])]
         session, _ = self.session(history, canaries=[104.0])   # 4 % from A's 100, 5.5 % from a pooled 110
         self.assertEqual(session.canary_once("test"), "ok")
-        self.assertIn("canary (test): C 104.0 ms/s against baseline 100.0 (4.0%): ok", session.rep.lines)
+        self.assertIn("canary (test): C 104.0 ms/s against baseline 100.0 (4.0%, limit 10%): ok", session.rep.lines)
         session, _ = self.session(history[1:], canaries=[104.0])
         with self.assertRaises(p0blocks.Stopped) as caught:
             session.canary_once("test")
