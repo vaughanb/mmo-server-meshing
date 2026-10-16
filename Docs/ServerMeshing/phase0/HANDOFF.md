@@ -65,8 +65,8 @@ and the space game) before slices 2b-6.
   stops B's bots and sink around each run and refuses to start while anything of ours is left on B; new subcommands
   `accept-b` (19 runs), `calibrate` (4), `crossings` (18), `jfull` (4, only if `calibrate-bots` finds B hosts 100
   bots), `packets --sink` (22), `register-bots`, `calibrate-bots`. Ship stand-ins now follow the space game's main
-  (IsAtRest with the angular and pending terms; unowned ships acknowledge a teleport at once). Before a B session the
-  user stops Relics of Imperium and `RelicTestServer` on B. Since 2026-10-09 a block's canaries are judged against its
+  (IsAtRest with the angular and pending terms; unowned ships acknowledge a teleport at once). Since 2026-10-16 the
+  user may work on B during peer runs (§4: B's CPU split is recorded and judged). Since 2026-10-09 a block's canaries are judged against its
   own opening canary (5 %), which is judged against the build's baseline at 10 % (`p0blocks.START_DRIFT`; rows record
   `drift_reference`); a new epoch and baseline (`Logs/p0/MACHINE_EPOCH`; 8b used `2026-10-06b`, `2026-10-08n`) are due
   only when an opening canary is more than 10 % off.
@@ -147,7 +147,12 @@ reliable records/s to 8 subscribers in a 100-AI fight). B also runs "Relics of I
   above 45 s; restart the editor before long chains.
 - Editor menus (for example `Server Meshing/Test Rig/Build Ship Prefab`) need the user; the harness drives the editor
   only through its request files (`ServerMeshPlayRunner`: refresh, unit tests, Play, player build, packages).
-- On B: `RelicTestServer` holds the rig's ports and only the user can stop it (admin). Check `sc query RelicTestServer`.
+- On B: `RelicTestServer` holds the kit's ports (6010, 6100, 7000, 8000, 18000) and only the user can stop it (admin);
+  that matters only for cells on B (`regress --remote-cells`). Since 2026-10-16 the user develops on B while the rig
+  runs there: bots and the sink bind only OS-assigned ports and every B filter matches our `kit-ce-project.exe` only
+  (the user's programs have other names), so Relics no longer blocks a peer run (`remoteb.state_notes` names it);
+  instead each peer run records B's CPU split (`row["peer_load"]`: ours / other, by executable folder) and is not
+  accepted when other programs took more than 20 % of B (`p0peer.B_BUSY_SHARE`).
 - Repo `mmorpg-kit-space` (the space game) was read-only for this work until 2026-10-05; since then the user lets this
   work change it too (on branches; ask before merging, committing or pushing, as here).
 

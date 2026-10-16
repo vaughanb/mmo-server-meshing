@@ -106,16 +106,56 @@ def state(args):
 
 
 def state_problems(state):
-    """Why B cannot serve a step 8b run as it is: a cell running, RelicTestServer running, a Relics process running,
-    or counts it did not print. Leftover bots and sinks are not refused: every peer run stops them first."""
+    """Why B cannot serve a step 8b run as it is: one of our cells running, or counts it did not print. Leftover bots
+    and sinks are not refused (every peer run stops them first), and since 2026-10-16 neither is the user's own work on
+    B (RelicTestServer, Relics, other programs: our processes bind no fixed port there, and every peer run records how
+    busy B's other programs kept it, cpu_sample / load_shares); state_notes names it."""
     problems = [f"B printed no {key} count" for key in ("cells", "relics") if state.get(key) is None]
     if state.get("cells"):
         problems.append(f"B runs {state['cells']} cell(s); stop them: remoteb.py stop")
-    if state.get("relic_service") == "Running":
-        problems.append(f"B runs {RELIC_SERVICE}; only the user can stop it (admin)")
-    if state.get("relics"):
-        problems.append(f"B runs {state['relics']} Relics process(es); the user stops them for the rig")
     return problems
+
+
+def state_notes(state):
+    """What else runs on B that a run should mention (not refuse): RelicTestServer, Relics processes."""
+    notes = []
+    if state.get("relic_service") == "Running":
+        notes.append(f"B runs {RELIC_SERVICE} (the user's; not ours to stop)")
+    if state.get("relics"):
+        notes.append(f"B runs {state['relics']} Relics process(es) (the user's)")
+    return notes
+
+
+def cpu_command(directory):
+    """The PowerShell printing B's CPU seconds so far for our processes (those whose executable sits under directory)
+    and for every other process, and its logical processor count: "ours=<s> other=<s> logical=<n>"."""
+    folder = directory.rstrip("\\") + "\\*"
+    return ("$all = Get-Process; $ours = ($all | Where-Object { $_.Path -like '" + folder + "' } | Measure-Object CPU -Sum).Sum; "
+            "$tot = ($all | Measure-Object CPU -Sum).Sum; "
+            "$n = (Get-CimInstance Win32_ComputerSystem).NumberOfLogicalProcessors; "
+            "'ours={0} other={1} logical={2}' -f [double]$ours, ([double]$tot - [double]$ours), $n")
+
+
+def parse_cpu(text):
+    """{"ours", "other" (CPU seconds), "logical"} from cpu_command's line, else None."""
+    m = re.search(r"ours=([\d.]+) other=(-?[\d.]+) logical=(\d+)", text.replace(",", "."))
+    return {"ours": float(m[1]), "other": max(0.0, float(m[2])), "logical": int(m[3])} if m else None
+
+
+def cpu_sample(args):
+    """parse_cpu of one SSH query (None when B printed nothing usable)."""
+    out, _, _ = remotessh.ssh(args, cpu_command(args.dir))
+    return parse_cpu(out)
+
+
+def load_shares(before, after, seconds):
+    """{"ours", "other"}: the shares of B's whole CPU (logical processors x seconds) our processes and the rest used
+    between two cpu_sample readings; None when either reading is missing or no time passed. A process that started
+    or ended between them counts only its own seconds, so the shares are a lower bound for short lives."""
+    if before is None or after is None or seconds <= 0 or not after.get("logical"):
+        return None
+    capacity = after["logical"] * seconds
+    return {key: max(0.0, after[key] - before[key]) / capacity for key in ("ours", "other")}
 
 
 def sink_arguments(a_ip, port, count, base, directory, sizes=False):

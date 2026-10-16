@@ -284,14 +284,34 @@ class StateTests(unittest.TestCase):
         cases = {
             "counts not printed": (remoteb.parse_state(""), ["B printed no cells count", "B printed no relics count"]),
             "a cell": (dict(base, cells=1), ["B runs 1 cell(s); stop them: remoteb.py stop"]),
-            "RelicTestServer": (dict(base, relic_service="Running"),
-                                ["B runs RelicTestServer; only the user can stop it (admin)"]),
-            "a Relics process": (dict(base, relics=2), ["B runs 2 Relics process(es); the user stops them for the rig"]),
+            "the user's RelicTestServer and Relics are no refusal (2026-10-16)": (
+                dict(base, relic_service="Running", relics=2), []),
             "leftover bots and a sink are no refusal": (base, []),
         }
         for name, (state, expected) in cases.items():
             with self.subTest(name):
                 self.assertEqual(remoteb.state_problems(state), expected)
+        self.assertEqual(remoteb.state_notes(dict(base, relic_service="Running", relics=2)),
+                         ["B runs RelicTestServer (the user's; not ours to stop)", "B runs 2 Relics process(es) (the user's)"])
+        self.assertEqual(remoteb.state_notes(base), [])
+
+    def test_cpu_sample_and_load_shares(self):
+        command = remoteb.cpu_command(r"C:\MeshTest\Server")
+        self.assertIn(r"$_.Path -like 'C:\MeshTest\Server\*'", command)
+        self.assertNotIn('"', command)   # ssh wraps the command in double quotes
+        cases = {  # printed line, parsed
+            "dots": ("ours=12.5 other=300.25 logical=24", {"ours": 12.5, "other": 300.25, "logical": 24}),
+            "a comma decimal": ("ours=12,5 other=3 logical=8", {"ours": 12.5, "other": 3.0, "logical": 8}),
+            "a negative rest floors at 0": ("ours=5 other=-0.5 logical=8", {"ours": 5.0, "other": 0.0, "logical": 8}),
+            "nothing usable": ("Access denied", None),
+        }
+        for name, (text, parsed) in cases.items():
+            with self.subTest(name):
+                self.assertEqual(remoteb.parse_cpu(text), parsed)
+        before, after = {"ours": 10, "other": 100, "logical": 24}, {"ours": 130, "other": 340, "logical": 24}
+        self.assertEqual(remoteb.load_shares(before, after, 100), {"ours": 0.05, "other": 0.1})
+        self.assertIsNone(remoteb.load_shares(None, after, 100))
+        self.assertIsNone(remoteb.load_shares(before, after, 0))
 
     def test_the_state_command_has_no_double_quote(self):
         self.assertNotIn('"', remoteb.STATE_COMMAND)

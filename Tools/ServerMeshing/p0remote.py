@@ -62,6 +62,9 @@ class RemoteB:
     def start_impair(self, profile):
         return remoteb.start_impair(self.args, profile)
 
+    def cpu_sample(self):
+        return remoteb.cpu_sample(self.args)
+
 
 def plural(count, word):
     return f"{count} {word}{'' if count == 1 else 's'}"

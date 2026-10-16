@@ -54,6 +54,10 @@ class FakeB:
                                                             "clock": datetime.datetime(2026, 10, 7, 9, 0, 7, tzinfo=UTC),
                                                             "free_mb": 40000}
         self.matches, self.logs = matches, list(logs)
+        self.cpu = []   # cpu_sample readings handed out in order (None once they run out); not recorded in calls
+
+    def cpu_sample(self):
+        return self.cpu.pop(0) if self.cpu else None
 
     def _call(self, name, *args):
         self.calls.append((name,) + args)
@@ -264,6 +268,33 @@ class SessionTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "cell C logged no 'Phantoms: cell C port N mode sink' line"):
                 session.on_play(PLAY)
         self.assertGreaterEqual(clock.t, p0peer.PORT_WAIT_S)
+
+    def test_b_load_is_judged_over_the_run(self):
+        def reading(ours, other):
+            return {"ours": ours, "other": other, "logical": 10}
+        cases = {  # readings at on_play and after_play, monotonic seconds between, then (load, a busy problem, note)
+            "quiet B": ([reading(0, 100), reading(300, 150)], 100, ({"ours": 0.3, "other": 0.05}, False, "ours 30% other 5%")),
+            "the user's work keeps B busy": ([reading(0, 100), reading(100, 400)], 100,
+                                             ({"ours": 0.1, "other": 0.3}, True, "ours 10% other 30%")),
+            "no reading": ([None, reading(1, 1)], 100, (None, False, "B: CPU load not read")),
+        }
+        for name, (readings, seconds, (load, busy, note)) in cases.items():
+            with self.subTest(name):
+                b, rep = FakeB(), Rep()
+                b.cpu = list(readings)
+                session = p0peer.PeerSession(spec({"sink": SINK}, {"MESH_PHANTOM": "sink:50:character:C"}), rep, b)
+                now = [1000.0]
+                with fake_time({"C": [PORT_LINE]}), mock.patch.object(p0peer.time, "monotonic", lambda: now[0]):
+                    session.on_play(PLAY)
+                    now[0] += seconds
+                    session.after_play()
+                self.assertEqual(session.load if load is None else {k: round(v, 4) for k, v in session.load.items()},
+                                 load)
+                self.assertEqual(any("busy with other work" in p for p in session.problems), busy)
+                self.assertTrue(any(note in line for line in rep.lines), rep.lines)
+                rows = p0peer.mark_rows([{"accepted": True}], session)
+                self.assertEqual(rows[0].get("peer_load"), load)
+                self.assertEqual(rows[0]["accepted"], not busy and not session.problems)
 
     def test_after_play(self):
         cases = {  # failure first: (peer, FakeB), problems, stop_reason, calls

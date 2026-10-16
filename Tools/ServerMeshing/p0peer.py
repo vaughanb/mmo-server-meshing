@@ -52,6 +52,7 @@ from p0calibration import (CALIBRATION, bot_upload_rate, build_id, calibrate_bot
 
 PEER_STOP = "peer_stop"     # a row key run_spec sets and Session.run pops: B kept processes, so the invocation stops
 PORT_WAIT_S = 120           # on_play: how long the sink waits for its cell's "Phantoms: cell C port N" line
+B_BUSY_SHARE = 0.20        # after_play: B's other programs above this share of its CPU make the run's B figures suspect
 
 
 def walk_points(points, mode, walk_x=None):
@@ -135,6 +136,7 @@ class PeerSession:
                              + ", ".join(p for p in remoteb.PROFILES if p != "off"))
         self.problems, self.stop_reason, self.started = [], None, False
         self.impair_started, self.impair_on = False, None
+        self.load, self._cpu_start = None, None   # B's CPU shares over the run (load_shares), its first reading
         self.points = botpoints.bot_points(self.bots["n"], self.bots["placement"]) if self.bots else []
 
     def before_play(self):
@@ -147,6 +149,7 @@ class PeerSession:
 
     def on_play(self, play_start):
         self.started = True
+        self._cpu_start = (time.monotonic(), self._cpu_sample())
         if self.sink:
             cell = sink_cell(self.spec)
             port = wait_port(play_start, cell)
@@ -166,6 +169,27 @@ class PeerSession:
             self.rep.note(f"    B: meshbot{bots['first']}..meshbot{bots['first'] + bots['n'] - 1} {bots['mode']} at "
                           f"{bots['placement']}")
 
+    def _cpu_sample(self):
+        try:
+            return self.b.cpu_sample()
+        except Exception:  # a missed reading only leaves the run's B load unknown
+            return None
+
+    def _judge_load(self):
+        """load: B's CPU shares (ours, other) between Play's start and now (remoteb.load_shares); a run where B's
+        other programs (the user works on B) used more than B_BUSY_SHARE of its CPU gets a problem, so its bot and
+        sink figures are not taken for the rig's alone. Unknown load is noted, never a problem."""
+        start, before = self._cpu_start or (None, None)
+        after = self._cpu_sample()
+        self.load = remoteb.load_shares(before, after, time.monotonic() - start) if start is not None else None
+        if self.load is None:
+            self.rep.note("    B: CPU load not read")
+            return
+        self.rep.note(f"    B: CPU ours {self.load['ours']:.0%} other {self.load['other']:.0%}")
+        if self.load["other"] > B_BUSY_SHARE:
+            self.problems.append(f"B was busy with other work: {self.load['other']:.0%} of its CPU outside the rig "
+                                 f"(over {B_BUSY_SHARE:.0%})")
+
     def _start_impair(self):
         self.impair_started = True   # after_play stops whatever this leaves behind
         try:
@@ -184,6 +208,7 @@ class PeerSession:
     def after_play(self):
         if not self.started:
             return
+        self._judge_load()
         try:
             if self.impair_started:
                 try:
@@ -308,6 +333,8 @@ def window_hooks(spec, rep, on_play=None, stop_when=None):
 def mark_rows(rows, peer, *others):
     """The rows with the problems of the peer and of any other session (a p0burst.BurstSession) added (each such row
     not accepted), and PEER_STOP set when one has a stop_reason; rows unchanged when every session is None."""
+    for row in rows if peer is not None and peer.load is not None else []:
+        row["peer_load"] = {key: round(value, 4) for key, value in peer.load.items()}
     for session in (peer,) + others:
         for row in rows if session is not None else []:
             if session.problems:
