@@ -70,7 +70,9 @@ and the space game) before slices 2b-6.
   own opening canary (5 %), which is judged against the build's baseline at 10 % (`p0blocks.START_DRIFT`; rows record
   `drift_reference`); a new epoch and baseline (`Logs/p0/MACHINE_EPOCH`; 8b used `2026-10-06b`, `2026-10-08n`) are due
   only when an opening canary is more than 10 % off.
-- **Step 9 (stage 0c), built on A (2026-10-09), smokes pass; blocks not yet run:** contract `step9_design.md` (rev 2,
+- **Step 9 (stage 0c), built (d6a8af5) and measured 2026-10-12 (`stage0b_8a_results.md` §6; 62/62 runs):** Database gate
+  PASS (200 at once p95 ~0.7 s); sustained 5 handoffs/s, bound by a ~6.7 writes/s save drain; the fantasy worker split
+  costs ~1.5x CPU; a space costs ~1.9 ms/s; loss barely touches A. Built as: contract `step9_design.md` (rev 2,
   two critiques); `p0load dbburst` (21 runs; 800 burst accounts `meshburst0001..0800@meshburst.invalid`, approved by
   the user), `workerab` (14), `spaces` (18), `packets --loss` (9; clumsy on B, the user's choice). Smokes
   (`phase0/accept_step9.py`): 50 burst ready p50 526 ms, 0 errors, drained; forwarded hits p50 ~43 ms; spaces own 30,

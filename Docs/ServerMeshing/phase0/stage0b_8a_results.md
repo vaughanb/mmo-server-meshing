@@ -1,4 +1,4 @@
-# Phase 0 stage 0b: step 8a's blocks on machine A and step 8b's with B (draft, 2026-10-09)
+# Phase 0 stages 0b and 0c on machines A and B (draft, 2026-10-12)
 
 Draft results of the step 8a blocks (b3-b8 virtual parts: observed, targets, syncrpc, packets, prewarm, fanout),
 measured on machine A. It is not the DESIGN 0.74 row: that row is one stage-level row for all of stage 0b and waits for
@@ -187,7 +187,27 @@ Caveats: the phantom runs' upload rate reads 0 in the rows (no metric for sink p
 of gate J is unverified, though work and bytes match; handoff latency grows with how many cross at once (20 → 50 bots
 roughly doubles p50), which matters for the drain and split pacing of slices 2b/2c.
 
-## 6. Open for the stage 0b report
+## 6. Stage 0c (step 9) on A with B, build of d6a8af5, 2026-10-12 00:10-02:40
+
+Epoch `2026-10-08n`, baseline 72.5; every block's canaries within 3.4 % of its opening canary (the block-reference
+rule, a74372d); 62 of 62 runs accepted.
+
+| Block | Result |
+|---|---|
+| c1 dbburst | **Database gate PASS**: 200 arrivals at once ready at p95 658-692 ms, 0 errors (50: 567-600; 100: 592-1,002). The save drain runs at ~6-7 writes/s against the kit's configured 16/s (one lane per 500 ms tick): at R 10, 15, 20 arrivals/s pending grows 0.8, 2.6, 6.5 /s while request latency stays under 0.8 s at p95. **Sustained capacity: 5 arrivals/s (35 requests/s)**, bound by the MySQL save drain, not by the request path. Calibration: 25 real bots' validate+load median 132-133 ms against the burst's token+get 133-134 ms (2 pairs): the burst reproduces a real arrival's database time. Crossings half B's B5 term is that 5 handoffs/s. |
+| c2 workerab | Total work, coarse (C owns all monsters) against halves (E owns all, players on C): 399 → 325 + 268 = 593 ms/s at 100 players, 643 → 567 + 390 = 957 at 200: **the worker split costs ~1.5× the CPU and relieves the player cell only 12-19 %**. Forwarded hits work (2,900-4,100 per run, p95 83-106 ms); E owns every monster, C none; C sees E's monsters (~180 puppets). Awake monsters 166-173 (coarse, by subscription) against 81-89 (E, by ghost proximity). |
+| c3 spaces | Isolation holds (other seen max 0 in every run). Floor per space (1 observer + 5 station stand-ins): 13.9 ms/s at S 1 (the cell's own fixed cost in it), 4.2 at S 4, **1.9 at S 16 and S 64** (intervals ±0.2); slope with 100 players split over the spaces 2.1 ms/s per space. |
+| c4 loss | 100 sink ship phantoms, ~57,800 datagrams/s: A's main thread and network thread move < 2 % with loss (475 → 467-471 and 273 → 266-268 ms/s); reliable resends 5 → 2,514 → 4,108 /s at 0, 1, 5 %; received records per pair 574 → 435 → 421 /s. Caveat: 1 % loss cut the received rate almost as much as 5 % and its resend share read 4 %, so clumsy itself probably limits throughput near 58,000 packets/s; the A-side cost (near none) stands, the received-rate figures need a lower-rate check. |
+
+## 7. Open for the stage reports
+
+- Crossings half A with 50 clients that are not CPU-bound (B saturates at 50 bots); half B compares B5's 5 handoffs/s
+  with the recommended geography's crossing rate (the refit).
+- c4's received rate at a packet rate clumsy can carry (e.g. P 25), to separate the loss from clumsy's ceiling.
+- The save drain's 6-7 writes/s against the configured 16/s (the kit's scheduler or MySQL; a slice 2c drain-pacing
+  input).
+
+## 8. Open for the stage 0b report (earlier)
 
 - Crossings half A with 50 clients that are not CPU-bound (B saturates at 50 bots).
 - Drift judged against a block's own opening canary instead of an hours-old baseline (A's canary moves several % over
