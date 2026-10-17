@@ -20,7 +20,7 @@ and the space game) before slices 2b-6.
 | Slice 0: prerequisites, fixes, harness | Done |
 | Slice 1: measurement, go/no-go | Done: GO (halves/coarse 0.67-0.74) |
 | Slice 2a: per-map mode, overlay, distribution, gate (no ops) | Done, rig-verified (DESIGN 0.72) |
-| **Phase 0** | **Step 8a built and measuring on A; 8b and 9 to do** (below) |
+| **Phase 0** | **Measured: stages 0a-0c (DESIGN 0.73-0.75); open: Crossings half A** (below) |
 | Slice 2b manual split, 2c merge/drain/retire, 2d supervision/fencing, 3 automatic policy, 4 buildings (CE-10), 5 central restart, 6 operator path | After Phase 0 |
 
 ### Phase 0 (spec: `phase0_build_sheet.md`; per-step contracts `stepN_design.md`)
@@ -77,7 +77,9 @@ and the space game) before slices 2b-6.
   the user), `workerab` (14), `spaces` (18), `packets --loss` (9; clumsy on B, the user's choice). Smokes
   (`phase0/accept_step9.py`): 50 burst ready p50 526 ms, 0 errors, drained; forwarded hits p50 ~43 ms; spaces own 30,
   other 0; 5 % loss resends ~8 % of sent (≈ 2p).
-- After Phase 0: the DESIGN 0.74 row (one stage-level row for stage 0b, like 0.73), then slices 2b-6.
+- **Phase 0 close-out (2026-10-16):** DESIGN 0.74 (stage 0b) and 0.75 (stage 0c) written from
+  `stage0b_8a_results.md`. Open: Crossings half A (needs 50 clients that are not CPU-bound; B saturates) and,
+  for slice 2c, the save drain's ~6.7 writes/s against the configured 16/s. Next: slices 2b-6.
 
 ## 2. Moving the measurements to A
 
