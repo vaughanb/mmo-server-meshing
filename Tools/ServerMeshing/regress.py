@@ -35,6 +35,7 @@ import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import provision
+import regress_split
 import rigtools
 from provision import ITEM_BOW, ITEM_YIELD, db_connect
 
@@ -59,6 +60,9 @@ ASSETS = os.path.join(ROOT, "Assets")
 RIG_REGISTRY = os.path.join(ASSETS, "ServerMeshing", "TestMap", "ServerMeshWorld.asset")
 # MeshCoordinatorStore.DefaultRelativePath, relative to the editor's working directory (the central runs there).
 COORDINATOR_STORE = os.path.join(TEMP, "ServerMesh.Coordinator.json")
+# Slice 2b's layout operations (regress_split): the command the play runner forwards to the central, and its op lines.
+LAYOUT_COMMAND = os.path.join(TEMP, "ServerMesh.LayoutCommand.txt")
+LAYOUT_COMMAND_STATUS = os.path.join(TEMP, "ServerMesh.LayoutCommandStatus.txt")
 MAP = "ServerMeshTestMap"
 MAP2 = "ServerMeshTestMap2"   # placed 400 m east of MAP in the world registry; its only cell C2 touches E
 # The test map is a 3x3 grid; C/E/N/NE keep the world positions every scenario was written against, and the
@@ -246,11 +250,19 @@ def kit_process_count():
         raise RuntimeError(f"could not count the rig's processes: {out[:200]!r}") from ex
 
 
-def launch_bot(scenario, user, args):
+def launch_bot(scenario, user, args, channel="C", observe_seconds=None, line_x=None, harvest_after_migration=False):
+    """Start a headless bot on `channel`; the split scenarios' stand window, cut line and harvest variant are optional."""
     log = os.path.join(LOGS, f"regress_{scenario}_{user}.log")
     if os.path.exists(log):
         os.remove(log)
-    cmd = [EXE, "-batchmode", "-nographics", "-meshAutoClient", "-meshUser", user, "-meshChannel", "C"] + args + ["-logFile", log]
+    extra = []
+    if observe_seconds is not None:
+        extra += ["-meshObserveSeconds", f"{observe_seconds:g}"]
+    if line_x is not None:
+        extra += ["-meshLineX", f"{line_x:g}"]
+    if harvest_after_migration:
+        extra += ["-meshHarvestAfterMigration", "1"]
+    cmd = [EXE, "-batchmode", "-nographics", "-meshAutoClient", "-meshUser", user, "-meshChannel", channel] + args + extra + ["-logFile", log]
     subprocess.Popen(cmd, creationflags=getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return log
 
@@ -699,11 +711,13 @@ def run_scenario(name, rep):
         if marker.startswith("ServerMesh.FaultFired."):
             os.remove(os.path.join(TEMP, marker))
     # The central's layout coordinator keeps its store across Plays; one left by an earlier run would be recovered
-    # from, so every scenario starts without one.
-    for leftover in (COORDINATOR_STORE, COORDINATOR_STORE + ".tmp"):
+    # from, so every scenario starts without one. A layout command or its status left by an earlier run would be
+    # carried out again or read as this run's (Slice 2b decision 17).
+    for leftover in (COORDINATOR_STORE, COORDINATOR_STORE + ".tmp", LAYOUT_COMMAND, LAYOUT_COMMAND_STATUS):
         if os.path.exists(leftover):
             os.remove(leftover)
     bots = []
+    split = None
 
     if name == "pet":
         # The pet round trip: an observer 12 m from the line watches the bot cross with its pet and come back.
@@ -938,14 +952,22 @@ def run_scenario(name, rep):
         rep.check(count(c_lines, r"Handoff ACK \S+ by zone E: .*promoted=True") >= 1, "E took the bot over in place (both gates open)")
         for zone, lines in (("C", c_lines), ("E", e_lines)):
             rep.check(count(lines, r"Layout gate open on ") == 1, f"{zone}: layout gate opened once")
-        rep.check(count(zone_lines("C2", start, day, MAP2), rigtools.LAYOUT_APPLIED.pattern) == 0, "C2 (Static map) applied no layout")
+        c2_lines = zone_lines("C2", start, day, MAP2)
+        rep.check(count(c2_lines, rigtools.LAYOUT_APPLIED.pattern) == 0,
+                  f"C2 (Static map) applied no own-cell layout ({count(c2_lines, rigtools.NEIGHBOURS_APPLIED.pattern)} Static-neighbour applies)")
+
+    elif name in regress_split.SCENARIOS:
+        split = regress_split.run(name, rep, sys.modules[__name__], start, day, bots)
 
     else:
         raise ValueError(f"unknown scenario {name}")
 
     # The sleeping-cell scenarios leave cells asleep on purpose; every other scenario runs them all.
     grade_common(rep, start, day, expect={"wake": {"C", "E", "C2"}}.get(name))
-    grade_layout(rep, start, day)
+    if name in regress_split.SCENARIOS:
+        regress_split.grade_layout(rep, sys.modules[__name__], start, day, split)
+    else:
+        grade_layout(rep, start, day)
     for kind, log in bots:
         try:
             txt = open(log, encoding="utf-8", errors="replace").read()
@@ -979,10 +1001,12 @@ TWO_HOST_SKIP = {
     "sleep": "needs cells started on demand by the central, which asks the spawner that serves the cell; the other "
              "machine runs no spawner, so nothing can start its cell there",
     "wake": "needs cells started on demand by the central (as sleep does); the other machine runs no spawner",
+    **{n: regress_split.TWO_HOST_REASON for n in regress_split.SCENARIOS},
 }
-ALL = DEFAULT + ["pvp", "wake", "dynidle"]
+ALL = DEFAULT + ["pvp", "wake", "dynidle"] + list(regress_split.SCENARIOS)
 # A persisted remote cell outlives the Plays, so no scenario's environment reaches it.
-PERSIST_SKIP = {"dynidle": "runs the test map Dynamic through the environment, which a persisted remote cell never gets"}
+PERSIST_SKIP = {"dynidle": "runs the test map Dynamic through the environment, which a persisted remote cell never gets",
+                **{n: regress_split.PERSIST_REASON for n in regress_split.SCENARIOS}}
 
 
 def main():

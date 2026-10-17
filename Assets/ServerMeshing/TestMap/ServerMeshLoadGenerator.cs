@@ -14,7 +14,7 @@ using UnityEngine;
 
 namespace MultiplayerARPG.MMO.Mesh
 {
-    public class ServerMeshLoadGenerator : MonoBehaviour
+    public partial class ServerMeshLoadGenerator : MonoBehaviour
     {
         public const string ENV_PLAYERS = "MESH_LOAD_PLAYERS";
         public const string ENV_CELL = "MESH_LOAD_CELL";
@@ -388,7 +388,7 @@ namespace MultiplayerARPG.MMO.Mesh
     }
 
     /// <summary>SyntheticPlayerBrain is a synthetic player's behaviour: wander, fight what is in reach (unless told not to), never die.</summary>
-    public class SyntheticPlayerBrain : MonoBehaviour
+    public partial class SyntheticPlayerBrain : MonoBehaviour
     {
         private BasePlayerCharacterEntity _entity;
         private Rect _area;

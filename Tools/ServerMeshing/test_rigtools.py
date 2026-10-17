@@ -455,6 +455,7 @@ class LayoutGradeTests(unittest.TestCase):
     OWN_FROM_LAYOUT = " INFO Mesh [2026-09-25 10:00:01] - Own cell from layout: C.1 of map M, grid (-1,-1), world x [0, 100) z [-100, 100), 5 neighbours"
     PLAYER = " INFO MeshTrace [2026-09-25 10:00:05] - 10:00:05.123 S player registered MeshTester2 conn=0 at (1, 0, 0) (data (1, 0, 0))"
     OTHER = " INFO Mesh [2026-09-25 10:00:03] - Mesh stats: nothing to see"
+    NEIGHBOURS = " INFO Mesh [2026-09-25 10:00:04] - Layout 1a2b/3 neighbours applied: C2 band E, E.1"
 
     @staticmethod
     def applied(incarnation="1a2b", version=1):
@@ -511,10 +512,12 @@ class LayoutGradeTests(unittest.TestCase):
             "dynamic, two from one coordinator": ([o, a(), a(version=2), p], True, 1),
             "dynamic, applied after a player registered": ([o, p, a()], True, 1),
             "static, one applied": ([o, a(), p], False, 1),
+            "dynamic, a Static-neighbour apply line": ([o, a(), self.NEIGHBOURS, p], True, 1),
             "dynamic, one per lifetime across a crash restart": ([o, a(), p, o, a(), p], True, 0),
             "dynamic, a central restart adds one": ([o, a("1a"), p, a("2b")], True, 0),
             "dynamic, applied first": ([o, x, a(), p], True, 0),
             "static, none applied": ([o, x, p], False, 0),
+            "static, band-neighbour applies only (Slice 2b)": ([o, self.NEIGHBOURS, p, self.NEIGHBOURS], False, 0),
             "a leading segment from an earlier process is lenient": ([p, a(), a(), o, a(), p], True, 0),
             "no lifetime at all": ([x, p], True, 0),
             "a child's own-cell line does not start a lifetime": ([o, a(), self.OWN_FROM_LAYOUT, p], True, 0),
@@ -539,6 +542,12 @@ class LayoutGradeTests(unittest.TestCase):
         self.assertTrue(rigtools.LAYOUT_APPLIED.search(self.applied("0"))
                         and rigtools.LAYOUT_GATE_WARNING.search("Layout gate: cell C has had no answer to LayoutHello for 10s; ...")
                         and rigtools.PLAYER_REGISTERED.search(self.PLAYER))
+        # Slice 2b decision 14: the Static neighbour's line is distinct from a dynamic cell's apply, and neither an op
+        m = rigtools.NEIGHBOURS_APPLIED.search(self.NEIGHBOURS)
+        self.assertEqual(m.groups() if m else None, ("1a2b", "3", "C2", "E, E.1"))
+        self.assertIsNone(rigtools.LAYOUT_APPLIED.search(self.NEIGHBOURS))
+        self.assertIsNone(rigtools.NEIGHBOURS_APPLIED.search(self.applied()))
+        self.assertIsNone(rigtools.OP_LINE.search(self.NEIGHBOURS))
 
     def test_asset_cell_modes_and_assets_with_script(self):
         guid = rigtools.REGISTRY_SCRIPT_GUID

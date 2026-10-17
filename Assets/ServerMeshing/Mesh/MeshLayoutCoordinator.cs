@@ -1,96 +1,15 @@
 // Server Meshing add-on — the central's layout coordinator (DESIGN.md 0.72, plan D3). It owns the runtime layout of
 // every Dynamic map: it recovers it when the central starts, answers each cell's hello with the layout to hold (which
-// opens the cell's gate), and tells the cells what it decided. Splits and merges come in later slices; this is the
-// skeleton they plug into. A plain class with its clock, transport, store and log injected, so it is tested without
-// Unity networking. Nothing throws out of a handler or out of Tick: each validates, then changes state.
+// opens the cell's gate), and tells the cells what it decided. Splits run in MeshLayoutCoordinator_Split.cs (Slice 2b);
+// merges come later. A plain class with its clock, transport, store and log injected, so it is tested without Unity
+// networking. Nothing throws out of a handler or out of Tick: each validates, then changes state.
 using System;
 using System.Collections.Generic;
-using LiteNetLibManager;
-using UnityEngine;
 
 namespace MultiplayerARPG.MMO.Mesh
 {
-    /// <summary>IMeshClock is the coordinator's time.</summary>
-    public interface IMeshClock
-    {
-        /// <summary>Seconds, monotonic.</summary>
-        float Now { get; }
-        /// <summary>Wall-clock UTC ticks (a new coordinator incarnation is at least this).</summary>
-        long UtcTicks { get; }
-    }
-
-    /// <summary>MeshUnityClock is Unity's unscaled time and the wall clock.</summary>
-    public sealed class MeshUnityClock : IMeshClock
-    {
-        public float Now => Time.unscaledTime;
-        public long UtcTicks => DateTime.UtcNow.Ticks;
-    }
-
-    /// <summary>IMeshLog is where the coordinator writes its lines.</summary>
-    public interface IMeshLog
-    {
-        void Info(string message);
-        void Warning(string message);
-        void Error(string message);
-    }
-
-    /// <summary>MeshKitLog writes to the kit's log under the Mesh tag.</summary>
-    public sealed class MeshKitLog : IMeshLog
-    {
-        public void Info(string message) => Logging.Log("Mesh", message);
-        public void Warning(string message) => Logging.LogWarning("Mesh", message);
-        public void Error(string message) => Logging.LogError("Mesh", message);
-    }
-
-    /// <summary>MeshMapServerPeer is a registered map server as the coordinator sees it.</summary>
-    public struct MeshMapServerPeer
-    {
-        public long connectionId;
-        public string cellId;
-        public string mapId;
-        public string address;
-        public int port;
-    }
-
-    /// <summary>IMeshCoordinatorTransport is how the coordinator reaches the map servers.</summary>
-    public interface IMeshCoordinatorTransport
-    {
-        /// <summary>Every registered map server (cells, not instances or spawners), into a reused list.</summary>
-        void GetMapServers(List<MeshMapServerPeer> into);
-        bool TryGetMapServer(long connectionId, out MeshMapServerPeer peer);
-        void Send(long connectionId, MeshLayoutMessage message);
-        void Send(long connectionId, MeshRetireMessage message);
-        void Send(long connectionId, MeshCoordinatorNoteMessage message);
-    }
-
-    /// <summary>MeshCellBinding is one cell of a Dynamic map as the coordinator knows it: the map server that said hello.</summary>
-    public sealed class MeshCellBinding
-    {
-        public string cellId;
-        public string mapId;
-        public long connectionId;
-        public string incarnation;
-        public float helloAt;
-        /// <summary>Whether the cell was answered, so its gate is open.</summary>
-        public bool answered;
-        /// <summary>The last layout the cell acknowledged as applied.</summary>
-        public MeshLayoutPair applied;
-        public float lastEvidenceAt = -1f;
-        /// <summary>When the cell was seen gone from the cluster (-1 while registered).</summary>
-        public float unregisteredAt = -1f;
-        public bool mismatchLogged;
-    }
-
-    /// <summary>MeshCoordinatorPhase is where the coordinator is.</summary>
-    public enum MeshCoordinatorPhase
-    {
-        Stopped,
-        Recovering,
-        Running,
-    }
-
     /// <summary>MeshLayoutCoordinator is the central's owner of the runtime layout.</summary>
-    public sealed class MeshLayoutCoordinator
+    public sealed partial class MeshLayoutCoordinator
     {
         /// <summary>Seconds a Dynamic map's cell may stay registered without a hello before one warning.</summary>
         public const float HelloMissingWarnSeconds = 10f;
@@ -210,6 +129,7 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>Stop forgets every binding and recovery; the registry's own reset owns the applied layout.</summary>
         public void Stop()
         {
+            SplitStop();
             _bindings.Clear();
             _maps.Clear();
             _firstSeenWithoutHello.Clear();
@@ -232,10 +152,18 @@ namespace MultiplayerARPG.MMO.Mesh
             if (!_world.IsDynamicMap(hello.mapId))
             {
                 Answer(connectionId, hello.cellId, hello.incarnation);
+                if (!hello.dynamicMap && BandsWithDynamicMap(hello.cellId))
+                {
+                    // A Static neighbour of a Dynamic map: it takes every broadcast and acks it (Slice 2b decision 14).
+                    BindStaticNeighbour(connectionId, hello.cellId, hello.mapId, hello.incarnation);
+                    return;
+                }
                 Note(connectionId, MeshNoteLevel.Warning, hello.cellId, "mode-mismatch",
                     $"map {hello.mapId} is Static on the central{(hello.dynamicMap ? " but Dynamic on cell " + hello.cellId : string.Empty)}; the cell was answered with no runtime layout");
                 return;
             }
+            if (HelloGetsRetire(connectionId, hello))
+                return;
             if (_bindings.TryGetValue(hello.cellId, out MeshCellBinding binding))
             {
                 if (binding.connectionId != connectionId || binding.incarnation != hello.incarnation)
@@ -254,10 +182,12 @@ namespace MultiplayerARPG.MMO.Mesh
             binding.applied = hello.held != null ? hello.held.pair : MeshLayoutPair.None;
             binding.unregisteredAt = -1f;
             binding.mismatchLogged = false;
+            binding.hasEvidence = false;
             _firstSeenWithoutHello.Remove(hello.cellId);
 
             MapRecovery map = MapOf(hello.mapId);
-            if (HeldEntriesOf(hello) > 0 && !map.helloHeldEntries)
+            // A layout this coordinator sent (a split's cell registering again) is no reason to recover (decision 5b).
+            if (MeshRecoveryResolver.HeldReopensRecovery(HeldEntriesOf(hello), binding.applied, Incarnation) && !map.helloHeldEntries)
             {
                 // A cell still holds a runtime layout from before this coordinator: the map cannot run its asset cut blindly.
                 map.helloHeldEntries = true;
@@ -278,6 +208,8 @@ namespace MultiplayerARPG.MMO.Mesh
                     Note(connectionId, MeshNoteLevel.Error, hello.cellId, "recovery-frozen", $"map {hello.mapId} is frozen: {map.reason}; cell {hello.cellId} gets no layout");
                     break;
                 default:
+                    if (SplitAnswersHello(connectionId, hello, binding))
+                        break;
                     Answer(connectionId, hello.cellId, binding.incarnation);
                     binding.answered = true;
                     break;
@@ -313,13 +245,21 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>OnLayoutAck: a cell applied or rejected a layout (only the bound connection and incarnation count).</summary>
         public void OnLayoutAck(long connectionId, MeshLayoutAckMessage ack)
         {
+            if (Phase == MeshCoordinatorPhase.Stopped)
+                return;
             MeshCellBinding binding = BindingOf(ack.cellId);
+            if (binding == null || (binding.staticNeighbour && (binding.connectionId != connectionId || binding.incarnation != (ack.incarnation ?? string.Empty))))
+                binding = BindStaticFromAck(connectionId, ack) ?? binding;
             if (binding == null || binding.connectionId != connectionId || binding.incarnation != (ack.incarnation ?? string.Empty))
                 return;
             if (ack.result == MeshLayoutAckResult.Applied)
-                binding.applied = ack.pair;
+            {
+                if (ack.pair.IsNewerThan(binding.applied))
+                    binding.applied = ack.pair;
+            }
             else
                 _log.Warning($"Cell {ack.cellId} rejected layout {ack.pair}: {ack.reason}");
+            SplitOnAck(ack);
         }
 
         /// <summary>OnLoadReport: a bound cell's report is evidence it is alive and what layout it measured under.</summary>
@@ -332,7 +272,9 @@ namespace MultiplayerARPG.MMO.Mesh
                 return;
             binding.lastEvidenceAt = _clock.Now;
             MeshLayoutPair reported = new MeshLayoutPair(report.layoutIncarnation, report.layoutVersion);
-            if (!binding.applied.IsNone && reported != binding.applied && !binding.mismatchLogged)
+            // A report measured before the cell's latest apply lags by design (a split moves the pair every step); one
+            // ahead of every ack means the cell holds a layout this coordinator never heard it apply.
+            if (!binding.applied.IsNone && reported.IsNewerThan(binding.applied) && !binding.mismatchLogged)
             {
                 binding.mismatchLogged = true;
                 _log.Warning($"Cell {report.cellId} reports layout {reported} but acknowledged {binding.applied}");
@@ -381,6 +323,7 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             if (Phase == MeshCoordinatorPhase.Recovering)
                 ResolveAll();
+            SplitTick();
         }
 
         private MapRecovery MapOf(string mapId)

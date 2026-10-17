@@ -32,7 +32,7 @@ using UnityEditor;
 
 namespace MultiplayerARPG.MMO.Mesh
 {
-    public class ServerMeshAutoClient : MonoBehaviour
+    public partial class ServerMeshAutoClient : MonoBehaviour
     {
         public const string ARG_ENABLE = "-meshAutoClient";
         public const string ARG_MODE = "-meshAutoMode";
@@ -200,6 +200,7 @@ namespace MultiplayerARPG.MMO.Mesh
             if (!string.IsNullOrEmpty(returnX) && float.TryParse(returnX, out float rx)) c.walkReturnX = rx;
             if (!string.IsNullOrEmpty(seamPreload) && float.TryParse(seamPreload, out float sp)) c.seamPreloadOverride = sp;
             if (!string.IsNullOrEmpty(botNet) && float.TryParse(botNet, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float bn) && bn > 0f) c.botNetSeconds = bn;
+            c.ReadMigrationSettings(args);
         }
 
         private static string ReadArg(string[] args, string key, string fallback)
@@ -576,7 +577,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     yield return RunPvp(deadline);
                     break;
                 case Mode.harvest:
-                    yield return RunHarvest(deadline);
+                    yield return harvestAfterMigration ? RunHarvestAfterMigration(deadline) : RunHarvest(deadline);
                     break;
                 case Mode.build:
                     yield return RunBuild(deadline);
@@ -705,6 +706,7 @@ namespace MultiplayerARPG.MMO.Mesh
             _walkZOverride = null;
             BasePlayerCharacterEntity self = GameInstance.PlayingCharacterEntity;
             Log($"Standing at {(self != null ? self.EntityTransform.position : Vector3.zero)} party={(self != null ? self.PartyId : 0)}; watching exp/gold/quests for {observeSeconds}s");
+            BeginStandMigrations(self);
             int expStart = self != null ? self.Exp : 0, goldStart = self != null ? self.Gold : 0, levelStart = self != null ? self.Level : 0, killsStart = CountQuestKills(self);
             float end = Time.realtimeSinceStartup + observeSeconds, nextLog = 0f;
             while (Time.realtimeSinceStartup < end)
@@ -715,11 +717,12 @@ namespace MultiplayerARPG.MMO.Mesh
                     nextLog = Time.realtimeSinceStartup + 10f;
                     Log($"stand: level={self.Level} exp={self.Exp} gold={self.Gold} questKills={CountQuestKills(self)} hp={self.CurrentHp}/{self.MaxHp} buffs={self.Buffs.Count}");
                 }
+                PollStandMigrations();
                 yield return null;
             }
             self = GameInstance.PlayingCharacterEntity;
             Finished = true; Passed = reached;
-            Log($"RESULT stand: reached={reached} exp+{(self != null ? self.Exp - expStart : 0)} gold+{(self != null ? self.Gold - goldStart : 0)} level+{(self != null ? self.Level - levelStart : 0)} questKills+{CountQuestKills(self) - killsStart} -> {(Passed ? "PASS" : "FAIL")}");
+            Log($"RESULT stand: reached={reached} exp+{(self != null ? self.Exp - expStart : 0)} gold+{(self != null ? self.Gold - goldStart : 0)} level+{(self != null ? self.Level - levelStart : 0)} questKills+{CountQuestKills(self) - killsStart}{StandMigrationsSuffix()} -> {(Passed ? "PASS" : "FAIL")}");
         }
 
         private static int CountQuestKills(BasePlayerCharacterEntity self)

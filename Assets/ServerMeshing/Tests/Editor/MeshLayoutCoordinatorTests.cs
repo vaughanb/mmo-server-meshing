@@ -236,7 +236,7 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             Assert.That(coordinator.OutcomeOf(Map1), Is.EqualTo(MeshRecoveryOutcome.Frozen));
             Assert.That(_transport.layouts, Is.Empty);
             Assert.That(_transport.notes, Has.Some.Matches<(long connection, MeshCoordinatorNoteMessage message)>(n => n.message.code == "recovery-frozen"));
-            Assert.That(_log.errors, Has.Some.Contains("needs Slice 2b"));
+            Assert.That(_log.errors, Has.Some.Contains("Slice 5 recovery"));
         }
 
         [Test]

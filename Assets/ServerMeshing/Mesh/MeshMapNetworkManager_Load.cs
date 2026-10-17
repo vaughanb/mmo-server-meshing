@@ -164,6 +164,7 @@ namespace MultiplayerARPG.MMO.Mesh
             MeshSendWindow sends = TakeSendWindow(window, out long wireBytes, out long wirePackets);
             string senderLine = _stateSender != null ? _stateSender.TakeWindowLine(window) : null;
             ReportProbeTransitions(before, _lastWorkWindow);
+            SplitOnWorkWindow(window); // Slice 2b: the Prewarm window line and the split-gate evidence (Dynamic maps)
             if (!HasOwnZone || (OwnCell.owned.IsEmpty && OwnCell.interest.IsEmpty))
                 return; // a retired cell measures nothing
             MeshLoadReportMessage report = BuildLoadReport(window);

@@ -30,7 +30,9 @@ and the space game) before slices 2b-6.
   a kinematic puppet costs about a seventh of a steered one (k_band 0.174 against 0.93); G3-F GO; halves/coarse
   0.57-0.60 GO; strips4/halves 0.57-0.69 GO (steered controls NO-GO); G-GEO (b) FAIL narrowly (0.058 against 0.05),
   (c) PASS; W* about 57 m kinematic, 307 m steered; s_min 125 m at an 80 m band on a 1 km ladder. **All stage 0a numbers
-  are machine B's CPU** (Ryzen AI 9 HX 370, 60 fps, 0.03 s physics).
+  are machine B's CPU** (Ryzen AI 9 HX 370, 60 fps, 0.03 s physics). The 30 fps G3-F set stage 0a never ran was run
+  as slice 2b's acceptance on machine A (2026-10-17, epoch 2026-10-08n, 66/66, `Logs/p0/report_20261017_035136.md`):
+  G3-F (U) at 30/0.02 GO, k 0.243 [0.193, 0.292]; Kill (characters, U) at 30/0.02 NOT KILLED.
 - **Step 5, done.** Metered transport, send meter, phantom clients (character, eye), the sink on B. Virtual
   acceptance passed on B; the two-machine sink acceptance passed when driven from A (9/9, -0.04 % bytes).
 - **Step 6, done (2026-10-03).** The state sender (`Mesh/Sync/MeshStateSender*.cs`), kit adapter, CE-12 check.

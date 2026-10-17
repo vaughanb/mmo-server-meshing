@@ -922,6 +922,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     continue;
                 _handoffCandidates.Add(entity);
             }
+            PaceHandoffCandidates(_handoffCandidates); // Slice 2b: drain admission while a split is in progress
 
             for (int i = 0; i < _handoffCandidates.Count; ++i)
             {

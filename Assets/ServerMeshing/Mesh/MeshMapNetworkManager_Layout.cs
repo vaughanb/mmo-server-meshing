@@ -55,6 +55,12 @@ namespace MultiplayerARPG.MMO.Mesh
             string mapId = OwnMapId;
             bool dynamicMap = world != null && !string.IsNullOrEmpty(mapId) && world.IsDynamicMap(mapId);
             _layoutGate.Reset(dynamicMap);
+            _layoutAppliedHere = false;
+            _retiring = false;
+            PacingOnStartServer();
+            PrewarmOnStartServer();
+            EvidenceOnStartServer();
+            StaticHandoffOnStartServer();
             _heldPlacements.TakeAll();
             SetStreamTargets(_streamTargetIds, OwnCell);
             if (ClusterClient != null)
@@ -97,12 +103,19 @@ namespace MultiplayerARPG.MMO.Mesh
                 Logging.LogError("Mesh", $"Server stopping with {held.Count} building(s) still held by the layout gate, their items already spent: {string.Join(", ", ids)}");
             }
             _streamTargetIds.Clear();
+            PrewarmOnStopServer();
         }
 
-        /// <summary>Says hello to the central's layout coordinator (Dynamic maps only), on every accepted cluster registration.</summary>
+        /// <summary>
+        /// Says hello to the central's layout coordinator on every accepted cluster registration: a Dynamic map's cell, and a
+        /// Static map's cell that bands with a Dynamic map (Slice 2b decision 14: it receives the broadcasts, applies only
+        /// the band-neighbour part, acks and never gates). A Static cell with no Dynamic neighbour says nothing, as before.
+        /// </summary>
         private void SendLayoutHello()
         {
-            if (!IsDynamicMap || world == null || ClusterClient == null || !ClusterClient.IsAppRegistered)
+            if (world == null || ClusterClient == null || !ClusterClient.IsAppRegistered)
+                return;
+            if (!IsDynamicMap && !(OwnCell != null && BandsWithDynamicMap(OwnCell)))
                 return;
             MeshLayoutSnapshot held = world.AppliedSnapshot ?? new MeshLayoutSnapshot();
             MeshLayoutHelloMessage hello = new MeshLayoutHelloMessage
@@ -110,7 +123,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 cellId = LayoutCellId,
                 mapId = OwnMapId,
                 incarnation = CellIncarnation,
-                dynamicMap = true,
+                dynamicMap = IsDynamicMap,
                 held = held,
             };
             ClusterClient.SendPacket(0, DeliveryMethod.ReliableOrdered, MeshClusterMsg.LayoutHello, writer => hello.Serialize(writer));
@@ -166,10 +179,9 @@ namespace MultiplayerARPG.MMO.Mesh
             MeshLayoutSnapshot snapshot = message.snapshot ?? new MeshLayoutSnapshot();
             MeshLayoutPair pair = snapshot.pair;
             bool answer = message.kind == MeshLayoutKind.HelloAnswer;
-            if (answer && !(string.Equals(message.targetCellId, cellId, System.StringComparison.OrdinalIgnoreCase)
-                && string.Equals(message.targetIncarnation, CellIncarnation, System.StringComparison.Ordinal)))
+            if (!MeshLayoutTarget.Accepts(message.kind, message.targetCellId, message.targetIncarnation, cellId, CellIncarnation))
             {
-                Logging.Log("Mesh", $"Layout answer for cell {message.targetCellId} incarnation {message.targetIncarnation} reached cell {cellId} incarnation {CellIncarnation}; ignored");
+                Logging.Log("Mesh", $"Layout {(answer ? "answer" : "step")} for cell {message.targetCellId} incarnation {message.targetIncarnation} reached cell {cellId} incarnation {CellIncarnation}; ignored");
                 return;
             }
             if (world == null)
@@ -197,12 +209,19 @@ namespace MultiplayerARPG.MMO.Mesh
                     Logging.Log("Mesh", $"Layout gate open on {cellId} (already at {pair})");
                 return;
             }
+            if (RetiresInLayout(snapshot))
+            {
+                SendLayoutAck(pair, MeshLayoutAckResult.Applied, "retiring");
+                RetireThisCell();
+                return;
+            }
             // Every check that can refuse runs before anything changes: an ack is never Rejected after a commit.
             if (!CanHoldLayout(snapshot, out string refusal))
             {
                 RejectLayout(pair, refusal);
                 return;
             }
+            SplitBeforeLayoutApply();
             if (!world.ApplyLayout(snapshot, out MeshLayoutChange change, out string reason))
             {
                 RejectLayout(pair, reason);
@@ -213,6 +232,7 @@ namespace MultiplayerARPG.MMO.Mesh
             if (answer && _layoutGate.OnAnswered())
                 Logging.Log("Mesh", System.FormattableString.Invariant($"Layout gate open on {cellId} {Time.unscaledTime - _layoutGate.FirstHelloAt:0.0}s after LayoutHello"));
             SendLayoutAck(pair, MeshLayoutAckResult.Applied, null);
+            SplitOnLayoutApplied(pair); // after the ack: the evidence of the change follows it
         }
 
         /// <summary>Whether this cell can hold the layout: it must be in it (as an asset cell or an entry) and not retired there.</summary>
@@ -304,8 +324,22 @@ namespace MultiplayerARPG.MMO.Mesh
                 EnsureNeighbourLinks();
                 _nextLinkCheck = Time.unscaledTime + 1f;
             }
-            MeshFrameOffsets.Recompute(world, cell, _neighbourZoneByConnection, _frameOffsetByConnection);
-            Logging.Log("Mesh", System.FormattableString.Invariant($"Layout {change.pair} applied: {cell.id} owns {Span(cell.owned)} interest {Span(cell.interest)}, {_currentTargetIds.Count} targets"));
+            // A neighbour of a new cell can say hello before this cell applies the layout naming it, so its link came up
+            // with no frame offset; the apply sets it, and says so when it is not zero.
+            _tmpOffsetZones.Clear();
+            MeshFrameOffsets.Recompute(world, cell, _neighbourZoneByConnection, _frameOffsetByConnection, _tmpOffsetZones);
+            for (int i = 0; i < _tmpOffsetZones.Count; ++i)
+            {
+                MeshCell sender = world.GetCellById(_tmpOffsetZones[i]);
+                Vector3 offset = sender.OffsetTo(cell);
+                if (offset != Vector3.zero)
+                    Logging.Log("Mesh", $"Neighbour zone {sender.id} frame offset {offset} from layout {change.pair}");
+            }
+            if (IsDynamicMap)
+                Logging.Log("Mesh", System.FormattableString.Invariant($"Layout {change.pair} applied: {cell.id} owns {Span(cell.owned)} interest {Span(cell.interest)}, {_currentTargetIds.Count} targets"));
+            else
+                Logging.Log("Mesh", System.FormattableString.Invariant($"Layout {change.pair} neighbours applied: {cell.id} band {string.Join(",", _currentTargetIds)}"));
+            _layoutAppliedHere = true; // from now on a puppet's change of owner is logged
             _streamTargetIds.Clear();
             _streamTargetIds.AddRange(_currentTargetIds);
         }
@@ -379,13 +413,59 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (!TryReadCentralMessage(messageHandler, "Retire", out MeshRetireMessage message))
                 return;
-            if (!string.Equals(message.cellId, OwnZoneId, System.StringComparison.OrdinalIgnoreCase)
+            string cellId = LayoutCellId; // a child that holds no layout yet has no own zone, only the id it was started as
+            if (!string.Equals(message.cellId, cellId, System.StringComparison.OrdinalIgnoreCase)
                 || !string.Equals(message.incarnation, CellIncarnation, System.StringComparison.Ordinal))
             {
-                Logging.LogWarning("Mesh", $"Retire for cell {message.cellId} incarnation {message.incarnation} reached cell {OwnZoneId} incarnation {CellIncarnation}; ignored");
+                Logging.LogWarning("Mesh", $"Retire for cell {message.cellId} incarnation {message.incarnation} reached cell {cellId} incarnation {CellIncarnation}; ignored");
                 return;
             }
-            Logging.LogWarning("Mesh", $"Retire asked for cell {OwnZoneId} at layout {message.pair} ({message.reason}), but this version cannot retire a running cell; staying up");
+            if (MayRetireNow(message.cellId, message.incarnation))
+            {
+                RetireThisCell();
+                return;
+            }
+            Logging.LogWarning("Mesh", $"Retire asked for cell {cellId} at layout {message.pair} ({message.reason}), but this version cannot retire a running cell; staying up");
+        }
+
+        private bool _retiring;
+        private readonly List<string> _tmpOffsetZones = new List<string>();
+
+        /// <summary>
+        /// MayRetireNow: a dynamic cell of a Dynamic map that owns nothing yet (no layout, or Pending in the one it holds)
+        /// may end itself (Slice 2b decision 5a); an asset cell, or a child that owns something, may not.
+        /// </summary>
+        private bool MayRetireNow(string retireCellId, string retireIncarnation)
+        {
+            if (!IsDynamicMap || world == null || (HasOwnZone && !OwnCell.isDynamic))
+                return false;
+            bool holdsLayout = HasOwnZone && !world.AppliedPair.IsNone;
+            return MeshRetireRule.ShouldRetire(retireCellId, retireIncarnation, LayoutCellId, CellIncarnation, holdsLayout, OwnCell != null ? OwnCell.state : MeshCellState.Pending);
+        }
+
+        /// <summary>A layout that names this cell Retired while it may retire (an aborted split's version after its e1 broadcast).</summary>
+        private bool RetiresInLayout(MeshLayoutSnapshot snapshot)
+        {
+            if (!IsDynamicMap)
+                return false;
+            string id = LayoutCellId;
+            for (int i = 0; i < snapshot.entries.Count; ++i)
+            {
+                MeshLayoutEntry entry = snapshot.entries[i];
+                if (entry != null && entry.state == MeshCellState.Retired && string.Equals(entry.id, id, System.StringComparison.OrdinalIgnoreCase))
+                    return MayRetireNow(id, CellIncarnation);
+            }
+            return false;
+        }
+
+        /// <summary>The child ends itself through the kit's quit path: the spawner cannot stop one process.</summary>
+        private void RetireThisCell()
+        {
+            if (_retiring)
+                return;
+            _retiring = true;
+            Logging.Log("Mesh", $"Split retire: {LayoutCellId} retired before it owned anything");
+            Application.Quit();
         }
 
         private void HandleCoordinatorNote(MessageHandlerData messageHandler)

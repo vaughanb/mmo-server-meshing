@@ -15,7 +15,9 @@
 // on the rig against 10 s or more of travel).
 //
 // Dynamic cells (DESIGN.md 0.72): when the world has a Dynamic map, this server also runs the layout coordinator
-// (MeshLayoutCoordinator), which answers each cell's layout hello; with none, nothing of it runs.
+// (MeshLayoutCoordinator), which answers each cell's layout hello and runs manual splits (Slice 2b,
+// MeshCentralNetworkManager_Split.cs); with none, nothing of it runs. A split family is never slept or started by the
+// awake set, and a wake request for a dynamic id is refused: the coordinator runs those cells.
 using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
 using LiteNetLib;
@@ -24,7 +26,7 @@ using UnityEngine;
 
 namespace MultiplayerARPG.MMO.Mesh
 {
-    public class MeshCentralNetworkManager : CentralNetworkManager
+    public partial class MeshCentralNetworkManager : CentralNetworkManager
     {
         [Header("Server Meshing")]
         [Tooltip("World registry: every cell of every layout becomes a channel of this central server.")]
@@ -90,6 +92,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 // answer (and a note), so its gate never waits for ever.
                 ClusterServer.RegisterMessageHandler(MeshClusterMsg.LayoutHello, HandleLayoutHello);
                 ClusterServer.RegisterMessageHandler(MeshClusterMsg.LayoutAck, HandleLayoutAck);
+                ClusterServer.RegisterMessageHandler(MeshClusterMsg.LayoutEvidence, HandleLayoutEvidence);
                 // Answered whether or not cells sleep: a cell asks whenever a neighbour it needs is not registered, and an
                 // unregistered request type makes the kit log an error for every one of them.
                 ClusterServer.RegisterRequestHandler<MeshWakeRequest, MeshWakeResponse>(MeshClusterMsg.Wake, HandleWakeRequest);
@@ -111,6 +114,7 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             MeshCoordinatorStore store = new MeshCoordinatorStore(MeshCoordinatorStore.ResolvePath(world.dynamicSettings.coordinatorStorePath));
             _coordinator = new MeshLayoutCoordinator(world, new MeshUnityClock(), new MeshClusterCoordinatorTransport(ClusterServer), store, new MeshKitLog());
+            AttachSplit(_coordinator);
             _coordinator.Start();
             _nextCoordinatorTick = 0f;
         }
@@ -227,6 +231,8 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (cell == null)
                 return false;
+            if (cell.isDynamic)
+                return IsCellUp(cell);   // the coordinator runs dynamic cells; nothing here starts one
             _wakeHolds[cell.id] = Time.unscaledTime + wakeHoldSeconds;
             if (IsCellUp(cell))
                 return true;
@@ -260,6 +266,12 @@ namespace MultiplayerARPG.MMO.Mesh
         private UniTaskVoid HandleWakeRequest(RequestHandlerData requestHandler, MeshWakeRequest request, RequestProceedResultDelegate<MeshWakeResponse> result)
         {
             MeshCell cell = world != null ? world.GetCell(request.mapId, request.cellId) ?? world.GetCellById(request.cellId) : null;
+            if ((cell != null && cell.isDynamic) || (_coordinator != null && _coordinator.IsOperationChild(request.cellId)))
+            {
+                Logging.LogWarning("Mesh", $"Wake requested for dynamic cell {request.cellId} by connection {requestHandler.ConnectionId}: refused, the layout coordinator runs it");
+                result.Invoke(AckResponseCode.Success, new MeshWakeResponse { accepted = false, reason = MeshWakeRefusal.UnknownCell });
+                return default;
+            }
             if (!sleepCells)
             {
                 result.Invoke(AckResponseCode.Success, new MeshWakeResponse { accepted = false, reason = MeshWakeRefusal.SleepingOff });
@@ -311,6 +323,13 @@ namespace MultiplayerARPG.MMO.Mesh
             for (int i = 0; i < cells.Count; ++i)
             {
                 MeshCell cell = cells[i];
+                if (IsSplitFamilyCell(cell))
+                {
+                    // A split family is never slept and never started here: its cells merge first (plan D3).
+                    _unwantedSince.Remove(cell.id);
+                    _sleepSent.Remove(cell.id);
+                    continue;
+                }
                 bool up = IsCellUp(cell);
                 bool wanted = _wanted.Contains(cell.id);
                 if (wanted)

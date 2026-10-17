@@ -296,12 +296,24 @@ namespace MultiplayerARPG.MMO.Mesh
                 bool resolved = TryResolveOwnZone();
                 // Rig toggle for capacity runs that must separate the players' cost from the monsters'.
                 bool noMonsters = System.Environment.GetEnvironmentVariable(ENV_NO_MONSTERS) == "1";
-                bool allMonsterAreas = !noMonsters && System.Environment.GetEnvironmentVariable(ENV_MONSTER_AREAS) == "all";
+                string monsterAreas = noMonsters ? null : System.Environment.GetEnvironmentVariable(ENV_MONSTER_AREAS);
+                bool allMonsterAreas = monsterAreas == "all";
+                // Or a comma list of area names: those saved inactive are switched on too (the split scenarios).
+                HashSet<string> namedAreas = null;
+                if (!allMonsterAreas && !string.IsNullOrWhiteSpace(monsterAreas))
+                {
+                    namedAreas = new HashSet<string>(System.StringComparer.Ordinal);
+                    foreach (string name in monsterAreas.Split(','))
+                        if (name.Trim().Length > 0)
+                            namedAreas.Add(name.Trim());
+                }
                 int kept = 0, disabled = 0, switchedOn = 0;
-                FindObjectsInactive inactive = allMonsterAreas ? FindObjectsInactive.Include : FindObjectsInactive.Exclude;
+                FindObjectsInactive inactive = allMonsterAreas || namedAreas != null ? FindObjectsInactive.Include : FindObjectsInactive.Exclude;
                 // Switched on before the base class discovers the active areas below, so each area has one owner.
                 foreach (MonsterSpawnArea area in FindObjectsByType<MonsterSpawnArea>(inactive, FindObjectsSortMode.None))
                 {
+                    if (namedAreas != null && !area.gameObject.activeSelf && !namedAreas.Contains(area.gameObject.name))
+                        continue; // saved inactive and not named: left as the scene has it
                     if (!noMonsters && resolved && MonsterAreaOwnedHere(area.transform.position))
                     {
                         if (!area.gameObject.activeSelf) { area.gameObject.SetActive(true); switchedOn++; }
@@ -314,14 +326,16 @@ namespace MultiplayerARPG.MMO.Mesh
                     Logging.Log("Mesh", $"{ENV_NO_MONSTERS}=1: every monster spawn area disabled on this cell");
                 if (allMonsterAreas)
                     Logging.Log("Mesh", $"{ENV_MONSTER_AREAS}=all: {switchedOn} monster spawn area(s) saved inactive switched on in zone {OwnZoneId}");
+                else if (namedAreas != null)
+                    Logging.Log("Mesh", $"{ENV_MONSTER_AREAS}={string.Join(",", namedAreas)}: {switchedOn} named monster spawn area(s) saved inactive switched on in zone {OwnZoneId}");
                 foreach (HarvestableSpawnArea area in FindObjectsByType<HarvestableSpawnArea>(FindObjectsSortMode.None))
                 {
-                    if (resolved && MeshCell.Same(world.OwnerOf(OwnCell, area.transform.position), OwnCell)) { kept++; continue; }
+                    if (resolved && SpawnAreaOwnedHere(area.transform.position)) { kept++; continue; }
                     area.gameObject.SetActive(false); disabled++;
                 }
                 foreach (ItemDropSpawnArea area in FindObjectsByType<ItemDropSpawnArea>(FindObjectsSortMode.None))
                 {
-                    if (resolved && MeshCell.Same(world.OwnerOf(OwnCell, area.transform.position), OwnCell)) { kept++; continue; }
+                    if (resolved && SpawnAreaOwnedHere(area.transform.position)) { kept++; continue; }
                     area.gameObject.SetActive(false); disabled++;
                 }
                 if (resolved)
@@ -330,6 +344,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     Logging.LogWarning("Mesh", $"Channel {ChannelId} is not a cell of meshed map {OwnMapId}: all {disabled} spawn areas disabled");
             }
             base.OnServerOnlineSceneLoaded();
+            SplitOnSceneLoaded(); // Slice 2b: a Dynamic map registers every spawn area's prefabs
         }
 
         private void GhostingUpdate()
@@ -339,6 +354,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 client.Update();
             if (_kinematicGhosts.Count > 0)
                 KinematicPuppetsUpdate(); // after the pumps: every snapshot of this frame is in
+            PrewarmUpdate(); // Slice 2b: queued puppet spawns on a Dynamic map, within the frame's budget
 
             if (!enableBorderGhosting || world == null || !HasOwnZone)
                 return;
@@ -366,6 +382,7 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 _nextSnapshotTime = Time.unscaledTime + Mathf.Max(0.02f, ghostSnapshotInterval);
                 MonsterHandoffTick();
+                SplitEntityTick(); // Slice 2b: statics, server-owned characters, drain evidence (Dynamic maps)
                 TickHandoffAcks();
                 SendBandSnapshots();
                 ExpireGhosts();
@@ -613,6 +630,7 @@ namespace MultiplayerARPG.MMO.Mesh
             if (!(entity is BasePlayerCharacterEntity))
                 EnsureBirthMeshId(entity, entity.ObjectId);
             _ownedCharacters.Add(entity, OwnedKeyOf(entity), 0); // characters move: measured against the bands every tick
+            NoteOwnedSince(entity);
             if (entity is BaseMonsterCharacterEntity monster && !_killHooks.ContainsKey(monster))
             {
                 BaseMonsterCharacterEntity captured = monster;
@@ -628,6 +646,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 return;
             MeshIdentity id = EnsureBirthMeshId(drop, drop.ObjectId);
             _ownedDrops.Add(drop, id.MeshEntityId, BandMaskOf(drop.EntityTransform.position));
+            NoteOwnedSince(drop);
         }
 
         /// <summary>Forget an entity: destroyed, demoted to a puppet, or unregistered.</summary>
@@ -635,6 +654,7 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (entity == null)
                 return;
+            OnOwnedUntracked(entity);
             if (entity is BaseCharacterEntity character)
             {
                 _ownedCharacters.Remove(character);
@@ -1008,6 +1028,7 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (playerCharacter == null)
                 return;
+            PrewarmConsume(playerCharacter.Id);
             if (_pendingHandoffAcks.TryGetValue(playerCharacter.Id, out PendingHandoffAck unclaimed))
             {
                 // The client is here, so the cell we sent it to did not keep it: it refused (a restarted destination
@@ -1142,6 +1163,7 @@ namespace MultiplayerARPG.MMO.Mesh
         private bool TryPromoteGhostForArrival(long connectionId, string userId, PlayerCharacterData data, out BasePlayerCharacterEntity entity)
         {
             entity = null;
+            PrewarmServeNow(data?.Id); // Slice 2b: a queued puppet is spawned now, so the arrival promotes it
             if (data == null || !_ghosts.TryGetValue(data.Id, out MeshGhost ghost) || ghost.entity == null || ghost.reserved)
                 return false;
             BasePlayerCharacterEntity player = ghost.entity as BasePlayerCharacterEntity;
@@ -1323,6 +1345,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 Logging.LogWarning("Mesh", $"Neighbour zone {zoneId} restarted (incarnation {previous} -> {incarnation}); releasing what the old process held");
                 ReleaseLentMonsters(zoneId, "neighbour restarted", linkUpAt);
                 ReleaseBorrowedMonsters(zoneId, "home zone restarted", incarnation);
+                ReleaseStaticRecords(zoneId, "neighbour restarted", incarnation, linkUpAt);
             }
             if (!string.IsNullOrEmpty(incarnation))
                 _neighbourIncarnation[zoneId] = incarnation;
@@ -1339,6 +1362,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 Logging.Log("Mesh", $"Neighbour zone {zoneId}: connection {stale} superseded by {connectionId}");
             }
             _neighbourZoneByConnection[connectionId] = zoneId;
+            NoteNeighbourHello(connectionId, zoneId); // Slice 2b: the e1 gate's evidence
             // Positions on this link are in the sender's frame; a neighbour of another map has a different one.
             MeshCell sender = world != null ? world.GetCellById(zoneId) : null;
             Vector3 frameOffset = sender != null && OwnCell != null ? sender.OffsetTo(OwnCell) : Vector3.zero;
@@ -1515,6 +1539,8 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 if (_recentlyRemoved.ContainsKey(msg.characterId))
                     return; // a snapshot that overtook its GhostRemove on the sequenced channel
+                if (QueuePuppetSpawn(connectionId, msg))
+                    return; // Slice 2b: a Dynamic map spawns puppets through the paced queue
                 BaseCharacterEntity entity = SpawnGhostEntity(msg);
                 if (entity == null)
                     return;
@@ -1543,7 +1569,10 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 MeshIdentity gid = MeshIdentity.Get(ghost.entity);
                 if (gid != null && gid.OwnerZoneId != ownerZone)
+                {
+                    NoteGhostOwnerChange(msg, gid.OwnerZoneId, ownerZone);
                     gid.OwnerZoneId = ownerZone; // ownership moved (monster handoff between neighbours)
+                }
                 if (_lentMonsters.TryGetValue(msg.characterId, out LentMonster lent))
                     lent.SetOwner(ownerZone);
             }
@@ -2011,6 +2040,7 @@ namespace MultiplayerARPG.MMO.Mesh
 
         internal void OnGhostRemove(long connectionId, string meshId)
         {
+            PrewarmConsume(meshId);
             // Only the cell that owns the entity may remove its puppet. Ownership moves by snapshot (the new owner's
             // stream takes the puppet over), so a removal from the previous owner that arrives after the move would
             // destroy a puppet the new owner is streaming, and _recentlyRemoved would then hide it for a second.
@@ -2121,6 +2151,8 @@ namespace MultiplayerARPG.MMO.Mesh
             if (Time.unscaledTime < _nextHarvestablePrefabScan)
                 return false;
             _nextHarvestablePrefabScan = Time.unscaledTime + 5f;
+            if (IsDynamicMap)
+                return RegisterSpawnAreaPrefabs() > 0; // Slice 2b: every kind of spawn area, inactive ones included
             int registered = 0;
             foreach (HarvestableSpawnArea area in FindObjectsByType<HarvestableSpawnArea>(FindObjectsInactive.Include, FindObjectsSortMode.None))
             {
@@ -2500,6 +2532,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     continue; // same hysteresis as players: only once clearly past the line
                 _monsterHandoffCandidates.Add(monster);
             }
+            PaceMonsterCandidates(_monsterHandoffCandidates); // Slice 2b: drain admission while a split is in progress
             for (int i = 0; i < _monsterHandoffCandidates.Count; ++i)
                 HandoffMonster(_monsterHandoffCandidates[i]);
             _monsterHandoffCandidates.Clear();
@@ -2618,6 +2651,7 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (!IsServer)
                 return;
+            PrewarmServeNow(msg.meshId); // Slice 2b: a queued puppet is spawned now, so the handoff promotes it
             Vector3 frameOffset = OffsetFrom(connectionId);
             msg.position += frameOffset;
             msg.spawnPosition += frameOffset;
@@ -2647,6 +2681,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (prefab == null)
                 {
                     WarnThrottled($"Monster handoff {msg.meshId} from {fromZone}: unknown monster entity id {msg.entityId}; dropped");
+                    ReplyMonsterHandoffFailed(fromZone, msg.meshId, $"unknown monster entity id {msg.entityId}");
                     return;
                 }
                 LiteNetLibIdentity identity = Assets.NetworkSpawn(prefab.Identity.HashAssetId, msg.position, rot);
@@ -2655,6 +2690,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 {
                     WarnThrottled($"Monster handoff {msg.meshId} from {fromZone}: cannot spawn entity id {msg.entityId}; dropped");
                     if (identity != null) identity.NetworkDestroy();
+                    ReplyMonsterHandoffFailed(fromZone, msg.meshId, $"cannot spawn entity id {msg.entityId}");
                     return;
                 }
             }
@@ -3526,9 +3562,9 @@ namespace MultiplayerARPG.MMO.Mesh
                     Logging.Log("Mesh", $"Handoff ack for {ack.msg.characterId} to zone {ack.zone} sent {Time.unscaledTime - ack.since:0.0}s late, once the link came up");
                     _deferredAcks.RemoveAt(i);
                 }
-                else if (Time.unscaledTime - ack.since > handoffAckGuardSeconds)
+                else if (Time.unscaledTime - ack.since > HandoffAckGuardSeconds)
                 {
-                    Logging.LogWarning("Mesh", $"Handoff ack for {ack.msg.characterId} to zone {ack.zone} dropped: no link to it for {handoffAckGuardSeconds:0}s");
+                    Logging.LogWarning("Mesh", $"Handoff ack for {ack.msg.characterId} to zone {ack.zone} dropped: no link to it for {HandoffAckGuardSeconds:0}s");
                     _deferredAcks.RemoveAt(i);
                 }
             }
@@ -3574,7 +3610,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     else if (kv.Value.linkDownSince < 0f)
                         kv.Value.linkDownSince = Time.unscaledTime;
                     bool linkDead = kv.Value.linkDownSince >= 0f && Time.unscaledTime - kv.Value.linkDownSince > handoffLinkDownGraceSeconds;
-                    if (linkDead || Time.unscaledTime - kv.Value.sentTime > handoffAckGuardSeconds)
+                    if (linkDead || Time.unscaledTime - kv.Value.sentTime > HandoffAckGuardSeconds)
                         (expired ??= new List<string>()).Add(kv.Key);
                 }
                 if (expired != null)
@@ -3583,7 +3619,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     {
                         if (!_pendingHandoffAcks.TryGetValue(characterId, out PendingHandoffAck pending))
                             continue;
-                        RollBackHandoff(characterId, pending, IsNeighbourLinked(pending.zone) ? $"no ack from the destination in {handoffAckGuardSeconds:0} s" : "link to the destination is down");
+                        RollBackHandoff(characterId, pending, IsNeighbourLinked(pending.zone) ? $"no ack from the destination in {HandoffAckGuardSeconds:0} s" : "link to the destination is down");
                     }
                 }
             }

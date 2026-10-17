@@ -1,5 +1,6 @@
 // Server Meshing add-on — the cluster messages of dynamic cells (DESIGN.md 0.72, plan D3): the central's layout
-// snapshots and notes to the map servers, and their hellos and acks back. Ids in MeshClusterMsg (30014-30018).
+// snapshots and notes to the map servers, and their hellos and acks back. Ids in MeshClusterMsg (30014-30018; the split
+// gates' evidence, 30019, is MeshLayoutEvidence.cs).
 using LiteNetLib.Utils;
 
 namespace MultiplayerARPG.MMO.Mesh
@@ -23,7 +24,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public string targetCellId;
         /// <summary>...and that cell's incarnation, so a restarted cell ignores an answer meant for its predecessor.</summary>
         public string targetIncarnation;
-        /// <summary>The operation step this layout belongs to (empty until splits and merges exist).</summary>
+        /// <summary>The operation step this layout belongs to, "&lt;op&gt;/e1", "/e2", "/e3" or "/abort" (Slice 2b); empty outside an operation. An ack carries no step: its pair names it.</summary>
         public string stepId;
         public MeshLayoutSnapshot snapshot = new MeshLayoutSnapshot();
 

@@ -1,6 +1,7 @@
 // Server Meshing add-on — what the central's coordinator does with a Dynamic map when it (re)starts (DESIGN.md 0.72,
-// plan D3). Pure. Until splits and merges exist (Slice 2b) there is nothing a restarted coordinator could safely adopt,
-// so any dynamic entry anywhere freezes the map: no operations and no answers, rather than a guess.
+// plan D3). Pure. Until a restarted coordinator can restore a stored layout (Slice 5) there is nothing it could safely
+// adopt, so any dynamic entry from an earlier coordinator freezes the map: no operations and no answers, rather than a
+// guess. A layout the running coordinator sent itself never does (HeldReopensRecovery).
 using System;
 using System.Collections.Generic;
 
@@ -50,6 +51,16 @@ namespace MultiplayerARPG.MMO.Mesh
     /// <summary>MeshRecoveryResolver decides one map's recovery.</summary>
     public static class MeshRecoveryResolver
     {
+        /// <summary>
+        /// HeldReopensRecovery is whether a hello's held layout must re-open its map's recovery: it holds entries of the map
+        /// and comes from another coordinator incarnation. A layout this coordinator sent itself (a split's child or parent
+        /// saying hello again after a re-registration) is not a reason to freeze the map (Slice 2b decision 5b).
+        /// </summary>
+        public static bool HeldReopensRecovery(int heldEntries, MeshLayoutPair held, long coordinatorIncarnation)
+        {
+            return heldEntries > 0 && held.coordinatorIncarnation != coordinatorIncarnation;
+        }
+
         public static MeshRecoveryDecision Resolve(MeshRecoveryInput input)
         {
             MeshRecoveryDecision decision = new MeshRecoveryDecision();
@@ -63,7 +74,7 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 decision.outcome = MeshRecoveryOutcome.Frozen;
                 decision.isError = true;
-                decision.reason = $"map {input.mapId} has a runtime layout ({input.storedEntries} stored entries{(input.helloHeldEntries ? ", and cells hold one" : string.Empty)}); rebuilding it needs Slice 2b recovery";
+                decision.reason = $"map {input.mapId} has a runtime layout ({input.storedEntries} stored entries{(input.helloHeldEntries ? ", and cells hold one" : string.Empty)}); restoring it is Slice 5 recovery";
                 return decision;
             }
             foreach (string cell in input.registeredCells)

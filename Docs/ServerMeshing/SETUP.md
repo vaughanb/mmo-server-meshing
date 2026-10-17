@@ -96,9 +96,15 @@ exists). Registry-wide: `touchTolerance` (how close two rectangles must come to 
 0.5 m) and `dynamicSettings`, read only when a map is Dynamic: `bandWidth` (the band every process computes band
 neighbours with, and the narrowest cut; each map server logs an error if its own `ghostBandWidth` is wider),
 `defaultMinCellSize` (100 m), `defaultMaxCellsPerBase` (4), `layoutGateWarnSeconds` (10), `recoveryCeilingSeconds`
-(60: how long the central waits after a restart for the cells to say what layout they hold) and
+(60: how long the central waits after a restart for the cells to say what layout they hold),
 `coordinatorStorePath` (where the central keeps the layout it has sent; empty = `Temp/ServerMesh.Coordinator.json`
-under its working directory). Every mesh manager (`MeshMapNetworkManager`, `MeshLoginNetworkManager`,
+under its working directory), and for splits (Slice 2b): `handoffAckGuardSeconds` (20), `drainRatePerSecond` (5
+character handoffs a second, cluster-wide: one operation runs at a time), `drainEntityRatePerSecond` (20 monster,
+static and drop handoffs a second), `maxConcurrentHandoffsPerDestination` (20), `prewarmSeconds` (2: how long a new
+cell's band neighbours must have been linked and sending before it takes the rectangle), `prewarmSpawnBudgetShare`
+(0.25 of a frame for queued puppet spawns on a Dynamic map), `splitStepTimeoutSeconds` (60: a silent participant
+aborts a split before its second step and freezes it after), `splitCooldownSeconds` (30) and
+`drainMonsterAgeSeconds` (5). Every mesh manager (`MeshMapNetworkManager`, `MeshLoginNetworkManager`,
 `MeshCentralNetworkManager`, `MeshMapSpawnNetworkManager`) carries a `world` reference to this asset; panel 3 assigns
 it.
 
@@ -335,7 +341,8 @@ and, later, several hosts all reach one database, and SQLite is a single file on
   so a player present in two layouts stands at the same place in both), `MESH_LOAD_SEED` (that placement's seed),
   `MESH_LOAD_AREA` (crowd them into a square `x,z,r`), `MESH_NO_MONSTERS=1`, `MESH_MONSTER_AREAS=all` (also switch on
   the monster spawn areas the test maps save inactive, about 294 monsters, each on the cell that owns it; the
-  scenarios use the one area that is on), `MESH_SPAWN_CELLS` (which cells the spawner starts), `MESH_BAND` (ghost band
+  scenarios use the one area that is on; or a comma list of area names, e.g. `Spawn_Interior_C` for `split`, to
+  switch on just those), `MESH_SPAWN_CELLS` (which cells the spawner starts), `MESH_BAND` (ghost band
   and visible range together), `MESH_PROBE_BURN_MS` (`[cell:]ms` of busy work per frame), and, on a bare player with
   no rig at all, `MESH_PROBE_SELFTEST=0,5,10,24`.
 - **Measuring a tick (Phase 0):** the Work ticks line is always on; these rig toggles sharpen it (all unset = today):
@@ -481,6 +488,16 @@ and, later, several hosts all reach one database, and SQLite is a single file on
   warns at the layout gate), and checks after each Play that the registry asset is unchanged on disk. The `dynidle`
   scenario runs the test map Dynamic with a walk from C to E; `--env MESH_CELL_MODE=all:Dynamic` runs any other
   scenario that way.
+- **Manual split (Slice 2b):** while the editor is in Play, write one line to `Temp/ServerMesh.LayoutCommand.txt`:
+  `<seq> split <baseCell> <x|z> <at> <+|-> <childId>` (e.g. `7 split C x 0 + C.1`: cut C at world x = 0 and give
+  the + side to a new cell C.1). The play runner hands it to the central (`MeshCentralNetworkManager.SubmitLayoutCommand`)
+  and mirrors every `Split <op>: …` and `Layout op refused: …` line to `Temp/ServerMesh.LayoutCommandStatus.txt` under
+  that seq; the harness clears both files before each scenario. The central adds the channel, has the spawner start
+  the child, stages and broadcasts the three steps (pre-warm, hand over, settle) and logs `done`, or `aborted` before
+  the hand-over and `frozen` after it. Scenarios `split` (C at x = 0, eight standing bots, a harvest-and-pickup bot and
+  40 synthetic players in C; `MESH_MONSTER_AREAS=Spawn_Interior_C`, which also takes a comma list of area names) and
+  `splitc2` (E at x = 200, the child touching C2 across the seam) grade the operation; both are skipped with
+  `--remote-cells` and `--remote-persist`.
 - **The play runner and the environment:** every Play request carries an id that the status file echoes as
   `playSeq=` while that Play runs, so the harness never mistakes a Play an earlier, abandoned request started late for
   its own; a stop that arrives while Play is starting is carried out once it has started. The environment variables a

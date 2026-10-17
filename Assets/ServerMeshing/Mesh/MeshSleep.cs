@@ -42,6 +42,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public const ushort LayoutAck = 30016;       // map server -> central: a layout applied or rejected
         public const ushort Retire = 30017;          // central -> map server: your cell is gone; drain and exit
         public const ushort CoordinatorNote = 30018; // central -> map server: a decision or refusal, for the cell's log
+        public const ushort LayoutEvidence = 30019;  // map server -> central: split-gate evidence (MeshLayoutEvidenceMessage, Slice 2b)
     }
 
     /// <summary>Central to a map server: nobody needs this cell; save and exit (ignored while a player is on it).</summary>

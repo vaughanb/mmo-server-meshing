@@ -46,6 +46,8 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private readonly List<ServerMeshWalkingBot> _bots = new List<ServerMeshWalkingBot>();
         private Rect _area;
+        /// <summary>Area is the wander area (scene frame, y is z) the loop folds walking players back into.</summary>
+        public Rect Area => _area;
         private bool _fight = ServerMeshLoadMotion.DefaultFight;
         private int _waiting;
         private int _walking;

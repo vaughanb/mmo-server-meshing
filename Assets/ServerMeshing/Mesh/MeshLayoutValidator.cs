@@ -24,6 +24,8 @@ namespace MultiplayerARPG.MMO.Mesh
         public readonly Dictionary<string, bool> dynamicByMap = new Dictionary<string, bool>(StringComparer.Ordinal);
         /// <summary>The narrowest new cut per Dynamic map.</summary>
         public readonly Dictionary<string, float> minCellSizeByMap = new Dictionary<string, float>(StringComparer.Ordinal);
+        /// <summary>The most live cells one base cell may be cut into, per Dynamic map (a map not listed has no limit).</summary>
+        public readonly Dictionary<string, int> maxCellsPerBaseByMap = new Dictionary<string, int>(StringComparer.Ordinal);
         public float bandWidth = 80f;
         public float touchTolerance = 0.5f;
         public int maxNeighbours = MeshWorldRegistry.MaxNeighbours;
@@ -204,6 +206,23 @@ namespace MultiplayerARPG.MMO.Mesh
                 }
             }
 
+            // 9: no family cut into more live cells (Pending ones included) than its map allows, where the count grew.
+            if (world.maxCellsPerBaseByMap.Count > 0)
+            {
+                foreach (string family in families)
+                {
+                    MeshLayoutBaseCell baseCell = baseById[family];
+                    if (!world.maxCellsPerBaseByMap.TryGetValue(baseCell.mapId, out int maxCells) || maxCells <= 0)
+                        continue;
+                    int count = CountFamily(live, family);
+                    if (count > maxCells && count > CountFamily(LiveWorld(world, previous), family))
+                    {
+                        reason = $"maxCellsPerBase: {family} would be cut into {count} cells, more than the map's {maxCells}";
+                        return false;
+                    }
+                }
+            }
+
             // 8: band neighbours, where the count grew.
             Dictionary<string, int> after = BandCounts(live, world);
             Dictionary<string, int> before2 = BandCounts(LiveWorld(world, previous), world);
@@ -217,6 +236,17 @@ namespace MultiplayerARPG.MMO.Mesh
                 }
             }
             return true;
+        }
+
+        private static int CountFamily(List<LiveCell> live, string family)
+        {
+            int count = 0;
+            foreach (LiveCell cell in live)
+            {
+                if (string.Equals(cell.baseId, family, StringComparison.OrdinalIgnoreCase))
+                    count++;
+            }
+            return count;
         }
 
         private static bool StateFits(MeshLayoutEntry entry, out string reason)

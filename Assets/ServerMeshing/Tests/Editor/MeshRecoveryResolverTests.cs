@@ -16,7 +16,7 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
 
         private static IEnumerable<TestCaseData> Cases()
         {
-            yield return new TestCaseData(Input(stored: 2), MeshRecoveryOutcome.Frozen, "needs Slice 2b").SetName("Resolve_StoredDynamicEntries_Freeze");
+            yield return new TestCaseData(Input(stored: 2), MeshRecoveryOutcome.Frozen, "Slice 5 recovery").SetName("Resolve_StoredDynamicEntries_Freeze");
             yield return new TestCaseData(Input(helloHeld: true), MeshRecoveryOutcome.Frozen, "cells hold one").SetName("Resolve_ACellHoldingALayout_Freezes");
             yield return new TestCaseData(Input(elapsed: 60f, registered: new[] { "C", "E" }, hello: new[] { "C" }), MeshRecoveryOutcome.Frozen, "no hello from E").SetName("Resolve_MissingHelloAtTheCeiling_Freezes");
             yield return new TestCaseData(Input(elapsed: 5f, registered: new[] { "C", "E" }, hello: new[] { "C" }), MeshRecoveryOutcome.Waiting, "waiting for the hello of E").SetName("Resolve_MissingHelloBeforeTheCeiling_Waits");

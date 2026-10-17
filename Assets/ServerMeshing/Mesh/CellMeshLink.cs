@@ -36,6 +36,127 @@ namespace MultiplayerARPG.MMO.Mesh
         public const ushort GhostReplay = 115;   // 116-118 were the per-verb attack/skill messages, folded into GhostReplay
         public const ushort BuildingPlace = 119; // a building placed from next door lands on the cell that owns its position
         public const ushort LentMonsterOwner = 120; // a borrowed monster changed hands again: its home learns the new owner
+        // 121-123 are reserved. Slice 2b (dynamic cells, slices/slice2b_design.md decisions 10, 11 and 13):
+        public const ushort StaticHandoff = 124;          // a harvestable or item drop now stands in the receiver's owned rectangle: take it
+        public const ushort StaticHandoffAck = 125;       // receiver -> sender: the static is the receiver's now (promoted or spawned)
+        public const ushort StaticHandoffFailed = 126;    // receiver -> sender: it could not take it; the sender re-promotes its copy
+        public const ushort LentStatic = 127;             // to a static's home cell: who holds it now, or that it is gone (respawn it)
+        public const ushort MonsterHandoffFailed = 128;   // receiver -> sender: it could not spawn the monster; the sender re-promotes it
+        public const ushort ServerCharacterHandoff = 129; // a server-owned character (no client) moves to the cell that owns its position
+    }
+
+    /// <summary>
+    /// A harvestable or an item drop the sender owned that stands in the receiver's owned rectangle (Slice 2b decision 10).
+    /// The sender has already demoted its copy to a puppet; the receiver promotes its own puppet in place or spawns the
+    /// entity from the registered prefab, and answers StaticHandoffAck or StaticHandoffFailed. Positions are in the
+    /// sender's frame.
+    /// </summary>
+    public struct StaticHandoffMessage : INetSerializable
+    {
+        public string meshId;
+        public byte kind;             // GhostKind.Harvestable or GhostKind.ItemDrop
+        public int entityId;          // the prefab's entity id
+        public int level;             // the spawn level
+        public Vector3 position;
+        public float yaw;
+        public Vector3 spawnPosition;
+        public string homeZoneId;     // the cell whose spawn area respawns it (empty: nobody does)
+        public int currentHp;         // harvestables
+        public float respawnDelay;    // the spawn area's respawn delay for it
+        public byte givenType;        // item drops: RewardGivenType
+        public CharacterItem[] items; // item drops: the contents
+        public string[] looters;      // item drops: who may loot it while the loot lock lasts
+        public float appearSeconds;   // item drops: seconds left before it disappears; negative = it stays until picked up
+
+        public void Serialize(NetDataWriter writer)
+        {
+            writer.Put(meshId ?? string.Empty); writer.Put(kind); writer.Put(entityId); writer.Put(level);
+            writer.Put(position.x); writer.Put(position.y); writer.Put(position.z); writer.Put(yaw);
+            writer.Put(spawnPosition.x); writer.Put(spawnPosition.y); writer.Put(spawnPosition.z);
+            writer.Put(homeZoneId ?? string.Empty); writer.Put(currentHp); writer.Put(respawnDelay); writer.Put(givenType);
+            int n = items != null ? items.Length : 0;
+            writer.Put(n);
+            for (int i = 0; i < n; ++i) writer.Put(items[i]);
+            int m = looters != null ? looters.Length : 0;
+            writer.Put(m);
+            for (int i = 0; i < m; ++i) writer.Put(looters[i] ?? string.Empty);
+            writer.Put(appearSeconds);
+        }
+
+        public void Deserialize(NetDataReader reader)
+        {
+            meshId = reader.GetString(); kind = reader.GetByte(); entityId = reader.GetInt(); level = reader.GetInt();
+            position = new Vector3(reader.GetFloat(), reader.GetFloat(), reader.GetFloat()); yaw = reader.GetFloat();
+            spawnPosition = new Vector3(reader.GetFloat(), reader.GetFloat(), reader.GetFloat());
+            homeZoneId = reader.GetString(); currentHp = reader.GetInt(); respawnDelay = reader.GetFloat(); givenType = reader.GetByte();
+            int n = reader.GetInt();
+            if (n < 0 || n > 256) throw new System.IO.InvalidDataException($"static handoff with {n} items");
+            items = new CharacterItem[n];
+            for (int i = 0; i < n; ++i) items[i] = reader.Get<CharacterItem>();
+            int m = reader.GetInt();
+            if (m < 0 || m > 256) throw new System.IO.InvalidDataException($"static handoff with {m} looters");
+            looters = new string[m];
+            for (int i = 0; i < m; ++i) looters[i] = reader.GetString();
+            appearSeconds = reader.GetFloat();
+        }
+    }
+
+    /// <summary>The answer to a StaticHandoff, sent as StaticHandoffAck (no reason) or StaticHandoffFailed (why not).</summary>
+    public struct StaticHandoffReplyMessage : INetSerializable
+    {
+        public string meshId;
+        public string reason;
+        public void Serialize(NetDataWriter writer) { writer.Put(meshId ?? string.Empty); writer.Put(reason ?? string.Empty); }
+        public void Deserialize(NetDataReader reader) { meshId = reader.GetString(); reason = reader.GetString(); }
+    }
+
+    /// <summary>
+    /// To a static's home cell (whose spawn area made it): <see cref="ownerZone"/> holds it now or, with <see cref="gone"/>,
+    /// it was depleted, picked up or expired there and the home's spawn area respawns it.
+    /// </summary>
+    public struct LentStaticMessage : INetSerializable
+    {
+        public string meshId;
+        public string ownerZone;
+        public bool gone;
+        public void Serialize(NetDataWriter writer) { writer.Put(meshId ?? string.Empty); writer.Put(ownerZone ?? string.Empty); writer.Put(gone); }
+        public void Deserialize(NetDataReader reader) { meshId = reader.GetString(); ownerZone = reader.GetString(); gone = reader.GetBool(); }
+    }
+
+    /// <summary>The receiver of a MonsterHandoff could not spawn the monster: the sender re-promotes its demoted copy.</summary>
+    public struct MonsterHandoffFailedMessage : INetSerializable
+    {
+        public string meshId;
+        public string reason;
+        public void Serialize(NetDataWriter writer) { writer.Put(meshId ?? string.Empty); writer.Put(reason ?? string.Empty); }
+        public void Deserialize(NetDataReader reader) { meshId = reader.GetString(); reason = reader.GetString(); }
+    }
+
+    /// <summary>
+    /// A server-owned character (no client connection) captured by an IMeshServerCharacterAdopter of <see cref="kind"/>:
+    /// the sender despawned it and the receiver's adopter of the same kind spawns it at the pose (sender's frame). The
+    /// add-on only carries the bytes; <see cref="meshId"/> lets the receiver drop its puppet of the character first.
+    /// </summary>
+    public struct ServerCharacterHandoffMessage : INetSerializable
+    {
+        public string kind;
+        public string meshId;
+        public byte[] state;
+        public Vector3 position;
+        public float yaw;
+
+        public void Serialize(NetDataWriter writer)
+        {
+            writer.Put(kind ?? string.Empty); writer.Put(meshId ?? string.Empty);
+            writer.PutBytesWithLength(state ?? System.Array.Empty<byte>());
+            writer.Put(position.x); writer.Put(position.y); writer.Put(position.z); writer.Put(yaw);
+        }
+
+        public void Deserialize(NetDataReader reader)
+        {
+            kind = reader.GetString(); meshId = reader.GetString(); state = reader.GetBytesWithLength();
+            position = new Vector3(reader.GetFloat(), reader.GetFloat(), reader.GetFloat()); yaw = reader.GetFloat();
+        }
     }
 
     /// <summary>
@@ -465,6 +586,12 @@ namespace MultiplayerARPG.MMO.Mesh
             RegisterMessageHandler(MeshLinkMessageTypes.GhostLoot, HandleGhostLoot);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostKill, HandleGhostKill);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostAction, HandleGhostAction);
+            RegisterMessageHandler(MeshLinkMessageTypes.StaticHandoff, HandleStaticHandoff);
+            RegisterMessageHandler(MeshLinkMessageTypes.StaticHandoffAck, HandleStaticHandoffAck);
+            RegisterMessageHandler(MeshLinkMessageTypes.StaticHandoffFailed, HandleStaticHandoffFailed);
+            RegisterMessageHandler(MeshLinkMessageTypes.LentStatic, HandleLentStatic);
+            RegisterMessageHandler(MeshLinkMessageTypes.MonsterHandoffFailed, HandleMonsterHandoffFailed);
+            RegisterMessageHandler(MeshLinkMessageTypes.ServerCharacterHandoff, HandleServerCharacterHandoff);
         }
 
         public override void OnServerReceive(TransportEventData eventData)
@@ -595,6 +722,42 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             GhostActionMessage msg = messageHandler.ReadMessage<GhostActionMessage>();
             _manager.OnGhostAction(messageHandler.ConnectionId, msg);
+        }
+
+        private void HandleStaticHandoff(MessageHandlerData messageHandler)
+        {
+            StaticHandoffMessage msg = messageHandler.ReadMessage<StaticHandoffMessage>();
+            _manager.OnStaticHandoff(messageHandler.ConnectionId, msg);
+        }
+
+        private void HandleStaticHandoffAck(MessageHandlerData messageHandler)
+        {
+            StaticHandoffReplyMessage msg = messageHandler.ReadMessage<StaticHandoffReplyMessage>();
+            _manager.OnStaticHandoffReply(messageHandler.ConnectionId, msg, true);
+        }
+
+        private void HandleStaticHandoffFailed(MessageHandlerData messageHandler)
+        {
+            StaticHandoffReplyMessage msg = messageHandler.ReadMessage<StaticHandoffReplyMessage>();
+            _manager.OnStaticHandoffReply(messageHandler.ConnectionId, msg, false);
+        }
+
+        private void HandleLentStatic(MessageHandlerData messageHandler)
+        {
+            LentStaticMessage msg = messageHandler.ReadMessage<LentStaticMessage>();
+            _manager.OnLentStatic(messageHandler.ConnectionId, msg);
+        }
+
+        private void HandleMonsterHandoffFailed(MessageHandlerData messageHandler)
+        {
+            MonsterHandoffFailedMessage msg = messageHandler.ReadMessage<MonsterHandoffFailedMessage>();
+            _manager.OnMonsterHandoffFailed(messageHandler.ConnectionId, msg);
+        }
+
+        private void HandleServerCharacterHandoff(MessageHandlerData messageHandler)
+        {
+            ServerCharacterHandoffMessage msg = messageHandler.ReadMessage<ServerCharacterHandoffMessage>();
+            _manager.OnServerCharacterHandoff(messageHandler.ConnectionId, msg);
         }
     }
 
@@ -785,6 +948,31 @@ namespace MultiplayerARPG.MMO.Mesh
         public void SendGhostRemove(string characterId)
         {
             Send(MeshLinkMessageTypes.GhostRemove, new GhostRemoveMessage { characterId = characterId });
+        }
+
+        public void SendStaticHandoff(StaticHandoffMessage msg)
+        {
+            Send(MeshLinkMessageTypes.StaticHandoff, msg);
+        }
+
+        public void SendStaticHandoffReply(string meshId, bool ok, string reason)
+        {
+            Send(ok ? MeshLinkMessageTypes.StaticHandoffAck : MeshLinkMessageTypes.StaticHandoffFailed, new StaticHandoffReplyMessage { meshId = meshId, reason = reason });
+        }
+
+        public void SendLentStatic(string meshId, string ownerZone, bool gone)
+        {
+            Send(MeshLinkMessageTypes.LentStatic, new LentStaticMessage { meshId = meshId, ownerZone = ownerZone, gone = gone });
+        }
+
+        public void SendMonsterHandoffFailed(string meshId, string reason)
+        {
+            Send(MeshLinkMessageTypes.MonsterHandoffFailed, new MonsterHandoffFailedMessage { meshId = meshId, reason = reason });
+        }
+
+        public void SendServerCharacterHandoff(ServerCharacterHandoffMessage msg)
+        {
+            Send(MeshLinkMessageTypes.ServerCharacterHandoff, msg);
         }
     }
 }

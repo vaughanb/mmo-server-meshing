@@ -338,5 +338,25 @@ namespace MultiplayerARPG.MMO.Mesh
         public float recoveryCeilingSeconds = 60f;
         [Tooltip("Where the central keeps its layout between restarts (a JSON file); empty = Temp/ServerMesh.Coordinator.json beside the process. Rig override: MESH_COORDINATOR_STORE.")]
         public string coordinatorStorePath = "";
+
+        // Slice 2b (split). New fields keep their initializers when an older asset lacks them.
+        [Tooltip("Seconds a handoff waits for the destination's ack before it is rolled back (the map servers' own field has the same default); the central adds it to a split's drain timeout.")]
+        public float handoffAckGuardSeconds = 20f;
+        [Tooltip("Character handoffs a draining cell starts per second (the database's sustained capacity; one operation runs world-wide, so this is the cluster's rate).")]
+        public float drainRatePerSecond = 5f;
+        [Tooltip("Monster, static and item drop handoffs a draining cell starts per second (no database work).")]
+        public float drainEntityRatePerSecond = 20f;
+        [Tooltip("Most handoffs in flight toward one destination while a cell drains (a safety cap).")]
+        public int maxConcurrentHandoffsPerDestination = 20;
+        [Tooltip("Seconds a new cell's band neighbours must have been linked to it (inbound hello, then traffic) before the split commits.")]
+        public float prewarmSeconds = 2f;
+        [Tooltip("Share of the frame budget a Dynamic map's cell spends spawning queued puppets per frame (0.25 = 4 ms at 60 fps).")]
+        public float prewarmSpawnBudgetShare = 0.25f;
+        [Tooltip("Seconds a split step waits for a silent participant (no ack, no hello, no evidence) before it aborts (before commit) or freezes (after).")]
+        public float splitStepTimeoutSeconds = 60f;
+        [Tooltip("Seconds after a split is done before the same base cell's family may be split again.")]
+        public float splitCooldownSeconds = 30f;
+        [Tooltip("A monster younger than this that a shrunk cell's spawn area made in the given-away rectangle is handed off, not counted by the drain gate.")]
+        public float drainMonsterAgeSeconds = 5f;
     }
 }

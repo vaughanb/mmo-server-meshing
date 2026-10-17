@@ -396,6 +396,8 @@ def crossing_rate(players, width, height, cut_length, mean_step=12.5, think_seco
 
 # ---- dynamic cells (DESIGN 0.72): what the layout grade reads from the cells' logs ----
 LAYOUT_APPLIED = re.compile(r"Layout ([0-9a-f]+)/(\d+) applied: (\S+) owns ")
+# Slice 2b decision 14: a Static map's cell beside a Dynamic map applies only the band-neighbour part of a broadcast.
+NEIGHBOURS_APPLIED = re.compile(r"Layout ([0-9a-f]+)/(\d+) neighbours applied: (\S+) band ?(.*?)\s*$")
 LAYOUT_GATE_WARNING = re.compile(r"Layout gate: cell \S+ has had no answer")
 # Case-sensitive on purpose: the work probe's "automatic splits" is not an operation.
 OP_LINE = re.compile(r"\b(Split|Merge|Retire|Retired)\b")
@@ -465,8 +467,10 @@ def layout_apply_violations(cell, info_lines, dynamic):
 
     A cell of a Dynamic map, in each process lifetime (from its 'Own cell from' line): a layout applied before the first
     player registers, and at most one per coordinator incarnation (a central restart may add one). A cell of a Static
-    map: none at all. Lines before the first 'Own cell from' belong to a process that started earlier and are not
-    graded. A dynamic cell's 'Own cell from layout' line comes after its first apply, so it does not start a lifetime.
+    map: none at all, though a Static neighbour's band-neighbour applies (NEIGHBOURS_APPLIED, Slice 2b) are its own
+    business; that line on a Dynamic map's cell is a violation. Lines before the first 'Own cell from' belong to a
+    process that started earlier and are not graded. A dynamic cell's 'Own cell from layout' line comes with its first
+    apply, so it does not start a lifetime.
     """
     lifetimes = []
     current = None
@@ -479,6 +483,9 @@ def layout_apply_violations(cell, info_lines, dynamic):
     problems = []
     for n, lines in enumerate(lifetimes, 1):
         applied = [(i, m) for i, line in enumerate(lines) for m in [LAYOUT_APPLIED.search(line)] if m]
+        neighbours = sum(1 for line in lines if NEIGHBOURS_APPLIED.search(line))
+        if dynamic and neighbours:
+            problems.append(f"{cell}: lifetime {n}: {neighbours} Static-neighbour apply line(s) on a Dynamic map")
         if not dynamic:
             if applied:
                 problems.append(f"{cell}: {len(applied)} layout(s) applied on a Static map")

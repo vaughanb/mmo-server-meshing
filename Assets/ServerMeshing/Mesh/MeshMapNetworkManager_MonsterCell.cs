@@ -105,7 +105,7 @@ namespace MultiplayerARPG.MMO.Mesh
         private bool MonsterAreaOwnedHere(Vector3 areaPosition)
         {
             if (_monsterCell == null)
-                return MeshCell.Same(world.OwnerOf(OwnCell, areaPosition), OwnCell);
+                return SpawnAreaOwnedHere(areaPosition); // a Dynamic map: the base rectangle (Slice 2b decision 12)
             LogMonsterCellOnce();
             return OwnsMonsterArea(_monsterCell, OwnZoneId, false);
         }

@@ -2,6 +2,7 @@
 // one JSON file on the central's host, written whole through a temporary file so a crash mid-write never leaves half a
 // layout. Every IO failure is reported, never thrown: a coordinator that cannot write refuses operations, it does not die.
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Security;
 using UnityEngine;
@@ -24,6 +25,11 @@ namespace MultiplayerARPG.MMO.Mesh
         public MeshLayoutSnapshot staged = new MeshLayoutSnapshot();
         public string stagedStepId = "";
         public string stagedFirstApplier = "";
+        /// <summary>The operation in progress when the file was written (empty when none) and its step, for an operator (Slice 2b).</summary>
+        public string opId = "";
+        public string opStep = "";
+        /// <summary>Dynamic ids an operation aborted: a hello from one of them is answered with Retire.</summary>
+        public List<string> abortedIds = new List<string>();
         public string writtenAtUtc = "";
     }
 
@@ -99,6 +105,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 data = null;
                 return false;
             }
+            if (data.abortedIds == null)
+                data.abortedIds = new List<string>();
             return true;
         }
 

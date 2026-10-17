@@ -11,6 +11,37 @@ using UnityEngine;
 
 namespace MultiplayerARPG.MMO.Mesh
 {
+    /// <summary>MeshPuppetMotionSource says where a cell's puppet motion came from.</summary>
+    public enum MeshPuppetMotionSource
+    {
+        Inspector = 0,
+        Environment = 1,
+        DynamicMapDefault = 2,
+    }
+
+    /// <summary>
+    /// MeshPuppetDefault settles a cell's puppet motion (Slice 2b decision 1): MESH_PUPPET_MOTION wins when it parses;
+    /// else a cell of a Dynamic map is Kinematic; else the inspector's value.
+    /// </summary>
+    public static class MeshPuppetDefault
+    {
+        public static MeshPuppetMotion Resolve(string environmentValue, bool dynamicMap, MeshPuppetMotion inspector, out MeshPuppetMotionSource source)
+        {
+            if (!string.IsNullOrEmpty(environmentValue) && MeshPuppetMotionSetting.TryParse(environmentValue, out MeshPuppetMotion parsed))
+            {
+                source = MeshPuppetMotionSource.Environment;
+                return parsed;
+            }
+            if (dynamicMap)
+            {
+                source = MeshPuppetMotionSource.DynamicMapDefault;
+                return MeshPuppetMotion.Kinematic;
+            }
+            source = MeshPuppetMotionSource.Inspector;
+            return inspector;
+        }
+    }
+
     public partial class MeshMapNetworkManager
     {
         /// <summary>
@@ -45,19 +76,22 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             string key = MeshPuppetMotionSetting.EnvironmentKey;
             string value = System.Environment.GetEnvironmentVariable(key);
+            bool dynamicMap = world != null && world.IsDynamicMap(OwnMapId);
+            MeshPuppetMotion inspector = puppetMotion;
+            puppetMotion = MeshPuppetDefault.Resolve(value, dynamicMap, inspector, out MeshPuppetMotionSource from);
             string source = "the inspector";
             if (!string.IsNullOrEmpty(value))
             {
                 string shown = value.Trim().Replace('{', '(').Replace('}', ')'); // the logger formats every message
-                if (MeshPuppetMotionSetting.TryParse(value, out MeshPuppetMotion parsed))
-                {
-                    puppetMotion = parsed;
+                if (from == MeshPuppetMotionSource.Environment)
                     source = key + "=" + shown;
-                }
                 else
-                {
                     Logging.LogWarning("Mesh", $"{key}={shown} is neither steered nor kinematic; ignored, puppet motion stays {puppetMotion}");
-                }
+            }
+            if (from == MeshPuppetMotionSource.DynamicMapDefault)
+            {
+                source = "the Dynamic map default";
+                Logging.Log("Mesh", "Puppet motion: Kinematic (Dynamic map default)");
             }
             if (puppetMotion == MeshPuppetMotion.Kinematic && !(ghostTeleportDistance > 0f))
             {

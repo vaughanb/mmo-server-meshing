@@ -1,4 +1,6 @@
 """Unit tests for regress's status waits (python -m unittest discover -s Tools/ServerMeshing -p "test_*.py")."""
+import os
+import tempfile
 import unittest
 from unittest import mock
 
@@ -66,6 +68,53 @@ class WaitStatusTests(unittest.TestCase):
             with self.subTest(name):
                 self.assertEqual(self.run_wait(clock, timeout, cap), {})
                 self.assertAlmostEqual(clock.elapsed(), clock.ready_at, delta=2)
+
+
+class SplitWiringTests(unittest.TestCase):
+    """Slice 2b: the split scenarios' registration, the LayoutCommand files cleared at every start, launch_bot's new
+    arguments. Popen is replaced, so no bot starts."""
+
+    def test_launch_bot(self):
+        cases = {
+            "the defaults": ({}, ["-meshChannel", "C", "-meshAutoMode", "stand"]),
+            "another channel": ({"channel": "E"}, ["-meshChannel", "E", "-meshAutoMode", "stand"]),
+            "the split's stand bot": ({"observe_seconds": 300, "line_x": 0.0},
+                                      ["-meshChannel", "C", "-meshAutoMode", "stand", "-meshObserveSeconds", "300",
+                                       "-meshLineX", "0"]),
+            "the harvest bot": ({"line_x": 200.0, "harvest_after_migration": True},
+                                ["-meshChannel", "C", "-meshAutoMode", "stand", "-meshLineX", "200",
+                                 "-meshHarvestAfterMigration", "1"]),
+        }
+        for name, (kwargs, expected) in cases.items():
+            with self.subTest(name), tempfile.TemporaryDirectory() as d, \
+                    mock.patch.object(regress, "LOGS", d), mock.patch.object(regress.subprocess, "Popen") as popen:
+                log = regress.launch_bot("split", "meshbot2", ["-meshAutoMode", "stand"], **kwargs)
+                cmd = popen.call_args[0][0]
+                self.assertEqual(cmd[:6], [regress.EXE, "-batchmode", "-nographics", "-meshAutoClient", "-meshUser",
+                                           "meshbot2"])
+                self.assertEqual(cmd[6:-2], expected)
+                self.assertEqual(cmd[-2:], ["-logFile", log])
+                self.assertEqual(log, os.path.join(d, "regress_split_meshbot2.log"))
+
+    def test_scenario_start_clears_the_layout_command_files(self):
+        with tempfile.TemporaryDirectory() as d:
+            paths = {name: os.path.join(d, f"{name}.txt") for name in
+                     ("COORDINATOR_STORE", "LAYOUT_COMMAND", "LAYOUT_COMMAND_STATUS")}
+            for path in paths.values():
+                open(path, "w").close()
+            with mock.patch.multiple(regress, TEMP=d, **paths), self.assertRaises(ValueError):
+                regress.run_scenario("no such scenario", regress.Report("x"))
+            self.assertEqual(os.listdir(d), [])
+
+    def test_registration(self):
+        for name in ("split", "splitc2"):
+            with self.subTest(name):
+                self.assertIn(name, regress.ALL)
+                self.assertNotIn(name, regress.DEFAULT)
+                self.assertIn("spawner", regress.TWO_HOST_SKIP[name])
+                self.assertIn(name, regress.PERSIST_SKIP)
+        self.assertEqual(regress.LAYOUT_COMMAND, os.path.join(regress.TEMP, "ServerMesh.LayoutCommand.txt"))
+        self.assertEqual(regress.LAYOUT_COMMAND_STATUS, os.path.join(regress.TEMP, "ServerMesh.LayoutCommandStatus.txt"))
 
 
 if __name__ == "__main__":

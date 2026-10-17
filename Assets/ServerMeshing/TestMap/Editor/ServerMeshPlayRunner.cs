@@ -19,6 +19,12 @@
 //   Temp/ServerMesh.PackageRequest.txt -> builds both .unitypackages (ServerMeshPackageBuilder); the outcome is written
 //                                     to Temp/ServerMesh.PackageStatus.txt as seq= and result=. Outside Play only.
 //   Temp/ServerMesh.PlayStatus.txt    written every second: editor state + auto-client phase/finished/passed.
+//   Temp/ServerMesh.LayoutCommand.txt -> during Play: one line `<seq> split <baseCell> <x|z> <at> <+|-> <childId>`, handed
+//                                     to the central's SubmitLayoutCommand and deleted. Every console line starting
+//                                     `Split ` or `Layout op ` is then appended to Temp/ServerMesh.LayoutCommandStatus.txt
+//                                     prefixed with that seq (ServerMeshLayoutCommandFile), as are refusals the runner
+//                                     makes itself. Play requests may carry observeSeconds, lineX and
+//                                     harvestAfterMigration for the auto client (absent: cleared).
 // The first line of a refresh, build, test or package request may hold a sequence number, echoed back so the harness knows the
 // status it reads belongs to its own request.
 // Never enters Play while the editor is compiling or importing (a domain reload mid-Play wipes statics).
@@ -47,6 +53,13 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         private static readonly string TestPath = Path.Combine(Root, "Temp", "ServerMesh.TestRequest.txt");
         private static readonly string PackagePath = Path.Combine(Root, "Temp", "ServerMesh.PackageRequest.txt");
         private static readonly string PackageStatusPath = Path.Combine(Root, "Temp", "ServerMesh.PackageStatus.txt");
+        private static readonly string LayoutCommandPath = Path.Combine(Root, "Temp", ServerMeshLayoutCommandFile.CommandFileName);
+        private static readonly string LayoutStatusPath = Path.Combine(Root, "Temp", ServerMeshLayoutCommandFile.StatusFileName);
+        private static readonly object s_layoutLock = new object();
+        // The seq of the layout command this Play last handed to the central (null: none yet); console lines are mirrored
+        // under it. A static: Play does not reload the domain while it runs, and leaving Play clears it.
+        private static volatile string s_layoutSeq;
+        private static volatile bool s_layoutRefusalMirrored;
         private static string _lastRefreshSeq = "";
         private static double _nextTick;
         private static string _lastError = "";
@@ -64,6 +77,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         {
             EditorApplication.update += Tick;
             EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
+            Application.logMessageReceivedThreaded += MirrorLayoutLine;
         }
 
         private static void OnPlayModeStateChanged(PlayModeStateChange change)
@@ -72,6 +86,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             if (change != PlayModeStateChange.EnteredEditMode)
                 return;
             SessionState.EraseString(PlaySeqKey);
+            s_layoutSeq = null;
             RestoreEnvironment();
         }
 
@@ -145,6 +160,8 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                         EditorApplication.ExitPlaymode();
                     return;
                 }
+                if (EditorApplication.isPlaying && File.Exists(LayoutCommandPath))
+                    HandleLayoutCommand();
                 if (EditorApplication.isPlayingOrWillChangePlaymode || ServerMeshTestRunner.IsRunning)
                     return; // a refresh, build or Play in the middle of an asynchronous test run would pull it down
                 if (File.Exists(RefreshPath))
@@ -263,6 +280,9 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             if (req.TryGetValue("walkZ", out v)) EditorPrefs.SetString(ServerMeshAutoClient.PREF_WALK_Z, v);
             if (req.TryGetValue("mount", out v)) EditorPrefs.SetBool(ServerMeshAutoClient.PREF_MOUNT, v == "1");
             if (req.TryGetValue("pet", out v)) EditorPrefs.SetBool(ServerMeshAutoClient.PREF_PET, v == "1");
+            ForwardOrClear(req, "observeSeconds", ServerMeshAutoClient.PREF_OBSERVE_SECONDS);
+            ForwardOrClear(req, "lineX", ServerMeshAutoClient.PREF_LINE_X);
+            ForwardOrClear(req, "harvestAfterMigration", ServerMeshAutoClient.PREF_HARVEST_AFTER_MIGRATION);
             foreach (KeyValuePair<string, string> kv in req)
             {
                 if (!kv.Key.StartsWith("env.", StringComparison.OrdinalIgnoreCase) || kv.Key.Length <= 4)
@@ -276,6 +296,96 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
 
             Debug.Log($"[MeshRunner] Entering Play in {scene} (auto client: {EditorPrefs.GetString(ServerMeshAutoClient.PREF_MODE, "walk")}, seq {seq})");
             EditorApplication.EnterPlaymode();
+        }
+
+        /// <summary>A Slice 2b bot setting: the request's value, or none (the auto client's default) when the request has none.</summary>
+        private static void ForwardOrClear(Dictionary<string, string> req, string key, string pref)
+        {
+            if (req.TryGetValue(key, out string value) && value.Length > 0)
+                EditorPrefs.SetString(pref, value);
+            else
+                EditorPrefs.DeleteKey(pref);
+        }
+
+        /// <summary>
+        /// Hands the layout command file's line to the central (the leg runs while this Play runs, so a command belongs to
+        /// the playSeq the status shows) and deletes the file; a blank file is left for the next tick (still being written).
+        /// A refusal the coordinator did not log itself is written to the status file here.
+        /// </summary>
+        private static void HandleLayoutCommand()
+        {
+            string text;
+            try
+            {
+                text = File.ReadAllText(LayoutCommandPath);
+            }
+            catch (IOException)
+            {
+                return; // the harness is still writing it
+            }
+            if (ServerMeshLayoutCommandFile.IsBlank(text))
+                return;
+            File.Delete(LayoutCommandPath);
+            if (!ServerMeshLayoutCommandFile.TryParse(text, out string seq, out string line, out string error))
+            {
+                AppendLayoutStatus(ServerMeshLayoutCommandFile.RefusalLine(seq, error));
+                return;
+            }
+            s_layoutSeq = seq;
+            s_layoutRefusalMirrored = false;
+            AppendLayoutStatus(ServerMeshLayoutCommandFile.SubmittedLine(seq, line));
+            MeshCentralNetworkManager central = UnityEngine.Object.FindFirstObjectByType<MeshCentralNetworkManager>();
+            if (central == null)
+            {
+                AppendLayoutStatus(ServerMeshLayoutCommandFile.RefusalLine(seq, "no central server in this Play"));
+                return;
+            }
+            string refusal;
+            try
+            {
+                central.SubmitLayoutCommand(line, out refusal);
+            }
+            catch (Exception ex)
+            {
+                refusal = "submit failed: " + ex.Message;
+            }
+            if (!string.IsNullOrEmpty(refusal) && !s_layoutRefusalMirrored)
+                AppendLayoutStatus(ServerMeshLayoutCommandFile.RefusalLine(seq, refusal));
+            Debug.Log("[MeshRunner] Layout command " + seq + " handed to the central" + (string.IsNullOrEmpty(refusal) ? "" : "; refused"));
+        }
+
+        /// <summary>Mirrors a console line starting `Split ` or `Layout op ` under the current command's seq (any thread).</summary>
+        private static void MirrorLayoutLine(string condition, string stackTrace, LogType type)
+        {
+            string seq = s_layoutSeq;
+            if (seq == null)
+                return;
+            string payload = ServerMeshLayoutCommandFile.MirroredPayload(condition);
+            if (payload == null)
+                return;
+            if (ServerMeshLayoutCommandFile.IsRefusal(payload))
+                s_layoutRefusalMirrored = true;
+            AppendLayoutStatus(ServerMeshLayoutCommandFile.StatusLine(seq, payload));
+        }
+
+        private static void AppendLayoutStatus(string line)
+        {
+            lock (s_layoutLock)
+            {
+                try
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(LayoutStatusPath));
+                    File.AppendAllText(LayoutStatusPath, line + "\n");
+                }
+                catch (IOException ex)
+                {
+                    _lastError = "layout status not written: " + ex.Message; // never logged: this runs inside the log callback
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    _lastError = "layout status not written: " + ex.Message;
+                }
+            }
         }
 
         private static void WriteStatus()
@@ -296,6 +406,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 $"finished={(c != null && c.Finished)}\n" +
                 $"passed={(c != null && c.Passed)}\n" +
                 $"result={(c != null ? c.LastResult : "")}\n" +
+                $"layoutSeq={(EditorApplication.isPlaying ? s_layoutSeq ?? "" : "")}\n" +
                 $"error={_lastError}\n";
             Directory.CreateDirectory(Path.GetDirectoryName(StatusPath));
             File.WriteAllText(StatusPath, text);

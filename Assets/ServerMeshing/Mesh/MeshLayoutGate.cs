@@ -129,6 +129,37 @@ namespace MultiplayerARPG.MMO.Mesh
         }
     }
 
+    /// <summary>MeshLayoutTarget is the map side's target check of a layout message (Slice 2b decision 4).</summary>
+    public static class MeshLayoutTarget
+    {
+        /// <summary>
+        /// Accepts: a broadcast is for every cell; a staged step and a hello answer only for the cell and incarnation they
+        /// name (cell ids compare ignoring case, incarnations exactly), so a restarted cell ignores its predecessor's.
+        /// </summary>
+        public static bool Accepts(MeshLayoutKind kind, string targetCellId, string targetIncarnation, string ownCellId, string ownIncarnation)
+        {
+            if (kind == MeshLayoutKind.Broadcast)
+                return true;
+            return string.Equals(targetCellId, ownCellId, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(targetIncarnation, ownIncarnation, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>MeshRetireRule is when a cell of a Dynamic map ends itself (Slice 2b decision 5a, 2b's share of 2c's retire).</summary>
+    public static class MeshRetireRule
+    {
+        /// <summary>
+        /// ShouldRetire: the retire names this cell and incarnation, and the cell owns nothing yet: it holds no layout, or
+        /// its own cell is Pending in the one it holds. A cell that owns something stays up (2c drains it first).
+        /// </summary>
+        public static bool ShouldRetire(string retireCellId, string retireIncarnation, string ownCellId, string ownIncarnation, bool holdsLayout, MeshCellState ownState)
+        {
+            if (!string.Equals(retireCellId, ownCellId, StringComparison.OrdinalIgnoreCase) || !string.Equals(retireIncarnation, ownIncarnation, StringComparison.Ordinal))
+                return false;
+            return !holdsLayout || ownState == MeshCellState.Pending;
+        }
+    }
+
     /// <summary>MeshStreamTargetDiff compares two lists of cell ids the way cell ids compare (ignoring case).</summary>
     public static class MeshStreamTargetDiff
     {
@@ -184,9 +215,9 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>
         /// Recompute sets the offset (added to a position from that neighbour to express it in <paramref name="own"/>'s frame)
         /// of every connection whose zone the registry knows; a connection to a zone it does not know keeps its offset.
-        /// Returns how many offsets changed.
+        /// Returns how many offsets changed; <paramref name="changedZones"/>, when given, receives each changed connection's zone.
         /// </summary>
-        public static int Recompute(MeshWorldRegistry world, MeshCell own, IReadOnlyDictionary<long, string> zoneByConnection, IDictionary<long, Vector3> offsets)
+        public static int Recompute(MeshWorldRegistry world, MeshCell own, IReadOnlyDictionary<long, string> zoneByConnection, IDictionary<long, Vector3> offsets, List<string> changedZones = null)
         {
             if (world == null || own == null || zoneByConnection == null || offsets == null)
                 return 0;
@@ -201,6 +232,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 {
                     offsets[kv.Key] = offset;
                     changed++;
+                    changedZones?.Add(kv.Value);
                 }
             }
             return changed;

@@ -308,10 +308,13 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             Dictionary<long, string> zones = new Dictionary<long, string> { { 7, "C2" } };
             Dictionary<long, Vector3> offsets = new Dictionary<long, Vector3>();
 
-            Assert.That(MeshFrameOffsets.Recompute(_world, null, zones, offsets), Is.EqualTo(0));
-            Assert.That(MeshFrameOffsets.Recompute(_world, _world.GetCellById("E"), zones, offsets), Is.EqualTo(1));
+            List<string> changed = new List<string>();
+            Assert.That(MeshFrameOffsets.Recompute(_world, null, zones, offsets, changed), Is.EqualTo(0));
+            Assert.That(changed, Is.Empty);
+            Assert.That(MeshFrameOffsets.Recompute(_world, _world.GetCellById("E"), zones, offsets, changed), Is.EqualTo(1));
 
             Assert.That(offsets[7], Is.EqualTo(new Vector3(400f, 0f, 0f)), "C2's map sits 400 m east of E's");
+            Assert.That(changed, Is.EqualTo(new[] { "C2" }));
         }
 
         [Test]
