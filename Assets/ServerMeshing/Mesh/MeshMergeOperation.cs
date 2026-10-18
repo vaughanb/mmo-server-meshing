@@ -62,6 +62,13 @@ namespace MultiplayerARPG.MMO.Mesh
         public float nextStraggleAt = -1f;
         /// <summary>Whether the retiring cell left the cluster before it reported drained.</summary>
         public bool exitedBeforeDrained;
+        /// <summary>
+        /// A collapse (Slice 2d decision 3): the supervisor merges a child that failed its restarts into its base. The child
+        /// is down and unbound, so there is no drain evidence, no Retire and no exit wait; its loss never aborts.
+        /// </summary>
+        public bool collapse;
+        /// <summary>When the retire step's spawner kill was sent (-1 before; Slice 2d decision 4, past retireKillAfterSeconds).</summary>
+        public float retireKillAt = -1f;
 
         public MeshMergeOperation(string opId) : base(opId, MeshLayoutOpKind.Merge)
         {
@@ -71,6 +78,9 @@ namespace MultiplayerARPG.MMO.Mesh
 
         /// <summary>From e2 staged to the survivor on, the survivor may own the union: a failure freezes instead of reverting.</summary>
         public override bool PastCommit => step >= MeshMergeStep.E2Staged;
+
+        /// <summary>Whether e2 was broadcast: from the drain gate on.</summary>
+        public override bool CommitBroadcast => step >= MeshMergeStep.DrainGate;
 
         public override bool IsFrozen => step == MeshMergeStep.Frozen;
         public override bool IsAborted => step == MeshMergeStep.Aborted;

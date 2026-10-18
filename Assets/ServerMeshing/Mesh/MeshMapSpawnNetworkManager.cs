@@ -5,6 +5,12 @@
 // start-up spawn once the spawner is registered with the cluster: a meshed map (one with a layout in the world
 // registry) is started on its own cells only, through the kit's own private SpawnMap (reached by reflection — the
 // kit stays untouched); maps without a layout are left to the kit's loop over its channel list.
+//
+// Kills (Slice 2d decision 4): the central's supervisor sends KillChannel (30020) for a hung, stale or straggling cell. The
+// kit keeps the pids it started in a private set with no channel, so the cell's own hello names its pid; the spawner
+// kills that process only when it runs the build's executable and started within 60 s of the incarnation's ticks (the
+// incarnation is made at server start, after the batchmode boot).
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
@@ -56,6 +62,8 @@ namespace MultiplayerARPG.MMO.Mesh
             base.Initialize();
             ResolveEditorExePath();
             ResolveEditorPublicAddress();
+            // Registered whether or not a map is meshed here: the central only sends it for a cell this host started.
+            ClusterClient?.RegisterMessageHandler(MeshClusterMsg.KillChannel, HandleKillChannel);
             world = MeshLayoutOverride.Resolve(world);
             if (world == null)
                 return;
@@ -250,6 +258,81 @@ namespace MultiplayerARPG.MMO.Mesh
             }
         }
 
+        /// <summary>HandleKillChannel kills one map-server process this host started, after MeshSpawnerKillRule's checks.</summary>
+        private void HandleKillChannel(MessageHandlerData messageHandler)
+        {
+            if (!MeshWholeMessage.TryRead(messageHandler.Reader, out MeshKillChannelMessage message, out string readError))
+            {
+                Logging.LogWarning("Mesh", $"Spawner: kill request dropped: {readError}");
+                return;
+            }
+            string refused = TryKill(message);
+            if (refused == null)
+                Logging.Log("Mesh", $"Spawner: killed {message.channelId} pid {message.processId} ({message.reason})");
+            else
+                Logging.LogWarning("Mesh", $"Spawner: kill of {message.channelId} pid {message.processId} refused ({refused})");
+        }
+
+        /// <summary>TryKill: null once the process is killed, else why it was not.</summary>
+        private string TryKill(MeshKillChannelMessage message)
+        {
+            if (message.processId <= 0)
+                return "no process id";
+            System.Diagnostics.Process process;
+            try
+            {
+                if (message.processId == System.Diagnostics.Process.GetCurrentProcess().Id)
+                    return "that is this spawner";
+                process = System.Diagnostics.Process.GetProcessById(message.processId);
+            }
+            catch (ArgumentException)
+            {
+                return "no such process";
+            }
+            catch (InvalidOperationException)
+            {
+                return "no such process";
+            }
+            using (process)
+            {
+                string executable;
+                DateTime startedUtc;
+                try
+                {
+                    executable = process.MainModule != null ? process.MainModule.FileName : string.Empty;
+                    startedUtc = process.StartTime.ToUniversalTime();
+                }
+                catch (Exception ex) when (ex is System.ComponentModel.Win32Exception || ex is InvalidOperationException || ex is NotSupportedException)
+                {
+                    return "the process could not be read (it exited, or access was denied)";
+                }
+                string why = MeshSpawnerKillRule.Check(executable, BuildExecutablePath(), startedUtc, message.incarnation);
+                if (why != null)
+                    return why;
+                try
+                {
+                    process.Kill();
+                }
+                catch (Exception ex) when (ex is System.ComponentModel.Win32Exception || ex is InvalidOperationException || ex is NotSupportedException)
+                {
+                    return "the kill failed (it exited, or access was denied)";
+                }
+            }
+            return null;
+        }
+
+        /// <summary>The executable this spawner starts map servers from, as the kit resolves it (its own when ExePath is empty).</summary>
+        private string BuildExecutablePath()
+        {
+            string path = ExePath;
+            if (string.IsNullOrEmpty(path))
+            {
+                string[] args = Environment.GetCommandLineArgs();
+                path = args.Length > 0 && File.Exists(args[0]) ? args[0] : System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName;
+            }
+            return MeshSpawnerKillRule.FullPath(path);
+        }
+
         private async UniTaskVoid SpawnCells(List<KeyValuePair<string, string>> cells)
         {
             ParameterInfo[] parameters = s_spawnMap.GetParameters();
@@ -262,5 +345,55 @@ namespace MultiplayerARPG.MMO.Mesh
             }
         }
 #endif
+    }
+
+    /// <summary>
+    /// MeshSpawnerKillRule decides whether a pid named by a kill request is still the map server it was (Slice 2d decision
+    /// 4): the build's executable, started within KillStartWindowSeconds of the incarnation's UTC ticks (a pid can be reused).
+    /// </summary>
+    public static class MeshSpawnerKillRule
+    {
+        public const double KillStartWindowSeconds = 60.0;
+
+        /// <summary>Check: null when the process may be killed, else why not.</summary>
+        public static string Check(string executable, string buildExecutable, DateTime processStartedUtc, string incarnation)
+        {
+            if (string.IsNullOrEmpty(executable) || string.IsNullOrEmpty(buildExecutable)
+                || !string.Equals(FullPath(executable), FullPath(buildExecutable), StringComparison.OrdinalIgnoreCase))
+                return $"it runs {FileName(executable)}, not the build's {FileName(buildExecutable)}";
+            if (!MeshIncarnation.TryTicks(incarnation, out long ticks) || ticks > DateTime.MaxValue.Ticks)
+                return $"incarnation {incarnation} is no start time";
+            double apart = Math.Abs((processStartedUtc.ToUniversalTime() - new DateTime(ticks, DateTimeKind.Utc)).TotalSeconds);
+            if (apart > KillStartWindowSeconds)
+                return $"it started {apart.ToString("0", System.Globalization.CultureInfo.InvariantCulture)} s from incarnation {incarnation}, over {KillStartWindowSeconds.ToString("0", System.Globalization.CultureInfo.InvariantCulture)} s: the pid was reused";
+            return null;
+        }
+
+        /// <summary>FullPath makes a path absolute (as given when it cannot be).</summary>
+        public static string FullPath(string path)
+        {
+            try
+            {
+                return Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            }
+            catch (Exception ex) when (ex is ArgumentException || ex is NotSupportedException || ex is PathTooLongException || ex is System.Security.SecurityException)
+            {
+                return path;
+            }
+        }
+
+        private static string FileName(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+                return "nothing known";
+            try
+            {
+                return Path.GetFileName(path);
+            }
+            catch (ArgumentException)
+            {
+                return path;
+            }
+        }
     }
 }

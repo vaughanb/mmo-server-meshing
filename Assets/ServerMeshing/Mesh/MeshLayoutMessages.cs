@@ -57,6 +57,8 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>Whether the cell runs its map Dynamic (a mismatch with the central is logged on both sides).</summary>
         public bool dynamicMap;
         public MeshLayoutSnapshot held = new MeshLayoutSnapshot();
+        /// <summary>processId is the map server's own pid (Slice 2d: the spawner kills by it); 0 when unknown.</summary>
+        public int processId;
 
         public void Serialize(NetDataWriter writer)
         {
@@ -65,6 +67,7 @@ namespace MultiplayerARPG.MMO.Mesh
             writer.Put(incarnation ?? string.Empty);
             writer.Put(dynamicMap);
             (held ?? new MeshLayoutSnapshot()).Serialize(writer);
+            writer.Put(processId);
         }
 
         public void Deserialize(NetDataReader reader)
@@ -75,6 +78,38 @@ namespace MultiplayerARPG.MMO.Mesh
             dynamicMap = reader.GetBool();
             held = new MeshLayoutSnapshot();
             held.Deserialize(reader);
+            processId = reader.GetInt();
+        }
+    }
+
+    /// <summary>
+    /// MeshKillChannelMessage (30020, Slice 2d) asks the spawner that started a map server to kill it: the process must
+    /// be the build's executable and have started within 60 s of the incarnation's ticks (pid reuse), else it is refused.
+    /// </summary>
+    public sealed class MeshKillChannelMessage : INetSerializable
+    {
+        public string channelId;
+        public string mapId;
+        public int processId;
+        public string incarnation;
+        public string reason;
+
+        public void Serialize(NetDataWriter writer)
+        {
+            writer.Put(channelId ?? string.Empty);
+            writer.Put(mapId ?? string.Empty);
+            writer.Put(processId);
+            writer.Put(incarnation ?? string.Empty);
+            writer.Put(reason ?? string.Empty);
+        }
+
+        public void Deserialize(NetDataReader reader)
+        {
+            channelId = reader.GetString();
+            mapId = reader.GetString();
+            processId = reader.GetInt();
+            incarnation = reader.GetString();
+            reason = reader.GetString();
         }
     }
 

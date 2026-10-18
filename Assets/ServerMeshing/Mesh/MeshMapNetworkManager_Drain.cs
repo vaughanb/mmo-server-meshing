@@ -240,6 +240,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 Logging.LogWarning("Mesh", $"Retire for cell {message.cellId} incarnation {message.incarnation} reached cell {cellId} incarnation {CellIncarnation}; ignored");
                 return;
             }
+            if (FenceOnRetire(message.reason))
+                return; // Slice 2d: a fenced: reason fences this cell in any state, a quit in progress included
             if (MayRetireNow(message.cellId, message.incarnation))
             {
                 RetireThisCell();

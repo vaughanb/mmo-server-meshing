@@ -387,5 +387,23 @@ namespace MultiplayerARPG.MMO.Mesh
         // Slice 2c (merge).
         [Tooltip("Seconds a merged-away cell may take to drain and exit before the central and the cell log it as straggling (every 30 s; players are never kicked).")]
         public float retireMaxSeconds = 90f;
+
+        // Slice 2d (supervision and fencing).
+        [Tooltip("Seconds a live dynamic cell (or a split family's base) must stay unregistered, its cluster key gone, before the central restarts it. Must exceed childFenceSeconds + fenceSaveSeconds + 3.")]
+        public float childDownGraceSeconds = 20f;
+        [Tooltip("Failed restarts of a child before the central collapses it into its base.")]
+        public int childMaxRestarts = 3;
+        [Tooltip("Least seconds between two restart attempts of one cell.")]
+        public float childRestartIntervalSeconds = 10f;
+        [Tooltip("Seconds a restarted cell must stay up for its restart to count as a success.")]
+        public float childRestartStableSeconds = 60f;
+        [Tooltip("Seconds a registered cell may send no load report before the central treats it as hung and has its spawner kill it.")]
+        public float childHungSeconds = 30f;
+        [Tooltip("Seconds a cell of a Dynamic map may be unregistered from the cluster, while a neighbour reports itself registered, before it fences itself (saves, kicks, exits).")]
+        public float childFenceSeconds = 10f;
+        [Tooltip("Upper bound, in seconds, on a fencing cell's player saves.")]
+        public float fenceSaveSeconds = 5f;
+        [Tooltip("Seconds a merge's retire step may last before the central has the retiring cell's spawner kill it.")]
+        public float retireKillAfterSeconds = 270f;
     }
 }

@@ -125,6 +125,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 incarnation = CellIncarnation,
                 dynamicMap = IsDynamicMap,
                 held = held,
+                processId = System.Diagnostics.Process.GetCurrentProcess().Id, // Slice 2d: the spawner kills by it
             };
             ClusterClient.SendPacket(0, DeliveryMethod.ReliableOrdered, MeshClusterMsg.LayoutHello, writer => hello.Serialize(writer));
             _layoutGate.OnHelloSent(Time.unscaledTime, LayoutGateWarnSeconds);

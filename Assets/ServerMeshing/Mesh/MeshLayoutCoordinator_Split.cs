@@ -103,9 +103,10 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>
         /// CheckOpCommon: the guards every operation on <paramref name="cellId"/> must pass (Slice 2c decision 3) — the
         /// coordinator running and its store writable, no operation in progress or frozen world-wide, a host, the cell known,
-        /// not Retired, on a recovered Dynamic map, Active and owning something, bound and answered, its family out of cooldown.
+        /// not Retired, on a recovered Dynamic map, Active and owning something, bound and answered, its family out of cooldown
+        /// (a collapse ignores the cooldown, Slice 2d decision 3).
         /// </summary>
-        private string CheckOpCommon(string cellId, out MeshCell cell, out MeshCellBinding binding)
+        private string CheckOpCommon(string cellId, out MeshCell cell, out MeshCellBinding binding, bool ignoreCooldown = false)
         {
             cell = null;
             binding = null;
@@ -133,7 +134,7 @@ namespace MultiplayerARPG.MMO.Mesh
             binding = BindingOf(cell.id);
             if (binding == null || !binding.answered || binding.unregisteredAt >= 0f || binding.staticNeighbour)
                 return $"{cell.id} is not running with a layout answer";
-            if (_cooldownUntil.TryGetValue(cell.baseId, out float until) && until > _clock.Now)
+            if (!ignoreCooldown && _cooldownUntil.TryGetValue(cell.baseId, out float until) && until > _clock.Now)
                 return $"cooldown {until - _clock.Now:0} s left on {cell.baseId}";
             return null;
         }
@@ -151,6 +152,9 @@ namespace MultiplayerARPG.MMO.Mesh
                 return $"cell {childId} already exists";
             if (IsRegistered(childId))
                 return $"a map server of {childId} is still registered";
+            string reuse = IdReuseRefusal(childId);
+            if (reuse != null)
+                return reuse;
             if (!MeshSplitOperation.Cut(cell.owned, axis, at, positive, out MeshRect given, out MeshRect kept))
                 return $"the {(axis == MeshSplitAxis.X ? "x" : "z")} {MeshSplitOperation.Number(at)} line does not cross {cell.id}, which owns {cell.owned}";
             op = new MeshSplitOperation("split-" + (_opCounter + 1))
@@ -357,9 +361,13 @@ namespace MultiplayerARPG.MMO.Mesh
                 AbortMerge(merge, reason);
         }
 
-        /// <summary>Abort (before e2): retire the child, remove its channel, and broadcast it Retired if e1 went out (decision 5a).</summary>
-        private void Abort(MeshSplitOperation op, string reason)
+        /// <summary>
+        /// Abort (before e2): retire the child, remove its channel, and broadcast it Retired if e1 went out (decision 5a). The
+        /// Retire is `fenced:` when the child may own something (its e2 was staged) or the abort is a member's loss (Slice 2d).
+        /// </summary>
+        private void Abort(MeshSplitOperation op, string reason, bool fence = false)
         {
+            string retireReason = (fence || op.step == MeshSplitStep.E2Staged ? "fenced: aborted by " : "aborted by ") + op.opId;
             op.step = MeshSplitStep.Aborted;
             op.endReason = reason;
             op.staged = null;
@@ -367,7 +375,7 @@ namespace MultiplayerARPG.MMO.Mesh
             _abortedIds.Add(op.childId);
             Line(true, $"Split {op.opId}: aborted {reason}");
             if (op.childBound)
-                _transport.Send(op.childConnection, new MeshRetireMessage { cellId = op.childId, incarnation = op.childIncarnation, pair = BroadcastPair, reason = "aborted by " + op.opId });
+                _transport.Send(op.childConnection, new MeshRetireMessage { cellId = op.childId, incarnation = op.childIncarnation, pair = BroadcastPair, reason = retireReason });
             SplitHost?.RemoveChannel(op.childId);
             if (op.e1Broadcast)
             {

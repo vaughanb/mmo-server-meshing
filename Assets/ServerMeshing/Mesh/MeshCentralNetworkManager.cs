@@ -17,7 +17,8 @@
 // Dynamic cells (DESIGN.md 0.72): when the world has a Dynamic map, this server also runs the layout coordinator
 // (MeshLayoutCoordinator), which answers each cell's layout hello and runs manual splits (Slice 2b,
 // MeshCentralNetworkManager_Split.cs); with none, nothing of it runs. A split family is never slept or started by the
-// awake set, and a wake request for a dynamic id is refused: the coordinator runs those cells.
+// awake set, and a wake request for a dynamic id is refused: the coordinator runs those cells, and its supervisor (Slice
+// 2d) restarts a crashed or hung one of them, a sleep-mode base included, through the map-spawn servers.
 using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
 using LiteNetLib;

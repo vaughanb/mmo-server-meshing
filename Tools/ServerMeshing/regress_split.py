@@ -109,10 +109,13 @@ def wait_standing(logs, timeout, seen=None):
         time.sleep(3)
 
 
-def wait_op(status_path, seq, timeout):
-    """The command's parsed status once it has ended (done, refused, aborted or frozen), or as it stood at the timeout."""
+def wait_op(status_path, seq, timeout, on_poll=None):
+    """The command's parsed status once it has ended (done, refused, aborted, frozen or ended), or as it stood at the
+    timeout. `on_poll` (Slice 2d's process samples), when given, is called once per poll, before the status is read."""
     end = time.time() + timeout
     while True:
+        if on_poll is not None:
+            on_poll()
         status = rigsplit.parse_op_status(read_lines(status_path), seq)
         if rigsplit.op_outcome(status) or time.time() >= end:
             return status
@@ -163,23 +166,46 @@ def run(name, rep, rig, start, day, bots):
     return r.split
 
 
-def start_split(name, rep, rig, start, day, bots, spec_name=None, observe_s=OBSERVE_S):
+def grade_status(rep, status, spec):
+    """The op's own record (decision 17): accepted, ended done, no abort, freeze or straggler."""
+    rep.check(status["requested"] is not None and not status["refused"],
+              f"split {spec.base} at x={spec.at:g} accepted ({status['op'] or 'no op'}"
+              + (f"; refused: {status['refused']}" if status["refused"] else "") + ")")
+    rep.check(status["done"], f"split done (states: {', '.join(status['states'][-4:]) or 'none'})")
+    rep.check(not status["aborted"] and not status["frozen"],
+              f"split neither aborted nor frozen ({status['aborted'] or status['frozen'] or 'clean'})")
+    rep.check(status["drain"] == "open" and not status["stragglers"],
+              f"P's drain evidence reached 0 left (drain {status['drain']}, {status['stragglers'] or 0} straggler(s))")
+    supervision = rigsplit.supervision_lines(status)
+    rep.check(not supervision, "no supervision (restart, pause, resume) during the split"
+              + (f" ({supervision[0][:120]})" if supervision else ""))
+    for text in status["other"][:3]:
+        rep.notes.append(f"   status: {text[:160]}")
+
+
+def start_split(name, rep, rig, start, day, bots, spec_name=None, observe_s=OBSERVE_S, plan=None, load_plan=None,
+                enabled=True, env=None, grade_status=grade_status, on_poll=None):
     """The split phase: setup (database, bot positions, the Dynamic Play, the bots, each with an `observe_s` stand
     window, their logs named after `name`), the command once every bot stands, its status graded, and the wait for
-    the base's e3 apply. `spec_name` picks the split (SPECS; default `name`). Returns a SplitRun."""
+    the base's e3 apply (when the op is done). `spec_name` picks the split (SPECS; default `name`). Slice 2d's crash
+    cases change the rest: `plan` the bots (default plan_bots), `load_plan` the synthetic players ('' for none; default
+    the spec's), `enabled` False keeps the editor's tester out, `env` adds to (and overrides) the Play's environment,
+    `grade_status` is the status grader (None: the caller grades), `on_poll` goes to wait_op. Returns a SplitRun."""
     spec, split = SPECS[spec_name or name], split_of(spec_name or name, rig.MAP)
-    plan = plan_bots(spec_name or name)
+    plan = plan_bots(spec_name or name) if plan is None else list(plan)
     harvest = next((b for b in plan if b.harvest), None)
     stand = [b for b in plan if not b.harvest]
     rig.db_reset(spec.tester, harvest.point if harvest else spec.tester)
     provision.reset_bot_positions(2, STAND_BOTS, [b.point for b in stand], status_path=rig.STATUS)
-    env = {"MESH_CELL_MODE": f"{rig.MAP}:Dynamic"}
-    if spec.load_plan:
-        env["MESH_LOAD_PLAN"] = spec.load_plan
+    play_env = {"MESH_CELL_MODE": f"{rig.MAP}:Dynamic"}
+    load_plan = spec.load_plan if load_plan is None else load_plan
+    if load_plan:
+        play_env["MESH_LOAD_PLAN"] = load_plan
     if spec.monster_areas:
         # The test map saves C's monster areas inactive; this one straddles the cut, so monsters stand on both sides.
-        env["MESH_MONSTER_AREAS"] = spec.monster_areas
-    rig.request_play("stand", spec.tester[0], spec.tester[1], env=env)
+        play_env["MESH_MONSTER_AREAS"] = spec.monster_areas
+    play_env.update(env or {})
+    rig.request_play("stand", spec.tester[0], spec.tester[1], env=play_env, enabled=enabled)
     rig.wait_play(60)
     time.sleep(20)
     logs = {}
@@ -203,12 +229,16 @@ def start_split(name, rep, rig, start, day, bots, spec_name=None, observe_s=OBSE
 
     seq = str(int(time.time()))
     write_command(rig.LAYOUT_COMMAND, rigsplit.command_line(seq, spec.base, AXIS, spec.at, SIDE, spec.child))
-    status = wait_op(rig.LAYOUT_COMMAND_STATUS, seq, SPLIT_TIMEOUT_S)
+    status = wait_op(rig.LAYOUT_COMMAND_STATUS, seq, SPLIT_TIMEOUT_S, on_poll)
     done_at = time.time() if status["done"] else None
-    grade_status(rep, status, spec)
-    applied = wait_applied(rig, split, start, day, APPLY_TIMEOUT_S) if status["done"] else None
-    kept = rigsplit.format_rect(rigsplit.split_rects(split.base_rect, AXIS, spec.at, SIDE)[0])
-    rep.check(applied is not None, f"{spec.base} applied a layout owning and interested in {kept} only (e3)")
+    if grade_status is not None:
+        grade_status(rep, status, spec)
+    applied = None
+    if status["done"]:
+        # (a split that never got done already failed its status grade; Slice 2d's aborted case expects none)
+        applied = wait_applied(rig, split, start, day, APPLY_TIMEOUT_S)
+        kept = rigsplit.format_rect(rigsplit.split_rects(split.base_rect, AXIS, spec.at, SIDE)[0])
+        rep.check(applied is not None, f"{spec.base} applied a layout owning and interested in {kept} only (e3)")
     return SplitRun(name, spec, split, plan, logs, standing, stood, seq, status, applied, True, done_at,
                     time.time() if applied is not None else None)
 
@@ -221,20 +251,6 @@ def finish_split(rep, rig, r, start, day):
     grade_entities(rep, rig, r.spec, start, day, r.status["pairs"].get("e2"), r.status["pairs"].get("e3"))
     if r.spec.beside_c2:
         grade_c2(rep, rig, r.plan, r.standing, r.logs, r.status, r.spec, start, day)
-
-
-def grade_status(rep, status, spec):
-    """The op's own record (decision 17): accepted, ended done, no abort, freeze or straggler."""
-    rep.check(status["requested"] is not None and not status["refused"],
-              f"split {spec.base} at x={spec.at:g} accepted ({status['op'] or 'no op'}"
-              + (f"; refused: {status['refused']}" if status["refused"] else "") + ")")
-    rep.check(status["done"], f"split done (states: {', '.join(status['states'][-4:]) or 'none'})")
-    rep.check(not status["aborted"] and not status["frozen"],
-              f"split neither aborted nor frozen ({status['aborted'] or status['frozen'] or 'clean'})")
-    rep.check(status["drain"] == "open" and not status["stragglers"],
-              f"P's drain evidence reached 0 left (drain {status['drain']}, {status['stragglers'] or 0} straggler(s))")
-    for text in status["other"][:3]:
-        rep.notes.append(f"   status: {text[:160]}")
 
 
 def grade_bots(rep, rig, plan, logs, results, spec, start, day):

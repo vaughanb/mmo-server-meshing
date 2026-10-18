@@ -2,7 +2,9 @@
 // the survivor's evidence; e2 staged to the survivor, then broadcast; the drain gate on the retiring cell's evidence;
 // Retire sent (and resent) to the retiring cell; its exit (5 s unregistered) and its channel removed; e3 (it is
 // Retired); the tidy when the survivor is whole again; done. Before e2 a silent participant aborts; from e2 on only acks
-// can freeze: the drain and the retire straggle (logged every 30 s past retireMaxSeconds), they never time out.
+// can freeze: the drain and the retire straggle (logged every 30 s past retireMaxSeconds), they never time out. Slice 2d:
+// past retireKillAfterSeconds the retiring cell is killed by its spawner; a collapse's retiring cell is down from the
+// start, so its loss never aborts and the drain gate sees it "exited before drained".
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -183,7 +185,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 op.retiringGoneSince = -1f;
             else if (op.retiringGoneSince < 0f)
                 op.retiringGoneSince = now;
-            if (!present && !op.PastCommit)
+            if (!present && !op.PastCommit && !op.collapse)
             {
                 FailOp(op, $"{op.retiringId} unregistered");
                 return;
@@ -217,6 +219,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     if (present && now - op.retireSentAt >= MeshMergeGates.RetireResendSeconds)
                         SendRetire(op);
                     Straggle(op, now, false);
+                    RetireKillTick(op, now);
                     break;
                 case MeshMergeStep.E3Broadcast:
                 case MeshMergeStep.TidyBroadcast:

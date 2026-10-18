@@ -12,10 +12,12 @@ namespace MultiplayerARPG.MMO.Mesh
     {
         private readonly List<string> _silent = new List<string>();
 
-        /// <summary>Advance takes every step whose gate is open now (several in one call when acks are already in).</summary>
+        /// <summary>Advance takes every step whose gate is open now (several in one call when acks are already in); none while paused (Slice 2d).</summary>
         private void Advance()
         {
             MeshLayoutOperation op = _op;
+            if (op != null && op.Paused)
+                return;
             for (int guard = 0; guard < 8 && op != null && op.InProgress; ++guard)
             {
                 bool stepped = op is MeshSplitOperation s ? TryStep(s) : op is MeshMergeOperation m && TryMergeStep(m);
@@ -241,6 +243,7 @@ namespace MultiplayerARPG.MMO.Mesh
             data.opId = op.InProgress ? op.opId : string.Empty;
             data.opStep = op.StepText;
             data.abortedIds = new List<string>(_abortedIds);
+            data.fencedIncarnations = _fenced.ToStore();
             _storeData = data;
             if (_store.TrySave(data, out string error))
                 return true;
@@ -347,11 +350,11 @@ namespace MultiplayerARPG.MMO.Mesh
             return cell != null ? BandOf(validation, live, cell) : new List<string>();
         }
 
-        /// <summary>OpTick: the silence timers of the current step, and gates that opened without a new message.</summary>
+        /// <summary>OpTick: the silence timers of the current step, and gates that opened without a new message (none while paused, Slice 2d).</summary>
         private void OpTick()
         {
             MeshLayoutOperation op = _op;
-            if (op == null || Phase != MeshCoordinatorPhase.Running)
+            if (op == null || Phase != MeshCoordinatorPhase.Running || op.Paused)
                 return;
             if (op is MeshMergeOperation merge)
             {

@@ -13,7 +13,7 @@ import rigsplit
 
 # ------------------------------------------------------------------ the op's status file (decisions 5, 15)
 MERGE_OP_ID = re.compile(r"^merge-\d+$")
-REQUESTED = re.compile(r"^requested (\S+) (\S+)$")
+REQUESTED = re.compile(r"^requested (\S+) (\S+)( collapse)?$")   # Slice 2d: the supervisor's collapse
 STEP_PAIR = re.compile(r"^(e[123]|tidy|reverted) broadcast ([0-9a-f]+/\d+)$")
 EXITED_BEFORE = re.compile(r"^(\S+) exited before drained$")
 EXITED = re.compile(r"^(\S+) exited$")
@@ -25,10 +25,10 @@ STEPS = ("e1", "e2", "e3", "tidy")
 
 def parse_merge_status(lines, seq):
     """The merge command `seq`'s record from Temp/ServerMesh.LayoutCommandStatus.txt's lines: {kind, op, requested
-    (survivor, retiring), refused, states, pairs (e1, e2, e3, tidy, reverted), retire_sent (how many), exited,
+    (survivor, retiring), collapse (Slice 2d: 'requested <base> <cell> collapse'), refused, states, pairs (e1, e2, e3, tidy, reverted), retire_sent (how many), exited,
     exited_before, channel_removed, straggling [state], done, aborted, frozen, reverted, other}. Only 'Merge merge-<n>:'
     lines count (the runner mirrors a late Split line, or a cell's 'Merge retire:', under the latest seq: 'other')."""
-    out = {"kind": "Merge", "op": None, "requested": None, "refused": None, "states": [], "pairs": {},
+    out = {"kind": "Merge", "op": None, "requested": None, "collapse": False, "refused": None, "states": [], "pairs": {},
            "retire_sent": 0, "exited": None, "exited_before": None, "channel_removed": None, "straggling": [],
            "done": False, "aborted": None, "frozen": None, "reverted": False, "other": []}
     for raw in lines:
@@ -49,7 +49,8 @@ def parse_merge_status(lines, seq):
         out["states"].append(state)
         step, before = STEP_PAIR.match(state), EXITED_BEFORE.match(state)
         if REQUESTED.match(state):
-            out["requested"] = REQUESTED.match(state).groups()
+            out["requested"] = REQUESTED.match(state).groups()[:2]
+            out["collapse"] = REQUESTED.match(state).group(3) is not None
         elif step:
             out["pairs"][step.group(1)] = step.group(2)
             out["reverted"] = out["reverted"] or step.group(1) == "reverted"

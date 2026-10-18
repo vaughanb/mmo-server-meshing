@@ -84,12 +84,20 @@ namespace MultiplayerARPG.MMO.Mesh
         public MeshLayoutEvidenceMessage evidence;
         /// <summary>When that evidence was received (a merge's drained window must arrive a load window after the last e2 ack).</summary>
         public float layoutEvidenceAt = -1f;
+        /// <summary>The map server's own pid from its hello (0 when unknown): its spawner kills by it (Slice 2d decision 4).</summary>
+        public int processId;
+        /// <summary>When this incarnation's last MeshLoadReport arrived (-1 before the first): a registered cell silent too long is hung.</summary>
+        public float lastReportAt = -1f;
+        /// <summary>When a spawner kill of this incarnation was sent (-1 when none): its id may be restarted once its key is gone.</summary>
+        public float killedAt = -1f;
     }
 
     /// <summary>
     /// IMeshSplitHost is what a split needs from the central around the coordinator: the kit's channel list and the
     /// map-spawn servers. The spawn's result comes back through MeshLayoutCoordinator.OnSpawnResult. A merge (Slice 2c)
-    /// uses RemoveChannel once the merged-away cell exited.
+    /// uses RemoveChannel once the merged-away cell exited. The supervisor (Slice 2d) restarts a cell through
+    /// RequestRestart (its result comes back through MeshLayoutCoordinator.OnRestartSpawnResult) and has a process killed by
+    /// its spawner through KillChannel.
     /// </summary>
     public interface IMeshSplitHost
     {
@@ -100,6 +108,12 @@ namespace MultiplayerARPG.MMO.Mesh
         void RemoveChannel(string cellId);
         /// <summary>RequestSpawn asks the base cell's map-spawn server for the child's process; false when it could not be asked.</summary>
         bool RequestSpawn(string opId, string baseId, string childId, string mapId, out string error);
+        /// <summary>RequestRestart asks the base cell's map-spawn server for a new process of an existing cell (its channel is kept); false when it could not be asked.</summary>
+        bool RequestRestart(string cellId, string baseId, string mapId, out string error);
+        /// <summary>KillChannel sends MeshKillChannelMessage (30020) to the base cell's map-spawn server; false when there is none.</summary>
+        bool KillChannel(MeshKillChannelMessage message, string baseId, out string error);
+        /// <summary>Whether the kit restarts a crashed base cell itself (autoRestart; false in sleep mode, where the supervisor does).</summary>
+        bool KitRestartsBaseCells { get; }
     }
 
     /// <summary>MeshCoordinatorPhase is where the coordinator is.</summary>

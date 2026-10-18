@@ -178,7 +178,7 @@ namespace MultiplayerARPG.MMO.Mesh
             Log(MigrationLine(_standMigrations, r.playerReadyMs, r.playerReady, r.positionJump, r.positionAfter.x, r.positionAfter.z));
         }
 
-        private string StandMigrationsSuffix() => MigrationSuffix(_standMigrations, _standAllReady, _standMaxGapMs, _standMaxJump);
+        private string StandMigrationsSuffix() => MigrationSuffix(_standMigrations, _standAllReady, _standMaxGapMs, _standMaxJump) + ReloginSuffix(Relogins); // Slice 2d: relogins
 
         /// <summary>The harvest variant: stand, wait for a migration, harvest a local node until a yield lands, pick up a drop.</summary>
         private IEnumerator RunHarvestAfterMigration(float deadline)
@@ -208,6 +208,11 @@ namespace MultiplayerARPG.MMO.Mesh
                 yield return HarvestLocal(minX, (seen, swings, gained) => { nodesSeen = seen; attacks = swings; yieldAmount = gained; });
                 if (yieldAmount > 0)
                 {
+                    // The harvest leaves the node targeted and the swing loop's state behind; a pickup walk then sometimes
+                    // never starts (two of ~13 runs on 2026-10-18: the bot stood 41 m from the drop for 60 s). Start clean.
+                    BasePlayerCharacterEntity harvester = GameInstance.PlayingCharacterEntity;
+                    if (harvester != null) { harvester.SetTargetEntity(null); harvester.StopMove(); }
+                    yield return null;
                     Phase = "pickup";
                     yield return PickUpLocal(minX, picked => pickup = picked);
                 }
@@ -280,6 +285,7 @@ namespace MultiplayerARPG.MMO.Mesh
             Dictionary<uint, float> retryAfter = new Dictionary<uint, float>();
             float end = Time.realtimeSinceStartup + 60f, nextLog = 0f, waitGainUntil = -1f;
             int bagBefore = 0;
+            Vector3 stallFrom = Vector3.zero; float stallSince = -1f;
             while (Time.realtimeSinceStartup < end)
             {
                 PollStandMigrations();
@@ -305,7 +311,21 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (target != null)
                 {
                     if (best > 2.2f)
+                    {
+                        // A walk that does not start (no progress for 3 s) is stopped and issued again.
+                        Vector3 here = self.EntityTransform.position;
+                        if (stallSince < 0f || (here - stallFrom).sqrMagnitude > 0.25f) { stallFrom = here; stallSince = now; }
+                        else if (now - stallSince > 3f)
+                        {
+                            LogInvariant($"pickup: no progress for 3 s at {here}; walk issued again");
+                            self.SetTargetEntity(null);
+                            self.StopMove();
+                            stallSince = now;
+                            yield return null;
+                            continue;
+                        }
                         self.PointClickMovement(target.EntityTransform.position);
+                    }
                     else
                     {
                         self.StopMove();

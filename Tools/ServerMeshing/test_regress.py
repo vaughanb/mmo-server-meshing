@@ -107,12 +107,15 @@ class SplitWiringTests(unittest.TestCase):
             self.assertEqual(os.listdir(d), [])
 
     def test_registration(self):
-        for name in ("split", "splitc2", "merge", "mergec2"):
+        for name in ("split", "splitc2", "merge", "mergec2", "splitcrash_prewarm", "splitcrash_drain", "splitcrash_base"):
             with self.subTest(name):
                 self.assertIn(name, regress.ALL)
                 self.assertNotIn(name, regress.DEFAULT)
                 self.assertIn("spawner", regress.TWO_HOST_SKIP[name])
                 self.assertIn(name, regress.PERSIST_SKIP)
+        for key in ("MESH_FAULT_DIE_ON_PREWARM", "MESH_FAULT_DIE_ON_DRAIN", "MESH_FAULT_DIE_ON_NOTICE"):
+            self.assertIn(key, regress.ENV_KEYS)
+        self.assertEqual(len(regress.ENV_KEYS), len(set(regress.ENV_KEYS)))
         self.assertEqual(regress.LAYOUT_COMMAND, os.path.join(regress.TEMP, "ServerMesh.LayoutCommand.txt"))
         self.assertEqual(regress.LAYOUT_COMMAND_STATUS, os.path.join(regress.TEMP, "ServerMesh.LayoutCommandStatus.txt"))
 

@@ -23,16 +23,22 @@ namespace MultiplayerARPG.MMO.Mesh
                 Refuse(error);
                 return false;
             }
+            StartMerge(op);
+            return true;
+        }
+
+        /// <summary>StartMerge runs a checked merge (an operator's, or the supervisor's collapse, Slice 2d decision 3) to its e1 broadcast.</summary>
+        private void StartMerge(MeshMergeOperation op)
+        {
             _op = op;
-            OpLog(op, $"requested {op.survivorId} {op.retiringId}");
+            OpLog(op, $"requested {op.survivorId} {op.retiringId}{(op.collapse ? " collapse" : string.Empty)}");
             MeshLayoutSnapshot e1 = op.E1(_broadcast, NextPair());
             op.e1Pair = e1.pair;
             if (!BroadcastStep(op, e1, "e1", () => EnterStep(op, MeshMergeStep.E1Gate), null))
-                return true;   // aborted, and logged
+                return;   // aborted, and logged
             op.e1Broadcast = true;
             op.prewarmNeighbours.Clear();
             op.prewarmNeighbours.AddRange(BandNeighboursOf(_broadcast, op.survivorId));
-            return true;
         }
 
         private string CheckMerge(string a, string b, out MeshMergeOperation op)

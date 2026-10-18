@@ -37,6 +37,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import provision
 import regress_merge
 import regress_split
+import regress_splitcrash
 import rigtools
 from provision import ITEM_BOW, ITEM_YIELD, db_connect
 
@@ -108,7 +109,9 @@ ENV_KEYS = ["MESH_NO_MONSTER_HANDOFF", "MESH_FAULT_DIE_ON_NOTICE", "MESH_GHOST_L
             # Phase 0 step 9 (p0tools.ENV_REGISTRY via p0cells0c): the database burst and the editor's save probe, the
             # monster cell, fighters hitting ghosts, forwarded-hit timing, isolated spaces and LiteNetLib's statistics
             "MESH_DB_BURST", "MESH_DB_SAVES_PROBE", "MESH_MONSTER_CELL", "MESH_FIGHT_GHOSTS", "MESH_FORWARD_TIMING",
-            "MESH_SPACES", "MESH_NET_STATS", "MESH_MONSTER_AWAKE"]
+            "MESH_SPACES", "MESH_NET_STATS", "MESH_MONSTER_AWAKE",
+            # Slice 2d's fault toggles (regress_splitcrash): a child dies on the e1 broadcast, or on its drain's first arrival
+            "MESH_FAULT_DIE_ON_PREWARM", "MESH_FAULT_DIE_ON_DRAIN"]
 EXTRA_ENV = {}   # --env KEY=VALUE from the command line, applied to every Play request of the run
 
 # Two-machine runs (--remote-cells): the named cells are served by the other machine, started and read over SSH by
@@ -964,6 +967,9 @@ def run_scenario(name, rep):
         # Slice 2c: the split's setup, then the merge back (regress_merge.run returns its MergeRun for the layout grade).
         split = regress_merge.run(name, rep, sys.modules[__name__], start, day, bots)
 
+    elif name in regress_splitcrash.SCENARIOS:
+        split = regress_splitcrash.run(name, rep, sys.modules[__name__], start, day, bots)   # Slice 2d: a CrashRun
+
     else:
         raise ValueError(f"unknown scenario {name}")
 
@@ -973,6 +979,8 @@ def run_scenario(name, rep):
         regress_split.grade_layout(rep, sys.modules[__name__], start, day, split)
     elif name in regress_merge.SCENARIOS:
         regress_merge.grade_layout(rep, sys.modules[__name__], start, day, split)
+    elif name in regress_splitcrash.SCENARIOS:
+        regress_splitcrash.grade_layout(rep, sys.modules[__name__], start, day, split)
     else:
         grade_layout(rep, start, day)
     for kind, log in bots:
@@ -1010,12 +1018,15 @@ TWO_HOST_SKIP = {
     "wake": "needs cells started on demand by the central (as sleep does); the other machine runs no spawner",
     **{n: regress_split.TWO_HOST_REASON for n in regress_split.SCENARIOS},
     **{n: regress_merge.TWO_HOST_REASON for n in regress_merge.SCENARIOS},
+    **{n: regress_splitcrash.TWO_HOST_REASON for n in regress_splitcrash.SCENARIOS},
 }
-ALL = DEFAULT + ["pvp", "wake", "dynidle"] + list(regress_split.SCENARIOS) + list(regress_merge.SCENARIOS)
+ALL = (DEFAULT + ["pvp", "wake", "dynidle"] + list(regress_split.SCENARIOS) + list(regress_merge.SCENARIOS)
+       + list(regress_splitcrash.SCENARIOS))
 # A persisted remote cell outlives the Plays, so no scenario's environment reaches it.
 PERSIST_SKIP = {"dynidle": "runs the test map Dynamic through the environment, which a persisted remote cell never gets",
                 **{n: regress_split.PERSIST_REASON for n in regress_split.SCENARIOS},
-                **{n: regress_merge.PERSIST_REASON for n in regress_merge.SCENARIOS}}
+                **{n: regress_merge.PERSIST_REASON for n in regress_merge.SCENARIOS},
+                **{n: regress_splitcrash.PERSIST_REASON for n in regress_splitcrash.SCENARIOS}}
 
 
 def main():

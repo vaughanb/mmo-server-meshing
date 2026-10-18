@@ -1,10 +1,13 @@
 // Server Meshing add-on — the central's share of a manual split (Slice 2b decisions 2, 3 and 6) and merge (Slice 2c
 // decision 2): the layout command entry point, the cells' gate evidence, and the split host the coordinator uses for what
 // only the kit can do: a channel added to the live channel list at runtime (and removed once a merged-away cell exited),
-// and the child's process asked from its base cell's map-spawn server.
+// and the child's process asked from its base cell's map-spawn server. Supervision (Slice 2d): a cell's process restarted
+// through the same spawn request (its channel kept), the `kill` command, and KillChannel (30020) sent to the base cell's
+// map-spawn server, which kills the process by the pid the cell's hello named.
 using System;
 using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
+using LiteNetLib;
 using LiteNetLibManager;
 
 namespace MultiplayerARPG.MMO.Mesh
@@ -16,8 +19,9 @@ namespace MultiplayerARPG.MMO.Mesh
 
         /// <summary>
         /// SubmitLayoutCommand runs one command line, `&lt;seq&gt; split &lt;cell&gt; &lt;x|z&gt; &lt;at&gt; &lt;+|-&gt; &lt;childId&gt;`
-        /// (world frame) or `&lt;seq&gt; merge &lt;a&gt; &lt;b&gt;` (either order). True when the operation started; false with
-        /// the reason, also logged "Layout op refused: reason".
+        /// (world frame), `&lt;seq&gt; merge &lt;a&gt; &lt;b&gt;` (either order) or `&lt;seq&gt; kill &lt;cell&gt;` (Slice 2d: its spawner
+        /// kills the cell's process). True when the operation started (or the kill was sent); false with the reason, also
+        /// logged "Layout op refused: reason".
         /// </summary>
         public bool SubmitLayoutCommand(string line, out string error)
         {
@@ -34,6 +38,8 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             if (command.kind == MeshLayoutCommandKind.Merge)
                 return _coordinator.RequestMerge(command.mergeA, command.mergeB, out error);
+            if (command.kind == MeshLayoutCommandKind.Kill)
+                return _coordinator.RequestKill(command.cellId, out error);
             return _coordinator.RequestSplit(command.cellId, command.axis, command.at, command.childOnPositiveSide, command.childId, out error);
         }
 
@@ -95,11 +101,17 @@ namespace MultiplayerARPG.MMO.Mesh
             return -1;
         }
 
-        private async UniTaskVoid SpawnChild(long spawnerConnectionId, string opId, string childId, string mapId)
+        private UniTaskVoid SpawnChild(long spawnerConnectionId, string opId, string childId, string mapId)
         {
-            string key = PeerInfoExtensions.GetPeerInfoKey(childId, mapId);
+            return SpawnCellProcess(spawnerConnectionId, childId, mapId, (success, detail) => _coordinator?.OnSpawnResult(opId, success, detail));
+        }
+
+        /// <summary>SpawnCellProcess asks a map-spawn server for one process of a cell; <paramref name="onResult"/> hears the kit's first answer only.</summary>
+        private async UniTaskVoid SpawnCellProcess(long spawnerConnectionId, string cellId, string mapId, Action<bool, string> onResult)
+        {
+            string key = PeerInfoExtensions.GetPeerInfoKey(cellId, mapId);
             bool answered = false;
-            RequestSpawnMapMessage request = new RequestSpawnMapMessage { channelId = childId, mapName = mapId, instanceId = string.Empty };
+            RequestSpawnMapMessage request = new RequestSpawnMapMessage { channelId = cellId, mapName = mapId, instanceId = string.Empty };
             try
             {
                 await ClusterServer.RequestSpawnMap(spawnerConnectionId, request, key, (responseCode, response, extraSerializer) =>
@@ -110,16 +122,16 @@ namespace MultiplayerARPG.MMO.Mesh
                     answered = true;
                     ClusterServer.MapSpawnResultActions.Remove(key);
                     bool success = responseCode == AckResponseCode.Success;
-                    _coordinator?.OnSpawnResult(opId, success, success ? "Success" : $"{responseCode} {response.message}");
+                    onResult(success, success ? "Success" : $"{responseCode} {response.message}");
                 });
             }
             catch (Exception ex)
             {
-                Logging.LogWarning("Mesh", $"Spawn request for child {childId} failed: {ex.Message}");
+                Logging.LogWarning("Mesh", $"Spawn request for cell {cellId} failed: {ex.Message}");
                 if (!answered)
                 {
                     answered = true;
-                    _coordinator?.OnSpawnResult(opId, false, "request failed: " + ex.Message);
+                    onResult(false, "request failed: " + ex.Message);
                 }
             }
             // On an error the kit calls back first and stores the callback after: take it out again.
@@ -188,6 +200,47 @@ namespace MultiplayerARPG.MMO.Mesh
                 }
                 Logging.Log("Mesh", $"Child {childId} of {baseId} ({mapId}): start requested from map-spawn server {spawner}{(advertised ? string.Empty : $", which did not advertise {baseId}")}");
                 _central.SpawnChild(spawner, opId, childId, mapId).Forget();
+                return true;
+            }
+
+            public bool KitRestartsBaseCells => !_central.sleepCells;
+
+            public bool RequestRestart(string cellId, string baseId, string mapId, out string error)
+            {
+                error = null;
+                if (!CanSpawn(baseId, out error))
+                    return false;
+                long spawner = SpawnerForKey(baseId, _central._spawnerByCell, Cluster.MapSpawnServerPeers.Keys, out bool advertised);
+                if (spawner < 0)
+                {
+                    error = "no map-spawn server is registered";
+                    return false;
+                }
+                // A child's channel was added by its split and stays until a merge removes it; put it back if it is gone.
+                if (!_central.Channels.ContainsKey(cellId))
+                    AddChannel(cellId, out _);
+                Logging.Log("Mesh", $"Restart of {cellId} ({mapId}): start requested from map-spawn server {spawner}{(advertised ? string.Empty : $", which did not advertise {baseId}")}");
+                MeshLayoutCoordinator coordinator = _central._coordinator;
+                _central.SpawnCellProcess(spawner, cellId, mapId, (success, detail) => coordinator?.OnRestartSpawnResult(cellId, success, detail)).Forget();
+                return true;
+            }
+
+            public bool KillChannel(MeshKillChannelMessage message, string baseId, out string error)
+            {
+                error = null;
+                if (Cluster == null || !Cluster.IsNetworkActive)
+                {
+                    error = "the cluster server is not running";
+                    return false;
+                }
+                long spawner = SpawnerForKey(baseId, _central._spawnerByCell, Cluster.MapSpawnServerPeers.Keys, out _);
+                if (spawner < 0)
+                {
+                    error = "no map-spawn server is registered";
+                    return false;
+                }
+                Cluster.SendPacket(spawner, 0, DeliveryMethod.ReliableOrdered, MeshClusterMsg.KillChannel, writer => message.Serialize(writer));
+                Logging.Log("Mesh", $"Kill of {message.channelId} pid {message.processId} incarnation {message.incarnation} sent to map-spawn server {spawner} ({message.reason})");
                 return true;
             }
         }

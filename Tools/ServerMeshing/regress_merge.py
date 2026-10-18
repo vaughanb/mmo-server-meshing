@@ -214,6 +214,9 @@ def grade_status(rep, status, spec):
     bad = rigmerge.bad_states(status)
     rep.check(not bad, "merge neither aborted, frozen, reverted, exited before drained nor straggling"
               + (f" ({'; '.join(bad[:3])})" if bad else ""))
+    supervision = rigsplit.supervision_lines(status)
+    rep.check(not supervision, "no supervision (restart, pause, resume) during the merge"
+              + (f" ({supervision[0][:120]})" if supervision else ""))
     for text in status["other"][:3]:
         rep.notes.append(f"   status: {text[:160]}")
 
@@ -291,9 +294,10 @@ def grade_retiring(rep, rig, cell, start, day):
               + (f" ({warned[0].strip()[:120]})" if warned else ""))
 
 
-def grade_prunes(rep, rig, retiring, e3, start, day):
+def grade_prunes(rep, rig, retiring, e3, start, day, step="e3"):
     """Every cell that applied the e3 pair logs 'Retired zone <retiring>: link closed, 0 record(s) released' once; no
-    cell logs a warning-level or non-zero prune line, or a lent/borrowed monster release."""
+    cell logs a warning-level or non-zero prune line, or a lent/borrowed monster release. `step` names the pair in the
+    labels (Slice 2d's aborted split retires its child in a 'retired' broadcast)."""
     applied = 0
     for zone, map_id in rig.graded_zones(day):
         if zone == retiring:
@@ -302,7 +306,7 @@ def grade_prunes(rep, rig, retiring, e3, start, day):
         if rigmerge.applied_pair(lines, e3):
             applied += 1
             ns = rigmerge.prunes(lines, retiring)
-            rep.check(ns == [0], f"zone {zone}: applied e3 {e3} and logged 'Retired zone {retiring}: link closed, "
+            rep.check(ns == [0], f"zone {zone}: applied {step} {e3} and logged 'Retired zone {retiring}: link closed, "
                                  f"0 record(s) released' once ({ns or 'none'})")
         bad = [line for line in lines if rigmerge.PRUNE.search(line)
                and (rigmerge.is_warning(line) or rigmerge.PRUNE.search(line).group(2) != "0")]
@@ -313,7 +317,8 @@ def grade_prunes(rep, rig, retiring, e3, start, day):
         lost = rigmerge.link_losts(lines, retiring)
         if lost:
             rep.notes.append(f"   zone {zone}: {lost} 'link lost (draining, retire expected)' line(s) for {retiring}")
-    rep.check(applied > 0, f"{applied} cell(s) applied the merge's e3 {e3}")
+    rep.check(applied > 0, f"{applied} cell(s) applied the {step} {e3}" if step != "e3" else
+              f"{applied} cell(s) applied the merge's e3 {e3}")
 
 
 def grade_entities(rep, rig, spec, pairs, start, day):

@@ -174,15 +174,17 @@ OP_STATE = re.compile(r"^(Split|Merge) (\S+): (.*)$")   # (kind, op, state)
 REFUSED = re.compile(r"^Layout op refused: (.*)$")
 STEP_PAIR = re.compile(r"^(e[123]) broadcast ([0-9a-f]+/\d+)$")
 DRAIN_TIMEOUT = re.compile(r"^drain timeout, (\d+) straggler")
+ENDED = re.compile(r"^ended, (\S+) collapsing$")   # Slice 2d decision 6
 
 
 def parse_op_status(lines, seq, kind="Split"):
     """The command `seq`'s outcome from Temp/ServerMesh.LayoutCommandStatus.txt's lines ('<seq> Split <op>: <state>'
     or '<seq> Layout op refused: <rule>'): {kind, op, requested, refused, states, pairs, drain, stragglers, done,
-    aborted, frozen, other}. Lines of other sequences are ignored; lines of this one the grade does not know, an op
-    line of the other kind (Slice 2c's Merge) included, land in 'other'."""
+    aborted, frozen, ended, other}. Lines of other sequences are ignored; lines of this one the grade does not know, an
+    op line of the other kind (Slice 2c's Merge) and Slice 2d's 'Supervisor:' lines included, land in 'other'. 'ended'
+    is the child of Slice 2d's 'ended, <child> collapsing'."""
     out = {"kind": kind, "op": None, "requested": None, "refused": None, "states": [], "pairs": {}, "drain": None,
-           "stragglers": None, "done": False, "aborted": None, "frozen": None, "other": []}
+           "stragglers": None, "done": False, "aborted": None, "frozen": None, "ended": None, "other": []}
     for raw in lines:
         parts = raw.strip().split(None, 1)
         if len(parts) != 2 or parts[0] != str(seq):
@@ -217,13 +219,22 @@ def parse_op_status(lines, seq, kind="Split"):
             out["aborted"] = state[len("aborted"):].strip() or "aborted"
         elif state.startswith("frozen"):
             out["frozen"] = state[len("frozen"):].strip() or "frozen"
+        elif ENDED.match(state):
+            out["ended"] = ENDED.match(state).group(1)
     return out
 
 
+def supervision_lines(status):
+    """The status texts of `status` (parse_op_status's or rigmerge's) that are Slice 2d supervision (SUPERVISION)."""
+    texts = [f"{status['kind']} {status['op']}: {state}" for state in status["states"]] + list(status["other"])
+    return [t for t in texts if SUPERVISION.search(t)]
+
+
 def op_outcome(status):
-    """'refused', 'aborted', 'frozen' or 'done' once the op has ended (the first that applies), else None."""
-    for key in ("refused", "aborted", "frozen"):
-        if status[key]:
+    """'refused', 'aborted', 'frozen', 'ended' (Slice 2d: a split whose child is queued for collapse) or 'done' once the
+    op has ended (the first that applies), else None. A status without an 'ended' key (rigmerge's) never ends so."""
+    for key in ("refused", "aborted", "frozen", "ended"):
+        if status.get(key):
             return key
     return "done" if status["done"] else None
 
@@ -242,7 +253,8 @@ STANDING = re.compile(r"Standing at \((-?[\d.]+), (-?[\d.]+), (-?[\d.]+)\)")
 RESULT_FIELDS = {"migrations": (r"\bmigrations=(\d+)", int), "allReady": (r"\ballReady=(True|False)", "True".__eq__),
                  "maxGap": (r"\bmaxGap=(-?[\d.]+)", float), "maxJump": (r"\bmaxJump=(-?[\d.]+)", float),
                  "yield": (r"\byield=(\d+)", int), "pickup": (r"\bpickup=(True|False)", "True".__eq__),
-                 "reached": (r"\breached=(True|False)", "True".__eq__)}
+                 "reached": (r"\breached=(True|False)", "True".__eq__),
+                 "relogins": (r"\brelogins=(\d+)", int)}   # Slice 2d decision 14
 
 
 def parse_migrations(lines):
@@ -319,8 +331,13 @@ GHOST_SPAWNED = re.compile(r"Ghost spawned Player (\S+) \([^)]*\) from zone (\S+
 GHOST_OWNER_CHANGED = re.compile(r"Ghost owner changed Player (\S+) \([^)]*\) zone \S+?->(\S+) at "
                                  r"\((-?[\d.]+), (-?[\d.]+), (-?[\d.]+)\)")
 # Map-side lines a passing split never logs: a child retired by an abort, a merge or retire of 2c/2d, an op's abort or
-# freeze mirrored into a cell's log. (The coordinator's own 'Split <op>:' lines are the central's, read from the status.)
-SPLIT_OP_PROBLEM = re.compile(r"retired before it owned anything|\b(Merge|Retire)\b|Split \S+: (aborted|frozen)\b")
+# freeze mirrored into a cell's log, Slice 2d's fence and fault lines (decision 19: only the crash cases allow them).
+# (The coordinator's own 'Split <op>:' lines are the central's, read from the status.)
+SPLIT_OP_PROBLEM = re.compile(r"retired before it owned anything|\b(Merge|Retire)\b|Split \S+: (aborted|frozen)\b"
+                              r"|\bFence: |FAULT: dying on ")
+# Slice 2d's supervision in an op's status (decision 19: only the crash cases allow it): the supervisor's lines, a
+# member lost before the commit, the pause and the resume after it.
+SUPERVISION = re.compile(r"^Supervisor: |^(Split|Merge) \S+: (aborted \S+ lost|\S+ lost, op paused|.*, op resumed)$")
 
 
 def count_kind(lines, rx, kind, from_zone, to_zone):

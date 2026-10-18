@@ -408,147 +408,12 @@ namespace MultiplayerARPG.MMO.Mesh
             if (MMOClientInstance.Singleton == null) { Fail("No MMOClientInstance"); yield break; }
             MMOClientInstance client = MMOClientInstance.Singleton;
 
-            Phase = "connect-login";
-            // Give in-process servers a moment to come up, then (re)try connecting.
-            yield return new WaitForSecondsRealtime(1f);
-            float nextAttempt = 0f;
-            while (!client.IsConnectedToCentralServer() && Time.realtimeSinceStartup < deadline)
-            {
-                if (Time.realtimeSinceStartup >= nextAttempt)
-                {
-                    nextAttempt = Time.realtimeSinceStartup + 3f;
-                    Log($"Connecting to login server {client.LoginNetworkManager.networkAddress}:{client.LoginNetworkManager.networkPort} ...");
-                    client.StartCentralClient();
-                }
-                yield return null;
-            }
-            if (!client.IsConnectedToCentralServer()) { Fail("Could not connect to the login server"); yield break; }
-            Log("Connected to login server");
-
-            // 1) Login (register on first run).
-            Phase = "login";
-            bool done = false; AckResponseCode code = AckResponseCode.Unimplemented; UITextKeys msg = UITextKeys.NONE;
-            for (int attempt = 1; ; ++attempt)
-            {
-                done = false;
-                client.RequestUserLogin(username, password, (h, c, r) => { code = c; msg = r.message; done = true; });
-                while (!done && Time.realtimeSinceStartup < deadline) yield return null;
-                // Sixteen bots logging in at once queue behind the login server's database: a timeout is not "no such
-                // user" (registering then fails with USERNAME_EXISTED), so try again before falling back to register.
-                if (code == AckResponseCode.Success || code != AckResponseCode.Timeout || attempt >= 4) break;
-                Log($"Login timed out (attempt {attempt}); retrying");
-                yield return new WaitForSecondsRealtime(2f * attempt);
-            }
-            if (code != AckResponseCode.Success)
-            {
-                Log($"Login failed ({code}/{msg}); registering '{username}'");
-                Phase = "register";
-                done = false;
-                client.RequestUserRegister(username, password, RegistrationEmail(), (h, c, r) => { code = c; msg = r.message; done = true; });
-                while (!done && Time.realtimeSinceStartup < deadline) yield return null;
-                if (code != AckResponseCode.Success) { Fail($"Register failed: {code}/{msg}"); yield break; }
-                Phase = "login2";
-                done = false;
-                client.RequestUserLogin(username, password, (h, c, r) => { code = c; msg = r.message; done = true; });
-                while (!done && Time.realtimeSinceStartup < deadline) yield return null;
-                if (code != AckResponseCode.Success) { Fail($"Login after register failed: {code}/{msg}"); yield break; }
-            }
-            Log($"Logged in as '{username}' (userId={GameInstance.UserId})");
-
-            // 2) Channel.
-            Phase = "channels";
-            done = false; List<ChannelEntry> channels = null;
-            client.RequestChannels((h, c, r) => { code = c; channels = r.channels; done = true; });
-            while (!done && Time.realtimeSinceStartup < deadline) yield return null;
-            if (code != AckResponseCode.Success || channels == null || channels.Count == 0) { Fail($"No channels ({code})"); yield break; }
-            string chosen = channels.Any(ch => ch.id == channelId) ? channelId : channels[0].id;
-            client.SelectedChannelId = chosen;
-            Log($"Channels: {string.Join(",", channels.Select(ch => ch.id))} -> selected '{chosen}'");
-
-            // 3) Character (create on first run).
-            Phase = "characters";
-            done = false; List<PlayerCharacterData> characters = null;
-            client.RequestCharacters((h, c, r) => { code = c; characters = r.characters; done = true; });
-            while (!done && Time.realtimeSinceStartup < deadline) yield return null;
-            if (code != AckResponseCode.Success) { Fail($"RequestCharacters failed: {code}"); yield break; }
-            PlayerCharacterData character = characters?.FirstOrDefault(ch => ch != null && (string.IsNullOrEmpty(expectedMapName) || ch.CurrentMapName == expectedMapName));
-            if (character == null)
-            {
-                int existing = characters?.Count ?? 0;
-                if (existing > 0)
-                    Log($"{existing} character(s) exist but none on '{expectedMapName}' (maps: {string.Join(",", characters.Select(ch => ch.CurrentMapName))}); creating a new one");
-                string newName = existing == 0 ? characterName : characterName + (existing + 1);
-                Phase = "create-character";
-                BasePlayerCharacterEntity prefab = GameInstance.PlayerCharacterEntities.Values.FirstOrDefault();
-                if (prefab == null || prefab.CharacterDatabases == null || prefab.CharacterDatabases.Length == 0) { Fail("No player character entity/database in GameInstance"); yield break; }
-                int factionId = GameInstance.Factions.Values.FirstOrDefault(f => !f.IsLocked)?.DataId ?? 0;
-                PlayerCharacterData data = new PlayerCharacterData();
-                data.Id = GenericUtils.GetUniqueId();
-                data.SetNewPlayerCharacterData(newName, prefab.CharacterDatabases[0].DataId, prefab.EntityId, factionId);
-                done = false;
-                client.RequestCreateCharacter(data, (h, c, r) => { code = c; msg = r.message; done = true; });
-                while (!done && Time.realtimeSinceStartup < deadline) yield return null;
-                if (code != AckResponseCode.Success) { Fail($"Create character failed: {code}/{msg}"); yield break; }
-                done = false;
-                client.RequestCharacters((h, c, r) => { code = c; characters = r.characters; done = true; });
-                while (!done && Time.realtimeSinceStartup < deadline) yield return null;
-                character = characters?.FirstOrDefault(ch => ch != null && ch.CharacterName == newName) ?? characters?.FirstOrDefault(ch => ch != null);
-                if (character == null) { Fail("Character still missing after create"); yield break; }
-                Log($"Created character '{newName}' on map '{character.CurrentMapName}'");
-            }
-
-            // 4) Select + enter map.
-            Phase = "select-character";
-            ResponseSelectCharacterMessage sel = default;
-            // Map servers spawned by MapSpawn take a few seconds to register; retry while "not ready".
-            while (true)
-            {
-                done = false;
-                client.RequestSelectCharacter(character.Id, (h, c, r) => { code = c; sel = r; done = true; });
-                while (!done && Time.realtimeSinceStartup < deadline) yield return null;
-                if (code == AckResponseCode.Success) break;
-                if (sel.message != UITextKeys.UI_ERROR_MAP_SERVER_NOT_READY || Time.realtimeSinceStartup >= deadline)
-                {
-                    Fail($"Select character failed: {code}/{sel.message}");
-                    yield break;
-                }
-                Log("Map server not ready yet; retrying select in 2s ...");
-                yield return new WaitForSecondsRealtime(2f);
-            }
-            if (!GameInstance.MapInfos.TryGetValue(sel.mapName, out BaseMapInfo mapInfo)) { Fail($"Unknown map '{sel.mapName}'"); yield break; }
-            _mapAddress = sel.networkAddress; _mapPort = sel.networkPort;
-            Log($"Selected '{character.CharacterName}' on map '{sel.mapName}' -> {_mapAddress}:{_mapPort} (channel {chosen})");
-            client.StartMapClient(mapInfo, _mapAddress, _mapPort);
-
-            Phase = "enter-map";
-            while (GameInstance.PlayingCharacterEntity == null && Time.realtimeSinceStartup < deadline) yield return null;
-            if (GameInstance.PlayingCharacterEntity == null) { Fail("Player never spawned"); yield break; }
-            Log($"In map at {GameInstance.PlayingCharacterEntity.EntityTransform.position}");
-            yield return new WaitForSecondsRealtime(settleSeconds);
-
-            // A character that died in an earlier run is loaded dead; respawn it (same request the UI sends).
-            if (GameInstance.PlayingCharacterEntity != null && GameInstance.PlayingCharacterEntity.IsDead())
-            {
-                Phase = "respawn";
-                Log("Character is dead; requesting respawn");
-                done = false;
-                GameInstance.ClientCharacterHandlers.RequestRespawn(new RequestRespawnMessage() { option = 0 }, (h, c, r) => { code = c; done = true; });
-                while (!done && Time.realtimeSinceStartup < deadline) yield return null;
-                float aliveDeadline = Time.realtimeSinceStartup + 20f;
-                float aliveSince = -1f;
-                while (Time.realtimeSinceStartup < aliveDeadline)
-                {
-                    BasePlayerCharacterEntity pe = GameInstance.PlayingCharacterEntity;
-                    bool alive = pe != null && !pe.IsDead() && pe.MaxHp > 0;
-                    if (!alive) aliveSince = -1f;
-                    else if (aliveSince < 0f) aliveSince = Time.realtimeSinceStartup;
-                    else if (Time.realtimeSinceStartup - aliveSince > 1f) break; // stable for a second (a respawn may hand us off first)
-                    yield return null;
-                }
-                if (GameInstance.PlayingCharacterEntity == null || GameInstance.PlayingCharacterEntity.IsDead()) { Fail($"Respawn failed ({code})"); yield break; }
-                Log($"Respawned at {GameInstance.PlayingCharacterEntity.EntityTransform.position}");
-                yield return new WaitForSecondsRealtime(1f);
-            }
+            // 1-4) Login server, login (register on first run), channel, character (create on first run), select, enter
+            // the map, respawn a character loaded dead (ServerMeshAutoClient_Relogin.cs; a lost session re-logs in).
+            LoginStep login = new LoginStep();
+            yield return FirstLogin(client, deadline, login);
+            if (!login.ok) { Fail(login.error); yield break; }
+            StartCoroutine(WatchSession());
 
             if (mountUp)
                 yield return MountUp();
@@ -694,7 +559,7 @@ namespace MultiplayerARPG.MMO.Mesh
             Finished = true;
             Passed = allLegsReached && migrations >= 1 && _allMigrationsReady;
             BasePlayerCharacterEntity walker = GameInstance.PlayingCharacterEntity;
-            Log($"RESULT walk: migrations={migrations} allReady={_allMigrationsReady} maxGap={_maxGapMs}ms maxJump={_maxJump:0.##}m finalPos={finalPos} summons={(walker != null ? walker.Summons.Count : -1)} pet={(FindOwnPet() != null ? "seen" : "none")} -> {(Passed ? "PASS" : "FAIL")}");
+            Log($"RESULT walk: migrations={migrations} allReady={_allMigrationsReady} maxGap={_maxGapMs}ms maxJump={_maxJump:0.##}m finalPos={finalPos} summons={(walker != null ? walker.Summons.Count : -1)} pet={(FindOwnPet() != null ? "seen" : "none")}{ReloginSuffix(Relogins)} -> {(Passed ? "PASS" : "FAIL")}");
         }
 
         private IEnumerator RunStand(float deadline)

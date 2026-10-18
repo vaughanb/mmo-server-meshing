@@ -108,6 +108,29 @@ namespace MultiplayerARPG.MMO.Mesh
 
         public bool IsRunning => _running;
 
+        /// <summary>
+        /// A warp that arrives while we still wait for the new cell's character (that cell seated us and handed us on at
+        /// once, so our character there came and went unseen) is acted on now: the server already moved us, so the cell
+        /// that sent it is the one we come from for the next leg, and the wait restarts toward the queued destination.
+        /// Before, the wait ran out, the queued hop was dropped and the session was lost. Returns true when it redirected.
+        /// </summary>
+        private bool TryRedirectToQueuedHop(ref string address, ref int port, ref bool legFellBack)
+        {
+            if (string.IsNullOrEmpty(_queuedAddress))
+                return false;
+            Logging.LogWarning("Spike2", $"Hop to {address}:{port} redirected to {_queuedAddress}:{_queuedPort} before the character arrived there");
+            _prevAddress = address;
+            _prevPort = port;
+            address = _queuedAddress;
+            port = _queuedPort;
+            _queuedAddress = null;
+            legFellBack = false; // a new leg: the cell that redirected us keeps our puppet, so it is the fallback now
+            _manager.StopClient();
+            _manager.BeginMigrationAttempt();
+            _manager.StartClient(address, port);
+            return true;
+        }
+
         private void RunQueuedHop()
         {
             if (string.IsNullOrEmpty(_queuedAddress))
@@ -282,16 +305,23 @@ namespace MultiplayerARPG.MMO.Mesh
             long tConnected = -1;
             int framesWithoutCamera = 0;
             bool fellBack = false;
+            bool legFellBack = false; // the fallback is per leg: a redirect (TryRedirectToQueuedHop) starts a new one
             BasePlayerCharacterEntity newEntity = null;
             while (true)
             {
+                if (TryRedirectToQueuedHop(ref address, ref port, ref legFellBack))
+                {
+                    deadline = Time.realtimeSinceStartup + _manager.migrationReadyTimeoutSeconds;
+                    tConnected = -1;
+                }
                 if (Time.realtimeSinceStartup >= deadline || _manager.MigrationDisconnected || _manager.MigrationRefused)
                 {
                     // Refused, dropped, or silent: one hop back to where we came from, then give up. A refusal is
                     // acted on the moment it arrives; the deadline is only for a cell that never answers.
                     string why = _manager.MigrationDisconnected ? _manager.MigrationDisconnectReason.ToString() : _manager.MigrationRefused ? "refused" : "timeout";
-                    if (!TryFallbackHop(ref address, ref port, ref fellBack, why))
+                    if (!TryFallbackHop(ref address, ref port, ref legFellBack, why))
                         break;
+                    fellBack = true;
                     deadline = Time.realtimeSinceStartup + _manager.migrationReadyTimeoutSeconds;
                     tConnected = -1;
                 }
@@ -609,14 +639,21 @@ namespace MultiplayerARPG.MMO.Mesh
 
             float deadline = Time.realtimeSinceStartup + _manager.migrationReadyTimeoutSeconds;
             bool fellBack = false;
+            bool legFellBack = false; // per leg, as in the seamless strategy
             long tConnected = -1;
             while (true)
             {
+                if (TryRedirectToQueuedHop(ref address, ref port, ref legFellBack))
+                {
+                    deadline = Time.realtimeSinceStartup + _manager.migrationReadyTimeoutSeconds;
+                    tConnected = -1;
+                }
                 if (Time.realtimeSinceStartup >= deadline || _manager.MigrationDisconnected || _manager.MigrationRefused)
                 {
                     string why = _manager.MigrationDisconnected ? _manager.MigrationDisconnectReason.ToString() : _manager.MigrationRefused ? "refused" : "timeout";
-                    if (!TryFallbackHop(ref address, ref port, ref fellBack, why))
+                    if (!TryFallbackHop(ref address, ref port, ref legFellBack, why))
                         break;
+                    fellBack = true;
                     deadline = Time.realtimeSinceStartup + _manager.migrationReadyTimeoutSeconds;
                     tConnected = -1;
                 }

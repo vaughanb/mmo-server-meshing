@@ -3,7 +3,8 @@
 // opens the cell's gate), and tells the cells what it decided. Splits run in MeshLayoutCoordinator_Split.cs (Slice 2b),
 // merges in MeshLayoutCoordinator_Merge.cs (Slice 2c). A plain class with its clock, transport, store and log injected,
 // so it is tested without Unity networking. Nothing throws out of a handler or out of Tick: each validates, then changes
-// state.
+// state. Supervision (Slice 2d: restarts, collapse, kills, the fenced set, ops pausing for a crashed member) is in
+// MeshLayoutCoordinator_Supervision.cs.
 using System;
 using System.Collections.Generic;
 
@@ -87,6 +88,7 @@ namespace MultiplayerARPG.MMO.Mesh
             if (!_store.TrySave(data, out string saveError))
                 _log.Error($"{saveError}; no operation will run until the store is writable again (hellos are still answered)");
             _storeData = data;
+            SupervisionStart(data);
             _broadcast = new MeshLayoutSnapshot { pair = new MeshLayoutPair(Incarnation, 1) };
             Phase = MeshCoordinatorPhase.Recovering;
             List<string> summary = new List<string>();
@@ -131,6 +133,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public void Stop()
         {
             SplitStop();
+            SupervisionStop();
             _bindings.Clear();
             _maps.Clear();
             _firstSeenWithoutHello.Clear();
@@ -163,10 +166,12 @@ namespace MultiplayerARPG.MMO.Mesh
                     $"map {hello.mapId} is Static on the central{(hello.dynamicMap ? " but Dynamic on cell " + hello.cellId : string.Empty)}; the cell was answered with no runtime layout");
                 return;
             }
-            if (HelloGetsRetire(connectionId, hello))
+            if (HelloGetsRetire(connectionId, hello) || HelloIsFenced(connectionId, hello))
                 return;
+            string previousIncarnation = null;
             if (_bindings.TryGetValue(hello.cellId, out MeshCellBinding binding))
             {
+                previousIncarnation = binding.incarnation;
                 if (binding.connectionId != connectionId || binding.incarnation != hello.incarnation)
                     _log.Info($"Cell {hello.cellId} re-bound: incarnation {binding.incarnation} -> {hello.incarnation}, connection {binding.connectionId} -> {connectionId}");
             }
@@ -184,6 +189,12 @@ namespace MultiplayerARPG.MMO.Mesh
             binding.unregisteredAt = -1f;
             binding.mismatchLogged = false;
             binding.hasEvidence = false;
+            binding.processId = hello.processId;
+            if (!string.Equals(previousIncarnation, binding.incarnation, StringComparison.Ordinal))
+            {
+                binding.lastReportAt = -1f;
+                binding.killedAt = -1f;
+            }
             _firstSeenWithoutHello.Remove(hello.cellId);
 
             MapRecovery map = MapOf(hello.mapId);
@@ -209,7 +220,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     Note(connectionId, MeshNoteLevel.Error, hello.cellId, "recovery-frozen", $"map {hello.mapId} is frozen: {map.reason}; cell {hello.cellId} gets no layout");
                     break;
                 default:
-                    if (OpAnswersHello(connectionId, hello, binding))
+                    if (SupervisionAnswersHello(connectionId, binding, previousIncarnation) || OpAnswersHello(connectionId, hello, binding))
                         break;
                     Answer(connectionId, hello.cellId, binding.incarnation);
                     binding.answered = true;
@@ -272,6 +283,7 @@ namespace MultiplayerARPG.MMO.Mesh
             if (binding == null || binding.connectionId != connectionId || binding.incarnation != (report.incarnation ?? string.Empty))
                 return;
             binding.lastEvidenceAt = _clock.Now;
+            binding.lastReportAt = _clock.Now;
             MeshLayoutPair reported = new MeshLayoutPair(report.layoutIncarnation, report.layoutVersion);
             // A report measured before the cell's latest apply lags by design (a split moves the pair every step); one
             // ahead of every ack means the cell holds a layout this coordinator never heard it apply.
@@ -282,7 +294,7 @@ namespace MultiplayerARPG.MMO.Mesh
             }
         }
 
-        /// <summary>Tick runs once a second: registrations, missing hellos, and recovery.</summary>
+        /// <summary>Tick runs once a second: registrations, missing hellos, recovery, supervision, and the operation's step.</summary>
         public void Tick()
         {
             if (Phase == MeshCoordinatorPhase.Stopped)
@@ -324,6 +336,7 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             if (Phase == MeshCoordinatorPhase.Recovering)
                 ResolveAll();
+            SupervisionTick();
             OpTick();
         }
 

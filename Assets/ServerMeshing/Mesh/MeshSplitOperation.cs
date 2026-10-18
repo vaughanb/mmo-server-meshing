@@ -35,6 +35,8 @@ namespace MultiplayerARPG.MMO.Mesh
         Done,
         Aborted,
         Frozen,
+        /// <summary>The child was queued for collapse after its failed restarts (Slice 2d decision 6): ended, not frozen.</summary>
+        Ended,
     }
 
     /// <summary>MeshSplitOperation is one split in progress, or the last one that ended.</summary>
@@ -78,10 +80,13 @@ namespace MultiplayerARPG.MMO.Mesh
         }
 
         /// <summary>Whether the operation still runs (Frozen is ended but keeps every later operation out).</summary>
-        public override bool InProgress => step != MeshSplitStep.Done && step != MeshSplitStep.Aborted && step != MeshSplitStep.Frozen;
+        public override bool InProgress => step != MeshSplitStep.Done && step != MeshSplitStep.Aborted && step != MeshSplitStep.Frozen && step != MeshSplitStep.Ended;
 
         /// <summary>Whether e2 has been sent to the child: from here a failure freezes the operation instead of aborting it.</summary>
         public override bool PastCommit => step >= MeshSplitStep.E2Staged;
+
+        /// <summary>Whether e2 was broadcast: from the drain gate on (a split in E2Staged has not committed).</summary>
+        public override bool CommitBroadcast => step >= MeshSplitStep.DrainGate;
 
         public override bool IsFrozen => step == MeshSplitStep.Frozen;
         public override bool IsAborted => step == MeshSplitStep.Aborted;

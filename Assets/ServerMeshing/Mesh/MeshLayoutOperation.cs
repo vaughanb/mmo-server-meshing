@@ -42,6 +42,18 @@ namespace MultiplayerARPG.MMO.Mesh
         public string lastGateWait = "";
         public string endReason = "";
 
+        /// <summary>
+        /// Pause (Slice 2d decision 6): after its e2 broadcast an operation whose member is down waits for it instead of
+        /// freezing. The members it waits for, since when (-1 while running), and whether a member came back as a new
+        /// incarnation, so the step's gate restarts once the last one is back.
+        /// </summary>
+        public readonly List<string> pausedMembers = new List<string>();
+        public float pausedAt = -1f;
+        public bool gateRestartPending;
+
+        /// <summary>Whether the operation waits for a member that is down (no step and no step timer runs).</summary>
+        public bool Paused => pausedMembers.Count > 0;
+
         protected MeshLayoutOperation(string opId, MeshLayoutOpKind kind)
         {
             this.opId = opId;
@@ -56,6 +68,12 @@ namespace MultiplayerARPG.MMO.Mesh
 
         /// <summary>Whether the commit step has been sent: from here a failure freezes the operation instead of undoing it.</summary>
         public abstract bool PastCommit { get; }
+
+        /// <summary>
+        /// Whether the commit step was broadcast (Slice 2d decision 6): before it, a member's crash aborts the operation
+        /// (a staged commit was seen by its target alone); from it on, the operation pauses for the member.
+        /// </summary>
+        public abstract bool CommitBroadcast { get; }
 
         public abstract bool IsFrozen { get; }
 

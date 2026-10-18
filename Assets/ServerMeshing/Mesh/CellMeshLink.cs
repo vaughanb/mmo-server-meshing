@@ -43,6 +43,8 @@ namespace MultiplayerARPG.MMO.Mesh
         public const ushort LentStatic = 127;             // to a static's home cell: who holds it now, or that it is gone (respawn it)
         public const ushort MonsterHandoffFailed = 128;   // receiver -> sender: it could not spawn the monster; the sender re-promotes it
         public const ushort ServerCharacterHandoff = 129; // a server-owned character (no client) moves to the cell that owns its position
+        // Slice 2d (supervision and fencing, slices/slice2d_design.md decision 8):
+        public const ushort RegistrationState = 130;      // a Dynamic map's cell -> each linked neighbour, every 2 s and on change: whether it is registered with the cluster
     }
 
     /// <summary>
@@ -157,6 +159,18 @@ namespace MultiplayerARPG.MMO.Mesh
             kind = reader.GetString(); meshId = reader.GetString(); state = reader.GetBytesWithLength();
             position = new Vector3(reader.GetFloat(), reader.GetFloat(), reader.GetFloat()); yaw = reader.GetFloat();
         }
+    }
+
+    /// <summary>
+    /// Whether the sender is registered with the cluster (Slice 2d decision 8). A neighbour that reports itself not
+    /// registered is chosen as no handoff target; one that reports itself registered witnesses that the cluster is up,
+    /// which a cell cut off from it needs before it fences itself. Sent and read on Dynamic maps only.
+    /// </summary>
+    public struct RegistrationStateMessage : INetSerializable
+    {
+        public bool registered;
+        public void Serialize(NetDataWriter writer) { writer.Put(registered); }
+        public void Deserialize(NetDataReader reader) { registered = reader.GetBool(); }
     }
 
     /// <summary>
@@ -592,6 +606,7 @@ namespace MultiplayerARPG.MMO.Mesh
             RegisterMessageHandler(MeshLinkMessageTypes.LentStatic, HandleLentStatic);
             RegisterMessageHandler(MeshLinkMessageTypes.MonsterHandoffFailed, HandleMonsterHandoffFailed);
             RegisterMessageHandler(MeshLinkMessageTypes.ServerCharacterHandoff, HandleServerCharacterHandoff);
+            RegisterMessageHandler(MeshLinkMessageTypes.RegistrationState, HandleRegistrationState);
         }
 
         public override void OnServerReceive(TransportEventData eventData)
@@ -758,6 +773,12 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             ServerCharacterHandoffMessage msg = messageHandler.ReadMessage<ServerCharacterHandoffMessage>();
             _manager.OnServerCharacterHandoff(messageHandler.ConnectionId, msg);
+        }
+
+        private void HandleRegistrationState(MessageHandlerData messageHandler)
+        {
+            RegistrationStateMessage msg = messageHandler.ReadMessage<RegistrationStateMessage>();
+            _manager.OnRegistrationState(messageHandler.ConnectionId, msg);
         }
     }
 
@@ -973,6 +994,11 @@ namespace MultiplayerARPG.MMO.Mesh
         public void SendServerCharacterHandoff(ServerCharacterHandoffMessage msg)
         {
             Send(MeshLinkMessageTypes.ServerCharacterHandoff, msg);
+        }
+
+        public void SendRegistrationState(bool registered)
+        {
+            Send(MeshLinkMessageTypes.RegistrationState, new RegistrationStateMessage { registered = registered });
         }
     }
 }

@@ -40,7 +40,34 @@ namespace MultiplayerARPG.MMO.Mesh
         private void SplitOnSceneLoaded()
         {
             if (world != null && world.IsDynamicMap(OwnMapId))
+            {
                 RegisterSpawnAreaPrefabs();
+                LogPlannedMonsters();
+            }
+        }
+
+        /// <summary>
+        /// Slice 2d decision 11: on a Dynamic map's base, once its kept monster areas are set up, how many monsters they
+        /// plan (the sum of their max amounts), so a restarted base's monster total can be checked against it.
+        /// </summary>
+        private void LogPlannedMonsters()
+        {
+            if (OwnCell == null || OwnCell.isDynamic)
+                return;
+            int planned = 0;
+            foreach (MonsterSpawnArea area in FindObjectsByType<MonsterSpawnArea>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+            {
+                if (area.prefab != null)
+                    planned += Mathf.Max(area.minAmount, area.maxAmount);
+                if (area.spawningPrefabs == null)
+                    continue;
+                for (int i = 0; i < area.spawningPrefabs.Count; ++i)
+                {
+                    if (area.spawningPrefabs[i] != null && area.spawningPrefabs[i].prefab != null)
+                        planned += Mathf.Max(area.spawningPrefabs[i].minAmount, area.spawningPrefabs[i].maxAmount);
+                }
+            }
+            Logging.Log("Mesh", $"Spawn areas of {OwnZoneId}: {planned} monster(s) planned in the base rectangle");
         }
 
         /// <summary>Registers the prefabs of every monster, harvestable and item drop spawn area in the scene, inactive ones included.</summary>
@@ -94,8 +121,15 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>OnMonsterHandoff's hook where it cannot spawn the monster: on a Dynamic map the sender is told, so it re-promotes.</summary>
         private void ReplyMonsterHandoffFailed(string fromZone, string meshId, string reason)
         {
-            if (!IsDynamicMap || string.IsNullOrEmpty(fromZone) || !_linkClients.TryGetValue(fromZone, out MeshLinkClient link) || !link.IsConnected)
+            if (!IsDynamicMap)
                 return;
+            if (string.IsNullOrEmpty(fromZone) || !_linkClients.TryGetValue(fromZone, out MeshLinkClient link) || !link.IsConnected)
+            {
+                // Slice 2d: a sender hands only to a cell whose readiness report reached it over that cell's own link, so
+                // this is a link lost in between; the sender's puppet then goes stale and its lent record waits for its sweeps.
+                Logging.LogWarning("Mesh", $"Monster handoff {meshId} from {fromZone} not taken ({reason}); the sender cannot be told (no link to it)");
+                return;
+            }
             link.SendMonsterHandoffFailed(meshId, reason);
             Logging.LogWarning("Mesh", $"Monster handoff {meshId} from {fromZone} not taken ({reason}); told the sender");
         }

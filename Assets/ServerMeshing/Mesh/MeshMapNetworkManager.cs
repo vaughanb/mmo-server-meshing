@@ -648,6 +648,7 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private void OnMeshAppServerRegister(AckResponseCode responseCode)
         {
+            FenceOnRegisterResponse(responseCode); // Slice 2d: the fence counts registrations and refusals (MeshMapNetworkManager_Fence)
             if (responseCode == AckResponseCode.Success)
             {
                 if (_clusterRegisterRetries > 0)
@@ -680,6 +681,7 @@ namespace MultiplayerARPG.MMO.Mesh
 
         public override void OnStartServer()
         {
+            ReadinessOnStartServer(); // Slice 2d: the mesh link waits for this start's server scene (MeshMapNetworkManager_Readiness)
             base.OnStartServer();
             _meshPeers.Clear();
             _handoffsInProgress.Clear();
@@ -727,6 +729,7 @@ namespace MultiplayerARPG.MMO.Mesh
             GhostingOnStartServer();
             LoadOnStartServer();
             LayoutOnStartServer();
+            FenceOnStartServer(); // Slice 2d: registration witnesses and the self-fence (MeshMapNetworkManager_Fence)
             MeshExceptionTrace.Install();
         }
 
@@ -818,6 +821,7 @@ namespace MultiplayerARPG.MMO.Mesh
         protected override void Update()
         {
             base.Update();
+            if (FenceTick()) return; // Slice 2d: a fencing cell runs nothing else of the add-on (MeshMapNetworkManager_Fence)
             if (IsServer)
             {
                 SampleFrame();

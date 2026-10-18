@@ -89,6 +89,26 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
         }
 
         [Test]
+        public void MirroredPayload_SupervisorLines_AreMirrored()
+        {
+            Assert.That(ServerMeshLayoutCommandFile.MirroredPayload(" INFO Mesh [2026-10-17 12:00:01] - Supervisor: C.1 down 21 s, restart 1 of 3 requested"), Is.EqualTo("Supervisor: C.1 down 21 s, restart 1 of 3 requested"));
+            Assert.That(ServerMeshLayoutCommandFile.MirroredPayload(" WARN Mesh [2026-10-17 12:00:01] - Supervisor: C.1 restart 2 failed (no hello in 60 s)"), Is.EqualTo("Supervisor: C.1 restart 2 failed (no hello in 60 s)"));
+            Assert.That(ServerMeshLayoutCommandFile.MirroredPayload("[Mesh] Supervisor: C.1 back, incarnation 8dcf1a2b3c4d5e6"), Is.EqualTo("Supervisor: C.1 back, incarnation 8dcf1a2b3c4d5e6"));
+            Assert.That(ServerMeshLayoutCommandFile.IsRefusal("Supervisor: C.1 cannot collapse (Slice 3); left down"), Is.False);
+        }
+
+        [Test]
+        public void TryParse_KillLine_GivesSeqAndTheWholeLine()
+        {
+            bool ok = ServerMeshLayoutCommandFile.TryParse("11 kill  C.1\n", out string seq, out string line, out string error);
+
+            Assert.That(ok, Is.True);
+            Assert.That(seq, Is.EqualTo("11"));
+            Assert.That(line, Is.EqualTo("11 kill C.1"));
+            Assert.That(error, Is.Null);
+        }
+
+        [Test]
         public void IsRefusal_NotForMergeLines()
         {
             Assert.That(ServerMeshLayoutCommandFile.IsRefusal("Merge merge-2: aborted e1 gate shut"), Is.False);
@@ -111,6 +131,9 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
         [TestCase("Merged two ranges")]
         [TestCase("[Mesh] Handoff START Bot1 (id) zone C.1->C Merge merge-2")]
         [TestCase(" INFO Mesh [2026-10-17 12:00:01] - Retired zone C.1: link closed, 0 record(s) released")]
+        [TestCase("Supervisor C.1 down")]
+        [TestCase(" INFO Mesh [2026-10-17 12:00:01] - Spawner: killed C.1 pid 4242 (restart 1)")]
+        [TestCase("[Mesh] Fence: C.1 incarnation 8dcf fenced (registration lost): saving 2 player(s)")]
         public void MirroredPayload_OtherLines_AreNotMirrored(string message)
         {
             Assert.That(ServerMeshLayoutCommandFile.MirroredPayload(message), Is.Null);

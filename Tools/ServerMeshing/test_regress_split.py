@@ -93,9 +93,9 @@ class FakeRig:
     def db_reset(self, tester, bot):
         self.calls.append(("db_reset", tester, bot))
 
-    def request_play(self, mode, x, z, env=None):
+    def request_play(self, mode, x, z, env=None, enabled=True):
         self._play_env = dict(env or {})
-        self.calls.append(("request_play", mode, x, z, self._play_env))
+        self.calls.append(("request_play", mode, x, z, self._play_env, enabled))
 
     def wait_play(self, timeout):
         self.calls.append(("wait_play",))
@@ -192,6 +192,8 @@ class ScenarioTests(unittest.TestCase):
             "stragglers": ({"status": STATUS_DONE[:3] + ["drain timeout, 2 straggler(s)", "e3 broadcast 1a2b/4", "done"]},
                            ["drain evidence"]),
             "no bot stood": ({"standing": False}, ["not sent"]),
+            "a supervisor restart": ({"status": STATUS_DONE[:3] + ["C.1 lost, op paused"] + STATUS_DONE[3:]},
+                                     ["no supervision"]),
             "an R-bot never migrated": ({"results": {"meshbot2": "migrations=0 allReady=True maxGap=0"}},
                                         ["meshbot2: 1 migration"]),
             "a P-bot migrated": ({"results": {"meshbot7": "migrations=1 allReady=True maxGap=5"}},

@@ -89,6 +89,23 @@ namespace MultiplayerARPG.MMO.Mesh
         }
 
         /// <summary>
+        /// SupervisionSettingsError is Slice 2d's grace rule: a cut-off cell fences within childFenceSeconds +
+        /// fenceSaveSeconds + 1 of losing the cluster and the central's clock lags by up to 2 s, so a restart may be asked for
+        /// only childDownGraceSeconds ≥ childFenceSeconds + fenceSaveSeconds + 3 after the loss. Null when the settings keep it.
+        /// </summary>
+        public static string SupervisionSettingsError(MeshDynamicSettings settings)
+        {
+            if (settings == null)
+                return null;
+            float least = settings.childFenceSeconds + settings.fenceSaveSeconds + 3f;
+            if (settings.childDownGraceSeconds >= least)
+                return null;
+            return $"dynamicSettings.childDownGraceSeconds {Number(settings.childDownGraceSeconds)} is under childFenceSeconds + fenceSaveSeconds + 3 = {Number(least)} s: a restarted cell could start beside one that is still fencing";
+        }
+
+        private static string Number(float value) => value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+
+        /// <summary>
         /// Validate judges <paramref name="next"/> against the world, knowing the layout it replaces (<paramref name="previous"/>,
         /// null when none was applied). An empty snapshot is always valid: it touches no family.
         /// </summary>

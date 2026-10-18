@@ -297,6 +297,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 // Rig toggle for capacity runs that must separate the players' cost from the monsters'.
                 bool noMonsters = System.Environment.GetEnvironmentVariable(ENV_NO_MONSTERS) == "1";
                 string monsterAreas = noMonsters ? null : System.Environment.GetEnvironmentVariable(ENV_MONSTER_AREAS);
+                bool onlyNamedAreas = MeshMonsterAreasToggle.StripOnly(ref monsterAreas); // Slice 2d: only:<names> switches every other monster area off
                 bool allMonsterAreas = monsterAreas == "all";
                 // Or a comma list of area names: those saved inactive are switched on too (the split scenarios).
                 HashSet<string> namedAreas = null;
@@ -312,6 +313,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 // Switched on before the base class discovers the active areas below, so each area has one owner.
                 foreach (MonsterSpawnArea area in FindObjectsByType<MonsterSpawnArea>(inactive, FindObjectsSortMode.None))
                 {
+                    if (SwitchOffUnnamedMonsterArea(onlyNamedAreas, namedAreas, area, ref disabled)) continue; // Slice 2d: only:
                     if (namedAreas != null && !area.gameObject.activeSelf && !namedAreas.Contains(area.gameObject.name))
                         continue; // saved inactive and not named: left as the scene has it
                     if (!noMonsters && resolved && MonsterAreaOwnedHere(area.transform.position))
@@ -345,10 +347,12 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             base.OnServerOnlineSceneLoaded();
             SplitOnSceneLoaded(); // Slice 2b: a Dynamic map registers every spawn area's prefabs
+            ReadinessOnSceneLoaded(); // Slice 2d: a Dynamic map reads its mesh link from now (MeshMapNetworkManager_Readiness)
         }
 
         private void GhostingUpdate()
         {
+            if (HoldLinksUntilSceneReady()) return; // Slice 2d: nothing from the link spawns before the server scene is ready (Readiness)
             _linkServer?.Update();
             foreach (MeshLinkClient client in _linkClients.Values)
                 client.Update();
@@ -404,7 +408,7 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>The link to the zone is up and has been for handoffLinkSettleSeconds (see the field).</summary>
         internal bool IsNeighbourSettled(string zoneId)
         {
-            return _linkClients.TryGetValue(zoneId, out MeshLinkClient link) && link.ConnectedFor >= handoffLinkSettleSeconds;
+            return _linkClients.TryGetValue(zoneId, out MeshLinkClient link) && link.ConnectedFor >= handoffLinkSettleSeconds && !NeighbourBlocksHandoff(zoneId); // Slice 2d: no handoff to a Dynamic neighbour not reported ready
         }
 
         private void EnsureNeighbourLinks()
@@ -1028,6 +1032,7 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (playerCharacter == null)
                 return;
+            RehandoffBackoffOnArrival(playerCharacter); // Slice 2d: no handoff straight after an arrival, longer after a return (Readiness)
             PrewarmConsume(playerCharacter.Id);
             if (_pendingHandoffAcks.TryGetValue(playerCharacter.Id, out PendingHandoffAck unclaimed))
             {
@@ -1330,6 +1335,7 @@ namespace MultiplayerARPG.MMO.Mesh
 
         internal void OnMeshNeighbourHello(long connectionId, string zoneId, string incarnation)
         {
+            if (IgnoreOlderNeighbourHello(connectionId, zoneId, incarnation)) return; // Slice 2d: a zombie's hello releases nothing
             // A new incarnation of a zone is a restarted process: whatever the dead one held for us, or lent us, is gone
             // with it. It is released here because nothing else would: the new inbound connection makes the zone look
             // reachable to the unreachable-zone sweep, and the superseded connection's late timeout is ignored below.
@@ -1380,6 +1386,7 @@ namespace MultiplayerARPG.MMO.Mesh
         /// </summary>
         internal void OnMeshNeighbourDisconnected(long connectionId)
         {
+            ForgetRegistrationReportOf(connectionId); // Slice 2d: a report is live only with its connection (Readiness)
             if (_neighbourZoneByConnection.TryGetValue(connectionId, out string zoneId))
             {
                 _neighbourZoneByConnection.Remove(connectionId); _frameOffsetByConnection.Remove(connectionId);
@@ -2547,8 +2554,8 @@ namespace MultiplayerARPG.MMO.Mesh
             MeshCell zone = world.OwnerOf(OwnCell, pos);
             if (zone == null || MeshCell.Same(zone, OwnCell))
                 return;
-            if (!_linkClients.TryGetValue(zone.id, out MeshLinkClient link) || !link.IsConnected)
-                return; // stays ours until the link is up
+            if (!_linkClients.TryGetValue(zone.id, out MeshLinkClient link) || !link.IsConnected || NeighbourBlocksHandoff(zone.id))
+                return; // stays ours until the link is up (Slice 2d: and its owner reports itself ready)
             MeshIdentity id = MeshIdentity.GetOrAdd(monster);
             if (string.IsNullOrEmpty(id.MeshEntityId))
                 return;
@@ -3332,7 +3339,6 @@ namespace MultiplayerARPG.MMO.Mesh
         // player just left; a failed handoff releases them at once.
 
         private sealed class IncomingHandoff { public string fromZone; public float time; public bool fastSpawned; }
-        private static readonly string s_faultDieOnNoticeZone = System.Environment.GetEnvironmentVariable("MESH_FAULT_DIE_ON_NOTICE"); // a zone id: that cell dies on its next handoff notice
         private sealed class PendingHandoffAck { public string zone; public string name; public float startTime; public float sentTime; public float linkDownSince = -1f; }
         private readonly Dictionary<string, IncomingHandoff> _incomingHandoffFrom = new Dictionary<string, IncomingHandoff>(); // characterId -> who announced it
         private readonly Dictionary<string, PendingHandoffAck> _pendingHandoffAcks = new Dictionary<string, PendingHandoffAck>(); // characterId -> our handoff awaiting the destination's ack
@@ -3392,20 +3398,7 @@ namespace MultiplayerARPG.MMO.Mesh
 
         internal void OnHandoffNotice(long connectionId, HandoffNoticeMessage msg)
         {
-            if (!string.IsNullOrEmpty(s_faultDieOnNoticeZone) && string.Equals(s_faultDieOnNoticeZone, OwnZoneId))
-            {
-                // Test switch (MESH_FAULT_DIE_ON_NOTICE=<zoneId>): that destination dies in the window between the
-                // origin's notice and the client's arrival, the one moment a crash cannot be produced by hand. Once
-                // per test run: the kit's MapSpawn restarts the dead server (with this environment) within seconds,
-                // and the marker file keeps the restarted incarnation alive.
-                string marker = System.IO.Path.Combine("Temp", $"ServerMesh.FaultFired.{OwnZoneId}");
-                if (!System.IO.File.Exists(marker))
-                {
-                    try { System.IO.Directory.CreateDirectory("Temp"); System.IO.File.WriteAllText(marker, System.DateTime.Now.ToString("HH:mm:ss.fff")); } catch { }
-                    Logging.LogError("Mesh", $"FAULT: dying on handoff notice for {msg.characterId} (MESH_FAULT_DIE_ON_NOTICE)");
-                    System.Diagnostics.Process.GetCurrentProcess().Kill();
-                }
-            }
+            MeshFaultOnHandoffNotice(msg.characterId); // the notice and drain faults, once per run (MeshFault, Slice 2d)
             _incomingHandoffFrom[msg.characterId] = new IncomingHandoff
             {
                 fromZone = _neighbourZoneByConnection.TryGetValue(connectionId, out string z) ? z : null,
@@ -3416,6 +3409,7 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>Origin side: remember a handoff we sent so the destination's ack can be matched and timed.</summary>
         internal void RegisterPendingHandoffAck(string characterId, string name, string zone, float startTime)
         {
+            NoteHandoffOut(characterId, zone); // Slice 2d: the re-handoff back-off reads it (MeshMapNetworkManager_Readiness)
             _pendingHandoffAcks[characterId] = new PendingHandoffAck { zone = zone, name = name, startTime = startTime, sentTime = Time.unscaledTime };
         }
 

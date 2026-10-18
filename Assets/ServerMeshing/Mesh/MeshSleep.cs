@@ -43,6 +43,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public const ushort Retire = 30017;          // central -> map server: your cell is gone; drain and exit
         public const ushort CoordinatorNote = 30018; // central -> map server: a decision or refusal, for the cell's log
         public const ushort LayoutEvidence = 30019;  // map server -> central: split-gate evidence (MeshLayoutEvidenceMessage, Slice 2b)
+        public const ushort KillChannel = 30020;     // central -> spawner: kill one map-server process it started (MeshKillChannelMessage, Slice 2d)
     }
 
     /// <summary>Central to a map server: nobody needs this cell; save and exit (ignored while a player is on it).</summary>

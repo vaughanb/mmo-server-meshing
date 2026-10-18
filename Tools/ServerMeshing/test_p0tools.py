@@ -299,8 +299,9 @@ class EnvRegistryTests(unittest.TestCase):
         self.assertEqual(registry & dropped, set())
         self.assertEqual(pending & dropped, set())
 
-    def test_regress_keys_are_73_distinct_keys(self):
-        self.assertEqual((len(regress.ENV_KEYS), len(set(regress.ENV_KEYS))), (73, 73))
+    def test_regress_keys_are_75_distinct_keys(self):
+        # 73 through Phase 0, plus Slice 2d's two fault toggles (MESH_FAULT_DIE_ON_PREWARM, MESH_FAULT_DIE_ON_DRAIN)
+        self.assertEqual((len(regress.ENV_KEYS), len(set(regress.ENV_KEYS))), (75, 75))
 
     def test_no_pending_or_dropped_key_is_a_regress_key(self):
         for key in list(p0tools.PENDING_KEYS) + list(p0tools.DROPPED_KEYS):

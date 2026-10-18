@@ -28,9 +28,22 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>The operation in progress when the file was written (empty when none) and its step, for an operator (Slice 2b).</summary>
         public string opId = "";
         public string opStep = "";
-        /// <summary>Dynamic ids an operation aborted: a hello from one of them is answered with Retire.</summary>
+        /// <summary>Dynamic ids an operation aborted: a hello from one of them is answered with Retire (loaded at start, Slice 2d).</summary>
         public List<string> abortedIds = new List<string>();
+        /// <summary>
+        /// The fenced set (Slice 2d decision 5): incarnations of cells the supervisor gave up on (down, hung, killed). A hello
+        /// from one of them, or from one older, is answered with a fenced Retire. Optional: a file without it reads as empty.
+        /// </summary>
+        public List<MeshFencedIncarnation> fencedIncarnations = new List<MeshFencedIncarnation>();
         public string writtenAtUtc = "";
+    }
+
+    /// <summary>MeshFencedIncarnation is one entry of the fenced set: a cell and one of its incarnations (hex UTC ticks).</summary>
+    [Serializable]
+    public sealed class MeshFencedIncarnation
+    {
+        public string cellId = "";
+        public string incarnation = "";
     }
 
     /// <summary>MeshCoordinatorStore reads and writes the coordinator's store file.</summary>
@@ -107,6 +120,8 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             if (data.abortedIds == null)
                 data.abortedIds = new List<string>();
+            if (data.fencedIncarnations == null)
+                data.fencedIncarnations = new List<MeshFencedIncarnation>();
             return true;
         }
 

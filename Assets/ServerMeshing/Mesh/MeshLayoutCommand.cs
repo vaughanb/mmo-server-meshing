@@ -12,12 +12,14 @@ namespace MultiplayerARPG.MMO.Mesh
     {
         Split,
         Merge,
+        /// <summary>Kill (Slice 2d): have a cell's spawner kill its process (an operator's escape for a hung cell).</summary>
+        Kill,
     }
 
     /// <summary>MeshLayoutCommand is one parsed layout command.</summary>
     public sealed class MeshLayoutCommand
     {
-        public const string Usage = "<seq> split <cell> <x|z> <at> <+|-> <childId> | <seq> merge <a> <b>";
+        public const string Usage = "<seq> split <cell> <x|z> <at> <+|-> <childId> | <seq> merge <a> <b> | <seq> kill <cell>";
 
         public long seq;
         public MeshLayoutCommandKind kind;
@@ -63,9 +65,19 @@ namespace MultiplayerARPG.MMO.Mesh
                 command = new MeshLayoutCommand { seq = seq, kind = MeshLayoutCommandKind.Merge, verb = "merge", mergeA = words[2], mergeB = words[3] };
                 return true;
             }
+            if (words.Length >= 2 && string.Equals(words[1], "kill", StringComparison.OrdinalIgnoreCase))
+            {
+                if (words.Length != 3)
+                {
+                    error = $"layout command {seq} has {words.Length} words, a kill takes 3 ({Usage})";
+                    return false;
+                }
+                command = new MeshLayoutCommand { seq = seq, kind = MeshLayoutCommandKind.Kill, verb = "kill", cellId = words[2] };
+                return true;
+            }
             if (words.Length < 2 || !string.Equals(words[1], "split", StringComparison.OrdinalIgnoreCase))
             {
-                error = words.Length < 2 ? $"layout command {seq} has no verb ({Usage})" : $"layout command {seq}: unknown verb '{words[1]}' (split or merge)";
+                error = words.Length < 2 ? $"layout command {seq} has no verb ({Usage})" : $"layout command {seq}: unknown verb '{words[1]}' (split, merge or kill)";
                 return false;
             }
             if (words.Length != 7)

@@ -1,9 +1,11 @@
 // Server Meshing add-on — the layout command files the play runner serves (Slice 2b, slices/slice2b_design.md
-// decisions 2 and 17; Slice 2c, slices/slice2c_design.md decision 15). Temp/ServerMesh.LayoutCommand.txt holds one
-// line, `<seq> split <baseCell> <x|z> <at> <+|-> <childId>` or `<seq> merge <a> <b>`; the runner hands it to the
-// central whatever its verb (the central dispatches on it) and mirrors the coordinator's `Split `, `Merge ` and
-// `Layout op ` lines into Temp/ServerMesh.LayoutCommandStatus.txt, one per line, prefixed with the latest command's seq
-// (a late `Split ` line lands under a merge's seq: graders filter by kind). Pure text: no editor state.
+// decisions 2 and 17; Slice 2c, slices/slice2c_design.md decision 15; Slice 2d, slices/slice2d_design.md decision 15).
+// Temp/ServerMesh.LayoutCommand.txt holds one line, `<seq> split <baseCell> <x|z> <at> <+|-> <childId>`, `<seq> merge
+// <a> <b>` or `<seq> kill <cell>`; the runner hands it to the central whatever its verb (the central dispatches on it)
+// and mirrors the coordinator's `Split `, `Merge `, `Layout op ` and `Supervisor:` lines into
+// Temp/ServerMesh.LayoutCommandStatus.txt, one per line, prefixed with the latest command's seq (a late `Split ` line
+// lands under a merge's seq, and the supervisor's lines under whichever command came last: graders filter by kind).
+// Pure text: no editor state.
 
 namespace MultiplayerARPG.MMO.Mesh.Editor
 {
@@ -17,7 +19,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         /// <summary>NoSeq stands for the seq of a command whose seq could not be read.</summary>
         public const string NoSeq = "?";
 
-        private static readonly string[] s_mirroredPrefixes = { "Split ", "Merge ", "Layout op " };
+        private static readonly string[] s_mirroredPrefixes = { "Split ", "Merge ", "Layout op ", "Supervisor:" };
 
         /// <summary>
         /// TryParse reads the command file's text: the first line that is neither blank nor a # comment, trimmed. Its first
@@ -64,7 +66,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         /// <summary>
         /// MirroredPayload is the part of a console message the status file mirrors, or null: the message's first line with
         /// the kit logger's prefix (` INFO Mesh [date time] - `) or a `[tag] ` prefix removed, when it then starts with
-        /// `Split `, `Merge ` or `Layout op `.
+        /// `Split `, `Merge `, `Layout op ` or `Supervisor:`.
         /// </summary>
         public static string MirroredPayload(string message)
         {

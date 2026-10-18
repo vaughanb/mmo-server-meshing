@@ -217,6 +217,8 @@ class MergeScenarioTests(unittest.TestCase):
             "straggling": ([s[:7] + ["drain straggling 92 s: characters=1"] + s[7:]], ["neither aborted"]),
             "exited before drained": ([s[:7] + ["C.1 exited before drained"] + s[9:]], ["neither aborted"]),
             "out of order": ([s[:1] + [s[2], s[1]] + s[3:]], ["out of order"]),
+            "a survivor paused": ([s[:7] + ["C lost, op paused", "C rebound 8d, op resumed"] + s[7:]],
+                                  ["no supervision"]),
         }
         for name, (merges, fragments) in cases.items():
             with self.subTest(name):

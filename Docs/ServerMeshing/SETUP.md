@@ -105,7 +105,13 @@ cell's band neighbours must have been linked and sending before it takes the rec
 (0.25 of a frame for queued puppet spawns on a Dynamic map), `splitStepTimeoutSeconds` (60: a silent participant
 aborts a split before its second step and freezes it after), `splitCooldownSeconds` (30: after any split or merge
 of the family) and `drainMonsterAgeSeconds` (5); for merges (Slice 2c) `retireMaxSeconds` (90: how long a merged-away cell may
-take to drain and exit before the central and the cell log it as straggling; players are never kicked). Every mesh manager (`MeshMapNetworkManager`, `MeshLoginNetworkManager`,
+take to drain and exit before the central and the cell log it as straggling; players are never kicked); for supervision
+(Slice 2d) `childDownGraceSeconds` (20: how long a live dynamic cell, or a split family's base in sleep mode, may be gone
+before the central restarts it; must exceed `childFenceSeconds + fenceSaveSeconds + 3`), `childMaxRestarts` (3 failed
+restarts, then the child collapses into its base), `childRestartIntervalSeconds` (10), `childRestartStableSeconds` (60),
+`childHungSeconds` (30: a registered cell that sends no load report this long is killed by its spawner),
+`childFenceSeconds` (10), `fenceSaveSeconds` (5) and `retireKillAfterSeconds` (270: a merge's retiring cell still
+there after this is killed). Every mesh manager (`MeshMapNetworkManager`, `MeshLoginNetworkManager`,
 `MeshCentralNetworkManager`, `MeshMapSpawnNetworkManager`) carries a `world` reference to this asset; panel 3 assigns
 it.
 
@@ -343,7 +349,10 @@ and, later, several hosts all reach one database, and SQLite is a single file on
   `MESH_LOAD_AREA` (crowd them into a square `x,z,r`), `MESH_NO_MONSTERS=1`, `MESH_MONSTER_AREAS=all` (also switch on
   the monster spawn areas the test maps save inactive, about 294 monsters, each on the cell that owns it; the
   scenarios use the one area that is on; or a comma list of area names, e.g. `Spawn_Interior_C` for `split`, to
-  switch on just those), `MESH_SPAWN_CELLS` (which cells the spawner starts), `MESH_BAND` (ghost band
+  switch on just those; `only:<names>` switches on those and off every other monster area, for an exact total),
+  `MESH_FAULT_DIE_ON_PREWARM=<cell>` and `MESH_FAULT_DIE_ON_DRAIN=<cell>` (Slice 2d, one-shot like
+  `MESH_FAULT_DIE_ON_NOTICE`: the cell dies on its split's e1 broadcast, or on its first incoming handoff after it owns
+  its rectangle), `MESH_SPAWN_CELLS` (which cells the spawner starts), `MESH_BAND` (ghost band
   and visible range together), `MESH_PROBE_BURN_MS` (`[cell:]ms` of busy work per frame), and, on a bare player with
   no rig at all, `MESH_PROBE_SELFTEST=0,5,10,24`.
 - **Measuring a tick (Phase 0):** the Work ticks line is always on; these rig toggles sharpen it (all unset = today):
@@ -507,6 +516,19 @@ and, later, several hosts all reach one database, and SQLite is a single file on
   Status lines `Merge <op>: …` are mirrored like a split's. Scenarios `merge` (`split`'s setup, then `merge C C.1`:
   the bots migrate back, C.1 drains, quits and stays gone) and `mergec2` (`splitc2`'s, then `merge E E.1`: C2 drops
   E.1 across the seam); both are skipped with `--remote-cells` and `--remote-persist`.
+- **Supervision and fencing (Slice 2d):** the central restarts a dead child with the same id and rectangle (or, after
+  `childMaxRestarts` failures, collapses it into its base) and has a hung cell killed by its spawner; an op whose member
+  dies before its e2 broadcast aborts, one that dies after pauses and resumes when the member is back. A cell of a
+  Dynamic map that loses the cluster for `childFenceSeconds` while a neighbour that never lost it still reports itself
+  registered fences itself: it saves its players (bounded by `fenceSaveSeconds`), kicks them (they re-log in, routed by
+  position) and kills its own process; with the central down nobody has such a witness and nobody fences. `<seq> kill
+  <cell>` in the command file has the cell's spawner kill it (an operator's escape for a hung process); lines starting
+  `Supervisor:` are mirrored to the status file. Scenarios `splitcrash_prewarm` (the child dies at e1: the split
+  aborts, the child stays gone), `splitcrash_drain` (it dies mid-drain: the bots fall back, it is restarted, the split
+  resumes and finishes) and `splitcrash_base` (the harness kills C with the child live: C comes back without R, the
+  child releases C's old monsters, the totals return to the area's 5, C's players re-log in); all three are skipped
+  with `--remote-cells` and `--remote-persist`. The headless bots log in again after a lost session (`Session lost …;
+  re-login <n>`; RESULT ` relogins=<n>`).
 - **The play runner and the environment:** every Play request carries an id that the status file echoes as
   `playSeq=` while that Play runs, so the harness never mistakes a Play an earlier, abandoned request started late for
   its own; a stop that arrives while Play is starting is carried out once it has started. The environment variables a
