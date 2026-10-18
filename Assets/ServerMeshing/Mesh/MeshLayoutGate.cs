@@ -158,6 +158,35 @@ namespace MultiplayerARPG.MMO.Mesh
                 return false;
             return !holdsLayout || ownState == MeshCellState.Pending;
         }
+
+        /// <summary>
+        /// Decide (Slice 2c decision 13): a cell that owns nothing yet retires at once (2b, ShouldRetire); a cell that is
+        /// Draining in its applied layout quits once drained and otherwise keeps handing off until it is; anything else
+        /// (another cell or incarnation, an asset cell, an Active or Static one) stays up.
+        /// </summary>
+        public static MeshRetireDecision Decide(string retireCellId, string retireIncarnation, string ownCellId, string ownIncarnation, bool holdsLayout, MeshCellState ownState, bool drained)
+        {
+            if (ShouldRetire(retireCellId, retireIncarnation, ownCellId, ownIncarnation, holdsLayout, ownState))
+                return MeshRetireDecision.RetireUnowned;
+            if (!string.Equals(retireCellId, ownCellId, StringComparison.OrdinalIgnoreCase) || !string.Equals(retireIncarnation, ownIncarnation, StringComparison.Ordinal))
+                return MeshRetireDecision.StayUp;
+            if (!holdsLayout || ownState != MeshCellState.Draining)
+                return MeshRetireDecision.StayUp;
+            return drained ? MeshRetireDecision.QuitDrained : MeshRetireDecision.AwaitDrain;
+        }
+    }
+
+    /// <summary>MeshRetireDecision is what a cell does with a Retire for its own id and incarnation.</summary>
+    public enum MeshRetireDecision
+    {
+        /// <summary>Not this cell, or a cell that may not end itself: stay up.</summary>
+        StayUp,
+        /// <summary>A cell that owns nothing yet (no layout, or Pending): quit now (Slice 2b).</summary>
+        RetireUnowned,
+        /// <summary>Draining in its applied layout and drained: quit now (Slice 2c).</summary>
+        QuitDrained,
+        /// <summary>Draining but still holding something: keep handing off, decide again each second.</summary>
+        AwaitDrain,
     }
 
     /// <summary>MeshStreamTargetDiff compares two lists of cell ids the way cell ids compare (ignoring case).</summary>

@@ -102,6 +102,31 @@ namespace MultiplayerARPG.MMO.Mesh
             return Mathf.Min(maxX, other.maxX) - Mathf.Max(minX, other.minX) > eps && Mathf.Min(maxZ, other.maxZ) - Mathf.Max(minZ, other.minZ) > eps;
         }
 
+        /// <summary>
+        /// TryUnion gives the rectangle the two make together when they share a full edge (give or take
+        /// <paramref name="tolerance"/>: same extent on one axis, touching on the other), so the union is a rectangle;
+        /// false otherwise (overlapping, apart, offset edges, or either empty). Slice 2c merge geometry.
+        /// </summary>
+        public bool TryUnion(MeshRect other, float tolerance, out MeshRect union)
+        {
+            union = Empty;
+            if (IsEmpty || other.IsEmpty)
+                return false;
+            bool sameX = Mathf.Abs(minX - other.minX) <= tolerance && Mathf.Abs(maxX - other.maxX) <= tolerance;
+            bool sameZ = Mathf.Abs(minZ - other.minZ) <= tolerance && Mathf.Abs(maxZ - other.maxZ) <= tolerance;
+            if (sameX && (Mathf.Abs(maxZ - other.minZ) <= tolerance || Mathf.Abs(other.maxZ - minZ) <= tolerance))
+            {
+                union = new MeshRect(Mathf.Min(minX, other.minX), Mathf.Min(minZ, other.minZ), Mathf.Max(maxX, other.maxX), Mathf.Max(maxZ, other.maxZ));
+                return true;
+            }
+            if (sameZ && (Mathf.Abs(maxX - other.minX) <= tolerance || Mathf.Abs(other.maxX - minX) <= tolerance))
+            {
+                union = new MeshRect(Mathf.Min(minX, other.minX), Mathf.Min(minZ, other.minZ), Mathf.Max(maxX, other.maxX), Mathf.Max(maxZ, other.maxZ));
+                return true;
+            }
+            return false;
+        }
+
         public bool Equals(MeshRect other) => minX == other.minX && minZ == other.minZ && maxX == other.maxX && maxZ == other.maxZ;
         public override bool Equals(object obj) => obj is MeshRect other && Equals(other);
         public override int GetHashCode() => (minX, minZ, maxX, maxZ).GetHashCode();
@@ -358,5 +383,9 @@ namespace MultiplayerARPG.MMO.Mesh
         public float splitCooldownSeconds = 30f;
         [Tooltip("A monster younger than this that a shrunk cell's spawn area made in the given-away rectangle is handed off, not counted by the drain gate.")]
         public float drainMonsterAgeSeconds = 5f;
+
+        // Slice 2c (merge).
+        [Tooltip("Seconds a merged-away cell may take to drain and exit before the central and the cell log it as straggling (every 30 s; players are never kicked).")]
+        public float retireMaxSeconds = 90f;
     }
 }

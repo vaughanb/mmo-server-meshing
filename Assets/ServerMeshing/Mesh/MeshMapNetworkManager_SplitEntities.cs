@@ -28,6 +28,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 return;
             float now = Time.unscaledTime;
             SplitEvidenceTick(now);
+            DrainTick(now); // Slice 2c: a Draining cell's own work and its retire check
             if (IsLayoutGated || !enableServerBoundaryHandoff)
                 return;
             StaticHandoffTick(now);

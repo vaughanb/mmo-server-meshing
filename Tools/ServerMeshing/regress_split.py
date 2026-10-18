@@ -93,11 +93,17 @@ def write_command(path, line):
     os.replace(tmp, path)
 
 
-def wait_standing(logs, timeout):
-    """{log: (x, z)} once every bot log holds 'Standing at', or as far as it got when the timeout passes."""
+def wait_standing(logs, timeout, seen=None):
+    """{log: (x, z)} once every bot log holds 'Standing at', or as far as it got when the timeout passes. `seen`, when
+    given, gets {log: time.time() of the poll that first found it} (the bot log has no stamps; Slice 2c's window
+    guard counts each bot's stand window from it)."""
     end = time.time() + timeout
     while True:
         found = {log: rigsplit.standing_at(read_lines(log)) for log in logs}
+        if seen is not None:
+            for log, at in found.items():
+                if at is not None:
+                    seen.setdefault(log, time.time())
         if all(found.values()) or time.time() >= end:
             return found
         time.sleep(3)
@@ -141,11 +147,28 @@ def wait_results(logs, timeout):
         time.sleep(3)
 
 
+# What the split phase leaves for the phase after it (finish_split, or Slice 2c's merge in regress_merge): `sent` once
+# the command went out; `stood` is {log: wall time its 'Standing at' was first seen}; `done_at` and `e3_at` the wall
+# times the harness saw the op's done and the base's e3 apply (None when it never did).
+SplitRun = collections.namedtuple("SplitRun", "name spec split plan logs standing stood seq status applied sent "
+                                              "done_at e3_at")
+
+
 def run(name, rep, rig, start, day, bots):
     """Runs one split scenario against the rig (regress) and records its checks on rep; appends ('stand', log) for
     every bot to `bots` (regress grades their logs). Returns the rigsplit.Split for grade_layout."""
-    spec, split = SPECS[name], split_of(name, rig.MAP)
-    plan = plan_bots(name)
+    r = start_split(name, rep, rig, start, day, bots)
+    if r.sent:
+        finish_split(rep, rig, r, start, day)
+    return r.split
+
+
+def start_split(name, rep, rig, start, day, bots, spec_name=None, observe_s=OBSERVE_S):
+    """The split phase: setup (database, bot positions, the Dynamic Play, the bots, each with an `observe_s` stand
+    window, their logs named after `name`), the command once every bot stands, its status graded, and the wait for
+    the base's e3 apply. `spec_name` picks the split (SPECS; default `name`). Returns a SplitRun."""
+    spec, split = SPECS[spec_name or name], split_of(spec_name or name, rig.MAP)
+    plan = plan_bots(spec_name or name)
     harvest = next((b for b in plan if b.harvest), None)
     stand = [b for b in plan if not b.harvest]
     rig.db_reset(spec.tester, harvest.point if harvest else spec.tester)
@@ -164,10 +187,11 @@ def run(name, rep, rig, start, day, bots):
         # The harvest variant is the harvest mode with -meshHarvestAfterMigration; it logs "Standing at" too.
         mode = "harvest" if b.harvest else "stand"
         args = ["-meshAutoMode", mode, "-meshWalkX", f"{b.point[0]:g}", "-meshWalkZ", f"{b.point[1]:g}"]
-        logs[b.user] = rig.launch_bot(name, b.user, args, channel=spec.channel, observe_seconds=OBSERVE_S,
+        logs[b.user] = rig.launch_bot(name, b.user, args, channel=spec.channel, observe_seconds=observe_s,
                                       line_x=spec.at, harvest_after_migration=b.harvest)
         bots.append((mode, logs[b.user]))
-    standing = wait_standing(list(logs.values()), STAND_TIMEOUT_S)
+    stood = {}
+    standing = wait_standing(list(logs.values()), STAND_TIMEOUT_S, stood)
     for b in plan:
         at = standing[logs[b.user]]
         rep.check(at is not None and rigsplit.side_of(at, AXIS, spec.at) == b.side,
@@ -175,22 +199,28 @@ def run(name, rep, rig, start, day, bots):
                   f"(at {at}, planned {b.point})")
     if not all(standing.values()):
         rep.check(False, "split: not sent, a bot never logged 'Standing at'")
-        return split
+        return SplitRun(name, spec, split, plan, logs, standing, stood, None, None, None, False, None, None)
 
     seq = str(int(time.time()))
     write_command(rig.LAYOUT_COMMAND, rigsplit.command_line(seq, spec.base, AXIS, spec.at, SIDE, spec.child))
     status = wait_op(rig.LAYOUT_COMMAND_STATUS, seq, SPLIT_TIMEOUT_S)
+    done_at = time.time() if status["done"] else None
     grade_status(rep, status, spec)
     applied = wait_applied(rig, split, start, day, APPLY_TIMEOUT_S) if status["done"] else None
     kept = rigsplit.format_rect(rigsplit.split_rects(split.base_rect, AXIS, spec.at, SIDE)[0])
     rep.check(applied is not None, f"{spec.base} applied a layout owning and interested in {kept} only (e3)")
+    return SplitRun(name, spec, split, plan, logs, standing, stood, seq, status, applied, True, done_at,
+                    time.time() if applied is not None else None)
 
-    results = wait_results(list(logs.values()), OBSERVE_S + RESULT_SLACK_S)
-    grade_bots(rep, rig, plan, logs, results, spec, start, day)
-    grade_entities(rep, rig, spec, start, day, status["pairs"].get("e2"), status["pairs"].get("e3"))
-    if spec.beside_c2:
-        grade_c2(rep, rig, plan, standing, logs, status, spec, start, day)
-    return split
+
+def finish_split(rep, rig, r, start, day):
+    """The split's own finish: every bot's RESULT (its stand window and RESULT_SLACK_S), then the migration, entity and
+    (splitc2) C2 checks."""
+    results = wait_results(list(r.logs.values()), OBSERVE_S + RESULT_SLACK_S)
+    grade_bots(rep, rig, r.plan, r.logs, results, r.spec, start, day)
+    grade_entities(rep, rig, r.spec, start, day, r.status["pairs"].get("e2"), r.status["pairs"].get("e3"))
+    if r.spec.beside_c2:
+        grade_c2(rep, rig, r.plan, r.standing, r.logs, r.status, r.spec, start, day)
 
 
 def grade_status(rep, status, spec):
@@ -284,10 +314,12 @@ def grade_c2(rep, rig, plan, standing, logs, status, spec, start, day):
               f"C2's band after e3 ({e3}) holds {spec.child} and not {spec.base}: {bands[-1] if bands else 'no apply'}")
 
 
-def grade_layout(rep, rig, start, day, split):
+def grade_layout(rep, rig, start, day, split, applies=None, ops=None,
+                 how_split="split map: three extra layouts by rectangle"):
     """regress.grade_layout for a split scenario: the split's map by rectangles (rigsplit.split_apply_violations), every
     other map as 2a grades it (C2: no own-cell layout, Static-neighbour applies allowed); no retire, merge, abort or
-    freeze line and no layout gate warning on any cell."""
+    freeze line and no layout gate warning on any cell. Slice 2c's merge grade hands in `applies` (zone, info lines)
+    -> problems for the split's map and `ops` (zone, lines) -> how many op lines it may not log, with `how_split`."""
     try:
         dynamic = rigtools.dynamic_maps(rig._play_env.get("MESH_CELL_MODE", ""),
                                         rigtools.asset_cell_modes(rig.RIG_REGISTRY), {m for _, m in rig.ZONES})
@@ -303,16 +335,17 @@ def grade_layout(rep, rig, start, day, split):
         if map_id == split.map_id:
             if not info and zone not in expected:
                 continue    # a dynamic cell of an earlier run today
-            problems = rigsplit.split_apply_violations(zone, info, split)
-            how = "split map: three extra layouts by rectangle"
+            problems = applies(zone, info) if applies else rigsplit.split_apply_violations(zone, info, split)
+            how = how_split
         else:
             problems = rigtools.layout_apply_violations(zone, info, map_id in dynamic)
             how = "Dynamic: layout applied before any player" if map_id in dynamic else "Static: no own-cell layout"
         everything = rig.zone_lines(zone, start, day, map_id)
-        ops = sum(1 for line in everything if rigsplit.SPLIT_OP_PROBLEM.search(line))
+        n_ops = (ops(zone, everything) if ops
+                 else sum(1 for line in everything if rigsplit.SPLIT_OP_PROBLEM.search(line)))
         gate = sum(1 for line in everything if rigtools.LAYOUT_GATE_WARNING.search(line))
-        if ops:
-            problems.append(f"{ops} retire/merge/abort/freeze line(s)")
+        if n_ops:
+            problems.append(f"{n_ops} retire/merge/abort/freeze line(s)")
         if gate:
             problems.append(f"{gate} layout gate warning(s)")
         rep.check(not problems, f"zone {zone}: {how}" + (f" ({'; '.join(problems[:2])})" if problems else ""))

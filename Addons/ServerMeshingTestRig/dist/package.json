@@ -2,7 +2,7 @@
   "name": "Server Meshing Test Rig",
   "guid": "6a71ac12-0405-44d7-b1c1-003df8ffd085",
   "packageUrl": "https://github.com/vaughanb/mmo-server-meshing/raw/refs/heads/master/Addons/ServerMeshingTestRig/dist/ServerMeshingTestRig.unitypackage",
-  "version": "0.76.0",
+  "version": "0.77.0",
   "updateDate": "2026-10-17",
   "category": "Demo",
   "description": "The test rig for the Server Meshing add-on: two test maps cut into ten cells (a 3x3 grid plus one cell across a seam), test items, skills, quests, mounts, pets, harvestables and buildings that exercise every path across a cell edge.\nAdds an auto client, an editor launcher and play runner, a load generator, and the Python regression and capacity harnesses under TestMap/Tools.\nNeeds the Server Meshing add-on and the kit's BaseDemo (the test data references its enemy prefab and default weapon).",

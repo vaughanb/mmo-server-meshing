@@ -2,7 +2,8 @@
 // and 8): sent to the central each load window while its map has an operation in progress, and on change. The e1 gate
 // reads a new child's pre-warm (its band neighbours' hellos and datagrams, its spawn queue, its saturation); the
 // drain gate reads what a shrunk parent still owns in the rectangle it gave away. Id MeshClusterMsg.LayoutEvidence
-// (30019). Game-neutral; the load report keeps its own frozen wire.
+// (30019). Game-neutral; the load report keeps its own frozen wire. Version 2 (Slice 2c decision 10) appends what a
+// Draining cell still holds (MeshDrainState) and whether it is drained.
 using System.Collections.Generic;
 using LiteNetLib.Utils;
 
@@ -41,7 +42,7 @@ namespace MultiplayerARPG.MMO.Mesh
     public struct MeshLayoutEvidenceMessage : INetSerializable
     {
         /// <summary>WireVersion is the evidence wire's version, written first; a reader refuses another.</summary>
-        public const byte WireVersion = 1;
+        public const byte WireVersion = 2;
 
         public string cellId;
         public string incarnation;
@@ -61,6 +62,10 @@ namespace MultiplayerARPG.MMO.Mesh
         public bool shrunk;
         public MeshRect givenAway;
         public MeshDrainCounts drain;
+        /// <summary>drainState is what this cell holds anywhere (Slice 2c; zeros when it is not Draining).</summary>
+        public MeshDrainState drainState;
+        /// <summary>drained is drainState.IsDrained on a Draining cell, else false.</summary>
+        public bool drained;
 
         public void Serialize(NetDataWriter writer)
         {
@@ -89,6 +94,8 @@ namespace MultiplayerARPG.MMO.Mesh
             writer.Put(drain.staticsAndDrops);
             writer.Put(drain.synthetics);
             writer.Put(drain.pendingHandoffs);
+            drainState.Put(writer);
+            writer.Put(drained);
         }
 
         /// <summary>
@@ -125,6 +132,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 synthetics = reader.GetInt(),
                 pendingHandoffs = reader.GetInt(),
             };
+            drainState = MeshDrainState.Get(reader);
+            drained = reader.GetBool();
         }
     }
 }

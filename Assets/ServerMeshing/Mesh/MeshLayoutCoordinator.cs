@@ -1,8 +1,9 @@
 // Server Meshing add-on — the central's layout coordinator (DESIGN.md 0.72, plan D3). It owns the runtime layout of
 // every Dynamic map: it recovers it when the central starts, answers each cell's hello with the layout to hold (which
-// opens the cell's gate), and tells the cells what it decided. Splits run in MeshLayoutCoordinator_Split.cs (Slice 2b);
-// merges come later. A plain class with its clock, transport, store and log injected, so it is tested without Unity
-// networking. Nothing throws out of a handler or out of Tick: each validates, then changes state.
+// opens the cell's gate), and tells the cells what it decided. Splits run in MeshLayoutCoordinator_Split.cs (Slice 2b),
+// merges in MeshLayoutCoordinator_Merge.cs (Slice 2c). A plain class with its clock, transport, store and log injected,
+// so it is tested without Unity networking. Nothing throws out of a handler or out of Tick: each validates, then changes
+// state.
 using System;
 using System.Collections.Generic;
 
@@ -208,7 +209,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     Note(connectionId, MeshNoteLevel.Error, hello.cellId, "recovery-frozen", $"map {hello.mapId} is frozen: {map.reason}; cell {hello.cellId} gets no layout");
                     break;
                 default:
-                    if (SplitAnswersHello(connectionId, hello, binding))
+                    if (OpAnswersHello(connectionId, hello, binding))
                         break;
                     Answer(connectionId, hello.cellId, binding.incarnation);
                     binding.answered = true;
@@ -259,7 +260,7 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             else
                 _log.Warning($"Cell {ack.cellId} rejected layout {ack.pair}: {ack.reason}");
-            SplitOnAck(ack);
+            OpOnAck(ack);
         }
 
         /// <summary>OnLoadReport: a bound cell's report is evidence it is alive and what layout it measured under.</summary>
@@ -323,7 +324,7 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             if (Phase == MeshCoordinatorPhase.Recovering)
                 ResolveAll();
-            SplitTick();
+            OpTick();
         }
 
         private MapRecovery MapOf(string mapId)

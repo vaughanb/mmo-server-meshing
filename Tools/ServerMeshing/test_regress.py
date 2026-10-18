@@ -107,7 +107,7 @@ class SplitWiringTests(unittest.TestCase):
             self.assertEqual(os.listdir(d), [])
 
     def test_registration(self):
-        for name in ("split", "splitc2"):
+        for name in ("split", "splitc2", "merge", "mergec2"):
             with self.subTest(name):
                 self.assertIn(name, regress.ALL)
                 self.assertNotIn(name, regress.DEFAULT)

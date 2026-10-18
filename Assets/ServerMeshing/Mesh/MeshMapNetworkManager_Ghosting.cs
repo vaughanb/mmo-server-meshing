@@ -423,7 +423,7 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>Opens the link to a cell; <paramref name="force"/> (a layout just made it a band neighbour) retries after 1 s instead of 5 s.</summary>
         private void EnsureLink(MeshCell cell, bool force = false)
         {
-            if (cell == null || MeshCell.Same(cell, OwnCell))
+            if (cell == null || MeshCell.Same(cell, OwnCell) || IsRetiredZone(cell.id)) // Slice 2c: no link to a retired zone
                 return;
             if (!_meshPeers.TryGetValue(PeerInfoExtensions.GetPeerInfoKey(cell.id, cell.mapId), out CentralServerPeerInfo peer))
                 return;
@@ -1383,7 +1383,7 @@ namespace MultiplayerARPG.MMO.Mesh
             if (_neighbourZoneByConnection.TryGetValue(connectionId, out string zoneId))
             {
                 _neighbourZoneByConnection.Remove(connectionId); _frameOffsetByConnection.Remove(connectionId);
-                Logging.LogWarning("Mesh", $"Neighbour zone {zoneId} link lost (conn {connectionId})");
+                LogNeighbourLinkLost(zoneId, connectionId); // Slice 2c: a Draining zone's loss is expected (Info)
                 // Monsters are released only once the zone is unreachable both ways (ReleaseRecordsOfUnreachableZones):
                 // with our own link to it still up this is a one-way loss or a dead incarnation's late timeout, and
                 // respawning here while the neighbour still holds the monster would put two of it in the world.
@@ -1441,6 +1441,7 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             foreach (string zone in _unreachableZones)
             {
+                if (IsRetiredZone(zone)) continue; // Slice 2c: pruned when the layout retired it
                 if (IsInboundLinked(zone) || IsNeighbourLinked(zone))
                     continue;
                 bool wasLinked = _neighbourIncarnation.ContainsKey(zone)
@@ -1484,6 +1485,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     monster.NetworkDestroy();
                 Logging.LogWarning("Mesh", $"Borrowed monster {_tmpIds[i]} released ({reason})");
             }
+            NoteZoneRecordsReleased(homeZone, _tmpIds.Count); // Slice 2c: counted toward a Draining zone's prune line
         }
 
         /// <summary>
@@ -1504,6 +1506,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     lent.area.Spawn(lent.prefab, lent.level, lent.respawnDelay, lent.respawnDelay);
                 Logging.LogWarning("Mesh", $"Lent monster {_tmpIds[i]} released ({reason}); home spawn area respawns it in {lent.respawnDelay:0.#}s");
             }
+            NoteZoneRecordsReleased(zoneId, _tmpIds.Count); // Slice 2c: counted toward a Draining zone's prune line
         }
 
         /// <summary>Add to a position received on that link to express it in our frame (zero for a cell of our own map).</summary>
@@ -3355,6 +3358,7 @@ namespace MultiplayerARPG.MMO.Mesh
         private void RollBackHandoff(string characterId, PendingHandoffAck pending, string reason)
         {
             _pendingHandoffAcks.Remove(characterId);
+            NoteZoneRecordsReleased(pending.zone, 1); // Slice 2c: counted toward a Draining zone's prune line
             float until = Time.unscaledTime + handoffRollbackHoldSeconds;
             bool held = false;
             if (_ghosts.TryGetValue(characterId, out MeshGhost puppet) && puppet.entity != null && !puppet.reserved)

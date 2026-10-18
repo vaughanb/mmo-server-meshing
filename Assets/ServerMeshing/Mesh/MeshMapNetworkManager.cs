@@ -376,6 +376,7 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
             Stamp($"enter-game request from {connectionId}");
+            if (RefuseEnterGameWhileDraining(requestId, reader)) return false; // Slice 2c decision 12: before the kit adopts a despawning entity
             bool ok = await base.DeserializeEnterGameData(requestId, connectionId, request, reader);
             Stamp($"enter-game validated+loaded ok={ok} in {sw.ElapsedMilliseconds}ms");
 #if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE

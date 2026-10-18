@@ -6,7 +6,9 @@
 // with the handoff hysteresis, as the most of each count sampled once a second over the window, plus the handoffs
 // toward the new owner not yet settled. Window pair semantics: a per-window message carries the pair applied when the
 // window started and how long after that apply it started (never negative); the on-apply message carries the new pair
-// with a negative offset (the current window started before it), so it never qualifies a gate by itself.
+// with a negative offset (the current window started before it), so it never qualifies a gate by itself. Wire version 2
+// (Slice 2c decision 10): a Draining cell adds what it still holds anywhere (MeshDrainState, the most of each count over
+// the window, sampled once a second) and whether that is drained; every other cell sends zeros and false.
 using System.Collections.Generic;
 using LiteNetLib;
 using UnityEngine;
@@ -97,6 +99,14 @@ namespace MultiplayerARPG.MMO.Mesh
                 drain = shrunk ? drain : default,
             };
         }
+
+        /// <summary>WithDrainState sets the version-2 part: a Draining cell's state and its IsDrained; zeros and false otherwise.</summary>
+        public static MeshLayoutEvidenceMessage WithDrainState(MeshLayoutEvidenceMessage evidence, bool draining, MeshDrainState state)
+        {
+            evidence.drainState = draining ? state : default;
+            evidence.drained = draining && state.IsDrained;
+            return evidence;
+        }
     }
 
     public partial class MeshMapNetworkManager
@@ -121,6 +131,8 @@ namespace MultiplayerARPG.MMO.Mesh
             _lastApplyPair = MeshLayoutPair.None;
             _lastApplyTime = Time.unscaledTime;
             _nextDrainSample = 0f;
+            DrainOnStartServer();
+            PruneOnStartServer();
         }
 
         private bool ShouldSendEvidence => MeshSplitEvidence.ShouldSend(IsDynamicMap, HasOwnZone, _splitOpInProgress, OwnCell != null ? OwnCell.state : MeshCellState.Static);
@@ -229,6 +241,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 SendLayoutEvidence(onChange: false);
             }
             _drainWindow.Reset();
+            ResetDrainStateWindow();
             _evidenceWindowStart = Time.unscaledTime;
             _evidenceWindowPair = world != null ? world.AppliedPair : MeshLayoutPair.None;
             _evidenceWindowPairAppliedAt = _evidenceWindowPair == _lastApplyPair ? _lastApplyTime : _evidenceWindowStart;
@@ -249,6 +262,7 @@ namespace MultiplayerARPG.MMO.Mesh
             MeshWorkWindow work = _hasWorkWindow ? _lastWorkWindow : default;
             MeshLayoutEvidenceMessage evidence = MeshSplitEvidence.Assemble(OwnZoneId, CellIncarnation, pair, _evidenceWindowStart, appliedAt,
                 NeighbourEvidence(now), _puppetQueue.Count, work.saturatedShare, work.workP95Ms, work.budgetMs, _splitShrunk, _splitGivenAway, drain);
+            evidence = MeshSplitEvidence.WithDrainState(evidence, IsDraining, EvidenceDrainState(onChange));
             ClusterClient.SendPacket(0, DeliveryMethod.ReliableOrdered, MeshClusterMsg.LayoutEvidence, writer => evidence.Serialize(writer));
         }
 #endif

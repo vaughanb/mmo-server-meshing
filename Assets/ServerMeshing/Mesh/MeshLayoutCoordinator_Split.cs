@@ -1,7 +1,9 @@
-// Server Meshing add-on — the coordinator's manual split (Slice 2b, slices/slice2b_design.md decisions 2-5c, plan D3/D4):
-// the request and its validation, the hooks the hello, ack, evidence and spawn handlers call, and the abort and freeze
-// paths. The steps themselves are in MeshLayoutCoordinator_SplitSteps.cs. One operation runs world-wide, so there is
-// one staged step at most. Every line an operator or the harness reads starts "Split <op>: " or "Layout op refused: ".
+// Server Meshing add-on — the coordinator's manual split (Slice 2b, slices/slice2b_design.md decisions 2-5c, plan D3/D4)
+// and what every layout operation shares (Slice 2c decision 4): the request and its validation (the common guards in
+// CheckOpCommon), the hooks the hello, ack, evidence and spawn handlers call, and the abort and freeze paths. The steps
+// are in MeshLayoutCoordinator_SplitSteps.cs; merges in MeshLayoutCoordinator_Merge*.cs. One operation runs world-wide,
+// so there is one staged step at most. Every line an operator or the harness reads starts "Split <op>: ",
+// "Merge <op>: " or "Layout op refused: ".
 using System;
 using System.Collections.Generic;
 
@@ -9,7 +11,7 @@ namespace MultiplayerARPG.MMO.Mesh
 {
     public sealed partial class MeshLayoutCoordinator
     {
-        private MeshSplitOperation _op;
+        private MeshLayoutOperation _op;
         private int _opCounter;
         private long _lastVersion;
         private readonly HashSet<string> _abortedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -18,11 +20,17 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>What a split needs from the central around the coordinator (channels, spawns); none = splits refused.</summary>
         public IMeshSplitHost SplitHost { get; set; }
 
-        /// <summary>OpLine is raised with every operation line ("Split ..." and "Layout op refused: ..."), after it is logged.</summary>
+        /// <summary>OpLine is raised with every operation line ("Split ...", "Merge ..." and "Layout op refused: ..."), after it is logged.</summary>
         public event Action<string> OpLine;
 
         /// <summary>The operation in progress, or the last one (Done, Aborted or Frozen); null before the first.</summary>
-        public MeshSplitOperation CurrentOp => _op;
+        public MeshLayoutOperation CurrentOp => _op;
+
+        /// <summary>CurrentOp when it is a split (else null).</summary>
+        public MeshSplitOperation CurrentSplit => _op as MeshSplitOperation;
+
+        /// <summary>CurrentOp when it is a merge (else null).</summary>
+        public MeshMergeOperation CurrentMerge => _op as MeshMergeOperation;
 
         /// <summary>Whether a dynamic id was aborted by an operation of this coordinator (its hello is answered with Retire).</summary>
         public bool IsAborted(string cellId) => !string.IsNullOrEmpty(cellId) && _abortedIds.Contains(cellId);
@@ -32,13 +40,23 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (string.IsNullOrEmpty(baseId))
                 return false;
-            if (_op != null && _op.step != MeshSplitStep.Done && _op.step != MeshSplitStep.Aborted && string.Equals(_op.baseId, baseId, StringComparison.OrdinalIgnoreCase))
+            if (_op != null && _op.HoldsFamily && string.Equals(_op.baseId, baseId, StringComparison.OrdinalIgnoreCase))
                 return true;
             return _world.FamilyOf(baseId).Count > 1;
         }
 
-        /// <summary>IsOperationChild: the id is the child of the operation in progress (known before any layout names it).</summary>
-        public bool IsOperationChild(string cellId) => _op != null && _op.InProgress && SameId(_op.childId, cellId);
+        /// <summary>
+        /// IsOperationChild: the id is the dynamic cell of the operation in progress — a split's child (known before any
+        /// layout names it) or a merge's retiring cell until e3 retires it.
+        /// </summary>
+        public bool IsOperationChild(string cellId)
+        {
+            if (_op == null || !_op.InProgress)
+                return false;
+            if (_op is MeshSplitOperation split)
+                return SameId(split.childId, cellId);
+            return _op is MeshMergeOperation merge && merge.step < MeshMergeStep.E3Broadcast && SameId(merge.retiringId, cellId);
+        }
 
         private MeshDynamicSettings Settings => _world.dynamicSettings ?? new MeshDynamicSettings();
 
@@ -82,9 +100,15 @@ namespace MultiplayerARPG.MMO.Mesh
             return true;
         }
 
-        private string CheckSplit(string cellId, MeshSplitAxis axis, float at, bool positive, string childId, out MeshSplitOperation op)
+        /// <summary>
+        /// CheckOpCommon: the guards every operation on <paramref name="cellId"/> must pass (Slice 2c decision 3) — the
+        /// coordinator running and its store writable, no operation in progress or frozen world-wide, a host, the cell known,
+        /// not Retired, on a recovered Dynamic map, Active and owning something, bound and answered, its family out of cooldown.
+        /// </summary>
+        private string CheckOpCommon(string cellId, out MeshCell cell, out MeshCellBinding binding)
         {
-            op = null;
+            cell = null;
+            binding = null;
             if (Phase == MeshCoordinatorPhase.Stopped)
                 return "the layout coordinator is not running";
             if (Phase != MeshCoordinatorPhase.Running)
@@ -93,11 +117,11 @@ namespace MultiplayerARPG.MMO.Mesh
                 return "the coordinator store is not writable";
             if (_op != null && _op.InProgress)
                 return $"{_op.opId} is in progress";
-            if (_op != null && _op.step == MeshSplitStep.Frozen)
+            if (_op != null && _op.IsFrozen)
                 return $"{_op.opId} is frozen: {_op.endReason}";
             if (SplitHost == null)
                 return "this central has no split host";
-            MeshCell cell = string.IsNullOrEmpty(cellId) ? null : _world.GetCellById(cellId);
+            cell = string.IsNullOrEmpty(cellId) ? null : _world.GetCellById(cellId);
             if (cell == null || cell.state == MeshCellState.Retired)
                 return $"cell {cellId} is not in the layout";
             if (!cell.OnDynamicMap)
@@ -106,11 +130,20 @@ namespace MultiplayerARPG.MMO.Mesh
                 return $"map {cell.mapId} is {OutcomeOf(cell.mapId)}";
             if (cell.state != MeshCellState.Active || cell.owned.IsEmpty)
                 return $"{cell.id} is {cell.state}";
-            MeshCellBinding parent = BindingOf(cell.id);
-            if (parent == null || !parent.answered || parent.unregisteredAt >= 0f || parent.staticNeighbour)
+            binding = BindingOf(cell.id);
+            if (binding == null || !binding.answered || binding.unregisteredAt >= 0f || binding.staticNeighbour)
                 return $"{cell.id} is not running with a layout answer";
             if (_cooldownUntil.TryGetValue(cell.baseId, out float until) && until > _clock.Now)
                 return $"cooldown {until - _clock.Now:0} s left on {cell.baseId}";
+            return null;
+        }
+
+        private string CheckSplit(string cellId, MeshSplitAxis axis, float at, bool positive, string childId, out MeshSplitOperation op)
+        {
+            op = null;
+            string common = CheckOpCommon(cellId, out MeshCell cell, out MeshCellBinding parent);
+            if (common != null)
+                return common;
             if (!MeshLayoutValidator.IsSafeCellId(childId, out string unsafeId))
                 return unsafeId;
             MeshCell existing = _world.GetCellById(childId);
@@ -173,7 +206,7 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>OnSpawnResult: the kit's spawn callback for an operation's child; only its first call counts, and none after the operation ended.</summary>
         public void OnSpawnResult(string opId, bool success, string detail)
         {
-            MeshSplitOperation op = _op;
+            MeshSplitOperation op = _op as MeshSplitOperation;
             if (op == null || op.opId != opId || !op.InProgress)
             {
                 Line(false, $"Split {opId}: spawn callback {detail} after the operation ended; ignored");
@@ -195,6 +228,7 @@ namespace MultiplayerARPG.MMO.Mesh
             binding.evidence = evidence;
             binding.hasEvidence = true;
             binding.lastEvidenceAt = _clock.Now;
+            binding.layoutEvidenceAt = _clock.Now;
             Advance();
         }
 
@@ -219,19 +253,47 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (MeshRecoveryResolver.HeldReopensRecovery(HeldEntriesOf(hello), hello.held != null ? hello.held.pair : MeshLayoutPair.None, Incarnation))
                     return false;
             }
-            string reason = aborted ? "aborted by " + (_op != null && SameId(_op.childId, id) ? _op.opId : "an earlier split") : "not in the layout";
+            // Only a split aborts an id (a merge's abort retires nothing): the split in hand, or an earlier one.
+            MeshSplitOperation aborter = _op is MeshSplitOperation split && SameId(split.childId, id) ? split : null;
+            string reason = aborted ? "aborted by " + (aborter != null ? aborter.opId : "an earlier split") : "not in the layout";
             _transport.Send(connectionId, new MeshRetireMessage { cellId = id, incarnation = hello.incarnation ?? string.Empty, pair = BroadcastPair, reason = reason });
-            Line(true, aborted && _op != null && SameId(_op.childId, id)
-                ? $"Split {_op.opId}: hello from aborted child {id} answered with Retire"
+            Line(true, aborted && aborter != null
+                ? $"{aborter.LinePrefix} {aborter.opId}: hello from aborted child {id} answered with Retire"
                 : $"Layout hello from dynamic cell {id} ({reason}) answered with Retire");
             return true;
         }
 
-        /// <summary>SplitAnswersHello: binds the child on its first hello and answers it (and any later one) with the staged step.</summary>
-        private bool SplitAnswersHello(long connectionId, MeshLayoutHelloMessage hello, MeshCellBinding binding)
+        /// <summary>OpAnswersHello: the operation in progress answers a hello from one of its cells (true when it did).</summary>
+        private bool OpAnswersHello(long connectionId, MeshLayoutHelloMessage hello, MeshCellBinding binding)
         {
-            MeshSplitOperation op = _op;
-            if (op == null || !op.InProgress)
+            if (_op is MeshSplitOperation split)
+                return SplitAnswersHello(connectionId, hello, binding, split);
+            if (_op is MeshMergeOperation merge)
+                return MergeAnswersHello(connectionId, hello, binding, merge);
+            return false;
+        }
+
+        /// <summary>
+        /// AnswerStaged: a hello from the staged target while its step is staged gets that staged step again, as the answer
+        /// to its hello (so its gate opens on it).
+        /// </summary>
+        private bool AnswerStaged(long connectionId, MeshLayoutOperation op, MeshCellBinding binding)
+        {
+            if (op.staged == null)
+                return false;
+            _transport.Send(connectionId, new MeshLayoutMessage
+            {
+                kind = MeshLayoutKind.HelloAnswer, targetCellId = op.StagedTargetId, targetIncarnation = op.StagedTargetIncarnation,
+                stepId = op.StepId(op.stagedStepName), snapshot = op.staged.Clone(),
+            });
+            binding.answered = true;
+            return true;
+        }
+
+        /// <summary>SplitAnswersHello: binds the child on its first hello and answers it (and any later one) with the staged step.</summary>
+        private bool SplitAnswersHello(long connectionId, MeshLayoutHelloMessage hello, MeshCellBinding binding, MeshSplitOperation op)
+        {
+            if (!op.InProgress)
                 return false;
             if (SameId(hello.cellId, op.parentId) && binding.incarnation != op.parentIncarnation)
             {
@@ -259,44 +321,40 @@ namespace MultiplayerARPG.MMO.Mesh
             op.childConnection = connectionId;
             if (!op.InProgress || op.staged == null)
                 return op.step == MeshSplitStep.Aborted;   // an aborted child got its Retire; otherwise the broadcast answers
-            _transport.Send(connectionId, new MeshLayoutMessage
-            {
-                kind = MeshLayoutKind.HelloAnswer, targetCellId = op.childId, targetIncarnation = op.childIncarnation,
-                stepId = op.StepId(op.step == MeshSplitStep.E1Staged ? "e1" : "e2"), snapshot = op.staged.Clone(),
-            });
-            binding.answered = true;
-            return true;
+            return AnswerStaged(connectionId, op, binding);
         }
 
-        /// <summary>SplitOnAck: a Rejected ack of the step's pair fails the operation; any other ack may open a gate.</summary>
-        private void SplitOnAck(MeshLayoutAckMessage ack)
+        /// <summary>OpOnAck: a Rejected ack of the step's pair fails the operation; any other ack may open a gate.</summary>
+        private void OpOnAck(MeshLayoutAckMessage ack)
         {
-            MeshSplitOperation op = _op;
+            MeshLayoutOperation op = _op;
             if (op == null || !op.InProgress)
                 return;
             if (ack.result == MeshLayoutAckResult.Rejected)
             {
-                MeshLayoutPair stepPair = CurrentStepPair(op);
-                bool byChild = SameId(ack.cellId, op.childId);
-                if (ack.pair == stepPair && (byChild || op.participants.Exists(p => SameId(p, ack.cellId))))
+                MeshLayoutPair stepPair = op.CurrentStepPair;
+                bool byTarget = SameId(ack.cellId, op.StagedTargetId);
+                if (ack.pair == stepPair && (byTarget || op.participants.Exists(p => SameId(p, ack.cellId))))
                 {
-                    // The child refusing e2 never owned R: the split can still be undone.
-                    bool undo = !op.PastCommit || (op.step == MeshSplitStep.E2Staged && byChild);
-                    End(op, undo, $"{ack.cellId} rejected {StepName(op)} {ack.pair}: {ack.reason}");
+                    // The staged target refusing its staged commit is the only cell that saw it: it can still be undone.
+                    bool undo = !op.PastCommit || (op.CommitStaged && byTarget);
+                    End(op, undo, $"{ack.cellId} rejected {op.CurrentStepName} {ack.pair}: {ack.reason}");
                 }
                 return;
             }
             Advance();
         }
 
-        private void FailOp(MeshSplitOperation op, string reason) => End(op, !op.PastCommit, reason);
+        private void FailOp(MeshLayoutOperation op, string reason) => End(op, !op.PastCommit, reason);
 
-        private void End(MeshSplitOperation op, bool abort, string reason)
+        private void End(MeshLayoutOperation op, bool abort, string reason)
         {
-            if (abort)
-                Abort(op, reason);
-            else
+            if (!abort)
                 Freeze(op, reason);
+            else if (op is MeshSplitOperation split)
+                Abort(split, reason);
+            else if (op is MeshMergeOperation merge)
+                AbortMerge(merge, reason);
         }
 
         /// <summary>Abort (before e2): retire the child, remove its channel, and broadcast it Retired if e1 went out (decision 5a).</summary>
@@ -305,6 +363,7 @@ namespace MultiplayerARPG.MMO.Mesh
             op.step = MeshSplitStep.Aborted;
             op.endReason = reason;
             op.staged = null;
+            op.stagedStepName = "";
             _abortedIds.Add(op.childId);
             Line(true, $"Split {op.opId}: aborted {reason}");
             if (op.childBound)
@@ -327,17 +386,17 @@ namespace MultiplayerARPG.MMO.Mesh
         }
 
         /// <summary>Freeze (after e2): the operation stops where it is; nothing else runs until supervision (Slice 2d) or a restart.</summary>
-        private void Freeze(MeshSplitOperation op, string reason)
+        private void Freeze(MeshLayoutOperation op, string reason)
         {
-            op.step = MeshSplitStep.Frozen;
+            op.MarkFrozen();
             op.endReason = reason;
-            Line(true, $"Split {op.opId}: frozen {reason}");
-            SaveStore(op, _broadcast, op.staged, op.staged != null ? op.StepId("e2") : null);
+            Line(true, $"{op.LinePrefix} {op.opId}: frozen {reason}");
+            SaveStore(op, _broadcast, op.staged, op.staged != null ? op.StepId(string.IsNullOrEmpty(op.stagedStepName) ? "e2" : op.stagedStepName) : null);
         }
 
         private void Refuse(string rule) => Line(true, "Layout op refused: " + rule);
 
-        private void OpLog(MeshSplitOperation op, string text) => Line(false, $"Split {op.opId}: {text}");
+        private void OpLog(MeshLayoutOperation op, string text) => Line(false, $"{op.LinePrefix} {op.opId}: {text}");
 
         private void Line(bool warning, string line)
         {
@@ -365,6 +424,7 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             _op = null;
             _opCounter = 0;
+            _mergeCounter = 0;
             _lastVersion = 0;
             _abortedIds.Clear();
             _cooldownUntil.Clear();

@@ -1,18 +1,30 @@
 // Server Meshing add-on — an operator's layout command as one line (Slice 2b decision 2; the rig writes it to
 // Temp/ServerMesh.LayoutCommand.txt and its PlayRunner hands it to MeshCentralNetworkManager.SubmitLayoutCommand):
-// `<seq> split <cell> <x|z> <at> <+|-> <childId>`. Pure: parsed and judged here, run by the coordinator.
+// `<seq> split <cell> <x|z> <at> <+|-> <childId>` or (Slice 2c) `<seq> merge <a> <b>`. Pure: parsed and judged here, run by
+// the coordinator.
 using System;
 using System.Globalization;
 
 namespace MultiplayerARPG.MMO.Mesh
 {
+    /// <summary>MeshLayoutCommandKind is what a layout command asks for.</summary>
+    public enum MeshLayoutCommandKind
+    {
+        Split,
+        Merge,
+    }
+
     /// <summary>MeshLayoutCommand is one parsed layout command.</summary>
     public sealed class MeshLayoutCommand
     {
-        public const string Usage = "<seq> split <cell> <x|z> <at> <+|-> <childId>";
+        public const string Usage = "<seq> split <cell> <x|z> <at> <+|-> <childId> | <seq> merge <a> <b>";
 
         public long seq;
+        public MeshLayoutCommandKind kind;
         public string verb;
+        /// <summary>mergeA and mergeB are a merge's two cells, in the order given (the coordinator finds the base).</summary>
+        public string mergeA;
+        public string mergeB;
         public string cellId;
         public MeshSplitAxis axis;
         /// <summary>The line's coordinate on the axis, world frame.</summary>
@@ -36,9 +48,24 @@ namespace MultiplayerARPG.MMO.Mesh
                 error = $"layout command sequence '{words[0]}' is not a number ({Usage})";
                 return false;
             }
+            if (words.Length >= 2 && string.Equals(words[1], "merge", StringComparison.OrdinalIgnoreCase))
+            {
+                if (words.Length != 4)
+                {
+                    error = $"layout command {seq} has {words.Length} words, a merge takes 4 ({Usage})";
+                    return false;
+                }
+                if (string.Equals(words[2], words[3], StringComparison.OrdinalIgnoreCase))
+                {
+                    error = $"layout command {seq}: a merge needs two different cells, not {words[2]} twice";
+                    return false;
+                }
+                command = new MeshLayoutCommand { seq = seq, kind = MeshLayoutCommandKind.Merge, verb = "merge", mergeA = words[2], mergeB = words[3] };
+                return true;
+            }
             if (words.Length < 2 || !string.Equals(words[1], "split", StringComparison.OrdinalIgnoreCase))
             {
-                error = words.Length < 2 ? $"layout command {seq} has no verb ({Usage})" : $"layout command {seq}: unknown verb '{words[1]}' (only split)";
+                error = words.Length < 2 ? $"layout command {seq} has no verb ({Usage})" : $"layout command {seq}: unknown verb '{words[1]}' (split or merge)";
                 return false;
             }
             if (words.Length != 7)
@@ -72,7 +99,7 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             command = new MeshLayoutCommand
             {
-                seq = seq, verb = "split", cellId = words[2], axis = axis, at = at, childOnPositiveSide = side == "+", childId = words[6],
+                seq = seq, kind = MeshLayoutCommandKind.Split, verb = "split", cellId = words[2], axis = axis, at = at, childOnPositiveSide = side == "+", childId = words[6],
             };
             return true;
         }

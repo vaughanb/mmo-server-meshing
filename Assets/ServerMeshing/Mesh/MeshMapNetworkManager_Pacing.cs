@@ -44,6 +44,18 @@ namespace MultiplayerARPG.MMO.Mesh
         }
 
         /// <summary>
+        /// DrainDepth orders drain candidates, smallest first: how far past the cell's owned edge an entity stands (world
+        /// frame). A cell that owns nothing (Draining, Slice 2c) measures against its previous owned rectangle instead,
+        /// so the entities nearest that edge go first rather than every one tying at infinity.
+        /// </summary>
+        public static float DrainDepth(MeshRect owned, MeshRect previousOwned, float worldX, float worldZ)
+        {
+            if (!owned.IsEmpty)
+                return -owned.DistanceToEdge(worldX, worldZ);
+            return previousOwned.IsEmpty ? 0f : previousOwned.DistanceToEdge(worldX, worldZ);
+        }
+
+        /// <summary>
         /// Admit returns how many of <paramref name="wanted"/> drain handoffs may start now, with <paramref name="inFlight"/>
         /// already in flight toward the destination. Time not used after an idle spell carries over by at most one interval.
         /// </summary>
@@ -156,6 +168,13 @@ namespace MultiplayerARPG.MMO.Mesh
             return !given.IsEmpty;
         }
 
+        /// <summary>
+        /// EndsSplitDrain: the operation under way when the cell's owned rectangle last shrank is over (it was in progress
+        /// and no longer is), so the drain state it left goes: a base cell that split keeps none of it into a later merge,
+        /// whose e1 would otherwise wake its pacer with a stale previous rectangle (Slice 2c decision 4).
+        /// </summary>
+        public static bool EndsSplitDrain(bool wasInProgress, bool inProgress) => wasInProgress && !inProgress;
+
         private static bool Near(float a, float b, float eps) => Mathf.Abs(a - b) <= eps;
     }
 
@@ -206,12 +225,14 @@ namespace MultiplayerARPG.MMO.Mesh
         /// </summary>
         private void SplitOnLayoutApplied(MeshLayoutPair pair)
         {
+            PruneOnLayoutApplied(); // Slice 2c, every map: a retired zone the layout names live again is forgotten
             if (!IsDynamicMap || world == null)
                 return;
             float now = Time.unscaledTime;
             NoteLayoutApplied(pair, now);
             if (!HasOwnZone)
                 return;
+            bool wasInProgress = _splitOpInProgress;
             _splitOpInProgress = MeshSplitState.OpInProgress(world.CellsOf(OwnCell.mapId));
             MeshRect owned = OwnCell.owned;
             if (!_splitOwnedBefore.Equals(owned))
@@ -232,6 +253,13 @@ namespace MultiplayerARPG.MMO.Mesh
                     _splitGivenAway = MeshRect.Empty;
                     _splitDrainOwnerId = null;
                 }
+            }
+            if (MeshSplitState.EndsSplitDrain(wasInProgress, _splitOpInProgress))
+            {
+                _splitShrunk = false;
+                _splitPrevOwned = MeshRect.Empty;
+                _splitGivenAway = MeshRect.Empty;
+                _splitDrainOwnerId = null;
             }
             if (!_splitOpInProgress)
                 _monsterPacePoses.Clear();
@@ -345,14 +373,15 @@ namespace MultiplayerARPG.MMO.Mesh
             return _entityPacer.Admit(Time.unscaledTime, 0, 1) > 0;
         }
 
-        /// <summary>The index of the entity nearest past this cell's edge (the smallest depth into the neighbour).</summary>
+        /// <summary>The index of the entity nearest past this cell's edge (the smallest depth into the neighbour; a cell owning nothing measures against its previous rectangle).</summary>
         private int NearestPastTheLine<T>(List<T> entities) where T : BaseGameEntity
         {
             int best = 0;
             float bestDepth = float.MaxValue;
             for (int i = 0; i < entities.Count; ++i)
             {
-                float depth = -OwnCell.DistanceToEdge(entities[i].EntityTransform.position);
+                Vector3 world = OwnCell.SceneToWorld(entities[i].EntityTransform.position);
+                float depth = MeshHandoffPacer.DrainDepth(OwnCell.owned, _splitPrevOwned, world.x, world.z);
                 if (depth < bestDepth)
                 {
                     bestDepth = depth;

@@ -266,9 +266,9 @@ namespace MultiplayerARPG.MMO.Mesh
         private UniTaskVoid HandleWakeRequest(RequestHandlerData requestHandler, MeshWakeRequest request, RequestProceedResultDelegate<MeshWakeResponse> result)
         {
             MeshCell cell = world != null ? world.GetCell(request.mapId, request.cellId) ?? world.GetCellById(request.cellId) : null;
-            if ((cell != null && cell.isDynamic) || (_coordinator != null && _coordinator.IsOperationChild(request.cellId)))
+            if ((cell != null && IsSplitFamilyCell(cell)) || (_coordinator != null && _coordinator.IsOperationChild(request.cellId)))
             {
-                Logging.LogWarning("Mesh", $"Wake requested for dynamic cell {request.cellId} by connection {requestHandler.ConnectionId}: refused, the layout coordinator runs it");
+                Logging.LogWarning("Mesh", $"Wake requested for {(cell != null && !cell.isDynamic ? "split-family base cell" : "dynamic cell")} {request.cellId} by connection {requestHandler.ConnectionId}: refused, the layout coordinator runs it");
                 result.Invoke(AckResponseCode.Success, new MeshWakeResponse { accepted = false, reason = MeshWakeRefusal.UnknownCell });
                 return default;
             }

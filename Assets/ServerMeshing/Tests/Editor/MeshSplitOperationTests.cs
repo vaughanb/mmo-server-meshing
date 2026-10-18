@@ -80,7 +80,7 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
         private MeshSplitOperation RequestC()
         {
             Assert.That(_c.RequestSplit("C", MeshSplitAxis.X, 0f, true, "C.1", out string error), Is.True, error);
-            return _c.CurrentOp;
+            return (MeshSplitOperation)_c.CurrentOp;
         }
 
         private void ChildHello(long connection = ConnX, string incarnation = "xc")
@@ -200,7 +200,7 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             _c.OnLayoutHello(ConnE, Hello("E", Map1, "pe"));
             _transport.Register(ConnC2, "C2", Map2);
             Assert.That(_c.RequestSplit("E", MeshSplitAxis.X, 200f, true, "E.1", out string error), Is.True, error);
-            MeshSplitOperation op = _c.CurrentOp;
+            MeshSplitOperation op = (MeshSplitOperation)_c.CurrentOp;
             _transport.Register(ConnX, "E.1", Map1);
             _c.OnLayoutHello(ConnX, Hello("E.1", Map1, "xe"));
             Ack(ConnX, "E.1", "xe", op.e1Pair);

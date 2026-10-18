@@ -394,79 +394,7 @@ namespace MultiplayerARPG.MMO.Mesh
             Logging.Log("Mesh", $"Cell {zoneId} left the band of {OwnZoneId}: {removed} puppet(s) there removed");
         }
 
-        /// <summary>A retired cell is gone for good: close the link to it and forget what was streamed there.</summary>
-        private void CloseLink(MeshCell cell)
-        {
-            if (_linkClients.TryGetValue(cell.id, out MeshLinkClient link))
-            {
-                link.StopClient();
-                _linkClients.Remove(cell.id);
-            }
-            _streamedToZone.Remove(cell.id);
-            _streamedPrevToZone.Remove(cell.id);
-            _statsLinkPrevOut.Remove(cell.id);
-            _meshPeers.Remove(PeerInfoExtensions.GetPeerInfoKey(cell.id, cell.mapId));
-            Logging.Log("Mesh", $"Link to retired cell {cell.id} closed");
-        }
-
-        private void HandleRetireMessage(MessageHandlerData messageHandler)
-        {
-            if (!TryReadCentralMessage(messageHandler, "Retire", out MeshRetireMessage message))
-                return;
-            string cellId = LayoutCellId; // a child that holds no layout yet has no own zone, only the id it was started as
-            if (!string.Equals(message.cellId, cellId, System.StringComparison.OrdinalIgnoreCase)
-                || !string.Equals(message.incarnation, CellIncarnation, System.StringComparison.Ordinal))
-            {
-                Logging.LogWarning("Mesh", $"Retire for cell {message.cellId} incarnation {message.incarnation} reached cell {cellId} incarnation {CellIncarnation}; ignored");
-                return;
-            }
-            if (MayRetireNow(message.cellId, message.incarnation))
-            {
-                RetireThisCell();
-                return;
-            }
-            Logging.LogWarning("Mesh", $"Retire asked for cell {cellId} at layout {message.pair} ({message.reason}), but this version cannot retire a running cell; staying up");
-        }
-
-        private bool _retiring;
         private readonly List<string> _tmpOffsetZones = new List<string>();
-
-        /// <summary>
-        /// MayRetireNow: a dynamic cell of a Dynamic map that owns nothing yet (no layout, or Pending in the one it holds)
-        /// may end itself (Slice 2b decision 5a); an asset cell, or a child that owns something, may not.
-        /// </summary>
-        private bool MayRetireNow(string retireCellId, string retireIncarnation)
-        {
-            if (!IsDynamicMap || world == null || (HasOwnZone && !OwnCell.isDynamic))
-                return false;
-            bool holdsLayout = HasOwnZone && !world.AppliedPair.IsNone;
-            return MeshRetireRule.ShouldRetire(retireCellId, retireIncarnation, LayoutCellId, CellIncarnation, holdsLayout, OwnCell != null ? OwnCell.state : MeshCellState.Pending);
-        }
-
-        /// <summary>A layout that names this cell Retired while it may retire (an aborted split's version after its e1 broadcast).</summary>
-        private bool RetiresInLayout(MeshLayoutSnapshot snapshot)
-        {
-            if (!IsDynamicMap)
-                return false;
-            string id = LayoutCellId;
-            for (int i = 0; i < snapshot.entries.Count; ++i)
-            {
-                MeshLayoutEntry entry = snapshot.entries[i];
-                if (entry != null && entry.state == MeshCellState.Retired && string.Equals(entry.id, id, System.StringComparison.OrdinalIgnoreCase))
-                    return MayRetireNow(id, CellIncarnation);
-            }
-            return false;
-        }
-
-        /// <summary>The child ends itself through the kit's quit path: the spawner cannot stop one process.</summary>
-        private void RetireThisCell()
-        {
-            if (_retiring)
-                return;
-            _retiring = true;
-            Logging.Log("Mesh", $"Split retire: {LayoutCellId} retired before it owned anything");
-            Application.Quit();
-        }
 
         private void HandleCoordinatorNote(MessageHandlerData messageHandler)
         {

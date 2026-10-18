@@ -1,6 +1,7 @@
-// Server Meshing add-on — the central's share of a manual split (Slice 2b decisions 2, 3 and 6): the layout command entry
-// point, the cells' split-gate evidence, and the split host the coordinator uses for what only the kit can do: a channel
-// added to the live channel list at runtime, and the child's process asked from its base cell's map-spawn server.
+// Server Meshing add-on — the central's share of a manual split (Slice 2b decisions 2, 3 and 6) and merge (Slice 2c
+// decision 2): the layout command entry point, the cells' gate evidence, and the split host the coordinator uses for what
+// only the kit can do: a channel added to the live channel list at runtime (and removed once a merged-away cell exited),
+// and the child's process asked from its base cell's map-spawn server.
 using System;
 using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
@@ -10,12 +11,13 @@ namespace MultiplayerARPG.MMO.Mesh
 {
     public partial class MeshCentralNetworkManager
     {
-        /// <summary>LayoutOpLine is raised with every layout operation line ("Split ..." or "Layout op refused: ..."), for a runner to mirror.</summary>
+        /// <summary>LayoutOpLine is raised with every layout operation line ("Split ...", "Merge ..." or "Layout op refused: ..."), for a runner to mirror.</summary>
         public event Action<string> LayoutOpLine;
 
         /// <summary>
         /// SubmitLayoutCommand runs one command line, `&lt;seq&gt; split &lt;cell&gt; &lt;x|z&gt; &lt;at&gt; &lt;+|-&gt; &lt;childId&gt;`
-        /// (world frame). True when the operation started; false with the reason, also logged "Layout op refused: reason".
+        /// (world frame) or `&lt;seq&gt; merge &lt;a&gt; &lt;b&gt;` (either order). True when the operation started; false with
+        /// the reason, also logged "Layout op refused: reason".
         /// </summary>
         public bool SubmitLayoutCommand(string line, out string error)
         {
@@ -30,6 +32,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 RefuseCommand(error);
                 return false;
             }
+            if (command.kind == MeshLayoutCommandKind.Merge)
+                return _coordinator.RequestMerge(command.mergeA, command.mergeB, out error);
             return _coordinator.RequestSplit(command.cellId, command.axis, command.at, command.childOnPositiveSide, command.childId, out error);
         }
 
@@ -71,7 +75,7 @@ namespace MultiplayerARPG.MMO.Mesh
             _coordinator?.OnLayoutEvidence(messageHandler.ConnectionId, evidence);
         }
 
-        /// <summary>A cell the awake set leaves alone: a dynamic cell, or a base cell whose family is cut or in an operation.</summary>
+        /// <summary>A cell the awake set leaves alone (and the wake refusal refuses): a dynamic cell, or a base cell whose family is cut or in an operation.</summary>
         private bool IsSplitFamilyCell(MeshCell cell)
         {
             return cell.isDynamic || (_coordinator != null && cell.OnDynamicMap && _coordinator.IsSplitFamily(cell.baseId));

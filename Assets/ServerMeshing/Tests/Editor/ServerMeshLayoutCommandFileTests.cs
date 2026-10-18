@@ -69,6 +69,33 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
         }
 
         [Test]
+        public void TryParse_MergeLine_GivesSeqAndTheWholeLine()
+        {
+            bool ok = ServerMeshLayoutCommandFile.TryParse("8  merge C   C.1\n", out string seq, out string line, out string error);
+
+            Assert.That(ok, Is.True);
+            Assert.That(seq, Is.EqualTo("8"));
+            Assert.That(line, Is.EqualTo("8 merge C C.1"));
+            Assert.That(error, Is.Null);
+        }
+
+        [Test]
+        public void MirroredPayload_MergeLines_AreMirrored()
+        {
+            Assert.That(ServerMeshLayoutCommandFile.MirroredPayload(" INFO Mesh [2026-10-17 12:00:01] - Merge merge-2: e1 broadcast 1a2b/5"), Is.EqualTo("Merge merge-2: e1 broadcast 1a2b/5"));
+            Assert.That(ServerMeshLayoutCommandFile.MirroredPayload(" WARN Mesh [2026-10-17 12:00:01] - Merge merge-2: drain straggling 92 s: characters=1"), Is.EqualTo("Merge merge-2: drain straggling 92 s: characters=1"));
+            Assert.That(ServerMeshLayoutCommandFile.MirroredPayload("[Mesh] Merge merge-2: channel C.1 removed"), Is.EqualTo("Merge merge-2: channel C.1 removed"));
+            Assert.That(ServerMeshLayoutCommandFile.MirroredPayload("Merge merge-2: done"), Is.EqualTo("Merge merge-2: done"));
+        }
+
+        [Test]
+        public void IsRefusal_NotForMergeLines()
+        {
+            Assert.That(ServerMeshLayoutCommandFile.IsRefusal("Merge merge-2: aborted e1 gate shut"), Is.False);
+            Assert.That(ServerMeshLayoutCommandFile.IsRefusal(ServerMeshLayoutCommandFile.MirroredPayload("Layout op refused: merge of two children (Slice 3)")), Is.True);
+        }
+
+        [Test]
         public void MirroredPayload_OnlyTheFirstLine()
         {
             Assert.That(ServerMeshLayoutCommandFile.MirroredPayload("[Mesh] Split split-1: done\nsecond line"), Is.EqualTo("Split split-1: done"));
@@ -81,6 +108,9 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
         [TestCase("Splitting hairs")]
         [TestCase("[Mesh] Handoff START Bot1 (id) zone C->C.1 Split split-1")]
         [TestCase("Layout operation")]
+        [TestCase("Merged two ranges")]
+        [TestCase("[Mesh] Handoff START Bot1 (id) zone C.1->C Merge merge-2")]
+        [TestCase(" INFO Mesh [2026-10-17 12:00:01] - Retired zone C.1: link closed, 0 record(s) released")]
         public void MirroredPayload_OtherLines_AreNotMirrored(string message)
         {
             Assert.That(ServerMeshLayoutCommandFile.MirroredPayload(message), Is.Null);

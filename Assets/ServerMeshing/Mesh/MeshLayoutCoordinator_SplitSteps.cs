@@ -1,7 +1,8 @@
 // Server Meshing add-on — the steps of the coordinator's split (Slice 2b decisions 3, 4, 6, 8; plan D4): e1 staged to
 // the child, then broadcast; the e1 (pre-warm) gate; e2 staged, then broadcast; the drain gate; e3; done. The store is
 // written before every step, the central applies each broadcast to its own registry, and a step whose participants stay
-// silent past splitStepTimeoutSeconds aborts the operation before e2 and freezes it after.
+// silent past splitStepTimeoutSeconds aborts the operation before e2 and freezes it after. The step plumbing here
+// (Advance, BroadcastStep, SaveStore, participants and acks, the tick) serves merges too (Slice 2c decision 4).
 using System;
 using System.Collections.Generic;
 
@@ -14,14 +15,15 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>Advance takes every step whose gate is open now (several in one call when acks are already in).</summary>
         private void Advance()
         {
-            MeshSplitOperation op = _op;
+            MeshLayoutOperation op = _op;
             for (int guard = 0; guard < 8 && op != null && op.InProgress; ++guard)
             {
-                if (!TryStep(op))
+                bool stepped = op is MeshSplitOperation s ? TryStep(s) : op is MeshMergeOperation m && TryMergeStep(m);
+                if (!stepped)
                     break;
             }
-            if (op != null && op.step == MeshSplitStep.Done)
-                TrySettleStragglers(op);
+            if (op is MeshSplitOperation split && split.step == MeshSplitStep.Done)
+                TrySettleStragglers(split);
         }
 
         /// <summary>
@@ -135,6 +137,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 return;
             }
             op.staged = e1;
+            op.stagedStepName = "e1";
             EnterStep(op, MeshSplitStep.E1Staged);
             OpLog(op, "e1 staged");
         }
@@ -150,6 +153,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 return;
             }
             op.staged = e2;
+            op.stagedStepName = "e2";
             EnterStep(op, MeshSplitStep.E2Staged);
             _transport.Send(op.childConnection, new MeshLayoutMessage
             {
@@ -162,7 +166,16 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>BroadcastStep writes the store, applies the step on the central, sends it to every map server and waits for its participants.</summary>
         private bool BroadcastStep(MeshSplitOperation op, MeshLayoutSnapshot snapshot, string name, MeshSplitStep next)
         {
-            List<string> participants = Participants(op, _broadcast, snapshot);
+            return BroadcastStep(op, snapshot, name, () => EnterStep(op, next), null);
+        }
+
+        /// <summary>
+        /// BroadcastStep for any operation: <paramref name="enter"/> moves it to its next step; <paramref name="extra"/> are
+        /// cells that take part although the step does not change them (a merge's e2: every cell banding with the retiring one).
+        /// </summary>
+        private bool BroadcastStep(MeshLayoutOperation op, MeshLayoutSnapshot snapshot, string name, Action enter, List<string> extra)
+        {
+            List<string> participants = Participants(op, _broadcast, snapshot, extra);
             if (!SaveStore(op, snapshot, null, null))
             {
                 FailOp(op, $"the coordinator store could not be written before {name}");
@@ -174,9 +187,10 @@ namespace MultiplayerARPG.MMO.Mesh
                 return false;
             }
             op.staged = null;
+            op.stagedStepName = "";
             op.participants.Clear();
             op.participants.AddRange(participants);
-            EnterStep(op, next);
+            enter();
             SendBroadcast(snapshot, op.StepId(name));
             OpLog(op, $"{name} broadcast {snapshot.pair}");
             return true;
@@ -201,6 +215,11 @@ namespace MultiplayerARPG.MMO.Mesh
         private void EnterStep(MeshSplitOperation op, MeshSplitStep step)
         {
             op.step = step;
+            StepStarted(op);
+        }
+
+        private void StepStarted(MeshLayoutOperation op)
+        {
             op.stepStartedAt = _clock.Now;
             op.lastGateWait = "";
         }
@@ -211,57 +230,22 @@ namespace MultiplayerARPG.MMO.Mesh
             return new MeshLayoutPair(Incarnation, _lastVersion);
         }
 
-        private bool SaveStore(MeshSplitOperation op, MeshLayoutSnapshot broadcast, MeshLayoutSnapshot staged, string stagedStepId)
+        private bool SaveStore(MeshLayoutOperation op, MeshLayoutSnapshot broadcast, MeshLayoutSnapshot staged, string stagedStepId)
         {
             MeshCoordinatorStoreData data = _storeData ?? new MeshCoordinatorStoreData { lastIncarnation = Incarnation };
             data.broadcast = broadcast.Clone();
             data.hasStaged = staged != null;
             data.staged = staged != null ? staged.Clone() : new MeshLayoutSnapshot();
             data.stagedStepId = stagedStepId ?? string.Empty;
-            data.stagedFirstApplier = staged != null ? op.childId : string.Empty;
+            data.stagedFirstApplier = staged != null ? op.StagedTargetId : string.Empty;
             data.opId = op.InProgress ? op.opId : string.Empty;
-            data.opStep = op.step.ToString();
+            data.opStep = op.StepText;
             data.abortedIds = new List<string>(_abortedIds);
             _storeData = data;
             if (_store.TrySave(data, out string error))
                 return true;
             _log.Error(error);
             return false;
-        }
-
-        /// <summary>The pair the operation's current step waits on (None while nothing was sent yet).</summary>
-        private static MeshLayoutPair CurrentStepPair(MeshSplitOperation op)
-        {
-            switch (op.step)
-            {
-                case MeshSplitStep.E1Staged:
-                case MeshSplitStep.E1Gate:
-                    return op.e1Pair;
-                case MeshSplitStep.E2Staged:
-                case MeshSplitStep.DrainGate:
-                    return op.e2Pair;
-                case MeshSplitStep.E3Broadcast:
-                    return op.e3Pair;
-                default:
-                    return MeshLayoutPair.None;
-            }
-        }
-
-        private static string StepName(MeshSplitOperation op)
-        {
-            switch (op.step)
-            {
-                case MeshSplitStep.E1Staged:
-                case MeshSplitStep.E1Gate:
-                    return "e1";
-                case MeshSplitStep.E2Staged:
-                case MeshSplitStep.DrainGate:
-                    return "e2";
-                case MeshSplitStep.E3Broadcast:
-                    return "e3";
-                default:
-                    return op.step.ToString();
-            }
         }
 
         /// <summary>AckedAtLeast: the cell's bound, registered map server acknowledged this pair or a newer one.</summary>
@@ -271,7 +255,7 @@ namespace MultiplayerARPG.MMO.Mesh
             return binding != null && binding.unregisteredAt < 0f && binding.applied.CompareTo(pair) >= 0;
         }
 
-        private bool ParticipantsAcked(MeshSplitOperation op, MeshLayoutPair pair)
+        private bool ParticipantsAcked(MeshLayoutOperation op, MeshLayoutPair pair)
         {
             _silent.Clear();
             foreach (string cell in op.participants)
@@ -281,7 +265,7 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             if (_silent.Count == 0)
                 return true;
-            op.lastGateWait = $"no {StepName(op)} ack from {string.Join(", ", _silent)}";
+            op.lastGateWait = $"no {op.CurrentStepName} ack from {string.Join(", ", _silent)}";
             return false;
         }
 
@@ -303,15 +287,24 @@ namespace MultiplayerARPG.MMO.Mesh
         }
 
         /// <summary>
-        /// Participants of a broadcast step: the child, the parent, and every registered cell of any map whose rectangles,
-        /// state or band neighbours the step changes (decision 4).
+        /// Participants of a broadcast step: the operation's own cells (the split's child and parent, the merge's two), the
+        /// <paramref name="extra"/> ones, and every registered cell of any map whose rectangles, state or band neighbours the
+        /// step changes (decision 4). Unregistered cells are left out (a merged-away cell that exited).
         /// </summary>
-        private List<string> Participants(MeshSplitOperation op, MeshLayoutSnapshot before, MeshLayoutSnapshot after)
+        private List<string> Participants(MeshLayoutOperation op, MeshLayoutSnapshot before, MeshLayoutSnapshot after, List<string> extra = null)
         {
             MeshLayoutWorld validation = ValidationWorld();
             Dictionary<string, (MeshLayoutValidator.LiveCell cell, string band)> was = Shapes(validation, before);
             Dictionary<string, (MeshLayoutValidator.LiveCell cell, string band)> now = Shapes(validation, after);
-            List<string> participants = new List<string> { op.childId, op.parentId };
+            List<string> participants = new List<string>(op.SeedParticipants);
+            if (extra != null)
+            {
+                foreach (string id in extra)
+                {
+                    if (!participants.Exists(p => SameId(p, id)))
+                        participants.Add(id);
+                }
+            }
             foreach (KeyValuePair<string, (MeshLayoutValidator.LiveCell cell, string band)> shape in now)
             {
                 bool changed = !was.TryGetValue(shape.Key, out (MeshLayoutValidator.LiveCell cell, string band) old)
@@ -354,13 +347,25 @@ namespace MultiplayerARPG.MMO.Mesh
             return cell != null ? BandOf(validation, live, cell) : new List<string>();
         }
 
-        /// <summary>SplitTick: the silence timers of the current step, and gates that opened without a new message.</summary>
-        private void SplitTick()
+        /// <summary>OpTick: the silence timers of the current step, and gates that opened without a new message.</summary>
+        private void OpTick()
         {
-            MeshSplitOperation op = _op;
+            MeshLayoutOperation op = _op;
             if (op == null || Phase != MeshCoordinatorPhase.Running)
                 return;
+            if (op is MeshMergeOperation merge)
+            {
+                MergeTick(merge);
+                return;
+            }
             Advance();
+            if (op is MeshSplitOperation split)
+                SplitTimers(split);
+        }
+
+        /// <summary>SplitTimers: a split step silent past splitStepTimeoutSeconds aborts before e2 and freezes after.</summary>
+        private void SplitTimers(MeshSplitOperation op)
+        {
             if (!op.InProgress || _clock.Now - op.stepStartedAt < Math.Max(1f, Settings.splitStepTimeoutSeconds))
                 return;
             float timeout = Math.Max(1f, Settings.splitStepTimeoutSeconds);
@@ -373,7 +378,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     break;
                 case MeshSplitStep.E1Staged:
                 case MeshSplitStep.E2Staged:
-                    FailOp(op, $"no {StepName(op)} ack from {op.childId} in {seconds} s");
+                    FailOp(op, $"no {op.CurrentStepName} ack from {op.childId} in {seconds} s");
                     break;
                 case MeshSplitStep.E1Gate:
                     FailOp(op, $"e1 gate not open in {seconds} s: {op.lastGateWait}");

@@ -82,11 +82,14 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>The cell's latest split-gate evidence (valid when hasEvidence), from this binding's connection and incarnation.</summary>
         public bool hasEvidence;
         public MeshLayoutEvidenceMessage evidence;
+        /// <summary>When that evidence was received (a merge's drained window must arrive a load window after the last e2 ack).</summary>
+        public float layoutEvidenceAt = -1f;
     }
 
     /// <summary>
     /// IMeshSplitHost is what a split needs from the central around the coordinator: the kit's channel list and the
-    /// map-spawn servers. The spawn's result comes back through MeshLayoutCoordinator.OnSpawnResult.
+    /// map-spawn servers. The spawn's result comes back through MeshLayoutCoordinator.OnSpawnResult. A merge (Slice 2c)
+    /// uses RemoveChannel once the merged-away cell exited.
     /// </summary>
     public interface IMeshSplitHost
     {

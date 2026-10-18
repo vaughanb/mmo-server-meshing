@@ -202,6 +202,7 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>A loan that failed or expired: the sender's puppet is its real entity again.</summary>
         private void RepromoteStatic(MeshStaticLoanBook<StaticLoan>.Loan loan)
         {
+            NoteZoneRecordsReleased(loan.toZone, 1); // Slice 2c: counted toward a Draining zone's prune line
             BaseGameEntity entity = loan.data.entity;
             if (_ghostStatics.TryGetValue(loan.meshId, out GhostStatic puppet) && ReferenceEquals(puppet.entity, entity))
             {

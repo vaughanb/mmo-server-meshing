@@ -129,8 +129,8 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             Assert.That(MeshLayoutCommand.TryParse("3  SPLIT E z -12.5 -z E.1 ", out command, out error), Is.True, error);
             Assert.That((command.axis, command.at, command.childOnPositiveSide), Is.EqualTo((MeshSplitAxis.Z, -12.5f, false)));
             Assert.That(MeshLayoutCommand.TryParse("x split C x 0 + C.1", out _, out error), Is.False);
-            Assert.That(MeshLayoutCommand.TryParse("1 merge C C.1", out _, out error), Is.False);
-            Assert.That(error, Does.Contain("unknown verb 'merge'"));
+            Assert.That(MeshLayoutCommand.TryParse("1 join C C.1", out _, out error), Is.False);
+            Assert.That(error, Does.Contain("unknown verb 'join'"));
             Assert.That(MeshLayoutCommand.TryParse("1 split C y 0 + C.1", out _, out error), Is.False);
             Assert.That(MeshLayoutCommand.TryParse("1 split C x 0 +z C.1", out _, out error), Is.False);
             Assert.That(MeshLayoutCommand.TryParse("1 split C x 0 +", out _, out error), Is.False);

@@ -38,14 +38,10 @@ namespace MultiplayerARPG.MMO.Mesh
     }
 
     /// <summary>MeshSplitOperation is one split in progress, or the last one that ended.</summary>
-    public sealed class MeshSplitOperation
+    public sealed class MeshSplitOperation : MeshLayoutOperation
     {
-        public string opId;
         /// <summary>The cell being split (P): a base cell or an earlier child.</summary>
         public string parentId;
-        public string mapId;
-        /// <summary>The asset cell P was cut from; the child X joins its family.</summary>
-        public string baseId;
         public string childId;
         public MeshSplitAxis axis;
         public float at;
@@ -59,9 +55,6 @@ namespace MultiplayerARPG.MMO.Mesh
         public MeshRect kept;
 
         public MeshSplitStep step = MeshSplitStep.ChannelAdded;
-        public float requestedAt;
-        /// <summary>When the current step started (its silence timer).</summary>
-        public float stepStartedAt;
 
         /// <summary>The child's process once its first hello bound it.</summary>
         public bool childBound;
@@ -73,43 +66,78 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>Whether the kit's spawn callback has been seen once (every later call is ignored).</summary>
         public bool spawnAnswered;
 
-        public MeshLayoutPair e1Pair, e2Pair, e3Pair;
-        /// <summary>The layout staged for the child (null when none is).</summary>
-        public MeshLayoutSnapshot staged;
-        /// <summary>Whether e1 reached every cell (an abort then broadcasts the child Retired).</summary>
-        public bool e1Broadcast;
-        /// <summary>The cells whose ack the current broadcast step waits for.</summary>
-        public readonly List<string> participants = new List<string>();
-        /// <summary>The child's band neighbours under e1 that its pre-warm evidence must name.</summary>
-        public readonly List<string> prewarmNeighbours = new List<string>();
-
         /// <summary>The drain: N_R from P's first qualifying window, and the deadline it gives (-1 until known).</summary>
         public int drainInitial = -1;
         public float drainDeadline = -1f;
         public int stragglers;
         /// <summary>After a drain timeout: the parent's interest was shrunk once its stragglers were gone (plan D4).</summary>
         public bool settled;
-        public string lastGateWait = "";
-        public string endReason = "";
 
-        public MeshSplitOperation(string opId)
+        public MeshSplitOperation(string opId) : base(opId, MeshLayoutOpKind.Split)
         {
-            this.opId = opId;
         }
 
         /// <summary>Whether the operation still runs (Frozen is ended but keeps every later operation out).</summary>
-        public bool InProgress => step != MeshSplitStep.Done && step != MeshSplitStep.Aborted && step != MeshSplitStep.Frozen;
+        public override bool InProgress => step != MeshSplitStep.Done && step != MeshSplitStep.Aborted && step != MeshSplitStep.Frozen;
 
         /// <summary>Whether e2 has been sent to the child: from here a failure freezes the operation instead of aborting it.</summary>
-        public bool PastCommit => step >= MeshSplitStep.E2Staged;
+        public override bool PastCommit => step >= MeshSplitStep.E2Staged;
 
-        public string StepId(string stepName) => opId + "/" + stepName;
+        public override bool IsFrozen => step == MeshSplitStep.Frozen;
+        public override bool IsAborted => step == MeshSplitStep.Aborted;
+        public override bool CommitStaged => step == MeshSplitStep.E2Staged;
+        public override string StepText => step.ToString();
+        public override string StagedTargetId => childId;
+        public override long StagedTargetConnection { get => childConnection; set => childConnection = value; }
+        public override string StagedTargetIncarnation { get => childIncarnation; set => childIncarnation = value; }
+        public override IEnumerable<string> SeedParticipants => new[] { childId, parentId };
+        public override bool IsMember(string cellId) => SameId(cellId, childId) || SameId(cellId, parentId);
+        internal override void MarkAborted() => step = MeshSplitStep.Aborted;
+        internal override void MarkFrozen() => step = MeshSplitStep.Frozen;
+
+        public override MeshLayoutPair CurrentStepPair
+        {
+            get
+            {
+                switch (step)
+                {
+                    case MeshSplitStep.E1Staged:
+                    case MeshSplitStep.E1Gate:
+                        return e1Pair;
+                    case MeshSplitStep.E2Staged:
+                    case MeshSplitStep.DrainGate:
+                        return e2Pair;
+                    case MeshSplitStep.E3Broadcast:
+                        return e3Pair;
+                    default:
+                        return MeshLayoutPair.None;
+                }
+            }
+        }
+
+        public override string CurrentStepName
+        {
+            get
+            {
+                switch (step)
+                {
+                    case MeshSplitStep.E1Staged:
+                    case MeshSplitStep.E1Gate:
+                        return "e1";
+                    case MeshSplitStep.E2Staged:
+                    case MeshSplitStep.DrainGate:
+                        return "e2";
+                    case MeshSplitStep.E3Broadcast:
+                        return "e3";
+                    default:
+                        return step.ToString();
+                }
+            }
+        }
 
         public string SideText => childOnPositiveSide ? "+" : "-";
 
         public string AxisText => axis == MeshSplitAxis.X ? "x" : "z";
-
-        public static string Number(float value) => value.ToString("0.###", CultureInfo.InvariantCulture);
 
         /// <summary>
         /// Cut divides <paramref name="owned"/> at the line: the child's side and what the parent keeps. False when the
@@ -175,19 +203,6 @@ namespace MultiplayerARPG.MMO.Mesh
             next.entries.RemoveAll(e => string.Equals(e.id, childId, StringComparison.OrdinalIgnoreCase));
             return next;
         }
-
-        private static void SetEntry(MeshLayoutSnapshot snapshot, MeshLayoutEntry entry)
-        {
-            for (int i = 0; i < snapshot.entries.Count; ++i)
-            {
-                if (string.Equals(snapshot.entries[i].id, entry.id, StringComparison.OrdinalIgnoreCase))
-                {
-                    snapshot.entries[i] = entry;
-                    return;
-                }
-            }
-            snapshot.entries.Add(entry);
-        }
     }
 
     /// <summary>MeshSplitGates are the e1 (pre-warm) and drain gate predicates over a cell's evidence. Pure.</summary>
@@ -202,6 +217,15 @@ namespace MultiplayerARPG.MMO.Mesh
         /// capped cell) or a p95 within the nominal budget (an uncapped one). <paramref name="why"/> names the first miss.
         /// </summary>
         public static bool PrewarmReady(MeshLayoutEvidenceMessage evidence, MeshLayoutPair e1, IReadOnlyList<string> neighbours, float prewarmSeconds, out string why)
+        {
+            return PrewarmCore(evidence, e1, neighbours, prewarmSeconds, true, out why);
+        }
+
+        /// <summary>
+        /// PrewarmCore is PrewarmReady with the load clause (saturation, or p95 when uncapped) optional: a merge's survivor
+        /// is a running, possibly loaded cell, and its e1 gate leaves it out (Slice 2c decision 5).
+        /// </summary>
+        internal static bool PrewarmCore(MeshLayoutEvidenceMessage evidence, MeshLayoutPair e1, IReadOnlyList<string> neighbours, float prewarmSeconds, bool checkLoad, out string why)
         {
             why = null;
             if (evidence.pair.CompareTo(e1) < 0)
@@ -238,6 +262,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 why = $"prewarm queue {evidence.prewarmQueue}";
                 return false;
             }
+            if (!checkLoad)
+                return true;
             if (evidence.budgetMs > 0f)
             {
                 if (evidence.saturatedShare > 0f)

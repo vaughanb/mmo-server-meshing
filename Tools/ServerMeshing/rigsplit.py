@@ -111,24 +111,26 @@ def lifetimes(info_lines, child=None):
     return out
 
 
-def split_apply_violations(cell, info_lines, split):
+def split_apply_violations(cell, info_lines, split, expected=None, label="the split"):
     """What a cell of the split's map breaks of the rectangle grade (decision 18), as messages; empty when it keeps it.
 
     One process lifetime; every apply from one coordinator incarnation with rising versions, the first before any
     player registers; exactly the applies of expected_applies, owning (and for P and X, with an interest of) the rects
-    it names; no Static-neighbour apply line (that one is a Static map's)."""
+    it names; no Static-neighbour apply line (that one is a Static map's). `expected` (Slice 2c's merge grade) replaces
+    expected_applies: a function (cell, own_rect) giving [(owned, interest)] or [(owned, interest, pair)], where a pair
+    other than None must be the apply's '<incarnation>/<version>'; `label` names the op in the messages."""
     child = cell if cell == split.child else None
     lives = lifetimes(info_lines, child)
     if not lives:
         return [f"{cell}: no process lifetime since the scenario started"]
     problems = []
     if len(lives) > 1:
-        problems.append(f"{cell}: {len(lives)} process lifetimes (restarted during the split)")
+        problems.append(f"{cell}: {len(lives)} process lifetimes (restarted during {label})")
     lines = lives[0]
     own = rigtools.parse_own_cell(lines[0]) if child is None else None
     own_rect = own[2] if own else ANY
     if cell == split.base and not same_rect(own_rect, split.base_rect):
-        problems.append(f"{cell}: own cell {format_rect(own_rect)}, the split expects {format_rect(split.base_rect)}")
+        problems.append(f"{cell}: own cell {format_rect(own_rect)}, {label} expects {format_rect(split.base_rect)}")
     if any(rigtools.NEIGHBOURS_APPLIED.search(line) for line in lines):
         problems.append(f"{cell}: a Static-neighbour apply line on a Dynamic map")
     applied = [(i, a) for i, line in enumerate(lines) for a in [parse_apply(line)] if a]
@@ -141,10 +143,14 @@ def split_apply_violations(cell, info_lines, split):
     versions = [a["version"] for _, a in applied]
     if any(b <= a for a, b in zip(versions, versions[1:])):
         problems.append(f"{cell}: layout versions not rising ({', '.join(map(str, versions))})")
-    expected = expected_applies(split, cell, own_rect)
+    expected = (expected or (lambda c, r: expected_applies(split, c, r)))(cell, own_rect)
     if len(applied) != len(expected):
-        problems.append(f"{cell}: {len(applied)} layout(s) applied, the split expects {len(expected)}")
-    for n, ((_, a), (owned, interest)) in enumerate(zip(applied, expected), 1):
+        problems.append(f"{cell}: {len(applied)} layout(s) applied, {label} expects {len(expected)}")
+    for n, ((_, a), want) in enumerate(zip(applied, expected), 1):
+        owned, interest, pair = (tuple(want) + (None,))[:3]
+        at = f"{a['incarnation']}/{a['version']}"
+        if pair is not None and at != pair:
+            problems.append(f"{cell}: apply {n} is layout {at}, {label} expects {pair}")
         if not same_rect(a["owned"], owned) or not same_rect(a["interest"], interest):
             problems.append(f"{cell}: apply {n} ({a['incarnation']}/{a['version']}) owns {format_rect(a['owned'])} "
                             f"interest {format_rect(a['interest'])}, expected owns {format_rect(owned)} "
@@ -164,17 +170,18 @@ def neighbour_bands(lines, cell=None):
 
 
 # ------------------------------------------------------------------ the op's status file (decision 17)
-OP_STATE = re.compile(r"^Split (\S+): (.*)$")
+OP_STATE = re.compile(r"^(Split|Merge) (\S+): (.*)$")   # (kind, op, state)
 REFUSED = re.compile(r"^Layout op refused: (.*)$")
 STEP_PAIR = re.compile(r"^(e[123]) broadcast ([0-9a-f]+/\d+)$")
 DRAIN_TIMEOUT = re.compile(r"^drain timeout, (\d+) straggler")
 
 
-def parse_op_status(lines, seq):
+def parse_op_status(lines, seq, kind="Split"):
     """The command `seq`'s outcome from Temp/ServerMesh.LayoutCommandStatus.txt's lines ('<seq> Split <op>: <state>'
-    or '<seq> Layout op refused: <rule>'): {op, requested, refused, states, pairs, drain, stragglers, done, aborted,
-    frozen, other}. Lines of other sequences are ignored; lines of this one the grade does not know land in 'other'."""
-    out = {"op": None, "requested": None, "refused": None, "states": [], "pairs": {}, "drain": None,
+    or '<seq> Layout op refused: <rule>'): {kind, op, requested, refused, states, pairs, drain, stragglers, done,
+    aborted, frozen, other}. Lines of other sequences are ignored; lines of this one the grade does not know, an op
+    line of the other kind (Slice 2c's Merge) included, land in 'other'."""
+    out = {"kind": kind, "op": None, "requested": None, "refused": None, "states": [], "pairs": {}, "drain": None,
            "stragglers": None, "done": False, "aborted": None, "frozen": None, "other": []}
     for raw in lines:
         parts = raw.strip().split(None, 1)
@@ -186,11 +193,11 @@ def parse_op_status(lines, seq):
             out["refused"] = m.group(1)
             continue
         m = OP_STATE.match(text)
-        if not m:
+        if not m or m.group(1) != kind:
             out["other"].append(text)
             continue
-        out["op"] = out["op"] or m.group(1)
-        state = m.group(2)
+        out["op"] = out["op"] or m.group(2)
+        state = m.group(3)
         out["states"].append(state)
         step = STEP_PAIR.match(state)
         timeout = DRAIN_TIMEOUT.match(state)

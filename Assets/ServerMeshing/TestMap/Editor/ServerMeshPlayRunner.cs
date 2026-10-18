@@ -19,10 +19,11 @@
 //   Temp/ServerMesh.PackageRequest.txt -> builds both .unitypackages (ServerMeshPackageBuilder); the outcome is written
 //                                     to Temp/ServerMesh.PackageStatus.txt as seq= and result=. Outside Play only.
 //   Temp/ServerMesh.PlayStatus.txt    written every second: editor state + auto-client phase/finished/passed.
-//   Temp/ServerMesh.LayoutCommand.txt -> during Play: one line `<seq> split <baseCell> <x|z> <at> <+|-> <childId>`, handed
-//                                     to the central's SubmitLayoutCommand and deleted. Every console line starting
-//                                     `Split ` or `Layout op ` is then appended to Temp/ServerMesh.LayoutCommandStatus.txt
-//                                     prefixed with that seq (ServerMeshLayoutCommandFile), as are refusals the runner
+//   Temp/ServerMesh.LayoutCommand.txt -> during Play: one line `<seq> split <baseCell> <x|z> <at> <+|-> <childId>` or
+//                                     `<seq> merge <a> <b>` (Slice 2c), handed to the central's SubmitLayoutCommand
+//                                     whatever its verb, and deleted. Every console line starting `Split `, `Merge ` or
+//                                     `Layout op ` is then appended to Temp/ServerMesh.LayoutCommandStatus.txt prefixed
+//                                     with the latest command's seq (ServerMeshLayoutCommandFile), as are refusals the runner
 //                                     makes itself. Play requests may carry observeSeconds, lineX and
 //                                     harvestAfterMigration for the auto client (absent: cleared).
 // The first line of a refresh, build, test or package request may hold a sequence number, echoed back so the harness knows the
@@ -354,7 +355,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             Debug.Log("[MeshRunner] Layout command " + seq + " handed to the central" + (string.IsNullOrEmpty(refusal) ? "" : "; refused"));
         }
 
-        /// <summary>Mirrors a console line starting `Split ` or `Layout op ` under the current command's seq (any thread).</summary>
+        /// <summary>Mirrors a console line starting `Split `, `Merge ` or `Layout op ` under the current command's seq (any thread).</summary>
         private static void MirrorLayoutLine(string condition, string stackTrace, LogType type)
         {
             string seq = s_layoutSeq;

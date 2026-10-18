@@ -103,8 +103,9 @@ character handoffs a second, cluster-wide: one operation runs at a time), `drain
 static and drop handoffs a second), `maxConcurrentHandoffsPerDestination` (20), `prewarmSeconds` (2: how long a new
 cell's band neighbours must have been linked and sending before it takes the rectangle), `prewarmSpawnBudgetShare`
 (0.25 of a frame for queued puppet spawns on a Dynamic map), `splitStepTimeoutSeconds` (60: a silent participant
-aborts a split before its second step and freezes it after), `splitCooldownSeconds` (30) and
-`drainMonsterAgeSeconds` (5). Every mesh manager (`MeshMapNetworkManager`, `MeshLoginNetworkManager`,
+aborts a split before its second step and freezes it after), `splitCooldownSeconds` (30: after any split or merge
+of the family) and `drainMonsterAgeSeconds` (5); for merges (Slice 2c) `retireMaxSeconds` (90: how long a merged-away cell may
+take to drain and exit before the central and the cell log it as straggling; players are never kicked). Every mesh manager (`MeshMapNetworkManager`, `MeshLoginNetworkManager`,
 `MeshCentralNetworkManager`, `MeshMapSpawnNetworkManager`) carries a `world` reference to this asset; panel 3 assigns
 it.
 
@@ -498,6 +499,14 @@ and, later, several hosts all reach one database, and SQLite is a single file on
   40 synthetic players in C; `MESH_MONSTER_AREAS=Spawn_Interior_C`, which also takes a comma list of area names) and
   `splitc2` (E at x = 200, the child touching C2 across the seam) grade the operation; both are skipped with
   `--remote-cells` and `--remote-persist`.
+- **Manual merge (Slice 2c):** `<seq> merge <a> <b>` in the same command file joins a child back into its family's
+  base cell (either order; the two must share a full edge; a merge of two children is refused). The central widens the
+  base's interest, hands it the child's rectangle (the child drains everything it holds to the base), sends the child
+  `Retire` (it quits through the kit's quit path once it holds nothing), waits for it to leave the cluster, retires it
+  in the layout, and, when the family is back to its asset cut, broadcasts a layout without the family's entries.
+  Status lines `Merge <op>: …` are mirrored like a split's. Scenarios `merge` (`split`'s setup, then `merge C C.1`:
+  the bots migrate back, C.1 drains, quits and stays gone) and `mergec2` (`splitc2`'s, then `merge E E.1`: C2 drops
+  E.1 across the seam); both are skipped with `--remote-cells` and `--remote-persist`.
 - **The play runner and the environment:** every Play request carries an id that the status file echoes as
   `playSeq=` while that Play runs, so the harness never mistakes a Play an earlier, abandoned request started late for
   its own; a stop that arrives while Play is starting is carried out once it has started. The environment variables a

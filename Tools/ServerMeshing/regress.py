@@ -35,6 +35,7 @@ import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import provision
+import regress_merge
 import regress_split
 import rigtools
 from provision import ITEM_BOW, ITEM_YIELD, db_connect
@@ -959,6 +960,10 @@ def run_scenario(name, rep):
     elif name in regress_split.SCENARIOS:
         split = regress_split.run(name, rep, sys.modules[__name__], start, day, bots)
 
+    elif name in regress_merge.SCENARIOS:
+        # Slice 2c: the split's setup, then the merge back (regress_merge.run returns its MergeRun for the layout grade).
+        split = regress_merge.run(name, rep, sys.modules[__name__], start, day, bots)
+
     else:
         raise ValueError(f"unknown scenario {name}")
 
@@ -966,6 +971,8 @@ def run_scenario(name, rep):
     grade_common(rep, start, day, expect={"wake": {"C", "E", "C2"}}.get(name))
     if name in regress_split.SCENARIOS:
         regress_split.grade_layout(rep, sys.modules[__name__], start, day, split)
+    elif name in regress_merge.SCENARIOS:
+        regress_merge.grade_layout(rep, sys.modules[__name__], start, day, split)
     else:
         grade_layout(rep, start, day)
     for kind, log in bots:
@@ -1002,11 +1009,13 @@ TWO_HOST_SKIP = {
              "machine runs no spawner, so nothing can start its cell there",
     "wake": "needs cells started on demand by the central (as sleep does); the other machine runs no spawner",
     **{n: regress_split.TWO_HOST_REASON for n in regress_split.SCENARIOS},
+    **{n: regress_merge.TWO_HOST_REASON for n in regress_merge.SCENARIOS},
 }
-ALL = DEFAULT + ["pvp", "wake", "dynidle"] + list(regress_split.SCENARIOS)
+ALL = DEFAULT + ["pvp", "wake", "dynidle"] + list(regress_split.SCENARIOS) + list(regress_merge.SCENARIOS)
 # A persisted remote cell outlives the Plays, so no scenario's environment reaches it.
 PERSIST_SKIP = {"dynidle": "runs the test map Dynamic through the environment, which a persisted remote cell never gets",
-                **{n: regress_split.PERSIST_REASON for n in regress_split.SCENARIOS}}
+                **{n: regress_split.PERSIST_REASON for n in regress_split.SCENARIOS},
+                **{n: regress_merge.PERSIST_REASON for n in regress_merge.SCENARIOS}}
 
 
 def main():
