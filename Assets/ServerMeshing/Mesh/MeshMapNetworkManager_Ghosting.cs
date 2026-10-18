@@ -347,7 +347,7 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             base.OnServerOnlineSceneLoaded();
             SplitOnSceneLoaded(); // Slice 2b: a Dynamic map registers every spawn area's prefabs
-            ReadinessOnSceneLoaded(); // Slice 2d: a Dynamic map reads its mesh link from now (MeshMapNetworkManager_Readiness)
+            ReadinessOnSceneLoaded(); // Slice 2d, every map since 0.79: the mesh link is read from now (MeshMapNetworkManager_Readiness)
         }
 
         private void GhostingUpdate()

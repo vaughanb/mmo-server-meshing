@@ -900,6 +900,10 @@ def run_scenario(name, rep):
         rep.check(count(c_lines, r"Handoff ROLLBACK ") >= 1, "C rolled the handoff back")
         rep.check(count(c_lines, r"ROLLBACK complete") >= 1, "the client's return promoted the held puppet")
         rep.check(count(e_lines, r"Cluster registration accepted") >= 1, "the restarted E re-registered with the cluster")
+        # DESIGN 0.79: every map's cell reads its mesh link only once its server scene is ready (Static maps too), so
+        # both incarnations log the release; a neighbour that still held E's address could otherwise link it early.
+        rep.check(count(e_lines, r"Mesh link of E read from now: .* (Static|Dynamic) map\)") >= 2,
+                  "both of E's incarnations read the mesh link only once the server scene was ready")
         rep.check(count(c_lines, r"Handoff ACK .*promoted=") >= 1, "a later handoff to the restarted E was acked")
 
     elif name == "harvest":

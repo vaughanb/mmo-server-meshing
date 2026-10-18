@@ -5,11 +5,13 @@
 // scene objects no client has, and the kit's spawn-state reader then lost the rest of the batch (the player's own
 // character among it), so every client that came there timed out. Drop snapshots also met the kit's game data before it
 // was set up, and handoffs met prefabs not registered yet. The held link events are read once OnServerOnlineSceneLoaded
-// has run (every spawn area's prefabs registered), nothing is dropped. (2) A player that comes back to this cell without
-// a handoff notice shortly after this cell handed it out (the client fell back, or re-logged in) is not handed again at
-// once: every arrival waits rehandoffCooldownSeconds, and each such return doubles it up to rehandoffBackoffMaxSeconds.
+// has run (every spawn area's prefabs registered), nothing is dropped. Since DESIGN 0.79 the hold (MeshLinkHold) is on
+// every map: a Static map's cell met the same early puppets when a neighbour still held its address. (2) A player that
+// comes back to this cell without a handoff notice shortly after this cell handed it out (the client fell back, or
+// re-logged in) is not handed again at once: every arrival waits rehandoffCooldownSeconds, and each such return doubles
+// it up to rehandoffBackoffMaxSeconds.
 // (3) A neighbour's registration report is no longer live once the connection it came over is lost (an old incarnation's
-// "registered" would otherwise make its restarted successor a handoff target). Static maps: unchanged.
+// "registered" would otherwise make its restarted successor a handoff target). (2) and (3): Dynamic maps only.
 using System;
 using System.Collections.Generic;
 using LiteNetLibManager;
@@ -47,8 +49,6 @@ namespace MultiplayerARPG.MMO.Mesh
         public float rehandoffBackoffMaxSeconds = 30f;
 
 #if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
-        /// <summary>A server scene not ready this long after start gets one warning line (the links stay held).</summary>
-        private const float SceneHoldWarnSeconds = 30f;
         /// <summary>Handed-out records kept at most; older ones than the return window are pruned beyond this.</summary>
         private const int MaxHandoffOutRecords = 256;
 
@@ -56,44 +56,35 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private readonly Dictionary<string, HandoffOut> _handoffsOut = new Dictionary<string, HandoffOut>();
         private readonly List<string> _handoffsOutPrune = new List<string>();
-        private bool _serverSceneReady;
-        private float _serverStartedAt;
-        private int _linkHeldFrames;
-        private bool _sceneHoldWarned;
+        private readonly MeshLinkHold _linkHold = new MeshLinkHold(); // every map since 0.79
 
         /// <summary>OnStartServer's hook, before the kit's start: the scene of this start is not ready yet.</summary>
         private void ReadinessOnStartServer()
         {
-            _serverSceneReady = false;
-            _serverStartedAt = Time.unscaledTime;
-            _linkHeldFrames = 0;
-            _sceneHoldWarned = false;
+            _linkHold.Start(Time.unscaledTime);
             _handoffsOut.Clear();
         }
 
         /// <summary>OnServerOnlineSceneLoaded's hook, after every spawn area's prefabs are registered: the link is read from now.</summary>
         private void ReadinessOnSceneLoaded()
         {
-            if (_serverSceneReady)
+            if (!_linkHold.SceneReady())
                 return;
-            _serverSceneReady = true;
-            if (_linkHeldFrames > 0)
-                Logging.Log("Mesh", FormattableString.Invariant($"Mesh link of {PrintableCell(LayoutCellId)} read from now: the server scene is ready {Time.unscaledTime - _serverStartedAt:0.0} s after start ({_linkHeldFrames} frame(s) held)"));
+            if (_linkHold.HeldFrames > 0)
+                Logging.Log("Mesh", FormattableString.Invariant($"Mesh link of {PrintableCell(LayoutCellId)} read from now: the server scene is ready {Time.unscaledTime - _linkHold.StartedAt:0.0} s after start ({_linkHold.HeldFrames} frame(s) held, {MapModeText} map)"));
         }
 
-        /// <summary>GhostingUpdate's hook: true while a Dynamic map's cell holds its mesh link until the server scene is ready.</summary>
+        /// <summary>GhostingUpdate's hook: true while a map server holds its mesh link until the server scene is ready (any map since 0.79).</summary>
         private bool HoldLinksUntilSceneReady()
         {
-            if (_serverSceneReady || !IsServer || !IsDynamicMap)
+            if (!_linkHold.Tick(IsServer, Time.unscaledTime, out bool warn))
                 return false;
-            _linkHeldFrames++;
-            if (!_sceneHoldWarned && Time.unscaledTime - _serverStartedAt >= SceneHoldWarnSeconds)
-            {
-                _sceneHoldWarned = true;
-                Logging.LogWarning("Mesh", FormattableString.Invariant($"Mesh link of {PrintableCell(LayoutCellId)} still held: the server scene is not ready {Time.unscaledTime - _serverStartedAt:0} s after start"));
-            }
+            if (warn)
+                Logging.LogWarning("Mesh", FormattableString.Invariant($"Mesh link of {PrintableCell(LayoutCellId)} still held: the server scene is not ready {Time.unscaledTime - _linkHold.StartedAt:0} s after start ({MapModeText} map)"));
             return true;
         }
+
+        private string MapModeText => IsDynamicMap ? "Dynamic" : "Static";
 
         /// <summary>RegisterPendingHandoffAck's hook: a Dynamic map's cell remembers whom it handed where (the return rule reads it).</summary>
         private void NoteHandoffOut(string characterId, string zone)

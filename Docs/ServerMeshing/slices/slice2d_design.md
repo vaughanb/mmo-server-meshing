@@ -300,3 +300,12 @@ parameters), `rigsplit.py` (`ended`, `relogins`), `rigmerge.py` (`collapse`), `r
   bot's pickup (it stood 41 m from the drop for 60 s: the harvest left the node targeted and the walk never started,
   2 of ~13 harvest runs) → the bot clears its target and stops before the pickup and re-issues a walk that makes no
   progress for 3 s (`pickup: no progress for 3 s at <pos>; walk issued again`); the reruns passed (flake policy).
+- **Follow-up (2026-10-18), Static maps: DESIGN 0.79, a separate change after this slice.** The first live run's "not
+  fixed" was checked against every map log since 2026-09-14. The single-machine `crash` never met it: E's 37 restarts
+  came back on a new port, and its neighbours learn a new address only from the cluster registration (`PostSpawnEntities`,
+  after `Assets.Initialize`); C.1's four restarts reused their port, which is why this slice met it. Static cells met it
+  on the two-machine rig (2026-09-16..18): B's cell still held A's cells' addresses across a Play, and A's C/N/NE logged
+  `Cannot spawn monster ghost` and spawned monster puppets before their scene was set up (5 incarnations) → the hold is
+  on every map (pure `MeshLinkHold`, same hook, the release line names the map's mode; `crash` grades both of E's
+  release lines); the back-off and the registration reports stay Dynamic-only. This slice's "Static maps
+  byte-identical" rule no longer holds for that one start-up step (a Static cell reads its link 5 frames later).
