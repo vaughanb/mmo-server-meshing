@@ -1,13 +1,13 @@
 // Server Meshing add-on — what a Draining cell still holds (Slice 2c, slices/slice2c_design.md decision 9). A cell
 // merged away owns nothing, so everything it still has must reach the survivor before it may exit: counted anywhere,
 // not by rectangle. The same predicate decides the evidence's `drained` (the central's drain gate) and the cell's own
-// exit on Retire. Pure and game-neutral.
+// exit on Retire. Since Slice 4 (slices/slice4_design.md decision 6) buildings hold the drain too. Pure and game-neutral.
 using System.Text;
 using LiteNetLib.Utils;
 
 namespace MultiplayerARPG.MMO.Mesh
 {
-    /// <summary>MeshDrainState counts what a Draining cell still holds; IsDrained when nothing but buildings is left.</summary>
+    /// <summary>MeshDrainState counts what a Draining cell still holds; IsDrained when nothing is left.</summary>
     public struct MeshDrainState
     {
         /// <summary>characters: every non-puppet player character present (the kit's despawn delay included) plus pending spawns.</summary>
@@ -20,7 +20,7 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>rewardDrops: kill and reward drops (they stay with the cell of the kill and expire after their appear time).</summary>
         public int rewardDrops;
         public int harvestables;
-        /// <summary>buildings: not handed off before Slice 4; reported, never part of IsDrained.</summary>
+        /// <summary>buildings: owned non-scene buildings plus building transfers in flight (Slice 4: part of IsDrained).</summary>
         public int buildings;
         /// <summary>connections: game-transport peers only (not neighbour mesh links, not the cluster client).</summary>
         public int connections;
@@ -36,9 +36,9 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>serverCharacters: server-owned character handoffs in flight.</summary>
         public int serverCharacters;
 
-        /// <summary>IsDrained is true when every count but buildings is zero.</summary>
+        /// <summary>IsDrained is true when every count is zero.</summary>
         public bool IsDrained => characters == 0 && summons == 0 && monsters == 0 && itemDrops == 0 && rewardDrops == 0
-            && harvestables == 0 && connections == 0 && inProgress == 0 && pendingAcks == 0 && rolledBack == 0
+            && harvestables == 0 && buildings == 0 && connections == 0 && inProgress == 0 && pendingAcks == 0 && rolledBack == 0
             && deferredAcks == 0 && reserved == 0 && incoming == 0 && staticLoans == 0 && serverCharacters == 0;
 
         /// <summary>

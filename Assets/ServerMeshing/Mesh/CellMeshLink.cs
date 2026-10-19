@@ -45,6 +45,65 @@ namespace MultiplayerARPG.MMO.Mesh
         public const ushort ServerCharacterHandoff = 129; // a server-owned character (no client) moves to the cell that owns its position
         // Slice 2d (supervision and fencing, slices/slice2d_design.md decision 8):
         public const ushort RegistrationState = 130;      // a Dynamic map's cell -> each linked neighbour, every 2 s and on change: whether it is registered with the cluster
+        // Slice 4 (buildings across a cut, slices/slice4_design.md decisions 9 and 10):
+        public const ushort BuildingTransfer = 131;       // a building tree whose root stands in the receiver's owned rectangle: take it (rows already saved)
+        public const ushort BuildingTransferReply = 132;  // receiver -> sender: taken (promoted, spawned, owned already), or refused with a reason
+    }
+
+    /// <summary>
+    /// A building tree (Slice 4 decision 9): the root first, then its descendants parent before child, each node the
+    /// save data the sender force-saved before sending. Positions are in the sender's frame.
+    /// </summary>
+    public struct BuildingTransferMessage : INetSerializable
+    {
+        public string rootId;
+        public BuildingSaveData[] nodes;
+
+        public void Serialize(NetDataWriter writer)
+        {
+            writer.Put(rootId ?? string.Empty);
+            int count = nodes != null ? nodes.Length : 0;
+            writer.Put(count);
+            for (int i = 0; i < count; ++i)
+                (nodes[i] ?? new BuildingSaveData()).Serialize(writer);
+        }
+
+        public void Deserialize(NetDataReader reader)
+        {
+            rootId = reader.GetString();
+            int count = reader.GetInt();
+            if (count < 0 || count > 4096)
+                throw new System.IO.InvalidDataException($"building transfer node count {count}");
+            nodes = new BuildingSaveData[count];
+            for (int i = 0; i < count; ++i)
+            {
+                nodes[i] = new BuildingSaveData();
+                nodes[i].Deserialize(reader);
+            }
+        }
+    }
+
+    /// <summary>The receiver's answer to a BuildingTransfer (Slice 4 decision 10).</summary>
+    public struct BuildingTransferReplyMessage : INetSerializable
+    {
+        public string rootId;
+        public bool ok;
+        public string reason;
+        public int promoted;
+        public int spawned;
+        public int ownedAlready;
+
+        public void Serialize(NetDataWriter writer)
+        {
+            writer.Put(rootId ?? string.Empty); writer.Put(ok); writer.Put(reason ?? string.Empty);
+            writer.Put(promoted); writer.Put(spawned); writer.Put(ownedAlready);
+        }
+
+        public void Deserialize(NetDataReader reader)
+        {
+            rootId = reader.GetString(); ok = reader.GetBool(); reason = reader.GetString();
+            promoted = reader.GetInt(); spawned = reader.GetInt(); ownedAlready = reader.GetInt();
+        }
     }
 
     /// <summary>
@@ -607,6 +666,8 @@ namespace MultiplayerARPG.MMO.Mesh
             RegisterMessageHandler(MeshLinkMessageTypes.MonsterHandoffFailed, HandleMonsterHandoffFailed);
             RegisterMessageHandler(MeshLinkMessageTypes.ServerCharacterHandoff, HandleServerCharacterHandoff);
             RegisterMessageHandler(MeshLinkMessageTypes.RegistrationState, HandleRegistrationState);
+            RegisterMessageHandler(MeshLinkMessageTypes.BuildingTransfer, HandleBuildingTransfer);
+            RegisterMessageHandler(MeshLinkMessageTypes.BuildingTransferReply, HandleBuildingTransferReply);
         }
 
         public override void OnServerReceive(TransportEventData eventData)
@@ -761,6 +822,18 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             LentStaticMessage msg = messageHandler.ReadMessage<LentStaticMessage>();
             _manager.OnLentStatic(messageHandler.ConnectionId, msg);
+        }
+
+        private void HandleBuildingTransfer(MessageHandlerData messageHandler)
+        {
+            BuildingTransferMessage msg = messageHandler.ReadMessage<BuildingTransferMessage>();
+            _manager.OnBuildingTransfer(messageHandler.ConnectionId, msg);
+        }
+
+        private void HandleBuildingTransferReply(MessageHandlerData messageHandler)
+        {
+            BuildingTransferReplyMessage msg = messageHandler.ReadMessage<BuildingTransferReplyMessage>();
+            _manager.OnBuildingTransferReply(messageHandler.ConnectionId, msg);
         }
 
         private void HandleMonsterHandoffFailed(MessageHandlerData messageHandler)
@@ -999,6 +1072,16 @@ namespace MultiplayerARPG.MMO.Mesh
         public void SendRegistrationState(bool registered)
         {
             Send(MeshLinkMessageTypes.RegistrationState, new RegistrationStateMessage { registered = registered });
+        }
+
+        public void SendBuildingTransfer(BuildingTransferMessage msg)
+        {
+            Send(MeshLinkMessageTypes.BuildingTransfer, msg);
+        }
+
+        public void SendBuildingTransferReply(BuildingTransferReplyMessage msg)
+        {
+            Send(MeshLinkMessageTypes.BuildingTransferReply, msg);
         }
     }
 }

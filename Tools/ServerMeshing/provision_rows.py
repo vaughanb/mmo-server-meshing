@@ -29,6 +29,8 @@ ITEM_SKILL = 357861288        # TestSkillItem-CE, id "testSkillItem" (casts Test
 ITEM_PET = -667740944         # TestPetItem-CE, id "testPetItem"
 ITEM_MOUNT = 1275161172       # TestMountItem-CE, id "testMountItem"
 ITEM_BUILDING = 1802134084    # TestBuildingItem-CE, id "TestBuildingItem-CE"
+ITEM_STORAGE = 772171733      # TestStorageItem-CE, id "TestStorageItem-CE" (Slice 4: a storage chest)
+ITEM_DOOR = 2129814156        # TestDoorItem-CE, id "TestDoorItem-CE" (Slice 4: a door)
 ITEM_YIELD = 970799895        # DefaultWeaponItem-CE (id empty: the name), the harvestable's only yield
 SKILL_DEBUFF = 2091623501     # TestDebuffSkill-CE, id "TestDebuffSkill"
 SKILL_HEAL = 254850431        # TestHealSkill-CE, id "TestHealSkill"
@@ -75,7 +77,9 @@ class Placement:
 
 COMMON_BAG = [Item(ITEM_SKILL, amount=20), Item(ITEM_PET, level=10), Item(ITEM_MOUNT)]
 # The ids are the ones the characters had before 0.71, so older logs and notes still name the same characters.
-TESTER = Fixture("meshtest", "493cd2454f4949ebbf2f09748fe78af8", "MeshTester2", COMMON_BAG + [Item(ITEM_BUILDING, amount=3)])
+# The wall stack stays first among the building items: `build` places the first building item it finds in the bag.
+TESTER = Fixture("meshtest", "493cd2454f4949ebbf2f09748fe78af8", "MeshTester2",
+                 COMMON_BAG + [Item(ITEM_BUILDING, amount=3), Item(ITEM_STORAGE), Item(ITEM_DOOR)])
 BOT = Fixture("meshbot", "8cb502da59bf43b4a654875dc2934c11", "meshbotChar", COMMON_BAG)
 FIXTURES = [TESTER, BOT]
 LEADER = TESTER

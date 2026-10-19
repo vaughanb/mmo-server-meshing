@@ -39,6 +39,7 @@ import regress_merge
 import regress_split
 import regress_splitcrash
 import regress_auto
+import regress_building
 import rigauto
 import rigtools
 from provision import ITEM_BOW, ITEM_YIELD, db_connect
@@ -68,6 +69,7 @@ COORDINATOR_STORE = os.path.join(TEMP, "ServerMesh.Coordinator.json")
 LAYOUT_COMMAND = os.path.join(TEMP, "ServerMesh.LayoutCommand.txt")
 LAYOUT_COMMAND_STATUS = os.path.join(TEMP, "ServerMesh.LayoutCommandStatus.txt")
 MAP = "ServerMeshTestMap"
+STORAGE_TYPE_BUILDING = 3   # the kit's StorageType.Building (storageitem.storageType)
 MAP2 = "ServerMeshTestMap2"   # placed 400 m east of MAP in the world registry; its only cell C2 touches E
 # The test map is a 3x3 grid; C/E/N/NE keep the world positions every scenario was written against, and the
 # five added cells surround them, so a crossing now happens with eight neighbours rather than three.
@@ -281,13 +283,18 @@ _play_seq = None   # the id of the last Play requested, echoed by the runner as 
 _play_env = {}     # the environment that Play was asked for (the scenario's own plus --env), for grading
 
 
-def request_play(mode, walk_x, walk_z, pet=False, mount=False, env=None, enabled=True):
-    """Ask the editor to enter Play with the auto client in a mode (enabled=False: no client logs in at all)."""
+def request_play(mode, walk_x, walk_z, pet=False, mount=False, env=None, enabled=True, observe_seconds=None, line_x=None):
+    """Ask the editor to enter Play with the auto client in a mode (enabled=False: no client logs in at all). Slice 4:
+    `observe_seconds` and `line_x` set the tester's stand window and cut line (the runner forwards them; None clears)."""
     global _play_seq, _play_env
     os.makedirs(TEMP, exist_ok=True)
     _play_seq = uuid.uuid4().hex[:8]
     lines = [f"seq={_play_seq}", f"mode={mode}", "channel=C", "user=meshtest", f"walkX={walk_x}", f"walkZ={walk_z}",
              f"pet={1 if pet else 0}", f"mount={1 if mount else 0}", f"enabled={1 if enabled else 0}"]
+    if observe_seconds is not None:
+        lines.append(f"observeSeconds={observe_seconds:g}")
+    if line_x is not None:
+        lines.append(f"lineX={line_x:g}")
     env = dict(EXTRA_ENV, **(env or {}))
     _play_env = env
     for key in ENV_KEYS:
@@ -501,7 +508,22 @@ def db_reset(tester_pos, bot_pos, tester_party=1, bot_party=1, clear_buildings=F
             with conn.cursor() as cur:
                 # Every channel of the test map, and nothing else: the database may be shared with another game. A
                 # building loads by channel id, not by position, so one left on any cell lands differently per layout.
+                # Slice 4: a building's storage rows go first (they are keyed by the building's id, not its channel).
+                cur.execute("delete from storageitem where storageType=%s and storageOwnerId in "
+                            "(select id from buildings where mapName=%s)", (STORAGE_TYPE_BUILDING, MAP))
                 cur.execute("delete from buildings where mapName=%s", (MAP,))
+    finally:
+        conn.close()
+
+
+def db_rows(sql, params=()):
+    """The rows of one read-only query against the rig's database (Slice 4's scenario reads building and storage rows;
+    the unit tests fake this)."""
+    conn = db_connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            return cur.fetchall()
     finally:
         conn.close()
 
@@ -994,12 +1016,16 @@ def run_scenario(name, rep):
     elif name in regress_auto.SCENARIOS:
         split = regress_auto.run(name, rep, sys.modules[__name__], start, day, bots)   # Slice 3: an AutoRun
 
+    elif name in regress_building.SCENARIOS:
+        split = regress_building.run(name, rep, sys.modules[__name__], start, day, bots)   # Slice 4: a BuildRun
+
     else:
         raise ValueError(f"unknown scenario {name}")
 
     # The sleeping-cell scenarios leave cells asleep on purpose; the Coarse ones run one cell; every other scenario
     # runs them all (autosplit: plus the child the policy makes).
-    expect = {"wake": {"C", "E", "C2"}, "autosplit": {z for z, _ in ZONES} | {"C.1"}, **regress_auto.EXPECTED_ZONES}
+    expect = {"wake": {"C", "E", "C2"}, "autosplit": {z for z, _ in ZONES} | {"C.1"}, **regress_auto.EXPECTED_ZONES,
+              **regress_building.EXPECTED_ZONES}
     grade_common(rep, start, day, expect=expect.get(name))
     if name in regress_split.SCENARIOS:
         regress_split.grade_layout(rep, sys.modules[__name__], start, day, split)
@@ -1009,6 +1035,8 @@ def run_scenario(name, rep):
         regress_splitcrash.grade_layout(rep, sys.modules[__name__], start, day, split)
     elif name in regress_auto.SCENARIOS:
         regress_auto.grade_layout(rep, sys.modules[__name__], start, day, split)
+    elif name in regress_building.SCENARIOS:
+        regress_building.grade_layout(rep, sys.modules[__name__], start, day, split)
     else:
         grade_layout(rep, start, day)
     for kind, log in bots:
@@ -1048,15 +1076,17 @@ TWO_HOST_SKIP = {
     **{n: regress_merge.TWO_HOST_REASON for n in regress_merge.SCENARIOS},
     **{n: regress_splitcrash.TWO_HOST_REASON for n in regress_splitcrash.SCENARIOS},
     **{n: regress_auto.TWO_HOST_REASON for n in regress_auto.SCENARIOS},
+    **{n: regress_building.TWO_HOST_REASON for n in regress_building.SCENARIOS},
 }
 ALL = (DEFAULT + ["pvp", "wake", "dynidle"] + list(regress_split.SCENARIOS) + list(regress_merge.SCENARIOS)
-       + list(regress_splitcrash.SCENARIOS) + list(regress_auto.SCENARIOS))
+       + list(regress_splitcrash.SCENARIOS) + list(regress_auto.SCENARIOS) + list(regress_building.SCENARIOS))
 # A persisted remote cell outlives the Plays, so no scenario's environment reaches it.
 PERSIST_SKIP = {"dynidle": "runs the test map Dynamic through the environment, which a persisted remote cell never gets",
                 **{n: regress_split.PERSIST_REASON for n in regress_split.SCENARIOS},
                 **{n: regress_merge.PERSIST_REASON for n in regress_merge.SCENARIOS},
                 **{n: regress_splitcrash.PERSIST_REASON for n in regress_splitcrash.SCENARIOS},
-                **{n: regress_auto.PERSIST_REASON for n in regress_auto.SCENARIOS}}
+                **{n: regress_auto.PERSIST_REASON for n in regress_auto.SCENARIOS},
+                **{n: regress_building.PERSIST_REASON for n in regress_building.SCENARIOS}}
 
 
 def main():

@@ -61,6 +61,7 @@ namespace MultiplayerARPG.MMO.Mesh
             PrewarmOnStartServer();
             EvidenceOnStartServer();
             StaticHandoffOnStartServer();
+            BuildingsOnStartServer(); // Slice 4: the building channel, load and transfer state (MeshMapNetworkManager_Buildings)
             _heldPlacements.TakeAll();
             SetStreamTargets(_streamTargetIds, OwnCell);
             if (ClusterClient != null)
@@ -149,6 +150,17 @@ namespace MultiplayerARPG.MMO.Mesh
                 }
                 return;
             }
+            BuildingsOnGateOpen(); // Slice 4 decision 4: the buildings load on the first open tick (MeshMapNetworkManager_BuildingLoad)
+            if (!BuildingsLoaded)
+            {
+                // Slice 4 decision 5: a placement waits for the load too (its row would be read back and created twice).
+                while (_heldPlacements.TryTakeExpired(now, out MeshHeldPlacementQueue<BuildingSaveData>.HeldItem expired))
+                {
+                    Logging.LogWarning("Mesh", $"Building {expired.item.Id} held {layoutGatePlacementSeconds:0}s by the layout gate: creating it here without routing");
+                    CreateBuildingHere(expired.item);
+                }
+                return;
+            }
             while (_heldPlacements.TryTakeNext(out MeshHeldPlacementQueue<BuildingSaveData>.HeldItem released))
             {
                 Logging.Log("Mesh", $"Building {released.item.Id} released by the layout gate");
@@ -163,7 +175,7 @@ namespace MultiplayerARPG.MMO.Mesh
         private bool TryHoldGatedPlacement(BuildingSaveData data, bool received)
         {
             float deadline = Time.unscaledTime + Mathf.Max(0f, layoutGatePlacementSeconds);
-            if (!_heldPlacements.TryHold(IsLayoutGated, data, received, deadline))
+            if (!_heldPlacements.TryHold(HoldsPlacements, data, received, deadline)) // Slice 4 decision 5: gated, or the buildings still loading
                 return false;
             Logging.Log("Mesh", $"Building {data.Id} {(received ? "sent by a neighbour" : "placed")} by {data.CreatorName} at {(Vector3)data.Position} is held until the layout gate opens ({_heldPlacements.Count} held)");
             return true;

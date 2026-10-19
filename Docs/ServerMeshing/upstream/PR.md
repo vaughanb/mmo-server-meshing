@@ -17,3 +17,9 @@ The inline `CountSubscribers() == 0` check becomes `protected virtual bool IsWat
 `SetPlayerReadyRoutine` already handles an entry that is an already-spawned entity. With the dictionary reachable, a subclass can substitute a standing entity for an arriving character and have that path taken.
 
 All four have been running under a regression harness (eight scenarios, five map servers over two maps) for the add-on; the first two are useful regardless of it.
+
+---
+
+**Later, for its own pull request (0008, 2026-10-19): `MapNetworkManager`: let subclasses choose the building persistence channel**
+
+Buildings are loaded, created, saved and deleted per channel and map. A map server that serves one channel's map from several processes wants every process to read and write the same rows under the channel they were placed on, so a building keeps its row when its ground changes hands. `protected virtual string BuildingPersistenceChannelId => ChannelId;`, read at the seven building database sites. No behaviour change for a `MapNetworkManager` that does not override it.

@@ -11,7 +11,8 @@
 //             waits before trying that one again.
 // LentStatic (127) tells the home cell who holds its static, or that it is gone (depleted, picked up, expired) so its
 // spawn area respawns it. A neighbour's new incarnation releases statics like monsters. Reward drops (exp, gold,
-// currency) are not item drops and stay with the killing cell. Buildings are Slice 4: never handed here.
+// currency) are not item drops and stay with the killing cell. Buildings move as trees through the Slice 4 hook below
+// (MeshMapNetworkManager_BuildingTransfer), never through StaticHandoff.
 using System.Collections.Generic;
 using LiteNetLibManager;
 using UnityEngine;
@@ -83,6 +84,7 @@ namespace MultiplayerARPG.MMO.Mesh
             _loanScratch.Clear();
             if (!enableBorderGhosting)
                 return;
+            BuildingTransferTick(now); // Slice 4 decision 8: building trees follow their root's ground (MeshMapNetworkManager_BuildingTransfer)
             _staticCandidates.Clear();
             List<OwnedEntry<DamageableEntity>> statics = _ownedStatics.Entries;
             for (int i = 0; i < statics.Count; ++i)

@@ -1,0 +1,108 @@
+From 0000000000000000000000000000000000000008 Mon Sep 17 00:00:00 2001
+From: vaughanb <brenden.vaughan@gmail.com>
+Date: Mon, 19 Oct 2026 00:01:29 -0600
+Subject: [PATCH] MapNetworkManager: let subclasses choose the building persistence
+ channel
+
+Buildings are loaded, created, saved and deleted per channel and map. A
+map server that serves one channel's map from several processes (server
+meshing: a cell split into children at runtime) wants every process to
+read and write the same rows, under the channel they were placed on, so
+a building keeps its row when its ground changes hands.
+
+Add a protected virtual BuildingPersistenceChannelId, defaulting to
+ChannelId, and read it at the seven building database sites (the load
+in PreSpawnEntities, the in-scene create, the quit save, SaveBuilding,
+ForceSaveBuilding, CreateBuildingEntity and DestroyBuildingEntityRoutine).
+No behaviour change for a MapNetworkManager that does not override it.
+---
+ {a => b}/MMO/Scripts/MMOGame/Networking/Map/MapNetworkManager.cs                  | 12 +++++++++---
+ {a => b}/MMO/Scripts/MMOGame/Networking/Map/MapNetworkManager_DatabaseFunction.cs |  8 ++++----
+ 2 files changed, 13 insertions(+), 7 deletions(-)
+
+diff --git a/MMO/Scripts/MMOGame/Networking/Map/MapNetworkManager.cs b/MMO/Scripts/MMOGame/Networking/Map/MapNetworkManager.cs
+index a55102e..c74f8d4 100644
+--- a/MMO/Scripts/MMOGame/Networking/Map/MapNetworkManager.cs
++++ b/MMO/Scripts/MMOGame/Networking/Map/MapNetworkManager.cs
+@@ -63,6 +63,12 @@ namespace MultiplayerARPG.MMO
+ #endif
+ 
+         public bool IsAllocate { get; set; } = false;
++        /// <summary>
++        /// The channel buildings of this map server are loaded from and saved under. The kit persists buildings per
++        /// channel and map; a subclass that serves one channel's map from several processes (server meshing) returns
++        /// the channel the rows belong to. Used at every building database site; nothing else reads it.
++        /// </summary>
++        protected virtual string BuildingPersistenceChannelId => ChannelId;
+         public string ClusterServerAddress { get { return clusterServerAddress; } }
+         public int ClusterServerPort { get { return clusterServerPort; } }
+         public string AppAddress { get { return publicAddress; } }
+@@ -260,7 +266,7 @@ namespace MultiplayerARPG.MMO
+                 if (buildingEntity == null) continue;
+                 await DatabaseClient.UpdateBuildingAsync(new UpdateBuildingReq()
+                 {
+-                    ChannelId = ChannelId,
++                    ChannelId = BuildingPersistenceChannelId,
+                     MapName = CurrentMapInfo.Id,
+                     BuildingData = buildingEntity.CloneTo(new BuildingSaveData())
+                 });
+@@ -363,7 +369,7 @@ namespace MultiplayerARPG.MMO
+                     {
+                         buildingsResp = await DatabaseClient.GetBuildingsAsync(new GetBuildingsReq()
+                         {
+-                            ChannelId = ChannelId,
++                            ChannelId = BuildingPersistenceChannelId,
+                             MapName = CurrentMapInfo.Id,
+                         });
+                     } while (!buildingsResp.IsSuccess);
+@@ -410,7 +416,7 @@ namespace MultiplayerARPG.MMO
+                         continue;
+                     initialBuildingTasks.Add(DatabaseClient.CreateBuildingAsync(new CreateBuildingReq()
+                     {
+-                        ChannelId = ChannelId,
++                        ChannelId = BuildingPersistenceChannelId,
+                         MapName = CurrentMapInfo.Id,
+                         BuildingData = initializingBuilding.CloneTo(new BuildingSaveData()),
+                     }));
+diff --git a/MMO/Scripts/MMOGame/Networking/Map/MapNetworkManager_DatabaseFunction.cs b/MMO/Scripts/MMOGame/Networking/Map/MapNetworkManager_DatabaseFunction.cs
+index e9db8f6..05e4a3a 100644
+--- a/MMO/Scripts/MMOGame/Networking/Map/MapNetworkManager_DatabaseFunction.cs
++++ b/MMO/Scripts/MMOGame/Networking/Map/MapNetworkManager_DatabaseFunction.cs
+@@ -339,7 +339,7 @@ namespace MultiplayerARPG.MMO
+             var updateResult = await DatabaseClient.UpdateBuildingAsync(new UpdateBuildingReq()
+             {
+                 State = state,
+-                ChannelId = ChannelId,
++                ChannelId = BuildingPersistenceChannelId,
+                 MapName = CurrentMapInfo.Id,
+                 BuildingData = savingBuildingData,
+             });
+@@ -364,7 +364,7 @@ namespace MultiplayerARPG.MMO
+             var updateResult = await DatabaseClient.UpdateBuildingAsync(new UpdateBuildingReq()
+             {
+                 State = state,
+-                ChannelId = ChannelId,
++                ChannelId = BuildingPersistenceChannelId,
+                 MapName = CurrentMapInfo.Id,
+                 BuildingData = savingBuildingData,
+             });
+@@ -442,7 +442,7 @@ namespace MultiplayerARPG.MMO
+             {
+                 await DatabaseClient.CreateBuildingAsync(new CreateBuildingReq()
+                 {
+-                    ChannelId = ChannelId,
++                    ChannelId = BuildingPersistenceChannelId,
+                     MapName = CurrentMapInfo.Id,
+                     BuildingData = saveData,
+                 });
+@@ -467,7 +467,7 @@ namespace MultiplayerARPG.MMO
+         {
+             await DatabaseClient.DeleteBuildingAsync(new DeleteBuildingReq()
+             {
+-                ChannelId = ChannelId,
++                ChannelId = BuildingPersistenceChannelId,
+                 MapName = CurrentMapInfo.Id,
+                 BuildingId = id
+             });
+-- 
+2.55.0.windows.3

@@ -108,7 +108,7 @@ class SplitWiringTests(unittest.TestCase):
 
     def test_registration(self):
         for name in ("split", "splitc2", "merge", "mergec2", "splitcrash_prewarm", "splitcrash_drain", "splitcrash_base",
-                     "autosplit", "autobenefit", "autorefuse"):
+                     "autosplit", "autobenefit", "autorefuse", "splitbuild"):
             with self.subTest(name):
                 self.assertIn(name, regress.ALL)
                 self.assertNotIn(name, regress.DEFAULT)

@@ -446,6 +446,12 @@ namespace MultiplayerARPG.MMO.Mesh
         [Tooltip("Cost model: a puppet monster against an owned player (kinematic). Rig override: MESH_MONSTER_WEIGHT.")]
         public float puppetMonsterWeight = 0.1f;
 
+        // Slice 4 (buildings across a cut, slices/slice4_design.md, Settings).
+        [Tooltip("Building trees one cell releases to another at a time (each release is two to four database round trips).")]
+        public int buildingTransfersInFlight = 2;
+        [Tooltip("Seconds a cell releasing a building waits for its storage's users and in-flight item moves before it goes on.")]
+        public float buildingStorageCloseSeconds = 5f;
+
         /// <summary>MergeThreshold is the predicted merged utilisation at or below which a pair may merge: the smaller of mergeUtil and 0.6 x splitUtil.</summary>
         public float MergeThreshold => Math.Min(mergeUtil, 0.6f * splitUtil);
     }

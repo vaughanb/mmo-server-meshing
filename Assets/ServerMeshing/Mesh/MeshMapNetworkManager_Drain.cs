@@ -119,8 +119,9 @@ namespace MultiplayerARPG.MMO.Mesh
                         if (harvestable.CurrentHp > 0)
                             state.harvestables++;
                         break;
-                    case BuildingEntity _:
-                        state.buildings++;
+                    case BuildingEntity building:
+                        if (!building.IsSceneObject && ServerBuildingHandlers.TryGetBuilding(building.Id, out _))
+                            state.buildings++; // Slice 4: owned (in the handlers), never a scene copy; transfers in flight below
                         break;
                 }
             }
@@ -134,6 +135,7 @@ namespace MultiplayerARPG.MMO.Mesh
             state.reserved = _reservedArrivals.Count;
             state.incoming = _incomingHandoffFrom.Count;
             state.staticLoans = _staticLoans.Count;
+            state.buildings += BuildingTransfersInFlight; // Slice 4 decision 6 (MeshMapNetworkManager_BuildingTransfer)
             state.serverCharacters = 0; // a server-owned character's handoff has no ack to wait for; one still here is counted in characters
             if (despawnMonsterSummons && _drainSummoned.Count > 0)
             {
@@ -290,8 +292,6 @@ namespace MultiplayerARPG.MMO.Mesh
                 return;
             _retiring = true;
             _mergeRetirePending = false;
-            if (_drainState.buildings > 0)
-                Logging.LogWarning("Mesh", $"Merge retire: {LayoutCellId} leaves {_drainState.buildings} building(s) saved under its channel");
             Logging.Log("Mesh", $"Merge retire: {LayoutCellId} drained, quitting");
             Application.Quit();
         }

@@ -123,7 +123,10 @@ planned only when the predicted busier side is at most this share of the cell's 
 (15) and `measureAfterSeconds` (10: the relief is read two load windows after an operation's done), `flapWindowSeconds`
 (900), `flapReliefShare` (0.1: a measured relief under it, or a split within the window of a merge, doubles the
 family's dwells and cooldown, up to `flapMaxMultiplier`, 8; a relief at twice it resets them), `hostHeadroomShare`
-(0.8: a split is deferred while the host's cores in use, plus the child's share, would exceed this share of its cores)
+(0.8: a split is deferred while the host's cores in use, plus the child's share, would exceed this share of its cores);
+for buildings across a cut (Slice 4) `buildingTransfersInFlight` (2: building trees one cell releases to another at a
+time, each two to four database round trips) and `buildingStorageCloseSeconds` (5: how long a cell releasing a chest
+waits for its users and in-flight item moves)
 and the cost model in owned-player equivalents (`modelFloorPlayers` 9.1, `puppetPlayerWeight` 0.174,
 `ownedMonsterWeight` 0.126, `puppetMonsterWeight` 0.1: DESIGN 0.71 and 0.73's fits; a crowd narrower than the band is
 accepted by the kinematic fit and refused only by a steered one). Every mesh manager (`MeshMapNetworkManager`, `MeshLoginNetworkManager`,
@@ -301,7 +304,11 @@ wait; `aggload.py --uncapped` remains as the older way to measure work.
 ## 6. The database
 
 The add-on stores nothing of its own: characters, buildings and items go through the kit's database manager as usual, so
-any backend the kit supports works. The rig runs **MySQL**, which matters for two reasons: several map-server processes
+any backend the kit supports works. One kit edit touches persistence (CE-10, DESIGN §17): the kit keeps buildings per
+channel and map, and on a Dynamic map every cell of a split family reads and writes them under the **base cell's
+channel**, so a building placed on a child keeps its row when the child merges back; a cell loads only the trees whose
+root stands in its own rectangle, once the central has answered its layout. Storage rows are keyed by the building's
+id and need nothing. The rig runs **MySQL**, which matters for two reasons: several map-server processes
 and, later, several hosts all reach one database, and SQLite is a single file on one machine.
 
 - **Choosing the backend.** `MMOServerInstance` reads `Config/serverConfig.json` only when it is *not* running in the
@@ -565,6 +572,21 @@ and, later, several hosts all reach one database, and SQLite is a single file on
   within 15 % of the prediction) and `autorefuse` (a 60 m crowd on the centre with steered puppets and the steered
   fit: refused, once a minute, nothing splits); all three skipped with `--remote-cells` and `--remote-persist`. Every
   other scenario fails on any `Policy:` line in the status file.
+- **Buildings across a cut (Slice 4):** on a Dynamic map a building tree (a root and the pieces snapped to it) follows
+  its root's ground: at a split's commit the parent hands the trees rooted in the given-away half to the child, at a
+  merge the child hands everything back, a placement lands on the cell that owns its position, and both drain gates
+  count buildings. The holder drops the tree from its handlers (the kit then refuses opens and item moves), closes and
+  waits out its chests (`buildingStorageCloseSeconds`), stops the saver, force-saves every piece and its storage, demotes
+  its copies to puppets and sends `BuildingTransfer`; the receiver loads each storage before it promotes its puppet or
+  creates the building without a database write. Lines: `Building channel on <cell>: <channel>`, `Buildings loaded on
+  <cell>: <n> placed in <t> tree(s) and <s> scene, ...`, `Building transfer <root> zone <from>-><to>: sent (<n> node(s))` /
+  `done` / `promoted <p>, spawned <s>, owned already <o>` / `released (<why>)` / `failed (<why>)`. A puppet's or a
+  demoted copy's despawn never deletes a row (only an owned building does). Scenario `splitbuild` (the tester in the
+  child's half places a wall with a chest and a door, keeps moving scrolls in and out, the split, the storage and the
+  door used on the child, the merge back, the rows all under C, C killed and loading exactly the tree, everyone
+  re-logged in); skipped with `--remote-cells` and `--remote-persist`. Test content: `TestStorage-CE` and `TestDoor-CE`
+  (`activatableDistance` 6: the kit's storage open is strict against it), their items in the tester's bag after the
+  wall stack; the tester mode `buildtree` writes its phases to the status file (`buildtree-placed`, `-ready`, `-checked`).
 - **The play runner and the environment:** every Play request carries an id that the status file echoes as
   `playSeq=` while that Play runs, so the harness never mistakes a Play an earlier, abandoned request started late for
   its own; a stop that arrives while Play is starting is carried out once it has started. The environment variables a
@@ -586,10 +608,16 @@ and, later, several hosts all reach one database, and SQLite is a single file on
   not by the mesh: 500 people in one place is a kit AOI/update-rate question.
 - **Warp portals or spawn points exactly on a login position** do what they do in the kit: a character that stands up
   inside a portal trigger is warped. Not a mesh issue, but easy to trip over on a test map.
-- **Dynamic split/merge of cells at runtime** works by command and by the central's own policy (Slices 2b-3); still
-  to come: buildings handed across a cut (Slice 4: a building in a given-away rectangle never drains), a central
-  restart with a cut map (Slice 5: the map freezes until the cut is merged back by hand), and the Setup window's
-  checks for Dynamic maps (Slice 6). One operation runs at a time world-wide. Sleeping cells on a fine grid cover the
+- **Dynamic split/merge of cells at runtime** works by command and by the central's own policy (Slices 2b-3), and
+  buildings follow the cut (Slice 4); still to come: a central restart with a cut map (Slice 5: the map freezes until
+  the cut is merged back by hand), and the Setup window's checks for Dynamic maps (Slice 6). Buildings: scene-placed
+  buildings and chests stay per-channel copies (their ids embed the channel), so a child's scene rows accumulate under
+  the base channel and a chest's contents depend on the serving cell; `buildLimit` is counted per process; a building
+  placed while its owner restarts has two owners for about a second (reconciled from the database at the hand-over);
+  the kit's own race between a player's handoff and an item move it had in flight is unchanged.
+  A client that moves items into a chest on a cell where nobody has opened that chest yet trips the kit's
+  `NotifyStorageItemsUpdated` (an exception line and a stuck storage user); the kit's own UI always opens first, and so
+  does the rig's tester after a hand-over. One operation runs at a time world-wide. Sleeping cells on a fine grid cover the
   sandbox case meanwhile.
 - **One shared world frame per registry**: two maps meant to touch must be placed by their world origins; the
   registry does not derive placement from content.

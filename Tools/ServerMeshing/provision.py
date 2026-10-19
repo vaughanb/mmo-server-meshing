@@ -40,7 +40,7 @@ import provision_burst
 # The rows, the connection and the Play guard live in provision_rows (the ~500-line rule); every name stays
 # importable here.
 from provision_rows import (BASE_HP, BASE_STAMINA, BOT, COMMON_BAG, DB_CONFIG, FIXTURE_LEVEL, FIXTURES,  # noqa: F401
-                           INVENTORY_BAG, INVENTORY_WEAPON_RIGHT, ITEM_BOW, ITEM_BUILDING, ITEM_MOUNT, ITEM_PET,
+                           INVENTORY_BAG, INVENTORY_WEAPON_RIGHT, ITEM_BOW, ITEM_BUILDING, ITEM_DOOR, ITEM_MOUNT, ITEM_PET, ITEM_STORAGE,
                            ITEM_SKILL, ITEM_VERSION, ITEM_YIELD, LEADER, MAP, PARTY_ID, PASSWORD, PLAY_STATUS,
                            PLAYER_CLASS, PLAYER_ENTITY, QUEST_KILL, ROOT, SKILL_DEBUFF, SKILL_HEAL, TESTER, _i32,
                            character_row, character_tables, db_connect, delete_character, editor_is_playing,

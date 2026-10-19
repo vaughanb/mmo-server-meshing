@@ -63,6 +63,12 @@ namespace MultiplayerARPG.MMO
 #endif
 
         public bool IsAllocate { get; set; } = false;
+        /// <summary>
+        /// The channel buildings of this map server are loaded from and saved under. The kit persists buildings per
+        /// channel and map; a subclass that serves one channel's map from several processes (server meshing) returns
+        /// the channel the rows belong to. Used at every building database site; nothing else reads it.
+        /// </summary>
+        protected virtual string BuildingPersistenceChannelId => ChannelId; // MESH-EDIT: CE-10 — the add-on persists a split family's buildings under its base cell's channel. See Docs/ServerMeshing/DESIGN.md §17
         public string ClusterServerAddress { get { return clusterServerAddress; } }
         public int ClusterServerPort { get { return clusterServerPort; } }
         public string AppAddress { get { return publicAddress; } }
@@ -260,7 +266,7 @@ namespace MultiplayerARPG.MMO
                 if (buildingEntity == null) continue;
                 await DatabaseClient.UpdateBuildingAsync(new UpdateBuildingReq()
                 {
-                    ChannelId = ChannelId,
+                    ChannelId = BuildingPersistenceChannelId, // MESH-EDIT: CE-10
                     MapName = CurrentMapInfo.Id,
                     BuildingData = buildingEntity.CloneTo(new BuildingSaveData())
                 });
@@ -363,7 +369,7 @@ namespace MultiplayerARPG.MMO
                     {
                         buildingsResp = await DatabaseClient.GetBuildingsAsync(new GetBuildingsReq()
                         {
-                            ChannelId = ChannelId,
+                            ChannelId = BuildingPersistenceChannelId, // MESH-EDIT: CE-10
                             MapName = CurrentMapInfo.Id,
                         });
                     } while (!buildingsResp.IsSuccess);
@@ -410,7 +416,7 @@ namespace MultiplayerARPG.MMO
                         continue;
                     initialBuildingTasks.Add(DatabaseClient.CreateBuildingAsync(new CreateBuildingReq()
                     {
-                        ChannelId = ChannelId,
+                        ChannelId = BuildingPersistenceChannelId, // MESH-EDIT: CE-10
                         MapName = CurrentMapInfo.Id,
                         BuildingData = initializingBuilding.CloneTo(new BuildingSaveData()),
                     }));

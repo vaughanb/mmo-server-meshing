@@ -2092,7 +2092,7 @@ namespace MultiplayerARPG.MMO.Mesh
 
         public override async UniTask<BuildingEntity> CreateBuildingEntity(BuildingSaveData saveData, bool initialize)
         {
-            if (!initialize && IsLayoutGated && TryHoldGatedPlacement(saveData, received: false))
+            if (!initialize && HoldsPlacements && TryHoldGatedPlacement(saveData, received: false)) // Slice 4 decision 5: also while the buildings load
                 return null; // created when the layout gate opens (or here at its deadline)
             if (!initialize && ghostBuildings && world != null && TryResolveOwnZone())
             {
@@ -2116,13 +2116,13 @@ namespace MultiplayerARPG.MMO.Mesh
                 }
                 if (!string.IsNullOrEmpty(targetZone) && !string.Equals(targetZone, OwnZoneId))
                 {
-                    if (_linkClients.TryGetValue(targetZone, out MeshLinkClient link) && link.IsConnected)
+                    if (_linkClients.TryGetValue(targetZone, out MeshLinkClient link) && link.IsConnected && (!IsDynamicMap || IsNeighbourSettled(targetZone))) // Slice 4 decision 11: a Dynamic map's target must be registered with its gate open
                     {
                         link.SendBuildingPlace(saveData);
                         Logging.Log("Mesh", $"Building {saveData.Id} placed by {saveData.CreatorName} at {(Vector3)saveData.Position} belongs to zone {targetZone}{(string.IsNullOrEmpty(saveData.ParentId) ? "" : " (its parent's)")}: handed over");
                         return null;
                     }
-                    Logging.LogWarning("Mesh", $"Building {saveData.Id} placed at {(Vector3)saveData.Position} belongs to zone {targetZone}, which is not linked: kept here");
+                    Logging.LogWarning("Mesh", $"Building {saveData.Id} placed at {(Vector3)saveData.Position} belongs to zone {targetZone}, which is not ready: kept here");
                 }
             }
             return await base.CreateBuildingEntity(saveData, initialize);
@@ -2133,7 +2133,7 @@ namespace MultiplayerARPG.MMO.Mesh
             if (!IsServer || msg.building == null)
                 return;
             msg.building.Position = (Vector3)msg.building.Position + OffsetFrom(connectionId);
-            if (IsLayoutGated && TryHoldGatedPlacement(msg.building, received: true))
+            if (HoldsPlacements && TryHoldGatedPlacement(msg.building, received: true)) // Slice 4 decision 5
                 return;
             string from = _neighbourZoneByConnection.TryGetValue(connectionId, out string z) ? z : "?";
             Logging.Log("Mesh", $"Building {msg.building.Id} placed from zone {from} by {msg.building.CreatorName} at {(Vector3)msg.building.Position}: creating here");
@@ -2316,6 +2316,7 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private void DestroyGhostStatic(string meshId, string reason)
         {
+            if (DeferDemotedRootDestroy(meshId, reason)) return; // Slice 4 decision 7: a demoted tree despawns leaf first (MeshMapNetworkManager_Buildings)
             if (!_ghostStatics.TryGetValue(meshId, out GhostStatic ghost))
                 return;
             _ghostStatics.Remove(meshId);

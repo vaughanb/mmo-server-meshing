@@ -42,6 +42,8 @@ class HashTests(unittest.TestCase):
             "pet": ("testPetItem", p.ITEM_PET),
             "mount": ("testMountItem", p.ITEM_MOUNT),
             "building item": ("TestBuildingItem-CE", p.ITEM_BUILDING),
+            "storage item": ("TestStorageItem-CE", p.ITEM_STORAGE),
+            "door item": ("TestDoorItem-CE", p.ITEM_DOOR),
             "yield": ("DefaultWeaponItem-CE", p.ITEM_YIELD),
             "debuff skill": ("TestDebuffSkill", p.SKILL_DEBUFF),
             "heal skill": ("TestHealSkill", p.SKILL_HEAL),
@@ -64,7 +66,7 @@ class HashTests(unittest.TestCase):
 class RowTests(unittest.TestCase):
     def test_item_rows(self):
         cases = {
-            "tester": (p.TESTER, [p.ITEM_SKILL, p.ITEM_PET, p.ITEM_MOUNT, p.ITEM_BUILDING]),
+            "tester": (p.TESTER, [p.ITEM_SKILL, p.ITEM_PET, p.ITEM_MOUNT, p.ITEM_BUILDING, p.ITEM_STORAGE, p.ITEM_DOOR]),
             "bot": (p.BOT, [p.ITEM_SKILL, p.ITEM_PET, p.ITEM_MOUNT]),
         }
         for name, (fixture, bag) in cases.items():
@@ -91,6 +93,8 @@ class RowTests(unittest.TestCase):
             "skill stack": (p.ITEM_SKILL, 20, 1),
             "pet at level 10": (p.ITEM_PET, 1, 10),
             "three building items": (p.ITEM_BUILDING, 3, 1),
+            "one storage chest": (p.ITEM_STORAGE, 1, 1),
+            "one door": (p.ITEM_DOOR, 1, 1),
         }
         rows = {r["dataId"]: r for r in p.item_rows(p.TESTER)}
         for name, (data_id, amount, level) in cases.items():

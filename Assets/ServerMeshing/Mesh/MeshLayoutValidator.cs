@@ -122,6 +122,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 return "a dynamicSettings policy time is negative";
             if (s.flapReliefShare < 0f || s.flapMaxMultiplier < 1f || s.hostHeadroomShare <= 0f || s.fastPathSaturatedShare < 0f)
                 return "a dynamicSettings policy share is out of range (flapReliefShare >= 0, flapMaxMultiplier >= 1, hostHeadroomShare > 0, fastPathSaturatedShare >= 0)";
+            if (s.buildingTransfersInFlight <= 0 || !(s.buildingStorageCloseSeconds > 0f))
+                return "dynamicSettings.buildingTransfersInFlight and buildingStorageCloseSeconds must be above 0 (Slice 4)";
             string weights = MeshPlannerWeights.From(s).Error();
             return weights != null ? "dynamicSettings: " + weights : null;
         }

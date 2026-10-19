@@ -4,7 +4,7 @@ using NUnit.Framework;
 
 namespace MultiplayerARPG.MMO.Mesh.Tests
 {
-    /// <summary>Slice 2c decisions 9 and 10: what a Draining cell still holds, its predicate and text, and the evidence wire version 2.</summary>
+    /// <summary>Slice 2c decisions 9 and 10: what a Draining cell still holds, its predicate and text, and the evidence wire (version 3 since Slice 4).</summary>
     public class MeshDrainStateTests
     {
         private static MeshDrainState Every(int value)
@@ -18,11 +18,11 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
         }
 
         [Test]
-        public void IsDrained_EveryCountButBuildingsIsZero()
+        public void IsDrained_EveryCountIsZero()
         {
             Assert.That(default(MeshDrainState).IsDrained, Is.True);
-            Assert.That(new MeshDrainState { buildings = 3 }.IsDrained, Is.True, "buildings are Slice 4: reported, never waited for");
-            string[] names = { "characters", "summons", "monsters", "itemDrops", "rewardDrops", "harvestables", "connections", "inProgress",
+            Assert.That(new MeshDrainState { buildings = 3 }.IsDrained, Is.False, "Slice 4 decision 6: buildings hold the drain");
+            string[] names = { "characters", "summons", "monsters", "itemDrops", "rewardDrops", "harvestables", "buildings", "connections", "inProgress",
                 "pendingAcks", "rolledBack", "deferredAcks", "reserved", "incoming", "staticLoans", "serverCharacters" };
             foreach (string name in names)
             {
@@ -72,9 +72,9 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
         }
 
         [Test]
-        public void Evidence_V2_CarriesTheDrainStateAndDrained()
+        public void Evidence_V3_CarriesTheDrainStateAndDrained()
         {
-            Assert.That(MeshLayoutEvidenceMessage.WireVersion, Is.EqualTo((byte)2));
+            Assert.That(MeshLayoutEvidenceMessage.WireVersion, Is.EqualTo((byte)3));
             MeshRect given = new MeshRect(0f, -100f, 100f, 100f);
             MeshLayoutEvidenceMessage built = MeshSplitEvidence.Assemble("C.1", "inc", new MeshLayoutPair(3, 9), 20f, 10f,
                 new List<MeshNeighbourEvidence>(), 0, 0f, 4f, 16.67f, true, given, new MeshDrainCounts { characters = 1 });
@@ -89,11 +89,16 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             Assert.That(read.drainState, Is.EqualTo(state));
             Assert.That(read.drained, Is.False);
 
-            MeshLayoutEvidenceMessage drained = MeshSplitEvidence.WithDrainState(built, true, new MeshDrainState { buildings = 2 });
+            MeshLayoutEvidenceMessage holding = MeshSplitEvidence.WithDrainState(built, true, new MeshDrainState { buildings = 2 });
+            writer.Reset();
+            holding.Serialize(writer);
+            Assert.That(MeshWholeMessage.TryRead(new NetDataReader(writer.CopyData()), out read, out error), Is.True, error);
+            Assert.That((read.drained, read.drainState.buildings), Is.EqualTo((false, 2)), "Slice 4: buildings hold a drain");
+            MeshLayoutEvidenceMessage drained = MeshSplitEvidence.WithDrainState(built, true, default(MeshDrainState));
             writer.Reset();
             drained.Serialize(writer);
             Assert.That(MeshWholeMessage.TryRead(new NetDataReader(writer.CopyData()), out read, out error), Is.True, error);
-            Assert.That((read.drained, read.drainState.buildings), Is.EqualTo((true, 2)), "buildings never hold a drain");
+            Assert.That(read.drained, Is.True);
         }
 
         [Test]

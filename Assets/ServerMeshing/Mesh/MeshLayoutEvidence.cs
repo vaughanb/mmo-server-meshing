@@ -3,7 +3,8 @@
 // reads a new child's pre-warm (its band neighbours' hellos and datagrams, its spawn queue, its saturation); the
 // drain gate reads what a shrunk parent still owns in the rectangle it gave away. Id MeshClusterMsg.LayoutEvidence
 // (30019). Game-neutral; the load report keeps its own frozen wire. Version 2 (Slice 2c decision 10) appends what a
-// Draining cell still holds (MeshDrainState) and whether it is drained.
+// Draining cell still holds (MeshDrainState) and whether it is drained; version 3 (Slice 4 decision 12) adds the
+// buildings a shrunk cell still owns in the rectangle it gave away to the drain counts.
 using System.Collections.Generic;
 using LiteNetLib.Utils;
 
@@ -33,16 +34,18 @@ namespace MultiplayerARPG.MMO.Mesh
         public int synthetics;
         /// <summary>pendingHandoffs counts handoffs toward the new owner awaiting an ack, rolled back, or reserved.</summary>
         public int pendingHandoffs;
+        /// <summary>buildings counts building trees rooted in the given-away rectangle (no hysteresis) plus transfers in flight toward its owner (Slice 4).</summary>
+        public int buildings;
 
         /// <summary>Total is the sum of every count; the drain gate opens at 0.</summary>
-        public int Total => characters + petsAndMounts + monsters + staticsAndDrops + synthetics + pendingHandoffs;
+        public int Total => characters + petsAndMounts + monsters + staticsAndDrops + synthetics + pendingHandoffs + buildings;
     }
 
     /// <summary>MeshLayoutEvidenceMessage is one cell's split-gate evidence for one load window.</summary>
     public struct MeshLayoutEvidenceMessage : INetSerializable
     {
         /// <summary>WireVersion is the evidence wire's version, written first; a reader refuses another.</summary>
-        public const byte WireVersion = 2;
+        public const byte WireVersion = 3;
 
         public string cellId;
         public string incarnation;
@@ -94,6 +97,7 @@ namespace MultiplayerARPG.MMO.Mesh
             writer.Put(drain.staticsAndDrops);
             writer.Put(drain.synthetics);
             writer.Put(drain.pendingHandoffs);
+            writer.Put(drain.buildings);
             drainState.Put(writer);
             writer.Put(drained);
         }
@@ -131,6 +135,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 staticsAndDrops = reader.GetInt(),
                 synthetics = reader.GetInt(),
                 pendingHandoffs = reader.GetInt(),
+                buildings = reader.GetInt(),
             };
             drainState = MeshDrainState.Get(reader);
             drained = reader.GetBool();

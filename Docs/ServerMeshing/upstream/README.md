@@ -14,6 +14,7 @@ wording (no add-on markers). The local copy of the kit in `Assets/OpenMMORPG/` c
 | 0005 CharacterDataCache: drop the finalizer that released pooled collections off the main thread (CE-11) | **bug fix** | `CharacterDataCache.cs` |
 | 0006 Send one-shot movement flags to every receiver of a tick (CE-12) | **bug fix** | `IEntityMovementDataHandler.cs`, `BaseGameNetworkManager.cs`, `BuiltInEntityMovementFunctions3D.cs`, `NavMeshEntityMovement.cs` |
 | 0007 Read entity states synchronously and resume at each state's length (CE-13) | **bug fix** | `BaseGameNetworkManager.cs`, the five movement readers (`BuiltInEntityMovementFunctions3D.cs`, `NavMeshEntityMovement.cs`, `RigidBodyEntityMovement2D.cs`, `BuiltInSimpleEntityMovementFunctions3D.cs`, `SimpleNavMeshEntityMovement.cs`) |
+| 0008 MapNetworkManager: let subclasses choose the building persistence channel (CE-10) | extension seam | `MMO/Scripts/MMOGame/Networking/Map/MapNetworkManager.cs`, `MapNetworkManager_DatabaseFunction.cs` |
 
 0001-0004: 7 files, 30 insertions, 4 deletions, verified against upstream `develop` at `aa8ecf1` (2026-09-15): every
 anchor line is present and unchanged, and the diff contains nothing but these lines (byte-order marks and line
@@ -24,6 +25,11 @@ and carried by both downstream kit copies. They are the same code as the space t
 with comments ignored. Only the comments were reworded upstream-neutral, and NavMesh's class line was applied by hand
 because upstream's class is not `partial`. 0007 applies on top of 0006. The add-on's state sender (Phase 0 step 6)
 calls `IEntityMovementServerStateFlags.ConsumeServerStateFlags()` from 0006, so it needs a kit that carries 0006.
+
+0008 (2026-10-19, Slice 4 of the dynamic cells) is one `protected virtual string BuildingPersistenceChannelId => ChannelId;`
+read at the kit's seven building database sites (the load, the in-scene create, the quit save, the two saves, the
+create, the delete); no behaviour change unless overridden. Generated from the kit copy with the `MESH-EDIT: CE-10`
+markers stripped; the doc comment stays. **Not yet pushed.**
 
 ## Status
 

@@ -185,18 +185,26 @@ def grade_status(rep, status, spec):
 
 
 def start_split(name, rep, rig, start, day, bots, spec_name=None, observe_s=OBSERVE_S, plan=None, load_plan=None,
-                enabled=True, env=None, grade_status=grade_status, on_poll=None):
+                enabled=True, env=None, grade_status=grade_status, on_poll=None, tester=None, clear_buildings=False,
+                observe_seconds=None, line_x=None, before_command=None):
     """The split phase: setup (database, bot positions, the Dynamic Play, the bots, each with an `observe_s` stand
     window, their logs named after `name`), the command once every bot stands, its status graded, and the wait for
     the base's e3 apply (when the op is done). `spec_name` picks the split (SPECS; default `name`). Slice 2d's crash
     cases change the rest: `plan` the bots (default plan_bots), `load_plan` the synthetic players ('' for none; default
     the spec's), `enabled` False keeps the editor's tester out, `env` adds to (and overrides) the Play's environment,
-    `grade_status` is the status grader (None: the caller grades), `on_poll` goes to wait_op. Returns a SplitRun."""
+    `grade_status` is the status grader (None: the caller grades), `on_poll` goes to wait_op. Slice 4: `tester` is
+    (mode, x, z) for the editor's tester (default: `stand` at the spec's park), `clear_buildings`, `observe_seconds`
+    and `line_x` reach db_reset and request_play (only when set, so older rigs keep their shapes), and `before_command`
+    runs once every bot stands, before the command (it returns False to send nothing). Returns a SplitRun."""
     spec, split = SPECS[spec_name or name], split_of(spec_name or name, rig.MAP)
     plan = plan_bots(spec_name or name) if plan is None else list(plan)
     harvest = next((b for b in plan if b.harvest), None)
     stand = [b for b in plan if not b.harvest]
-    rig.db_reset(spec.tester, harvest.point if harvest else spec.tester)
+    tester_mode, tester_at = (tester[0], (tester[1], tester[2])) if tester else ("stand", spec.tester)
+    if clear_buildings:
+        rig.db_reset(tester_at, harvest.point if harvest else tester_at, clear_buildings=True)
+    else:
+        rig.db_reset(tester_at, harvest.point if harvest else tester_at)
     provision.reset_bot_positions(2, STAND_BOTS, [b.point for b in stand], status_path=rig.STATUS)
     play_env = {"MESH_CELL_MODE": f"{rig.MAP}:Dynamic"}
     load_plan = spec.load_plan if load_plan is None else load_plan
@@ -206,7 +214,12 @@ def start_split(name, rep, rig, start, day, bots, spec_name=None, observe_s=OBSE
         # The test map saves C's monster areas inactive; this one straddles the cut, so monsters stand on both sides.
         play_env["MESH_MONSTER_AREAS"] = spec.monster_areas
     play_env.update(env or {})
-    rig.request_play("stand", spec.tester[0], spec.tester[1], env=play_env, enabled=enabled)
+    play_kwargs = {}
+    if observe_seconds is not None:
+        play_kwargs["observe_seconds"] = observe_seconds
+    if line_x is not None:
+        play_kwargs["line_x"] = line_x
+    rig.request_play(tester_mode, tester_at[0], tester_at[1], env=play_env, enabled=enabled, **play_kwargs)
     rig.wait_play(60)
     time.sleep(20)
     logs = {}
@@ -226,6 +239,8 @@ def start_split(name, rep, rig, start, day, bots, spec_name=None, observe_s=OBSE
                   f"(at {at}, planned {b.point})")
     if not all(standing.values()):
         rep.check(False, "split: not sent, a bot never logged 'Standing at'")
+        return SplitRun(name, spec, split, plan, logs, standing, stood, None, None, None, False, None, None)
+    if before_command is not None and before_command() is False:
         return SplitRun(name, spec, split, plan, logs, standing, stood, None, None, None, False, None, None)
 
     seq = str(int(time.time()))

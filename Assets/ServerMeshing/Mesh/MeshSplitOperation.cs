@@ -304,7 +304,7 @@ namespace MultiplayerARPG.MMO.Mesh
             MeshDrainCounts d = evidence.drain;
             if (d.Total > 0)
             {
-                why = $"{d.Total} left: {d.characters} character(s), {d.petsAndMounts} pet(s) or mount(s), {d.monsters} monster(s), {d.staticsAndDrops} static(s) or drop(s), {d.synthetics} synthetic(s), {d.pendingHandoffs} handoff(s) unsettled";
+                why = $"{d.Total} left: {d.characters} character(s), {d.petsAndMounts} pet(s) or mount(s), {d.monsters} monster(s), {d.staticsAndDrops} static(s) or drop(s), {d.synthetics} synthetic(s), {d.pendingHandoffs} handoff(s) unsettled, {d.buildings} building(s)";
                 return false;
             }
             return true;

@@ -218,6 +218,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     counts.staticsAndDrops++;
             }
             counts.pendingHandoffs = CharacterHandoffsInFlight(_splitDrainOwnerId) + _rolledBackHandoffs.Count + StaticLoansToward(_splitDrainOwnerId);
+            counts.buildings = CountDrainBuildings(_splitDrainOwnerId); // Slice 4 decision 12 (MeshMapNetworkManager_BuildingTransfer)
             return counts;
         }
 

@@ -16,6 +16,18 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
         private const int StateLength = 8;
 
         [Test]
+        public void MapNetworkManager_HasAVirtualBuildingPersistenceChannel()
+        {
+            PropertyInfo kit = typeof(MapNetworkManager).GetProperty("BuildingPersistenceChannelId", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+            Assert.That(kit, Is.Not.Null, "CE-10: MapNetworkManager.BuildingPersistenceChannelId is missing (DESIGN.md §17)");
+            Assert.That(kit.PropertyType, Is.EqualTo(typeof(string)), "CE-10");
+            Assert.That(kit.GetGetMethod(true).IsVirtual && kit.GetGetMethod(true).IsFamily, Is.True, "CE-10: it must be protected virtual");
+            PropertyInfo mesh = typeof(MeshMapNetworkManager).GetProperty("BuildingPersistenceChannelId", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+            Assert.That(mesh, Is.Not.Null, "Slice 4 decision 2: the add-on overrides BuildingPersistenceChannelId");
+            Assert.That(mesh.GetGetMethod(true).GetBaseDefinition().DeclaringType, Is.EqualTo(typeof(MapNetworkManager)), "the override must override the kit's virtual");
+        }
+
+        [Test]
         public void CharacterDataCache_HasNoFinalizer()
         {
             MethodInfo finalizer = typeof(CharacterDataCache).GetMethod("Finalize", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
