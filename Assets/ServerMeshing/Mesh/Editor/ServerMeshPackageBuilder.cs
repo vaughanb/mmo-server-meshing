@@ -36,7 +36,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
     {
         // Release metadata. Version is the add-on version reported by the Addon Manager; UpdateDate drives its recency
         // filter and "New" badge, and is bumped by hand with the version rather than tracking the build clock.
-        public const string Version = "0.79.0";
+        public const string Version = "0.80.0";
         public const string UpdateDate = "2026-10-18";
 
         // Where the published packages will be fetched from. The Addon Manager downloads "packageUrl" verbatim, so this
@@ -62,7 +62,8 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             Category = "MMO",
             Description =
                 "Splits a map across several map-server processes (\"cells\") with seamless handoff, ghosting across cell " +
-                "edges, seams between maps, cells of any size and on-demand (\"sleeping\") cells.\n" +
+                "edges, seams between maps, cells of any size, on-demand (\"sleeping\") cells, and dynamic cells the central " +
+                "cuts and merges at runtime, by command or by its own load policy.\n" +
                 "Players cross a cell edge without a loading screen; neighbouring cells exchange ghosts of everything near " +
                 "their shared edge, so combat, loot, quests and building resolve across it. Empty land costs nothing: a cell " +
                 "with nobody near it does not run.\n" +

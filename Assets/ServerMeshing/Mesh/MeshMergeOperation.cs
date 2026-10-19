@@ -31,7 +31,7 @@ namespace MultiplayerARPG.MMO.Mesh
     /// <summary>MeshMergeOperation is one merge in progress, or the last one that ended.</summary>
     public sealed class MeshMergeOperation : MeshLayoutOperation
     {
-        /// <summary>The family's base cell (A), which takes the union and is never retired.</summary>
+        /// <summary>The survivor (A), which takes the union: the family's base cell when it is one of the two (it is never retired), else the child holding more players (Slice 3).</summary>
         public string survivorId;
         /// <summary>The child (B) that drains to the survivor and exits.</summary>
         public string retiringId;

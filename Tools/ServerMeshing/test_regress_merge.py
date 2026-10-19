@@ -210,7 +210,7 @@ class MergeScenarioTests(unittest.TestCase):
     def test_status_failures(self):
         s = merge_status("merge")
         cases = {
-            "refused": ([["Layout op refused: merge of two children (Slice 3)"]], ["accepted"]),
+            "refused": ([["Layout op refused: C and E are not of one family (bases C and E)"]], ["accepted"]),
             "aborted": ([s[:3] + ["aborted e1 gate shut: no hello from N", "reverted broadcast 1a2b/6"]],
                         ["merge states", "neither aborted"]),
             "frozen": ([s[:11] + ["frozen e3 ack timeout"]], ["merge states", "neither aborted"]),

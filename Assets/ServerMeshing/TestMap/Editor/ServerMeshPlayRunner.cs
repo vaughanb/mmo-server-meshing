@@ -84,12 +84,19 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         private static void OnPlayModeStateChanged(PlayModeStateChange change)
         {
             SessionState.EraseFloat(PlayPendingKey);
+            if (change == PlayModeStateChange.EnteredPlayMode)
+                s_playing = true;
             if (change != PlayModeStateChange.EnteredEditMode)
                 return;
+            s_playing = false;
             SessionState.EraseString(PlaySeqKey);
             s_layoutSeq = null;
             RestoreEnvironment();
         }
+
+        // Whether Play runs (set on EnteredPlayMode, cleared on EnteredEditMode): lines of automatic operations are
+        // mirrored under `auto` only then. A static, read from the log thread.
+        private static volatile bool s_playing;
 
         /// <summary>A request whose Play did not start within the grace period gets its environment put back.</summary>
         private static void AbandonUnstartedPlay()
@@ -355,12 +362,19 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             Debug.Log("[MeshRunner] Layout command " + seq + " handed to the central" + (string.IsNullOrEmpty(refusal) ? "" : "; refused"));
         }
 
-        /// <summary>Mirrors a console line starting `Split `, `Merge ` or `Layout op ` under the current command's seq (any thread).</summary>
+        /// <summary>
+        /// Mirrors a console line starting `Split `, `Merge `, `Layout op `, `Supervisor:` or `Policy: ` under the current
+        /// command's seq, or under `auto` while this Play has no live command (Slice 3: automatic operations); any thread.
+        /// </summary>
         private static void MirrorLayoutLine(string condition, string stackTrace, LogType type)
         {
             string seq = s_layoutSeq;
             if (seq == null)
-                return;
+            {
+                if (!s_playing)
+                    return;
+                seq = ServerMeshLayoutCommandFile.AutoSeq;
+            }
             string payload = ServerMeshLayoutCommandFile.MirroredPayload(condition);
             if (payload == null)
                 return;

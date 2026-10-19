@@ -19,7 +19,9 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         /// <summary>NoSeq stands for the seq of a command whose seq could not be read.</summary>
         public const string NoSeq = "?";
 
-        private static readonly string[] s_mirroredPrefixes = { "Split ", "Merge ", "Layout op ", "Supervisor:" };
+        private static readonly string[] s_mirroredPrefixes = { "Split ", "Merge ", "Layout op ", "Supervisor:", "Policy: " };
+        /// <summary>AutoSeq is the seq the runner mirrors lines under while no command of this Play is live (Slice 3: automatic operations).</summary>
+        public const string AutoSeq = "auto";
 
         /// <summary>
         /// TryParse reads the command file's text: the first line that is neither blank nor a # comment, trimmed. Its first
@@ -66,7 +68,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         /// <summary>
         /// MirroredPayload is the part of a console message the status file mirrors, or null: the message's first line with
         /// the kit logger's prefix (` INFO Mesh [date time] - `) or a `[tag] ` prefix removed, when it then starts with
-        /// `Split `, `Merge `, `Layout op ` or `Supervisor:`.
+        /// `Split `, `Merge `, `Layout op `, `Supervisor:` or `Policy: `.
         /// </summary>
         public static string MirroredPayload(string message)
         {

@@ -103,6 +103,29 @@ namespace MultiplayerARPG.MMO.Mesh
             return $"dynamicSettings.childDownGraceSeconds {Number(settings.childDownGraceSeconds)} is under childFenceSeconds + fenceSaveSeconds + 3 = {Number(least)} s: a restarted cell could start beside one that is still fencing";
         }
 
+        /// <summary>
+        /// PolicySettingsError is Slice 3's consistency rule over the automatic policy's settings (slices/slice3_design.md,
+        /// Settings): null when they can be used, else the first fault.
+        /// </summary>
+        public static string PolicySettingsError(MeshDynamicSettings s)
+        {
+            if (s == null)
+                return null;
+            if (!(s.splitUtil > 0f) || s.splitUtil > 1f)
+                return $"dynamicSettings.splitUtil {Number(s.splitUtil)} is not in (0, 1]";
+            if (!(s.splitBenefitRatio > 0f) || s.splitBenefitRatio > 1f)
+                return $"dynamicSettings.splitBenefitRatio {Number(s.splitBenefitRatio)} is not in (0, 1]";
+            if (s.fastPathUtil < s.splitUtil)
+                return $"dynamicSettings.fastPathUtil {Number(s.fastPathUtil)} is under splitUtil {Number(s.splitUtil)}";
+            if (s.splitDwellSeconds < 0f || s.fastPathSeconds < 0f || s.mergeDwellSeconds < 0f || s.opCooldownSeconds < 0f
+                || s.reportFreshSeconds < 0f || s.measureAfterSeconds < 0f || s.flapWindowSeconds < 0f)
+                return "a dynamicSettings policy time is negative";
+            if (s.flapReliefShare < 0f || s.flapMaxMultiplier < 1f || s.hostHeadroomShare <= 0f || s.fastPathSaturatedShare < 0f)
+                return "a dynamicSettings policy share is out of range (flapReliefShare >= 0, flapMaxMultiplier >= 1, hostHeadroomShare > 0, fastPathSaturatedShare >= 0)";
+            string weights = MeshPlannerWeights.From(s).Error();
+            return weights != null ? "dynamicSettings: " + weights : null;
+        }
+
         private static string Number(float value) => value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
 
         /// <summary>

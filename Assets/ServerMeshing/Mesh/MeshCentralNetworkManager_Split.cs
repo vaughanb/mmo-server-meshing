@@ -205,6 +205,15 @@ namespace MultiplayerARPG.MMO.Mesh
 
             public bool KitRestartsBaseCells => !_central.sleepCells;
 
+            public bool TryGetHost(string baseId, out MeshHostInfo host)
+            {
+                host = default;
+                if (Cluster == null || !Cluster.IsNetworkActive)
+                    return false;
+                long spawner = SpawnerForKey(baseId, _central._spawnerByCell, Cluster.MapSpawnServerPeers.Keys, out _);
+                return spawner >= 0 && _central._hostBySpawner.TryGetValue(spawner, out host);
+            }
+
             public bool RequestRestart(string cellId, string baseId, string mapId, out string error)
             {
                 error = null;

@@ -90,6 +90,8 @@ namespace MultiplayerARPG.MMO.Mesh
         public float lastReportAt = -1f;
         /// <summary>When a spawner kill of this incarnation was sent (-1 when none): its id may be restarted once its key is gone.</summary>
         public float killedAt = -1f;
+        /// <summary>This incarnation's latest load report (null before the first; it arrived at lastReportAt): the policy's evidence (Slice 3).</summary>
+        public MeshLoadReportMessage report;
     }
 
     /// <summary>
@@ -114,6 +116,8 @@ namespace MultiplayerARPG.MMO.Mesh
         bool KillChannel(MeshKillChannelMessage message, string baseId, out string error);
         /// <summary>Whether the kit restarts a crashed base cell itself (autoRestart; false in sleep mode, where the supervisor does).</summary>
         bool KitRestartsBaseCells { get; }
+        /// <summary>TryGetHost: the host of the spawner a base cell's family runs on, when that spawner reported one (Slice 3 decision 8).</summary>
+        bool TryGetHost(string baseId, out MeshHostInfo host);
     }
 
     /// <summary>MeshCoordinatorPhase is where the coordinator is.</summary>

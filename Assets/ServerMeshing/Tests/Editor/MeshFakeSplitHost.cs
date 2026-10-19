@@ -14,6 +14,14 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
         public readonly List<(MeshKillChannelMessage message, string baseId)> kills = new List<(MeshKillChannelMessage, string)>();
 
         public bool KitRestartsBaseCells => kitRestartsBaseCells;
+        /// <summary>The host every base cell runs on, when set (null: no spawner reported one).</summary>
+        public MeshHostInfo? host;
+
+        public bool TryGetHost(string baseId, out MeshHostInfo info)
+        {
+            info = host ?? default;
+            return host.HasValue;
+        }
 
         public bool CanSpawn(string baseId, out string error)
         {

@@ -57,6 +57,7 @@ namespace MultiplayerARPG.MMO.Mesh
             op.stragglers = 0;
             SendBroadcast(settle, op.StepId("settle"));
             OpLog(op, $"stragglers gone, settle broadcast {settle.pair}");
+            _policy?.OpSettled(op.opId, _clock.Now);
         }
 
         private bool TryStep(MeshSplitOperation op)
@@ -93,6 +94,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     _cooldownUntil[op.baseId] = _clock.Now + Math.Max(0f, Settings.splitCooldownSeconds);
                     SaveStore(op, _broadcast, null, null);
                     OpLog(op, "done");
+                    PolicyOpEnded(op, true, "done");   // the family's cooldown starts now; with stragglers the settle re-dates the measurement
                     return false;
                 default:
                     return false;

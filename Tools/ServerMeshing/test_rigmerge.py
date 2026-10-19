@@ -37,8 +37,8 @@ class MergeStatusTests(unittest.TestCase):
     def test_parse_merge_status(self):
         cases = {
             # failures first
-            "refused": (["Layout op refused: merge of two children (Slice 3)"], "refused",
-                        {"refused": "merge of two children (Slice 3)", "op": None}),
+            "refused": (["Layout op refused: C and E are not of one family (bases C and E)"], "refused",
+                        {"refused": "C and E are not of one family (bases C and E)", "op": None}),
             "aborted and reverted": (self.DONE[:3] + ["aborted e1 gate shut", "reverted broadcast 1a2b/6"], "aborted",
                                      {"aborted": "e1 gate shut", "reverted": True, "pairs": {"e1": "1a2b/5",
                                                                                              "reverted": "1a2b/6"}}),

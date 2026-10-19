@@ -38,6 +38,8 @@ import provision
 import regress_merge
 import regress_split
 import regress_splitcrash
+import regress_auto
+import rigauto
 import rigtools
 from provision import ITEM_BOW, ITEM_YIELD, db_connect
 
@@ -111,7 +113,11 @@ ENV_KEYS = ["MESH_NO_MONSTER_HANDOFF", "MESH_FAULT_DIE_ON_NOTICE", "MESH_GHOST_L
             "MESH_DB_BURST", "MESH_DB_SAVES_PROBE", "MESH_MONSTER_CELL", "MESH_FIGHT_GHOSTS", "MESH_FORWARD_TIMING",
             "MESH_SPACES", "MESH_NET_STATS", "MESH_MONSTER_AWAKE",
             # Slice 2d's fault toggles (regress_splitcrash): a child dies on the e1 broadcast, or on its drain's first arrival
-            "MESH_FAULT_DIE_ON_PREWARM", "MESH_FAULT_DIE_ON_DRAIN"]
+            "MESH_FAULT_DIE_ON_PREWARM", "MESH_FAULT_DIE_ON_DRAIN",
+            # Slice 3's automatic policy (regress_auto): which Dynamic maps split and merge by themselves, the triggers,
+            # the cooldown, the benefit gate, the cost model's weights, and the spawner's core count
+            "MESH_AUTO_OPS", "MESH_SPLIT_UTIL", "MESH_SPLIT_DWELL", "MESH_MERGE_UTIL", "MESH_MERGE_AFTER", "MESH_OP_COOLDOWN",
+            "MESH_SPLIT_BENEFIT", "MESH_MONSTER_WEIGHT", "MESH_PLANNER_WEIGHTS", "MESH_HOST_CORES"]
 EXTRA_ENV = {}   # --env KEY=VALUE from the command line, applied to every Play request of the run
 
 # Two-machine runs (--remote-cells): the named cells are served by the other machine, started and read over SSH by
@@ -594,10 +600,13 @@ def wait_log(zone, map_id, pattern, start, day, timeout):
 
 
 def expected_zones(expect):
-    """The cells a scenario expects to have run: every local static cell by default, or the ids it names."""
+    """The cells a scenario expects to have run: every local static cell by default, or the ids it names (an id
+    outside ZONES, a dynamic child such as C.1, is on the test map)."""
     if expect is None:
         return [(z, m) for z, m in ZONES if z not in REMOTE_CELLS]
-    return [(z, m) for z, m in ZONES if z in expect and z not in REMOTE_CELLS]
+    known = {z for z, _ in ZONES}
+    return ([(z, m) for z, m in ZONES if z in expect and z not in REMOTE_CELLS]
+            + [(z, MAP) for z in sorted(expect) if z not in known and z not in REMOTE_CELLS])
 
 
 def graded_zones(day):
@@ -676,6 +685,14 @@ def grade_layout(rep, start, day):
             problems.append(f"{gate} layout gate warning(s)")
         how = "Dynamic: layout applied before any player" if map_id in dynamic else "Static: no layout applied"
         rep.check(not problems, f"zone {zone}: {how}" + (f" ({'; '.join(problems[:2])})" if problems else ""))
+    grade_no_policy(rep)
+
+
+def grade_no_policy(rep):
+    """Slice 3 decision 16: a scenario that does not turn the automatic policy on sees no `Policy:` line in the
+    status file (the central writes no log the harness reads; the runner mirrors its lines under `auto`)."""
+    policy = rigauto.policy_texts(regress_split.read_lines(LAYOUT_COMMAND_STATUS))
+    rep.check(not policy, "no automatic policy line in the status file" + (f" ({policy[0][:100]})" if policy else ""))
 
 
 def registry_state(paths):
@@ -974,17 +991,24 @@ def run_scenario(name, rep):
     elif name in regress_splitcrash.SCENARIOS:
         split = regress_splitcrash.run(name, rep, sys.modules[__name__], start, day, bots)   # Slice 2d: a CrashRun
 
+    elif name in regress_auto.SCENARIOS:
+        split = regress_auto.run(name, rep, sys.modules[__name__], start, day, bots)   # Slice 3: an AutoRun
+
     else:
         raise ValueError(f"unknown scenario {name}")
 
-    # The sleeping-cell scenarios leave cells asleep on purpose; every other scenario runs them all.
-    grade_common(rep, start, day, expect={"wake": {"C", "E", "C2"}}.get(name))
+    # The sleeping-cell scenarios leave cells asleep on purpose; the Coarse ones run one cell; every other scenario
+    # runs them all (autosplit: plus the child the policy makes).
+    expect = {"wake": {"C", "E", "C2"}, "autosplit": {z for z, _ in ZONES} | {"C.1"}, **regress_auto.EXPECTED_ZONES}
+    grade_common(rep, start, day, expect=expect.get(name))
     if name in regress_split.SCENARIOS:
         regress_split.grade_layout(rep, sys.modules[__name__], start, day, split)
     elif name in regress_merge.SCENARIOS:
         regress_merge.grade_layout(rep, sys.modules[__name__], start, day, split)
     elif name in regress_splitcrash.SCENARIOS:
         regress_splitcrash.grade_layout(rep, sys.modules[__name__], start, day, split)
+    elif name in regress_auto.SCENARIOS:
+        regress_auto.grade_layout(rep, sys.modules[__name__], start, day, split)
     else:
         grade_layout(rep, start, day)
     for kind, log in bots:
@@ -1023,14 +1047,16 @@ TWO_HOST_SKIP = {
     **{n: regress_split.TWO_HOST_REASON for n in regress_split.SCENARIOS},
     **{n: regress_merge.TWO_HOST_REASON for n in regress_merge.SCENARIOS},
     **{n: regress_splitcrash.TWO_HOST_REASON for n in regress_splitcrash.SCENARIOS},
+    **{n: regress_auto.TWO_HOST_REASON for n in regress_auto.SCENARIOS},
 }
 ALL = (DEFAULT + ["pvp", "wake", "dynidle"] + list(regress_split.SCENARIOS) + list(regress_merge.SCENARIOS)
-       + list(regress_splitcrash.SCENARIOS))
+       + list(regress_splitcrash.SCENARIOS) + list(regress_auto.SCENARIOS))
 # A persisted remote cell outlives the Plays, so no scenario's environment reaches it.
 PERSIST_SKIP = {"dynidle": "runs the test map Dynamic through the environment, which a persisted remote cell never gets",
                 **{n: regress_split.PERSIST_REASON for n in regress_split.SCENARIOS},
                 **{n: regress_merge.PERSIST_REASON for n in regress_merge.SCENARIOS},
-                **{n: regress_splitcrash.PERSIST_REASON for n in regress_splitcrash.SCENARIOS}}
+                **{n: regress_splitcrash.PERSIST_REASON for n in regress_splitcrash.SCENARIOS},
+                **{n: regress_auto.PERSIST_REASON for n in regress_auto.SCENARIOS}}
 
 
 def main():

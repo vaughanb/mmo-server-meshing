@@ -94,7 +94,7 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             Assert.That(ServerMeshLayoutCommandFile.MirroredPayload(" INFO Mesh [2026-10-17 12:00:01] - Supervisor: C.1 down 21 s, restart 1 of 3 requested"), Is.EqualTo("Supervisor: C.1 down 21 s, restart 1 of 3 requested"));
             Assert.That(ServerMeshLayoutCommandFile.MirroredPayload(" WARN Mesh [2026-10-17 12:00:01] - Supervisor: C.1 restart 2 failed (no hello in 60 s)"), Is.EqualTo("Supervisor: C.1 restart 2 failed (no hello in 60 s)"));
             Assert.That(ServerMeshLayoutCommandFile.MirroredPayload("[Mesh] Supervisor: C.1 back, incarnation 8dcf1a2b3c4d5e6"), Is.EqualTo("Supervisor: C.1 back, incarnation 8dcf1a2b3c4d5e6"));
-            Assert.That(ServerMeshLayoutCommandFile.IsRefusal("Supervisor: C.1 cannot collapse (Slice 3); left down"), Is.False);
+            Assert.That(ServerMeshLayoutCommandFile.IsRefusal("Supervisor: C.1 cannot collapse (no live cell of its family shares a full edge); left down"), Is.False);
         }
 
         [Test]
@@ -112,7 +112,8 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
         public void IsRefusal_NotForMergeLines()
         {
             Assert.That(ServerMeshLayoutCommandFile.IsRefusal("Merge merge-2: aborted e1 gate shut"), Is.False);
-            Assert.That(ServerMeshLayoutCommandFile.IsRefusal(ServerMeshLayoutCommandFile.MirroredPayload("Layout op refused: merge of two children (Slice 3)")), Is.True);
+            Assert.That(ServerMeshLayoutCommandFile.IsRefusal(ServerMeshLayoutCommandFile.MirroredPayload("Layout op refused: C and E are not of one family (bases C and E)")), Is.True);
+            Assert.That(ServerMeshLayoutCommandFile.MirroredPayload(" INFO Mesh [2026-10-18 10:00:00] - Policy: split of C planned: x 0 + child C.1, util 0.9 -> peak 0.5 (C 0.5, C.1 0.4), 1 cut(s) tried"), Does.StartWith("Policy: split of C planned"));
         }
 
         [Test]

@@ -299,7 +299,7 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
                 Sup("C.1 down 20 s, restart 1 of 3 requested"), Sup("C.1 restart 1 failed (spawn error: spawner gone)"),
                 Sup("C.1 down 30 s, restart 2 of 3 requested"), Sup("C.1 restart 2 failed (spawn error: spawner gone)"),
                 Sup("C.1 down 40 s, restart 3 of 3 requested"), Sup("C.1 restart 3 failed (spawn error: spawner gone)"),
-                Sup("C.1 collapse queued after 3 failed restart(s)"), Sup("C.1 cannot collapse (Slice 3); left down"),
+                Sup("C.1 collapse queued after 3 failed restart(s)"), Sup("C.1 cannot collapse (no live cell of its family shares a full edge); left down"),
             }));
             Assert.That(_c.SupervisedOf("C.1").phase, Is.EqualTo(MeshSupervisorPhase.LeftDown));
             Tick(61);

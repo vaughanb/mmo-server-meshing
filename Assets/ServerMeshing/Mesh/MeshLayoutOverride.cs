@@ -118,13 +118,14 @@ namespace MultiplayerARPG.MMO.Mesh
                 return configured; // already the process's copy
             string layoutValue = Environment.GetEnvironmentVariable(ENV);
             string modeValue = Environment.GetEnvironmentVariable(ENV_CELL_MODE);
-            if (string.IsNullOrWhiteSpace(layoutValue) && string.IsNullOrWhiteSpace(modeValue))
+            bool policyEnv = MeshPolicyEnv.AnySet(Environment.GetEnvironmentVariable);
+            if (string.IsNullOrWhiteSpace(layoutValue) && string.IsNullOrWhiteSpace(modeValue) && !policyEnv)
                 return configured;
             if (s_resolved.TryGetValue(configured, out MeshWorldRegistry copy) && copy != null)
                 return copy;
             Dictionary<string, MeshCellRect[]> maps = ParseOrIgnore(layoutValue, Parse);
             Dictionary<string, MeshCellMode> modes = ParseOrIgnore(modeValue, ParseCellModes);
-            if (maps.Count == 0 && modes.Count == 0)
+            if (maps.Count == 0 && modes.Count == 0 && !policyEnv)
                 return configured;
             copy = UnityEngine.Object.Instantiate(configured);
             copy.name = configured.name + " (" + (maps.Count > 0 && modes.Count > 0 ? ENV + ", " + ENV_CELL_MODE : maps.Count > 0 ? ENV : ENV_CELL_MODE) + ")";
@@ -139,12 +140,24 @@ namespace MultiplayerARPG.MMO.Mesh
                 layout.cellRects = kv.Value;
             }
             ApplyCellModes(copy, modes, configured.name);
+            List<string> policyApplied = new List<string>(), policyWarnings = new List<string>();
+            if (policyEnv)
+            {
+                // Slice 3: the policy's toggles land on the same copy (the central reads them; the maps' modes are set by now).
+                if (copy.dynamicSettings == null)
+                    copy.dynamicSettings = new MeshDynamicSettings();
+                MeshPolicyEnv.Apply(copy.dynamicSettings, copy.maps, Environment.GetEnvironmentVariable, policyApplied, policyWarnings);
+            }
             copy.Rebuild();
             s_resolved[configured] = copy;
             if (maps.Count > 0)
                 Debug.Log($"[Mesh] {ENV}={layoutValue}: using a re-cut copy of {configured.name}");
             if (modes.Count > 0)
                 Debug.Log($"[Mesh] {ENV_CELL_MODE}={modeValue}: maps {DynamicMapList(copy)} run Dynamic");
+            foreach (string warning in policyWarnings)
+                Debug.LogWarning("[Mesh] " + warning);
+            if (policyApplied.Count > 0)
+                Debug.Log("[Mesh] Policy settings from the environment (" + string.Join(" ", policyApplied) + ")");
             return copy;
         }
 

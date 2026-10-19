@@ -54,9 +54,11 @@ namespace MultiplayerARPG.MMO.Mesh
                 return $"a merge needs two different cells, not {cellA.id} twice";
             if (!SameId(cellA.baseId, cellB.baseId) || cellA.mapId != cellB.mapId)
                 return $"{cellA.id} and {cellB.id} are not of one family (bases {cellA.baseId} and {cellB.baseId})";
-            if (cellA.isDynamic && cellB.isDynamic)
-                return "merge of two children (Slice 3)";
-            bool aSurvives = !cellA.isDynamic;
+            // The base survives when it is one of the two; two children: the one with more owned players by the latest
+            // reports (ties: the lower id), Slice 3 decision 11.
+            bool aSurvives = !cellA.isDynamic || (cellB.isDynamic && OwnedPlayersOf(cellA.id, cellB.id) >= 0);
+            if (!cellA.isDynamic && !cellB.isDynamic)
+                return $"{cellA.id} and {cellB.id} are both base cells";
             MeshCell survivor = aSurvives ? cellA : cellB, retiring = aSurvives ? cellB : cellA;
             MeshCellBinding survivorBinding = aSurvives ? bindingA : bindingB, retiringBinding = aSurvives ? bindingB : bindingA;
             if (!survivor.owned.TryUnion(retiring.owned, _world.touchTolerance, out MeshRect union))
@@ -89,6 +91,21 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             _mergeCounter++;
             return null;
+        }
+
+        /// <summary>
+        /// OwnedPlayersOf compares two children's owned players by their latest reports (a cell without one counts 0):
+        /// positive when <paramref name="a"/> holds more, negative when <paramref name="b"/> does, and on a tie the lower
+        /// id wins (0 when a is it, else -1).
+        /// </summary>
+        private int OwnedPlayersOf(string a, string b)
+        {
+            MeshCellBinding bindingA = BindingOf(a), bindingB = BindingOf(b);
+            int playersA = bindingA != null && bindingA.report != null ? bindingA.report.ownedPlayers : 0;
+            int playersB = bindingB != null && bindingB.report != null ? bindingB.report.ownedPlayers : 0;
+            if (playersA != playersB)
+                return playersA > playersB ? 1 : -1;
+            return string.Compare(a, b, System.StringComparison.OrdinalIgnoreCase) <= 0 ? 0 : -1;
         }
 
         private static MeshLayoutEntry EntryOf(MeshLayoutSnapshot snapshot, string id)
@@ -138,6 +155,7 @@ namespace MultiplayerARPG.MMO.Mesh
             op.staged = null;
             op.stagedStepName = "";
             Line(true, $"Merge {op.opId}: aborted {reason}");
+            PolicyOpEnded(op, false, "aborted " + reason);
             if (!op.e1Broadcast)
             {
                 SaveStore(op, _broadcast, null, null);

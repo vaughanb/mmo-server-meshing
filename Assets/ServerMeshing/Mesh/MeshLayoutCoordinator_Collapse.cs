@@ -21,13 +21,52 @@ namespace MultiplayerARPG.MMO.Mesh
             Line(true, $"Supervisor: {id} collapse queued after {record.failures} failed restart(s)");
             if (_op is MeshSplitOperation split && split.InProgress && split.IsMember(id))
                 EndSplitForCollapse(split, id);
-            MeshCell cell = _world.GetCellById(id), baseCell = _world.GetCellById(record.baseId);
-            if (cell == null || baseCell == null || !baseCell.owned.TryUnion(cell.owned, _world.touchTolerance, out _))
+            if (CollapseSurvivorOf(record, true) == null)
             {
                 record.phase = MeshSupervisorPhase.LeftDown;
-                Line(true, $"Supervisor: {id} cannot collapse (Slice 3); left down");
+                Line(true, $"Supervisor: {id} cannot collapse (no live cell of its family shares a full edge); left down");
                 NoteCannotCollapse(record);
             }
+        }
+
+        /// <summary>
+        /// CollapseSurvivorOf picks the cell a collapsing child merges into (Slice 3 decision 14): its base when their owned
+        /// rectangles share a full edge; else a sibling that does. With <paramref name="geometryOnly"/> any live sibling
+        /// counts (the queue-time test); otherwise only a participating one (Active, bound, answered, registered), the
+        /// least loaded by its own fresh report first (the down cell's load is gone and its rectangle refills by position),
+        /// then by fewest owned players. Null when none qualifies.
+        /// </summary>
+        private MeshCell CollapseSurvivorOf(MeshSupervisedCell record, bool geometryOnly)
+        {
+            MeshCell cell = _world.GetCellById(record.cellId), baseCell = _world.GetCellById(record.baseId);
+            if (cell == null || baseCell == null)
+                return null;
+            if (baseCell.owned.TryUnion(cell.owned, _world.touchTolerance, out _))
+                return baseCell;
+            MeshCell best = null;
+            float bestScore = float.MaxValue;
+            bool bestMeasured = false;
+            float now = _clock.Now;
+            foreach (MeshCell sibling in _world.FamilyOf(record.baseId))
+            {
+                if (!sibling.isDynamic || SameId(sibling.id, cell.id) || sibling.state != MeshCellState.Active || sibling.owned.IsEmpty
+                    || !sibling.owned.TryUnion(cell.owned, _world.touchTolerance, out _))
+                    continue;
+                if (geometryOnly)
+                    return sibling;
+                MeshCellBinding binding = BindingOf(sibling.id);
+                if (binding == null || !binding.answered || binding.unregisteredAt >= 0f || binding.staticNeighbour)
+                    continue;
+                bool measured = binding.report != null && now - binding.lastReportAt <= Settings.reportFreshSeconds && MeshSplitPlanner.Usable(binding.report, out _);
+                float score = measured ? binding.report.work.Utilisation : binding.report != null ? binding.report.ownedPlayers : float.MaxValue / 2f;
+                bool better = best == null || (measured && !bestMeasured) || (measured == bestMeasured && score < bestScore);
+                if (!better)
+                    continue;
+                best = sibling;
+                bestScore = score;
+                bestMeasured = measured;
+            }
+            return best;
         }
 
         /// <summary>EndSplitForCollapse: a split whose member is queued for collapse ends (not frozen: the op slot is free).</summary>
@@ -42,6 +81,7 @@ namespace MultiplayerARPG.MMO.Mesh
             split.gateRestartPending = false;
             SaveStore(split, _broadcast, null, null);
             Line(true, $"Split {split.opId}: ended, {id} collapsing");
+            PolicyOpEnded(split, false, "ended, " + id + " collapsing");
         }
 
         private void NoteCannotCollapse(MeshSupervisedCell record)
@@ -49,7 +89,7 @@ namespace MultiplayerARPG.MMO.Mesh
             MeshCellBinding baseBinding = BindingOf(record.baseId);
             if (baseBinding != null && baseBinding.unregisteredAt < 0f)
                 Note(baseBinding.connectionId, MeshNoteLevel.Error, record.baseId, "cannot-collapse",
-                    $"{record.cellId} is down after {record.failures} failed restart(s) and shares no full edge with {record.baseId} (Slice 3): its rectangle is left unserved");
+                    $"{record.cellId} is down after {record.failures} failed restart(s) and shares no full edge with a live cell of {record.baseId}'s family: its rectangle is left unserved");
         }
 
         private void TryStartCollapse(MeshSupervisedCell record)
@@ -81,7 +121,10 @@ namespace MultiplayerARPG.MMO.Mesh
             MeshCell cell = _world.GetCellById(record.cellId);
             if (cell == null || !cell.isDynamic || cell.state != MeshCellState.Active || cell.owned.IsEmpty)
                 return $"{record.cellId} is {(cell != null ? cell.state.ToString() : "not in the layout")}";
-            string common = CheckOpCommon(cell.baseId, out MeshCell survivor, out MeshCellBinding survivorBinding, true);
+            MeshCell chosen = CollapseSurvivorOf(record, false);
+            if (chosen == null)
+                return $"no participating cell of {record.baseId}'s family shares a full edge with {cell.id}";
+            string common = CheckOpCommon(chosen.id, out MeshCell survivor, out MeshCellBinding survivorBinding, true);
             if (common != null)
                 return common;
             if (!survivor.owned.TryUnion(cell.owned, _world.touchTolerance, out MeshRect union))

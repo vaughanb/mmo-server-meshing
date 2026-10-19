@@ -40,7 +40,8 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             RunSplit("C", MeshSplitAxis.Z, 0f, true, "C.2", ConnY, "x2");
             _clock.Now += 31f;
 
-            Assert.That(Refused("C.1", "C.2"), Is.EqualTo("merge of two children (Slice 3)"));
+            // Two children with no report each hold 0 players: the lower id would survive, but their rectangles make none (Slice 3 decision 11).
+            Assert.That(Refused("C.1", "C.2"), Does.StartWith("C.1 and C.2 do not make a rectangle: C.1 owns x [0, 100) z [-100, 100), C.2 owns x [-100, 0) z [0, 100)"));
             Assert.That(Refused("C", "C.1"), Does.StartWith("C and C.1 do not make a rectangle: C owns x [-100, 0) z [-100, 0), C.1 owns x [0, 100) z [-100, 100)"));
             Assert.That(_c.CurrentOp, Is.InstanceOf<MeshSplitOperation>(), "nothing refused started an operation");
         }

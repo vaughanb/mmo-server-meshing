@@ -122,7 +122,7 @@ namespace MultiplayerARPG.MMO.Mesh
         CollapseQueued,
         /// <summary>Its collapse merge runs.</summary>
         Collapsing,
-        /// <summary>It cannot collapse (no full edge shared with its base, Slice 3): left down, no more restarts.</summary>
+        /// <summary>It cannot collapse (no live cell of its family shares a full edge with it): left down, no more restarts.</summary>
         LeftDown,
     }
 

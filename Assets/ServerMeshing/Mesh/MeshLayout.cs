@@ -405,5 +405,48 @@ namespace MultiplayerARPG.MMO.Mesh
         public float fenceSaveSeconds = 5f;
         [Tooltip("Seconds a merge's retire step may last before the central has the retiring cell's spawner kill it.")]
         public float retireKillAfterSeconds = 270f;
+
+        // Slice 3 (automatic policy). Read by the central only, on Dynamic maps that set autoSplit or autoMerge.
+        [Tooltip("Utilisation (mean work over the frame budget) at or above which a cell is hot. Rig override: MESH_SPLIT_UTIL.")]
+        public float splitUtil = 0.8f;
+        [Tooltip("Seconds a cell must stay hot before the central plans a split of it. Rig override: MESH_SPLIT_DWELL.")]
+        public float splitDwellSeconds = 45f;
+        [Tooltip("Share of frames that did not wait for the limiter above which a cell is saturated (the fast path).")]
+        public float fastPathSaturatedShare = 0.2f;
+        [Tooltip("Utilisation at or above which a cell is saturated (the fast path).")]
+        public float fastPathUtil = 0.95f;
+        [Tooltip("Seconds a cell must stay saturated before the central plans a split of it.")]
+        public float fastPathSeconds = 10f;
+        [Tooltip("Predicted utilisation of two cells as one at or below which they may merge (the threshold is the smaller of this and 0.6 x splitUtil). Rig override: MESH_MERGE_UTIL.")]
+        public float mergeUtil = 0.5f;
+        [Tooltip("Seconds a pair of cells must stay cool together before the central merges them. Rig override: MESH_MERGE_AFTER.")]
+        public float mergeDwellSeconds = 300f;
+        [Tooltip("Seconds after any operation on a base cell's family before the central plans another one on it by itself (dwell does not accumulate meanwhile). Rig override: MESH_OP_COOLDOWN.")]
+        public float opCooldownSeconds = 120f;
+        [Tooltip("A split is planned only when the predicted peak of its two sides is at most this share of the cell's utilisation now. Rig override: MESH_SPLIT_BENEFIT.")]
+        public float splitBenefitRatio = 0.75f;
+        [Tooltip("A load report older than this is no evidence for the policy (three load windows).")]
+        public float reportFreshSeconds = 15f;
+        [Tooltip("Seconds after an automatic operation's done before its relief is read from fresh reports (two load windows).")]
+        public float measureAfterSeconds = 10f;
+        [Tooltip("A split planned within this many seconds of the family's last merge is a flap.")]
+        public float flapWindowSeconds = 900f;
+        [Tooltip("A measured split relief under this share is a flap; one at twice it resets the family's multiplier.")]
+        public float flapReliefShare = 0.1f;
+        [Tooltip("Most a flapping family's dwell and cooldown multiplier may grow (doubling per flap).")]
+        public float flapMaxMultiplier = 8f;
+        [Tooltip("A split is deferred while the host's projected cores in use would exceed this share of its cores.")]
+        public float hostHeadroomShare = 0.8f;
+        [Tooltip("Cost model: the process floor in owned-player equivalents (DESIGN 0.73: 23.8 ms/s over 2.62 ms/s per owner at 60 fps).")]
+        public float modelFloorPlayers = 9.1f;
+        [Tooltip("Cost model: a puppet player against an owned player (DESIGN 0.73: kinematic k_band 0.174). Rig override: MESH_PLANNER_WEIGHTS.")]
+        public float puppetPlayerWeight = 0.174f;
+        [Tooltip("Cost model: an owned monster against an owned player (DESIGN 0.73: 0.33 / 2.62). Rig override: MESH_MONSTER_WEIGHT.")]
+        public float ownedMonsterWeight = 0.126f;
+        [Tooltip("Cost model: a puppet monster against an owned player (kinematic). Rig override: MESH_MONSTER_WEIGHT.")]
+        public float puppetMonsterWeight = 0.1f;
+
+        /// <summary>MergeThreshold is the predicted merged utilisation at or below which a pair may merge: the smaller of mergeUtil and 0.6 x splitUtil.</summary>
+        public float MergeThreshold => Math.Min(mergeUtil, 0.6f * splitUtil);
     }
 }

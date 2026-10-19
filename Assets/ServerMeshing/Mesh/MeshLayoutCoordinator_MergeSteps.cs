@@ -137,6 +137,7 @@ namespace MultiplayerARPG.MMO.Mesh
             _cooldownUntil[op.baseId] = _clock.Now + Math.Max(0f, Settings.splitCooldownSeconds);
             SaveStore(op, _broadcast, null, null);
             OpLog(op, "done");
+            PolicyOpEnded(op, true, "done");
         }
 
         /// <summary>SendRetire sends Retire to the retiring cell's bound connection while it is registered (decision 5).</summary>

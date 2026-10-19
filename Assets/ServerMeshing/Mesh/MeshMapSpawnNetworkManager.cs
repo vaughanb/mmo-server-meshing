@@ -43,6 +43,58 @@ namespace MultiplayerARPG.MMO.Mesh
         // The spawner registers again after every central restart; its cells are still running then (the spawner
         // outlives the central), so they are started once per spawner lifetime, never again on a re-registration.
         private MeshSpawnOnce _startOnce = new MeshSpawnOnce();
+        private bool _hostReported;
+        private readonly MeshHostCpuSampler _hostCpu = new MeshHostCpuSampler();
+        private float _nextHostReport;
+
+        /// <summary>Seconds between host reports to the central (Slice 3 decision 8).</summary>
+        public const float HostReportSeconds = 10f;
+
+        protected override void Update()
+        {
+            base.Update();
+            if (ClusterClient != null && ClusterClient.IsAppRegistered && UnityEngine.Time.unscaledTime >= _nextHostReport)
+                SendHostReport();
+        }
+
+        /// <summary>
+        /// SendHostReport tells the central this host's name, cores and cores in use (every process's processor time this
+        /// spawner can read, summed, over the interval since the last report; 0 at the first).
+        /// </summary>
+        private void SendHostReport()
+        {
+            _nextHostReport = UnityEngine.Time.unscaledTime + HostReportSeconds;
+            if (ClusterClient == null)
+                return;
+            double total = 0d;
+            foreach (System.Diagnostics.Process process in System.Diagnostics.Process.GetProcesses())
+            {
+                try
+                {
+                    total += process.TotalProcessorTime.TotalSeconds;
+                }
+                catch (System.Exception)
+                {
+                    // another user's process, or one that exited meanwhile: not ours to read
+                }
+                finally
+                {
+                    process.Dispose();
+                }
+            }
+            MeshHostReportMessage host = new MeshHostReportMessage
+            {
+                hostName = System.Environment.MachineName,
+                cores = MeshHostReportMessage.Cores(System.Environment.GetEnvironmentVariable(MeshHostReportMessage.ENV_HOST_CORES), System.Environment.ProcessorCount),
+                coresInUse = _hostCpu.Sample(total, UnityEngine.Time.realtimeSinceStartupAsDouble),
+            };
+            ClusterClient.SendPacket(0, LiteNetLib.DeliveryMethod.ReliableOrdered, MeshClusterMsg.HostReport, writer => host.Serialize(writer));
+            if (!_hostReported)
+            {
+                _hostReported = true;
+                Logging.Log("Mesh", $"Host report: {host.hostName} {host.cores} cores");
+            }
+        }
 
         /// <summary>The kit's SpawnMap(channelId, mapName, isAllocate, instanceId, warpPosition, overrideRotation, warpRotation, autoRestart, result) — it has a second, request-based overload.</summary>
         private static MethodInfo FindSpawnMap()
@@ -198,6 +250,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 _kitOnRegister?.Invoke(responseCode);
                 return;
             }
+            SendHostReport();   // Slice 3: at every registration (the central may be new), then every HostReportSeconds
             // Tell the central which cells this host may start, so a cell wakes on the machine that can serve it.
             // An empty list means "all of them", which is what a single-host deployment has always meant.
             if (servedCells != null && servedCells.Length > 0 && ClusterClient != null)

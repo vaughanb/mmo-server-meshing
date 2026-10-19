@@ -13,6 +13,11 @@ pre-loading the neighbouring scene behind the player's back. Cells can be any si
 large over empty land — and with **sleeping cells** on, a cell with nobody near it does not run at all: it starts a few
 seconds ahead of the first player who approaches, and exits again later. Empty land costs nothing.
 
+A map set **Dynamic** has its cells cut and merged at runtime: by an operator's command, or by the central's own
+policy, which reads every cell's load report, splits a cell that stays hot along the cut its cost model says relieves
+it most (only when that is worth a process), merges a pair that would be cool together, measures every operation it
+made, and restarts or collapses a child that dies.
+
 The add-on is subclasses on the kit's managers and entity prefabs plus one world-registry asset. **The kit's core is not
 modified.** It relies on four small core changes that have been in OpenMMORPG master since 2026-09-15.
 

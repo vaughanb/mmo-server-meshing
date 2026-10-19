@@ -88,6 +88,7 @@ namespace MultiplayerARPG.MMO.Mesh
             if (ClusterServer != null)
             {
                 ClusterServer.RegisterMessageHandler(MeshClusterMsg.Serves, HandleServesMessage);
+                ClusterServer.RegisterMessageHandler(MeshClusterMsg.HostReport, HandleHostReport);
                 ClusterServer.RegisterMessageHandler(MeshClusterMsg.LoadReport, HandleLoadReport);
                 // Registered whether or not a map is Dynamic here: a cell whose asset says otherwise still gets an
                 // answer (and a note), so its gate never waits for ever.
@@ -250,6 +251,19 @@ namespace MultiplayerARPG.MMO.Mesh
 
         /// <summary>Which map-spawn server may start a given cell, from what each spawner advertised at registration.</summary>
         private readonly Dictionary<string, long> _spawnerByCell = new Dictionary<string, long>(System.StringComparer.OrdinalIgnoreCase); // cell ids compare as the spawner's Serves does
+
+        /// <summary>Each spawner's host, by its cluster connection (Slice 3 decision 8: the policy's headroom rule reads it).</summary>
+        private readonly Dictionary<long, MeshHostInfo> _hostBySpawner = new Dictionary<long, MeshHostInfo>();
+
+        private void HandleHostReport(MessageHandlerData messageHandler)
+        {
+            if (!ReadWhole(messageHandler, "Host report", out MeshHostReportMessage report))
+                return;
+            bool first = !_hostBySpawner.ContainsKey(messageHandler.ConnectionId);
+            _hostBySpawner[messageHandler.ConnectionId] = new MeshHostInfo { spawnerConnection = messageHandler.ConnectionId, hostName = report.hostName ?? string.Empty, cores = report.cores, coresInUse = report.coresInUse };
+            if (first)
+                Logging.Log("Mesh", $"Map-spawn server on connection {messageHandler.ConnectionId} runs on host {report.hostName} with {report.cores} core(s)");
+        }
 
         private void HandleServesMessage(MessageHandlerData messageHandler)
         {

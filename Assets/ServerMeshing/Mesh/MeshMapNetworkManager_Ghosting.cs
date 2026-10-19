@@ -2734,6 +2734,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 CharacterEntityKilledDelegate killHook = (target, instigator) => OnBorrowedMonsterKilled(capturedMeshId, home);
                 monster.onKilled += killHook;
                 _borrowedKillHooks[msg.meshId] = killHook;
+                if (!string.Equals(home, fromZone) && _linkClients.TryGetValue(home, out MeshLinkClient homeLink) && homeLink.IsConnected)
+                    homeLink.SendLentMonsterOwner(msg.meshId, OwnZoneId); // Slice 3: a hand-on from a cell not linked to the home still reaches it (idempotent)
             }
             TrackOwned(monster);
             // Keep the chase going: the target is either the real player here or its ghost.

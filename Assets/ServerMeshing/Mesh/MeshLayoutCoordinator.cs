@@ -108,6 +108,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     summary.Add($"{map.Key} {map.Value.outcome}");
             }
             _log.Info($"Coordinator {Incarnation:x}: Dynamic maps {(summary.Count > 0 ? string.Join(", ", summary) : "none")}; store {_store.Path} ({storeState}); broadcast {_broadcast.pair}");
+            PolicyStart();
         }
 
         private static int StoredEntries(MeshCoordinatorStoreData data, string mapId)
@@ -134,6 +135,7 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             SplitStop();
             SupervisionStop();
+            PolicyStop();
             _bindings.Clear();
             _maps.Clear();
             _firstSeenWithoutHello.Clear();
@@ -194,6 +196,7 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 binding.lastReportAt = -1f;
                 binding.killedAt = -1f;
+                binding.report = null;
             }
             _firstSeenWithoutHello.Remove(hello.cellId);
 
@@ -284,6 +287,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 return;
             binding.lastEvidenceAt = _clock.Now;
             binding.lastReportAt = _clock.Now;
+            binding.report = report;
             MeshLayoutPair reported = new MeshLayoutPair(report.layoutIncarnation, report.layoutVersion);
             // A report measured before the cell's latest apply lags by design (a split moves the pair every step); one
             // ahead of every ack means the cell holds a layout this coordinator never heard it apply.
@@ -338,6 +342,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 ResolveAll();
             SupervisionTick();
             OpTick();
+            PolicyTick();
         }
 
         private MapRecovery MapOf(string mapId)

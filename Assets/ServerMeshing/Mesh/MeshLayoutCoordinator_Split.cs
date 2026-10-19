@@ -374,6 +374,7 @@ namespace MultiplayerARPG.MMO.Mesh
             op.stagedStepName = "";
             _abortedIds.Add(op.childId);
             Line(true, $"Split {op.opId}: aborted {reason}");
+            PolicyOpEnded(op, false, "aborted " + reason);
             if (op.childBound)
                 _transport.Send(op.childConnection, new MeshRetireMessage { cellId = op.childId, incarnation = op.childIncarnation, pair = BroadcastPair, reason = retireReason });
             SplitHost?.RemoveChannel(op.childId);
@@ -399,6 +400,7 @@ namespace MultiplayerARPG.MMO.Mesh
             op.MarkFrozen();
             op.endReason = reason;
             Line(true, $"{op.LinePrefix} {op.opId}: frozen {reason}");
+            PolicyOpEnded(op, false, "frozen " + reason);
             SaveStore(op, _broadcast, op.staged, op.staged != null ? op.StepId(string.IsNullOrEmpty(op.stagedStepName) ? "e2" : op.stagedStepName) : null);
         }
 

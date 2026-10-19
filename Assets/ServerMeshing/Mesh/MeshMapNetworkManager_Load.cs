@@ -27,7 +27,9 @@ namespace MultiplayerARPG.MMO.Mesh
         public const string ENV_BAND = "MESH_BAND";
 
         /// <summary>Rig toggle: busy-wait this many milliseconds every server frame, to prove the work probe measures work.
-        /// "8" burns on every cell, "C:8" on cell C only (so one cell's figure is not inflated by ten others spinning).</summary>
+        /// "8" burns on every cell, "C:8" on cell C only (so one cell's figure is not inflated by ten others spinning).
+        /// "@&lt;path&gt;" (Slice 3) names a file holding the same text, re-read at every load window: an absent or empty
+        /// file burns nothing, so a running cell's burn can be switched on and off.</summary>
         public const string ENV_PROBE_BURN_MS = "MESH_PROBE_BURN_MS";
 
         /// <summary>ENV_WORK_BINS is a rig toggle: "1" follows every Work ticks line with a Work bins line listing the non-empty 0.05 ms bins
@@ -46,6 +48,8 @@ namespace MultiplayerARPG.MMO.Mesh
         private float _lastLoadReportTime;
         private float _probeBurnMs;
         private string _probeBurnCell;
+        private string _probeBurnFile;
+        private string _probeBurnFileText;
         private long _loadClientBytesOut, _loadLinkBytesOut;
         private System.TimeSpan _loadCpuTime;
         private bool _loadCountersPrimed;
@@ -116,15 +120,21 @@ namespace MultiplayerARPG.MMO.Mesh
             _probeOverdueLogged = false;
             _probeBurnMs = 0f;
             _probeBurnCell = null;
+            _probeBurnFile = null;
+            _probeBurnFileText = null;
             string burn = System.Environment.GetEnvironmentVariable(ENV_PROBE_BURN_MS);
-            if (!string.IsNullOrEmpty(burn))
+            if (!string.IsNullOrEmpty(burn) && burn.StartsWith("@", System.StringComparison.Ordinal))
             {
-                int colon = burn.IndexOf(':');
-                string msText = colon >= 0 ? burn.Substring(colon + 1) : burn;
-                if (float.TryParse(msText.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float ms) && ms > 0f)
+                _probeBurnFile = burn.Substring(1).Trim();
+                Logging.Log("Mesh", $"{ENV_PROBE_BURN_MS}={burn}: the burn is read from that file at every load window");
+                ReadBurnFile();
+            }
+            else if (!string.IsNullOrEmpty(burn))
+            {
+                if (TryParseBurn(burn, out float ms, out string cell))
                 {
                     _probeBurnMs = ms;
-                    _probeBurnCell = colon >= 0 ? burn.Substring(0, colon).Trim() : null;
+                    _probeBurnCell = cell;
                     Logging.Log("Mesh", $"{ENV_PROBE_BURN_MS}={burn}: burning {ms:0.##} ms of main-thread work every frame on {(_probeBurnCell ?? "every cell")}");
                 }
                 else
@@ -140,6 +150,56 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private float ProbeWindowSeconds => loadReportSeconds > 0f ? loadReportSeconds : 5f;
 
+        /// <summary>TryParseBurn reads "[cell:]milliseconds" (a positive number; cell null for every cell).</summary>
+        public static bool TryParseBurn(string text, out float ms, out string cell)
+        {
+            ms = 0f;
+            cell = null;
+            string value = (text ?? string.Empty).Trim();
+            int colon = value.IndexOf(':');
+            string msText = colon >= 0 ? value.Substring(colon + 1) : value;
+            if (!float.TryParse(msText.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out ms) || !(ms > 0f))
+                return false;
+            cell = colon >= 0 ? value.Substring(0, colon).Trim() : null;
+            if (cell != null && cell.Length == 0)
+                cell = null;
+            return true;
+        }
+
+        /// <summary>ReadBurnFile re-reads the burn file (file mode): its first line sets the burn, nothing or an empty file clears it; changes are logged.</summary>
+        private void ReadBurnFile()
+        {
+            string text;
+            try
+            {
+                text = System.IO.File.Exists(_probeBurnFile) ? System.IO.File.ReadAllText(_probeBurnFile).Trim() : string.Empty;
+            }
+            catch (System.Exception ex)
+            {
+                Logging.LogWarning("Mesh", $"Burn file {_probeBurnFile} could not be read: {ex.Message}; the burn is unchanged");
+                return;
+            }
+            if (string.Equals(text, _probeBurnFileText, System.StringComparison.Ordinal))
+                return;
+            _probeBurnFileText = text;
+            if (text.Length == 0)
+            {
+                if (_probeBurnMs > 0f)
+                    Logging.Log("Mesh", "Burn off");
+                _probeBurnMs = 0f;
+                _probeBurnCell = null;
+                return;
+            }
+            if (!TryParseBurn(text, out float ms, out string cell))
+            {
+                Logging.LogWarning("Mesh", $"Burn file {_probeBurnFile} holds '{text}', not [cell:]milliseconds; the burn is unchanged");
+                return;
+            }
+            _probeBurnMs = ms;
+            _probeBurnCell = cell;
+            Logging.Log("Mesh", $"Burn {ms:0.##} ms on {(cell ?? "every cell")}");
+        }
+
         private void LoadTick()
         {
             if (_probeBurnMs > 0f && (_probeBurnCell == null || string.Equals(_probeBurnCell, OwnZoneId, System.StringComparison.OrdinalIgnoreCase)))
@@ -153,6 +213,8 @@ namespace MultiplayerARPG.MMO.Mesh
             float window = Mathf.Max(0.001f, now - _lastLoadReportTime);
             _nextLoadReport = now + ProbeWindowSeconds;
             _lastLoadReportTime = now;
+            if (_probeBurnFile != null)
+                ReadBurnFile();
             MeshProbeState before = _hasWorkWindow ? _lastWorkWindow.state : MeshProbeState.Unknown;
             _lastWorkWindow = MeshWorkProbe.Meter.TakeWindow(MeshWorkProbe.BudgetMs, window);
             MeshTickWindow ticks = MeshWorkProbe.Meter.TakeTickWindow(window, TickRate, MeshWorkProbe.EffectiveBudgetMs);

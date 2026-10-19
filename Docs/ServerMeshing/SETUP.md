@@ -78,9 +78,11 @@ The registry inspector lets you refine a layout afterwards:
 Below the layout, panel 2 sets each map's **cell mode**:
 
 - **Static** (the default): the cut is the cut, exactly as before 0.72.
-- **Dynamic**: the cut gives the map's *base cells*, which the central may later split into more cells while they are
-  busy and merge back when they are quiet (the splitting itself is not in this version: a Dynamic map runs its base
-  cells as they are). Every server of a Dynamic map says hello to the central once registered and hands nothing over,
+- **Dynamic**: the cut gives the map's *base cells*, which the central may split into more cells while they are busy
+  and merge back when they are quiet: by an operator's command (§7), or by itself when the map sets `autoSplit` and
+  `autoMerge` (Slice 3: a cell at `splitUtil` for `splitDwellSeconds` is cut where the cost model says the busier side
+  is least loaded, only when that is worth a process; two cells of a family predicted cool together for
+  `mergeDwellSeconds` merge back). Every server of a Dynamic map says hello to the central once registered and hands nothing over,
   and routes no building, until the central answers with the layout; it logs `Layout gate open on …` when that
   happens and warns every `layoutGateWarnSeconds` while it waits. Choose the mode before starting the servers: it is
   read at start and the panel is disabled in Play.
@@ -91,8 +93,8 @@ The registry's own fields, for hand edits: `maps` (one layout per map), and per 
 the map's origin sits in the shared world frame), `gridOrigin`, `cellSize`, `columns`, `rows`, `cellIdFormat` (the id
 pattern: `{map}` = the map id, `{x}`/`{y}` = column/row), the optional `cellRects` and `cellIds` above, `cellMode`,
 and for Dynamic maps `minCellSize` (the narrowest a cut may leave a cell, never below the band; 0 = the registry's
-default), `maxCellsPerBase` (0 = the default), `autoSplit` and `autoMerge` (both off until automatic splitting
-exists). Registry-wide: `touchTolerance` (how close two rectangles must come to count as neighbours across a seam,
+default), `maxCellsPerBase` (0 = the default), `autoSplit` and `autoMerge` (both off by default: with them on, the
+central splits and merges the map's cells by itself, Slice 3). Registry-wide: `touchTolerance` (how close two rectangles must come to count as neighbours across a seam,
 0.5 m) and `dynamicSettings`, read only when a map is Dynamic: `bandWidth` (the band every process computes band
 neighbours with, and the narrowest cut; each map server logs an error if its own `ghostBandWidth` is wider),
 `defaultMinCellSize` (100 m), `defaultMaxCellsPerBase` (4), `layoutGateWarnSeconds` (10), `recoveryCeilingSeconds`
@@ -111,7 +113,20 @@ before the central restarts it; must exceed `childFenceSeconds + fenceSaveSecond
 restarts, then the child collapses into its base), `childRestartIntervalSeconds` (10), `childRestartStableSeconds` (60),
 `childHungSeconds` (30: a registered cell that sends no load report this long is killed by its spawner),
 `childFenceSeconds` (10), `fenceSaveSeconds` (5) and `retireKillAfterSeconds` (270: a merge's retiring cell still
-there after this is killed). Every mesh manager (`MeshMapNetworkManager`, `MeshLoginNetworkManager`,
+there after this is killed); for the automatic policy (Slice 3, read only on maps with `autoSplit` or `autoMerge`)
+`splitUtil` (0.8: mean work over the frame budget at or above which a cell is hot), `splitDwellSeconds` (45: how long
+it must stay hot), `fastPathSaturatedShare` (0.2) and `fastPathUtil` (0.95) with `fastPathSeconds` (10: a saturated
+cell is planned sooner), `mergeUtil` (0.5: two cells predicted at or under the smaller of this and 0.6 x `splitUtil`
+as one may merge) with `mergeDwellSeconds` (300), `opCooldownSeconds` (120: after any operation on a family, by hand
+or by the policy, before it plans another; never under `splitCooldownSeconds`), `splitBenefitRatio` (0.75: a cut is
+planned only when the predicted busier side is at most this share of the cell's utilisation now), `reportFreshSeconds`
+(15) and `measureAfterSeconds` (10: the relief is read two load windows after an operation's done), `flapWindowSeconds`
+(900), `flapReliefShare` (0.1: a measured relief under it, or a split within the window of a merge, doubles the
+family's dwells and cooldown, up to `flapMaxMultiplier`, 8; a relief at twice it resets them), `hostHeadroomShare`
+(0.8: a split is deferred while the host's cores in use, plus the child's share, would exceed this share of its cores)
+and the cost model in owned-player equivalents (`modelFloorPlayers` 9.1, `puppetPlayerWeight` 0.174,
+`ownedMonsterWeight` 0.126, `puppetMonsterWeight` 0.1: DESIGN 0.71 and 0.73's fits; a crowd narrower than the band is
+accepted by the kinematic fit and refused only by a steered one). Every mesh manager (`MeshMapNetworkManager`, `MeshLoginNetworkManager`,
 `MeshCentralNetworkManager`, `MeshMapSpawnNetworkManager`) carries a `world` reference to this asset; panel 3 assigns
 it.
 
@@ -529,6 +544,27 @@ and, later, several hosts all reach one database, and SQLite is a single file on
   child releases C's old monsters, the totals return to the area's 5, C's players re-log in); all three are skipped
   with `--remote-cells` and `--remote-persist`. The headless bots log in again after a lost session (`Session lost …;
   re-login <n>`; RESULT ` relogins=<n>`).
+- **Automatic policy (Slice 3):** with `autoSplit` or `autoMerge` set on a Dynamic map (rig: `MESH_AUTO_OPS=split`,
+  `merge` or `split,merge` on every Dynamic map of the run), the central reads the cells' load reports once a second,
+  plans a split of a cell hot for the dwell (`Policy: split of <cell> planned: <x|z> <at> <+|-> child <id>, util …
+  -> peak … (<cell> …, <id> …), <n> cut(s) tried`), says why it did not (`Policy: split of <cell> refused: best peak …
+  over 0.75 x util …`, once a minute, also as a `split-refused` note in the cell's log; `deferred: host … at <n>/<m>
+  cores` while the host has no headroom), merges a pair predicted cool together (`Policy: merge of <a> <b> planned:
+  predicted …`), measures every operation it planned two windows after its done (`Policy: split <op> measured:
+  predicted peak …, measured … (<parent> …, <child> …), relief … %`; `Policy: merge <op> measured: …`; `not measured
+  (<why>)` when it cannot) and slows a family that flaps (`Policy: flap on <base>: …; dwell and cooldown x2`). A merge
+  of two children is accepted (the one with more players survives) and a child that cannot collapse into its base
+  collapses into a sibling sharing a full edge. The play runner mirrors these lines, and the automatic operations'
+  own `Split`/`Merge` lines, to the status file under the seq `auto` while no command is live. Rig overrides:
+  `MESH_SPLIT_UTIL`, `MESH_SPLIT_DWELL`, `MESH_MERGE_UTIL`, `MESH_MERGE_AFTER` (the merge dwell), `MESH_OP_COOLDOWN`,
+  `MESH_SPLIT_BENEFIT`, `MESH_MONSTER_WEIGHT`, `MESH_PLANNER_WEIGHTS=<puppetPlayer>,<ownedMonster>,<puppetMonster>,<floor>`,
+  `MESH_HOST_CORES` (the spawner's reported cores), and `MESH_PROBE_BURN_MS=@<absolute path>` (the burn read from a
+  file at every load window: `[cell:]ms`, empty = off). Scenarios `autosplit` (eight bots 88 m either side of C's
+  centre line, a burn makes C hot, the central splits it, eases the burn and measures the relief, merges C.1 back once
+  the bots are gone), `autobenefit` (the 600 m Coarse cut, 200 spread synthetic players, no client: the measured relief
+  within 15 % of the prediction) and `autorefuse` (a 60 m crowd on the centre with steered puppets and the steered
+  fit: refused, once a minute, nothing splits); all three skipped with `--remote-cells` and `--remote-persist`. Every
+  other scenario fails on any `Policy:` line in the status file.
 - **The play runner and the environment:** every Play request carries an id that the status file echoes as
   `playSeq=` while that Play runs, so the harness never mistakes a Play an earlier, abandoned request started late for
   its own; a stop that arrives while Play is starting is carried out once it has started. The environment variables a
@@ -550,9 +586,11 @@ and, later, several hosts all reach one database, and SQLite is a single file on
   not by the mesh: 500 people in one place is a kit AOI/update-rate question.
 - **Warp portals or spawn points exactly on a login position** do what they do in the kit: a character that stands up
   inside a portal trigger is warped. Not a mesh issue, but easy to trip over on a test map.
-- **Dynamic split/merge of cells at runtime** is being built: a map can be set Dynamic, and its servers already take
-  their layout from the central, but nothing splits or merges yet. Sleeping cells on a fine grid cover the sandbox
-  case meanwhile.
+- **Dynamic split/merge of cells at runtime** works by command and by the central's own policy (Slices 2b-3); still
+  to come: buildings handed across a cut (Slice 4: a building in a given-away rectangle never drains), a central
+  restart with a cut map (Slice 5: the map freezes until the cut is merged back by hand), and the Setup window's
+  checks for Dynamic maps (Slice 6). One operation runs at a time world-wide. Sleeping cells on a fine grid cover the
+  sandbox case meanwhile.
 - **One shared world frame per registry**: two maps meant to touch must be placed by their world origins; the
   registry does not derive placement from content.
 

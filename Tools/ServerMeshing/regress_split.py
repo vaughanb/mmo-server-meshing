@@ -15,6 +15,7 @@ import os
 import time
 
 import provision
+import rigauto
 import rigsplit
 import rigtools
 
@@ -331,7 +332,7 @@ def grade_c2(rep, rig, plan, standing, logs, status, spec, start, day):
 
 
 def grade_layout(rep, rig, start, day, split, applies=None, ops=None,
-                 how_split="split map: three extra layouts by rectangle"):
+                 how_split="split map: three extra layouts by rectangle", allow_policy=False):
     """regress.grade_layout for a split scenario: the split's map by rectangles (rigsplit.split_apply_violations), every
     other map as 2a grades it (C2: no own-cell layout, Static-neighbour applies allowed); no retire, merge, abort or
     freeze line and no layout gate warning on any cell. Slice 2c's merge grade hands in `applies` (zone, info lines)
@@ -365,3 +366,7 @@ def grade_layout(rep, rig, start, day, split, applies=None, ops=None,
         if gate:
             problems.append(f"{gate} layout gate warning(s)")
         rep.check(not problems, f"zone {zone}: {how}" + (f" ({'; '.join(problems[:2])})" if problems else ""))
+    if not allow_policy:
+        policy = rigauto.policy_texts(read_lines(rig.LAYOUT_COMMAND_STATUS))
+        rep.check(not policy, "no automatic policy line in the status file (Slice 3 decision 16)"
+                  + (f" ({policy[0][:100]})" if policy else ""))

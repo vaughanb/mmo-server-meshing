@@ -51,7 +51,7 @@ class StatusTests(unittest.TestCase):
     def test_parse_supervisor(self):
         texts = ["Supervisor: C.1 hung 31.5 s, restart 2 of 3 requested", "Supervisor: C.1 restart 2 failed (no hello in 60 s)",
                  "Supervisor: C.1 collapse queued after 3 failed restart(s)",
-                 "Supervisor: C.1 cannot collapse (Slice 3); left down", "Supervisor: C.1 killed by its spawner (hung)",
+                 "Supervisor: C.1 cannot collapse (no live cell of its family shares a full edge); left down", "Supervisor: C.1 killed by its spawner (hung)",
                  "Supervisor: C.1 something new", "Split split-1: done"]
         events = rigsplitcrash.parse_supervisor(self.lines(texts) + ["6 Supervisor: C.1 back, incarnation 01"], "7")
         self.assertEqual([e["event"] for e in events], ["hung", "failed", "collapse", "cannot", "killed", "other"])
