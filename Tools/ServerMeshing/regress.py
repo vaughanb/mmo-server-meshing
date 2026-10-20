@@ -236,8 +236,9 @@ RIG_PROCESSES = "@(Get-Process kit-ce-project -ErrorAction Ignore) | Where-Objec
 
 
 # The ports the editor's servers and the cells bind (Config/serverConfig.json, MMOServerInstance-CE.prefab): map spawner,
-# cluster, database manager, central, login, then the cells from spawnStartPort and their links meshLinkPortOffset above.
-RIG_PORTS = [6001, 6010, 6100, 7000, 7500] + list(range(8000, 8016)) + list(range(18000, 18016))
+# cluster, database manager, central, login, then the cells from spawnStartPort and their links meshLinkPortOffset above:
+# 64 of each, the most cells the mesh links can join (a split world adds cells; MULTIHOST §4 opens the same ranges).
+RIG_PORTS = [6001, 6010, 6100, 7000, 7500] + list(range(8000, 8064)) + list(range(18000, 18064))
 
 
 def foreign_port_holders(ports=RIG_PORTS):

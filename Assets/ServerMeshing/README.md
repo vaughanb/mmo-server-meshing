@@ -1,15 +1,19 @@
 # Server Meshing for OpenMMORPG
 
 Splits a map across several map-server processes ("cells") with seamless handoff, ghosting across cell edges, seams
-between maps, cells of any size and on-demand ("sleeping") cells. An add-on: subclasses on the kit's manager and
-entity prefabs plus one world-registry asset. The kit's core is not modified beyond four small changes that are in
-upstream OpenMMORPG master since 2026-09-15.
+between maps, cells of any size, on-demand ("sleeping") cells, and dynamic cells: a map set Dynamic has a busy cell
+split at runtime and merged back, by command or by the central's own load policy, with supervision, buildings that
+follow the cut and a central that can restart (`Documentation/SETUP.md` §6a). An add-on: subclasses on the kit's
+manager and entity prefabs plus one world-registry asset; the package changes no kit file. It builds on eight small kit
+changes (`Documentation/DESIGN.md` §17): seven are in OpenMMORPG `develop` at bb9895f (2026-10-02) or later, and the
+eighth, CE-10 (upstream patch 0008, a virtual `BuildingPersistenceChannelId` on `MapNetworkManager`), is not merged yet
+and must be applied to the kit by hand: the add-on does not compile without it (`Documentation/SETUP.md` §3).
 
 ## Packages
 
 | Package | Contents | Needs |
 |---|---|---|
-| `ServerMeshing.unitypackage` | `Assets/ServerMeshing/Mesh` (runtime + Editor), `Assets/ServerMeshing/Documentation` (the setup guide, the design record and the two-machine guide) | OpenMMORPG (master at or after 2026-09-15, which carries the four core changes the add-on relies on) |
+| `ServerMeshing.unitypackage` | `Assets/ServerMeshing/Mesh` (runtime + Editor), `Assets/ServerMeshing/Documentation` (the setup guide, the design record and the two-machine guide) | OpenMMORPG `develop` at bb9895f or later (seven of the kit changes the add-on relies on), plus upstream patch 0008 (CE-10) applied by hand |
 | `ServerMeshingTestRig.unitypackage` | `Assets/ServerMeshing/TestMap`: the two test maps, test items, auto client, launcher, play runner, load generator, and `TestMap/Tools` (the regression and capacity harnesses, Python) | the add-on package and the kit's demo (`BaseDemo`: the enemy prefab, the default weapon item and type are referenced by the test data and scenes) |
 
 ## Start here

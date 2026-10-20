@@ -55,6 +55,13 @@ database-manager server on A.
 Everything is UDP unless noted. A map server's mesh-link port is its map port plus the link offset, which is 10 000 by
 default, so a cell on map port 8001 listens for links on 18001.
 
+The ranges are 64 ports wide (2026-10-19, Slice 6; they were 8000-8010 before dynamic cells). A host's spawner hands
+out map ports from `spawnStartPort` upward and reuses one only after its process has exited, so the range must cover
+every process the host runs at once: its base cells, the children a split starts beside them, other maps, and a
+restart that overlaps its predecessor's exit. 64 is also where the mesh links stop: with `linkAllZones` every cell
+links to every live cell of its map and a cell's link server takes 64 (SETUP §6a.3 warns before a map can pass it).
+`regress.py` checks the same ranges for foreign processes before a run.
+
 **On A, allow inbound from B:**
 
 | Port | Purpose |
@@ -62,20 +69,20 @@ default, so a cell on map port 8001 listens for links on 18001.
 | 6010 | cluster, where every server registers |
 | 6100 | database manager |
 | 7500 | login, for clients |
-| 8000-8010 | A's map servers |
-| 18000-18010 | A's mesh links |
+| 8000-8063 | A's map servers |
+| 18000-18063 | A's mesh links |
 
 **On B, allow inbound from A:**
 
 | Port | Purpose |
 |---|---|
-| 8000-8010 | B's map servers |
-| 18000-18010 | B's mesh links |
+| 8000-8063 | B's map servers |
+| 18000-18063 | B's mesh links |
 
 A one-line rule per machine is enough for a lab, for example on A:
 
 ```powershell
-New-NetFirewallRule -DisplayName "MeshTest" -Direction Inbound -Protocol UDP -LocalPort 6010,6100,7500,8000-8010,18000-18010 -Action Allow -Profile Private
+New-NetFirewallRule -DisplayName "MeshTest" -Direction Inbound -Protocol UDP -LocalPort 6010,6100,7500,8000-8063,18000-18063 -Action Allow -Profile Private
 ```
 
 and the same on B with only the map and link ranges. Remove the rule when the test is over.
@@ -87,7 +94,10 @@ and the same on B with only the map and link ranges. Remove the rule when the te
    from A too.
 2. **Give A's map spawner only A's cells.** `MeshMapSpawnNetworkManager` now has a `servedCells` list. Set it to
    `C, N, NE` on the server-instance prefab, or start the editor with `MESH_SPAWN_CELLS=C,N,NE`. Without this, A starts
-   a server for every cell in the registry, B's included, and the cluster rejects B's duplicate registration.
+   a server for every cell in the registry, B's included, and the cluster rejects B's duplicate registration. List
+   base cells only, never a child such as `C.1`: a child of a Dynamic map, a restart of any cell of a cut family, a kill
+   and the policy's host-headroom check all go to the spawner that advertises the **base** cell, so a family stays on
+   its base's host. The Setup window's Validate judges every spawner prefab's list together (SETUP §6a.3).
 3. **Leave sleeping cells off for this test.** The central still asks the first map-spawn server it knows about when it
    wakes a cell, so with two hosts a sleeping cell can wake on the wrong one. Placement-aware waking is the next piece
    of work; until then, run with `sleepCells` off so every cell is started by its own host.
@@ -439,13 +449,19 @@ only through that cache.
   `Temp/ServerMesh.Coordinator.json`); every port the central and the spawner bind goes on the command line, the cells
   read `clusterPort` and the database manager's address from `Config/serverConfig.json`, and `-spawnMaps` is one
   pipe-separated token. The central process can then be killed and started again alone: the cells reconnect, say hello
-  with the layout they hold, and the new central adopts it (SETUP §7, Slice 5). Not yet across two machines: the second
+  with the layout they hold, and the new central adopts it (SETUP §6a.9). Not yet across two machines: the second
   machine still runs no spawner, so its cell could not follow a central restarted here.
 - **A map-spawn server on the second machine.** The central now asks the spawner that owns a cell rather than the
   first one it knows (each spawner advertises its `servedCells` when it registers, and the central routes by that,
   falling back to the old behaviour for a cell nobody claimed). What is still missing is a spawner *process* on the
   other machine: its cell is started by hand through `remoteb.py`, so there is nothing there to receive a start
   request and `sleep` still cannot run across two hosts.
+  **The two-host limit of dynamic cells (Slice 6).** A Dynamic map's children run on their base cell's host: the
+  central asks the spawner that advertises the base to start a child, and to restart, kill or judge the headroom of any
+  cell of its family. Machine B has no spawner, so a Dynamic base served from B would have its children started on
+  whichever spawner the central picks (A's), apart from their base, and its kills sent where no such process runs. Keep
+  B's cells on a Static map (as the rig does: the split scenarios are skipped with `--remote-cells`), or run a spawner
+  on every host that serves a Dynamic map's cells.
 - **A fault path to a persisting cell.** `crash` runs across both machines when the cell is started per scenario
   (`remoteb.py start --env --restart` carries the fault and stands in for the spawner); a cell kept across scenarios
   with `--remote-persist` never receives the variable, so the crash and the central-restart survival cannot yet be

@@ -32,7 +32,7 @@ namespace MultiplayerARPG.MMO.Mesh
         private string _storageBefore = "", _storageAfter = "";
         private int _scrollsStorage = -1, _storageAfterRelogin = -1, _buildingsAfterRelogin = -1;
         private bool _doorOpened;
-        private bool _storageOpenSeen, _storageClosedSeen;
+        private bool _storageOpenSeen;
         private string _storageOwnerSeen;
         private List<CharacterItem> _storageItemsSeen;
 
@@ -137,13 +137,11 @@ namespace MultiplayerARPG.MMO.Mesh
             if (type != StorageType.Building) return;
             _storageOwnerSeen = ownerId;
             _storageOpenSeen = true;
-            _storageClosedSeen = false;
         }
 
         private void OnBuildTreeStorageClosed(StorageType type, string ownerId)
         {
             if (type != StorageType.Building) return;
-            _storageClosedSeen = true;
             _storageOpenSeen = false;
         }
 

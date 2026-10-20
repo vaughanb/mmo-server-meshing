@@ -133,5 +133,14 @@ class SplitWiringTests(unittest.TestCase):
         self.assertEqual(regress.LAYOUT_COMMAND_STATUS, os.path.join(regress.TEMP, "ServerMesh.LayoutCommandStatus.txt"))
 
 
+class RigPortsTests(unittest.TestCase):
+    def test_cells_and_links_cover_the_multihost_ranges(self):
+        ports = set(regress.RIG_PORTS)
+        self.assertTrue(set(range(8000, 8064)) <= ports)
+        self.assertTrue(set(range(18000, 18064)) <= ports)
+        self.assertNotIn(8064, ports)
+        self.assertEqual(len(regress.RIG_PORTS), len(ports))
+
+
 if __name__ == "__main__":
     unittest.main()

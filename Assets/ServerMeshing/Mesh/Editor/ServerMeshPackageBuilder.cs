@@ -36,8 +36,8 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
     {
         // Release metadata. Version is the add-on version reported by the Addon Manager; UpdateDate drives its recency
         // filter and "New" badge, and is bumped by hand with the version rather than tracking the build clock.
-        public const string Version = "0.82.0";
-        public const string UpdateDate = "2026-10-19";
+        public const string Version = "0.83.0";
+        public const string UpdateDate = "2026-10-20";
 
         // Where the published packages will be fetched from. The Addon Manager downloads "packageUrl" verbatim, so this
         // has to point at wherever dist/ is finally hosted — change it here if these move to another repository.
@@ -64,11 +64,17 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 "Splits a map across several map-server processes (\"cells\") with seamless handoff, ghosting across cell " +
                 "edges, seams between maps, cells of any size, on-demand (\"sleeping\") cells, and dynamic cells the central " +
                 "cuts and merges at runtime, by command or by its own load policy.\n" +
+                "Dynamic cells are supervised (a dead or hung cell is restarted, a cell cut off from the cluster fences " +
+                "itself), buildings follow the cut, and a restarted central adopts the cut layout and resumes the operation " +
+                "it was running.\n" +
                 "Players cross a cell edge without a loading screen; neighbouring cells exchange ghosts of everything near " +
                 "their shared edge, so combat, loot, quests and building resolve across it. Empty land costs nothing: a cell " +
                 "with nobody near it does not run.\n" +
-                "Subclasses on the kit's managers and entity prefabs plus one world-registry asset — the kit's core is not " +
-                "modified. Includes a Setup window that validates a project and fixes what it can.",
+                "Subclasses on the kit's managers and entity prefabs plus one world-registry asset; the package changes no " +
+                "kit file. Needs OpenMMORPG develop at bb9895f or later and, until it is merged upstream, patch 0008 (CE-10: " +
+                "a virtual building persistence channel on the kit's MapNetworkManager) applied to the kit: the add-on " +
+                "does not compile without it (see the README). Includes a Setup window that validates a project, judges " +
+                "every Dynamic map's cut and settings before anything starts, and fixes what it can.",
             // The marker sits inside Mesh/ so it lands with the code wherever the Addon Manager installs the add-on.
             MarkerFolder = AddOnRoot + "/Mesh",
             ExportPaths = new[] { AddOnRoot + "/Mesh", DocsSnapshot, AddOnRoot + "/README.md" },
@@ -85,7 +91,9 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 "across a seam), test items, skills, quests, mounts, pets, harvestables and buildings that exercise every " +
                 "path across a cell edge.\n" +
                 "Adds an auto client, an editor launcher and play runner, a load generator, and the Python regression and " +
-                "capacity harnesses under TestMap/Tools.\n" +
+                "capacity harnesses under TestMap/Tools: 25 scenarios, eleven of the mesh itself and fourteen of dynamic " +
+                "cells (split, merge, crashes, the automatic policy, buildings across a cut, and a central restart with " +
+                "the central run as its own process).\n" +
                 "Needs the Server Meshing add-on and the kit's BaseDemo (the test data references its enemy prefab and " +
                 "default weapon).",
             Dependencies = new[] { "87f3a860-3714-407a-8bd2-3ae097a78867" },

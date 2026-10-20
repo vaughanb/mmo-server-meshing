@@ -9,7 +9,10 @@ each zone colour-coded so you can see which server owns the ground you are stand
 The rig ships the content needed to exercise every path that crosses a cell edge: test items, skills (heal and debuff),
 a kill quest, a bow and missile, a mount, a pet, a harvestable and a placeable building. It adds an **auto client** that
 walks characters over edges on its own, an editor **launcher** and **play runner** that bring up all ten cell processes,
-a **load generator**, and the Python regression and capacity harnesses under `TestMap/Tools`.
+a **load generator**, and the Python regression and capacity harnesses under `TestMap/Tools`. The regression harness
+runs 25 scenarios: eleven of the mesh itself (handoff, ghosts, combat, parties, buildings, seams, sleeping cells) and
+fourteen of dynamic cells (split, merge, crashes mid-operation, the automatic policy, buildings across a cut, and a
+central restart, the last with the central run as a build process of its own so it can be killed alone).
 
 ## Requirements
 
@@ -30,7 +33,7 @@ a **load generator**, and the Python regression and capacity harnesses under `Te
 
 ### The harnesses
 
-`TestMap/Tools/` is a reference copy of `regress.py` (the nine regression scenarios), `loadtest.py` (the capacity
+`TestMap/Tools/` is a reference copy of `regress.py` (the 25 regression scenarios), `loadtest.py` (the capacity
 sweep) and their helpers. They are written for the repository layout, not for a location inside `Assets`: they find
 the project root two directories above themselves and expect `Config/mySqlConfig.json`, a server build at
 `Build/Server/kit-ce-project.exe` and the editor's play runner watching `Temp/`. To run them, copy the folder to

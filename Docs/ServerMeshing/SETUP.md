@@ -4,7 +4,8 @@ How to split a map into cells served by separate map servers, join maps into one
 The design and its measurements are in [DESIGN.md](DESIGN.md); this document is the operator's and developer's path.
 
 **Status:** everything below is exercised by the regression harness on the test rig (ten cells over two maps: a 3×3
-grid plus one cell across a seam; one machine, or two with one cell served from the other). Version 0.72.
+grid plus one cell across a seam; one machine, or two with one cell served from the other), Dynamic maps' splits, merges,
+crashes and central restarts included (§6a). Version 0.83.
 
 ---
 
@@ -20,6 +21,9 @@ grid plus one cell across a seam; one machine, or two with one cell served from 
   client pre-loading the neighbouring scene behind the player's back.
 - **Sleeping cells:** with nobody near it a cell does not run at all; it starts a few seconds ahead of the first
   player who approaches and exits again later. Empty land costs nothing.
+- **Dynamic cells:** a map set Dynamic has a busy cell split into more cells at runtime and merged back when it quiets,
+  by an operator's command or the central's own load policy; the cells survive crashes and a central restart, and
+  buildings follow the cut (§6a).
 
 Nothing in the kit's core is edited: the add-on is subclasses on the kit's manager and entity prefabs plus one
 world-registry asset.
@@ -43,11 +47,18 @@ right for a sandbox where towns can appear anywhere.
 ## 3. Prerequisites
 
 - The add-on folder `Assets/ServerMeshing/` (it compiles into the game assembly; no asmdef needed).
-- OpenMMORPG at master from 2026-09-15 or later: it carries the four small core changes the add-on relies on (an
-  owner-change movement fix, frame-granular request waits, a virtual `IsWatched()` on the monster activity component and a
-  protected pending-spawn dictionary on the map manager; DESIGN.md §17).
-- A kit carrying upstream patch 0006 (OpenMMORPG `develop` bb9895f or later); the state sender calls its
-  `IEntityMovementServerStateFlags`, and the add-on does not compile without it ([upstream/README.md](upstream/README.md)).
+- OpenMMORPG `develop` at bb9895f (2026-10-02) or later. It carries seven of the eight kit changes the add-on relies on
+  (DESIGN.md §17, [upstream/README.md](upstream/README.md)): patches 0001-0004 (on `master` too since 2026-09-15: an
+  owner-change movement fix, frame-granular request waits, a virtual `IsWatched()` on the monster activity component, a
+  protected pending-spawn dictionary on the map manager), 0005 (on `master` since 2026-10-01: a cache finalizer that
+  corrupted pooled collections) and 0006-0007 (`develop` only: movement flags sent to every receiver of a tick, entity
+  states read to their length). The state sender calls 0006's `IEntityMovementServerStateFlags`, so the add-on does
+  not compile without it.
+- **Upstream patch 0008 (CE-10), not merged yet:** `protected virtual string BuildingPersistenceChannelId => ChannelId;`
+  on the kit's `MapNetworkManager`, read at its seven building database sites. `MeshMapNetworkManager` overrides it
+  (§6a.8), so **the add-on does not compile without it**, Dynamic maps or not. Apply
+  [upstream/0008-MapNetworkManager-let-subclasses-choose-the-building-persistence-channel.patch](upstream/0008-MapNetworkManager-let-subclasses-choose-the-building-persistence-channel.patch) to the kit (from the project root, `git apply
+  --directory=Assets/OpenMMORPG <patch>`, or by hand where a kit with local edits refuses a hunk) until upstream merges it; `MeshKitEditTests` fails if a kit update drops it.
 - Your map scenes in the build settings, your map infos in the game database.
 
 ## 4. Step by step
@@ -75,67 +86,24 @@ The registry inspector lets you refine a layout afterwards:
   next to 1 km wilderness cells. Rectangles must not overlap (the validator reports overlaps and duplicate ids).
 - **Cell ids** (`cellIds`): explicit ids for a grid, row-major.
 
-Below the layout, panel 2 sets each map's **cell mode**:
-
-- **Static** (the default): the cut is the cut, exactly as before 0.72.
-- **Dynamic**: the cut gives the map's *base cells*, which the central may split into more cells while they are busy
-  and merge back when they are quiet: by an operator's command (§7), or by itself when the map sets `autoSplit` and
-  `autoMerge` (Slice 3: a cell at `splitUtil` for `splitDwellSeconds` is cut where the cost model says the busier side
-  is least loaded, only when that is worth a process; two cells of a family predicted cool together for
-  `mergeDwellSeconds` merge back). Every server of a Dynamic map says hello to the central once registered and hands nothing over,
-  and routes no building, until the central answers with the layout; it logs `Layout gate open on …` when that
-  happens and warns every `layoutGateWarnSeconds` while it waits. Choose the mode before starting the servers: it is
-  read at start and the panel is disabled in Play.
+Below the layout, panel 2 sets each map's **cell mode**: **Static** (the default: the cut is the cut, exactly as before
+0.72) or **Dynamic** (the cut gives the map's *base cells*, which the central may split while they are busy and merge
+back when they are quiet). Dynamic maps have their own section, §6a.
 
 The band is not part of the layout: a cell's server streams the strip inside its own edge.
 
 The registry's own fields, for hand edits: `maps` (one layout per map), and per layout `mapId`, `worldOrigin` (where
 the map's origin sits in the shared world frame), `gridOrigin`, `cellSize`, `columns`, `rows`, `cellIdFormat` (the id
-pattern: `{map}` = the map id, `{x}`/`{y}` = column/row), the optional `cellRects` and `cellIds` above, `cellMode`,
-and for Dynamic maps `minCellSize` (the narrowest a cut may leave a cell, never below the band; 0 = the registry's
-default), `maxCellsPerBase` (0 = the default), `autoSplit` and `autoMerge` (both off by default: with them on, the
-central splits and merges the map's cells by itself, Slice 3). Registry-wide: `touchTolerance` (how close two rectangles must come to count as neighbours across a seam,
-0.5 m) and `dynamicSettings`, read only when a map is Dynamic: `bandWidth` (the band every process computes band
-neighbours with, and the narrowest cut; each map server logs an error if its own `ghostBandWidth` is wider),
-`defaultMinCellSize` (100 m), `defaultMaxCellsPerBase` (4), `layoutGateWarnSeconds` (10), `recoveryCeilingSeconds`
-(60: how long the central waits after a restart for the cells to say what layout they hold),
-`coordinatorStorePath` (where the central keeps the layout it has sent; empty = `Temp/ServerMesh.Coordinator.json`
-under its working directory), and for splits (Slice 2b): `handoffAckGuardSeconds` (20), `drainRatePerSecond` (5
-character handoffs a second, cluster-wide: one operation runs at a time), `drainEntityRatePerSecond` (20 monster,
-static and drop handoffs a second), `maxConcurrentHandoffsPerDestination` (20), `prewarmSeconds` (2: how long a new
-cell's band neighbours must have been linked and sending before it takes the rectangle), `prewarmSpawnBudgetShare`
-(0.25 of a frame for queued puppet spawns on a Dynamic map), `splitStepTimeoutSeconds` (60: a silent participant
-aborts a split before its second step and freezes it after), `splitCooldownSeconds` (30: after any split or merge
-of the family) and `drainMonsterAgeSeconds` (5); for merges (Slice 2c) `retireMaxSeconds` (90: how long a merged-away cell may
-take to drain and exit before the central and the cell log it as straggling; players are never kicked); for supervision
-(Slice 2d) `childDownGraceSeconds` (20: how long a live dynamic cell, or a split family's base in sleep mode, may be gone
-before the central restarts it; must exceed `childFenceSeconds + fenceSaveSeconds + 3`), `childMaxRestarts` (3 failed
-restarts, then the child collapses into its base), `childRestartIntervalSeconds` (10), `childRestartStableSeconds` (60),
-`childHungSeconds` (30: a registered cell that sends no load report this long is killed by its spawner),
-`childFenceSeconds` (10), `fenceSaveSeconds` (5) and `retireKillAfterSeconds` (270: a merge's retiring cell still
-there after this is killed); for the automatic policy (Slice 3, read only on maps with `autoSplit` or `autoMerge`)
-`splitUtil` (0.8: mean work over the frame budget at or above which a cell is hot), `splitDwellSeconds` (45: how long
-it must stay hot), `fastPathSaturatedShare` (0.2) and `fastPathUtil` (0.95) with `fastPathSeconds` (10: a saturated
-cell is planned sooner), `mergeUtil` (0.5: two cells predicted at or under the smaller of this and 0.6 x `splitUtil`
-as one may merge) with `mergeDwellSeconds` (300), `opCooldownSeconds` (120: after any operation on a family, by hand
-or by the policy, before it plans another; never under `splitCooldownSeconds`), `splitBenefitRatio` (0.75: a cut is
-planned only when the predicted busier side is at most this share of the cell's utilisation now), `reportFreshSeconds`
-(15) and `measureAfterSeconds` (10: the relief is read two load windows after an operation's done), `flapWindowSeconds`
-(900), `flapReliefShare` (0.1: a measured relief under it, or a split within the window of a merge, doubles the
-family's dwells and cooldown, up to `flapMaxMultiplier`, 8; a relief at twice it resets them), `hostHeadroomShare`
-(0.8: a split is deferred while the host's cores in use, plus the child's share, would exceed this share of its cores);
-for buildings across a cut (Slice 4) `buildingTransfersInFlight` (2: building trees one cell releases to another at a
-time, each two to four database round trips) and `buildingStorageCloseSeconds` (5: how long a cell releasing a chest
-waits for its users and in-flight item moves)
-and the cost model in owned-player equivalents (`modelFloorPlayers` 9.1, `puppetPlayerWeight` 0.174,
-`ownedMonsterWeight` 0.126, `puppetMonsterWeight` 0.1: DESIGN 0.71 and 0.73's fits; a crowd narrower than the band is
-accepted by the kinematic fit and refused only by a steered one). Every mesh manager (`MeshMapNetworkManager`, `MeshLoginNetworkManager`,
+pattern: `{map}` = the map id, `{x}`/`{y}` = column/row), the optional `cellRects` and `cellIds` above, `cellMode`, and
+for Dynamic maps `minCellSize`, `maxCellsPerBase`, `autoSplit` and `autoMerge` (§6a.2). Registry-wide: `touchTolerance`
+(how close two rectangles must come to count as neighbours across a seam, 0.5 m) and `dynamicSettings`, read only when
+a map is Dynamic (§6a.11). Every mesh manager (`MeshMapNetworkManager`, `MeshLoginNetworkManager`,
 `MeshCentralNetworkManager`, `MeshMapSpawnNetworkManager`) carries a `world` reference to this asset; panel 3 assigns
 it.
 
 ### 4.3 Wire the prefabs
 
-Panel 3: **Validate**. Every line with `!!` has a **Fix** button. The checks:
+Panel 3: **Validate**. `!!` is an error and `!` a warning; a line whose fix is safe has a **Fix** button. The checks:
 
 | Check | What Fix does |
 |---|---|
@@ -148,6 +116,7 @@ Panel 3: **Validate**. Every line with `!!` has a **Fix** button. The checks:
 | Game instance gameplay rule is a `MeshGameplayRule` | Assigns one (creates the asset if none exists) |
 | Server target frame rate ≤ 60 | Sets 60 |
 | Map info of each layout in the game database; its scene in the build settings | reported; do it in the database asset / build settings |
+| Dynamic maps: base cells that can never split, `minCellSize` under the band, the worst-case band neighbours and links, the spawners' `servedCells`, the settings the central checks at start (§6a.3) | **Raise to band** for `minCellSize`; the rest reported |
 
 `MeshIdentity` needs no wiring: it is added to entities at runtime. The kit's client-instance prefab is skipped (its login and
 central components are the client halves). A LAN-only game instance can ignore the gameplay-rule line.
@@ -163,8 +132,9 @@ neighbour count; at runtime the lines are drawn as debug lines and the player's 
 
 - **Editor rig:** **Server Meshing ▸ Launch Test Cluster** starts one map-server process per cell of the registry
   (plus the central, login and database servers) with the right arguments, or copies the commands to the clipboard.
-- **Several hosts:** give each host's `MeshMapSpawnNetworkManager` a `servedCells` list (or `MESH_SPAWN_CELLS=C,N`) so two
-  machines never start the same cell; see [MULTIHOST.md](MULTIHOST.md).
+- **Several hosts:** give each host's `MeshMapSpawnNetworkManager` a `servedCells` list of base cells (or
+  `MESH_SPAWN_CELLS=C,N`) so two machines never start the same cell; see [MULTIHOST.md](MULTIHOST.md), and §6a.4 for
+  Dynamic maps (a family runs on its base's host).
 - **Production:** the kit's `MMOServerInstance` runs unchanged. Its map spawner (`MeshMapSpawnNetworkManager`) starts
   one process per cell for every map that has a layout (maps without a layout keep the kit's single-server behaviour);
   the central (`MeshCentralNetworkManager`) lists every cell as a channel, so no channel has to be typed into
@@ -337,15 +307,246 @@ and, later, several hosts all reach one database, and SQLite is a single file on
   that no interface of this machine has is another computer on the LAN (the prefab was saved for a two-machine run
   there), so cells started here advertise this machine's address on that subnet, or loopback, instead.
 - **Ports.** The rig's cluster uses the kit's defaults (central 7000, cluster 6010, map spawner 6001, database manager 6100,
-  login 7500, cells from 8000 with their links 10000 above). Another kit server on the same machine holding those ports makes the editor's
+  login 7500, cells from 8000 with their links 10000 above; the checks cover 8000-8063 and 18000-18063, room for 64 cells). Another kit server on the same machine holding those ports makes the editor's
   servers fail to bind with `Only one usage of each socket address`, and its login server then joins the *other*
   cluster: the scenarios fail with no cell logging at all. `regress.py` and `abload.py` check the ports first and
   refuse to start, naming the process that holds them; stop it for the run.
 
+## 6a. Dynamic cells
+
+A **Static** map keeps the cut you drew. A **Dynamic** map treats that cut as its **base cells**: the central may cut a
+busy base cell into more cells (its **family**: the base and its **children**) while players crowd it and merge them
+back when they leave, by an operator's command or by its own policy. Players are handed across the new line like any
+other (one migration, 0.26-0.42 s on the rig, no visible jump); nobody is kicked by a split or a merge. This section is
+the whole operator's path; the design record behind each step is DESIGN 0.72 and 0.76-0.82.
+
+### 6a.1 When to choose it
+
+- Choose Dynamic for land whose crowds you cannot place in advance (a sandbox where towns appear anywhere, an event
+  ground). A Static grid fine enough for the worst crowd costs a process per cell all the time; sleeping cells (§4.6)
+  are the cheaper answer when the load is spread thin and moves.
+- A cut relieves a cell only when the crowd spreads over more than about twice the band: a crowd narrower than 2 x the
+  band, or one standing on a base cell's edge, gets little or nothing from a split (both sides hold most of it as
+  puppets). Per-client traffic does not change either way.
+- What Dynamic costs at all times: every server of the map waits for the central's answer at start (`Layout gate open
+  on …` within a second on the rig); character puppets on the map are kinematic (cheaper, DESIGN 0.76); the central
+  runs a layout coordinator and keeps its store file; a cut family's cells never sleep.
+- Choose the mode before starting the servers: it is read at start and the panel is disabled in Play.
+
+### 6a.2 Setting up a Dynamic map
+
+In panel 2 set the map's **cell mode** to Dynamic; its four fields and the registry's `dynamicSettings` appear below it.
+Size the base cells first: a base cell must be at least twice the minimum cell on one axis (and the minimum on the
+other) to be cut at all. The policy's cuts fall on the load report's bucket (`occupancyBucketSize`, 20 m), a command's
+anywhere, so a base just over twice the minimum may split by command and never by the policy.
+
+| Per map | Default | What it decides |
+|---|---|---|
+| `minCellSize` | 0 = `defaultMinCellSize` (100 m) | The narrowest a cut may leave a cell, on either axis. Never below the band: the central uses the band instead. |
+| `maxCellsPerBase` | 0 = `defaultMaxCellsPerBase` (4) | The most live cells one base cell may become. With the band neighbours (§6a.3) this is what bounds a world. |
+| `autoSplit`, `autoMerge` | off | Let the central split hot cells and merge cool ones by itself (§6a.6). Off: only operator commands cut. |
+
+The registry-wide settings that matter most (all of them are in §6a.11):
+
+| `dynamicSettings` | Default | What it decides |
+|---|---|---|
+| `bandWidth` | 80 m | The band every process computes band neighbours with, and the narrowest cell. Keep each map manager's `ghostBandWidth` at or under it (a wider one logs an error). It must be above 0 (Validate says so). |
+| `coordinatorStorePath` | `Temp/ServerMesh.Coordinator.json` | Where the central keeps the layout it sent and the operation it runs. A restarted central reads it back (§6a.9): keep it where the central's next start finds it (an absolute path on a disk that outlives the process). |
+| `splitUtil`, `splitDwellSeconds` | 0.8, 45 s | How hot (work over the frame budget) and for how long before the policy plans a split. |
+| `mergeUtil`, `mergeDwellSeconds` | 0.5, 300 s | How cool two cells must be predicted together, and for how long, before they merge. |
+| `opCooldownSeconds` | 120 s | After any operation on a family before the policy plans another there. |
+| `drainRatePerSecond` | 5 | Character handoffs a draining cell starts per second: the database's sustained rate (DESIGN 0.75). A split of 250 players takes about 50 s. |
+| `childDownGraceSeconds` | 20 s | How long a dynamic cell may be gone before the central restarts it. |
+| `recoveryCeilingSeconds` | 60 s | How long a restarted central waits for the cells to say what layout they hold. |
+
+On `MeshLoginNetworkManager`, `recoveryWaitSeconds` (15) is how long a login waits for a restarting central's recovery
+before it routes by the layout as it stands.
+
+### 6a.3 Validate
+
+Panel 3's **Validate** judges every Dynamic map before anything starts (`!!` is an error, `!` a warning):
+
+| Line | Meaning | Fix |
+|---|---|---|
+| `minCellSize … is under the … m band` (error) | The central uses the band in its place; the number you set is not the one that runs. | **Raise to band** sets the map's `minCellSize` to the band: nothing that runs changes. |
+| `… base cell(s) can never split` (warning) | No cut of those base cells leaves both sides at least the minimum cell (a cut needs twice the minimum on one axis and the minimum on the other), or `maxCellsPerBase` is 1. A `maxCellsPerBase` of 0 or less gets its own line: commands meet no limit and the policy never splits. | none: make the cell bigger or the minimum smaller. |
+| `up to <n> band neighbours … over the 32` (warning) | A cell streams to at most 32 band neighbours. If every base near this one is cut to `maxCellsPerBase` (never more cells than its area holds in minimum cells), one of its cells could pass that, and a layout change that would (a split, or a merge whose survivor reaches more cells) is refused. The count is an upper bound for a world started under these settings. | none: lower `maxCellsPerBase`, or cut the map coarser. |
+| `with linkAllZones a cell links to every live cell of its map … over the 64` (warning) | With `linkAllZones` on (the default) every cell links to every live cell of its map plus its band neighbours on other maps, and a cell's link server takes 64. Cut to `maxCellsPerBase` the map could pass it. | none: lower `maxCellsPerBase`, or turn `linkAllZones` off on the map managers (party shares then reach only linked cells). |
+| `servedCells of … leave out the Dynamic base cell(s) …` (warning) | Several hosts (§6a.4), judged over every spawner prefab's list together: a child, every supervised restart, a kill and the policy's host-headroom check go to the spawner that advertises the base. A host that runs its cells by hand advertises nothing, and the central then picks any registered spawner. | none: run Dynamic maps on hosts with a spawner. |
+| `an empty servedCells serves every cell but advertises none` (warning) | One spawner prefab lists its cells and another lists none: the second advertises nothing, so the children of the bases only it runs start on any spawner. | none: give every host its list. |
+| `servedCells names …, which is no cell of the registry` (warning) | A typo, or a child id: children are never listed (they start on their base's spawner). | none |
+| `Registry: dynamicSettings.…` (error) | A setting the central would reject at start (the supervision grace, the policy's ranges, the cost model's weights). | none |
+
+A Dynamic map with none of these gets one `OK` line naming its minimum cell and its worst band-neighbour count. The
+checks read the asset: a `MESH_BAND` or `MESH_SPAWN_CELLS` set for a run is not seen.
+
+### 6a.4 Running it
+
+- Nothing to start by hand: the central runs the layout coordinator whenever a map is Dynamic, every cell of the map
+  says hello once it has registered and holds every handoff and building placement until the answer
+  (`LayoutHello sent`, `Layout <pair> applied: <cell> owns …`, `Layout gate open on …`; a warning every
+  `layoutGateWarnSeconds` while it waits).
+- The map spawner starts the base cells at boot and never a child: the central starts a child, and has a dead child
+  (or, with sleeping cells, a dead base) restarted, **through the spawner that advertises the base cell**, so a family
+  runs on its base's host; with sleeping cells off the kit's own auto-restart brings a base back on the spawner that
+  started it. Each child is a new map-server process and a new channel (its id the cell id, e.g. `C.1`) on the host's
+  next free map port from `spawnStartPort` (a port is reused once its process has exited), its mesh link
+  `meshLinkPortOffset` above. A host's range must cover every process it runs at once: base cells, children, other maps,
+  and a restart that overlaps its predecessor's exit. The rig opens 64 of each (`8000-8063`, `18000-18063`, MULTIHOST
+  §4); with `linkAllZones` a map passes 64 live cells only at the cost of refused links (§6a.3).
+- **Several hosts** (MULTIHOST): give every host's spawner its base cells in `servedCells` (never a child's id). A
+  Dynamic map's cells must be served by hosts that run a spawner; today's second rig machine starts its cell by hand, so
+  keep its cells on a Static map (MULTIHOST §9).
+- **The production shape** is the split-process one: the central, login and database manager in one process, the
+  spawner in another (MULTIHOST §9). The central's process can then be restarted alone (§6a.9).
+
+### 6a.5 Splitting and merging by hand
+
+An operation is one command line handed to the central: `MeshCentralNetworkManager.SubmitLayoutCommand(line, out
+error)` from your own admin tool (it returns false with the reason, also logged `Layout op refused: <reason>`), and the
+central raises `LayoutOpLine` with every `Split …`, `Merge …` and `Layout op refused: …` line for a tool to show. The
+test rig feeds the same lines from a file (§7).
+
+- `<seq> split <cell> <x|z> <at> <+|-> <childId>`: cut `<cell>` at world x (or z) = `<at>` and give the `+` (or `-`)
+  side to a new cell `<childId>` (e.g. `7 split C x 0 + C.1`; the policy names children `<base>.<n>`). Refused while
+  another operation runs anywhere (one at a time world-wide), inside the family's cooldown (`splitCooldownSeconds`,
+  30 s), past `maxCellsPerBase`, when a side would be under the minimum cell, or when an id is unsafe (no `_ : | ; @ , =`,
+  no whitespace, at most 50 characters). The central adds the channel, has the spawner start the child, **pre-warms**
+  it (its band neighbours linked and streaming for `prewarmSeconds`), **hands over** the half (the parent drains its
+  players at `drainRatePerSecond`, monsters, statics, drops and buildings faster) and **settles** (`Split <op>: done`).
+  A failure before the hand-over aborts (the child retired); after it the split freezes rather than guess.
+- `<seq> merge <a> <b>`: join two cells of one family that share a full edge. The base survives when it is one of them,
+  else the one with more players. The retiring cell drains everything to the survivor, quits through the kit's quit
+  path once it holds nothing, and leaves the layout; a family back to its asset cut drops out of the layout altogether.
+- `<seq> kill <cell>`: have the cell's spawner kill its process (an escape for a hung cell; it is then restarted like
+  any dead cell).
+- Status lines: `Split <op>: …`, `Merge <op>: …`, `Layout op refused: …`, `Supervisor: …`, `Policy: …`.
+
+### 6a.6 The automatic policy
+
+With `autoSplit` and/or `autoMerge` on, the central reads every cell's load report (every 5 s: the work probe's
+utilisation, what it owns and holds, an occupancy grid) once a second:
+
+- A cell at `splitUtil` for `splitDwellSeconds` (or saturated for `fastPathSeconds`) is planned: every cut on a 20 m step
+  that leaves both sides the minimum is priced with the cost model, and the best is taken only when its busier side is
+  predicted at most `splitBenefitRatio` of the cell's utilisation now (`Policy: split of <cell> planned: …`). Otherwise
+  `Policy: split of <cell> refused: best peak … over 0.75 x util …`, once a minute (also a `split-refused` note in the
+  cell's log). A split is deferred while the spawner's host would pass `hostHeadroomShare` of its cores.
+- Two cells of a family predicted under the merge threshold together for `mergeDwellSeconds` merge (`Policy: merge of
+  <a> <b> planned: …`), two children of a family as well as a child and its base.
+- Every operation it made is measured two load windows after its done (`Policy: split <op> measured: predicted peak …,
+  measured …, relief … %`). A family whose split relieved under `flapReliefShare`, or that splits within
+  `flapWindowSeconds` of a merge, has its dwells and cooldown doubled, up to `flapMaxMultiplier`.
+- The cost model's weights are the rig's measured fits (DESIGN 0.71, 0.73); the planner uses their ratios only, so it
+  carries to another machine. Refit them for your game's entities if its puppets cost differently.
+
+### 6a.7 Supervision and fencing
+
+- A dynamic cell (or a cut family's base with sleeping on) gone for `childDownGraceSeconds` is restarted with the same id
+  and rectangle; after `childMaxRestarts` failed restarts a child collapses into its base (or, sharing no full edge with
+  it, into a sibling that does; one with neither is left down). A registered cell that sends no
+  load report for `childHungSeconds` is killed by its spawner and then restarted; so is a merge's retiring cell still
+  there after `retireKillAfterSeconds`. Lines start `Supervisor:`.
+- An operation whose member dies before the hand-over aborts at once; one that dies after it pauses and resumes when the
+  member is back.
+- **Fencing:** a cell of a Dynamic map cut off from the cluster for `childFenceSeconds`, while a neighbour that never lost
+  it still reports itself registered, saves its players (within `fenceSaveSeconds`), kicks them (they log in again,
+  routed by position) and exits, so two processes never own one rectangle. With the central itself down nobody has such a
+  witness and nobody fences.
+
+### 6a.8 Buildings
+
+Every cell of a family keeps its buildings under the base cell's channel (one core edit, CE-10), so nothing is lost when
+a child merges back. A building tree follows its root's ground: at a split's hand-over and at a merge the holder hands
+each tree to the new owner (`buildingTransfersInFlight` at a time, chests closed for `buildingStorageCloseSeconds`
+first), a placement lands on the cell that owns its position, and both drain gates wait for the trees. Lines:
+`Buildings loaded on <cell>: …`, `Building transfer <root> zone <from>-><to>: …`.
+
+### 6a.9 A central restart
+
+The cells keep running while the central is down. A restarted central waits (up to `recoveryCeilingSeconds`) for every
+registered cell and every dynamic id its store or the cells name to say hello, adopts the newest consistent layout among
+them (`Coordinator recovery: map <m> adopted layout <pair> from <the store|cell <c>> with <n> entries (<ids>)`), gives the
+children their channels back, and answers everyone with it; logins wait up to `recoveryWaitSeconds` for this. The
+operation the old central was running is aborted, re-sent or resumed at its gate (`<Kind> <op>: resumed at <step> after
+a central restart`); the policy's cooldowns start fresh. A dynamic id that never says hello by the ceiling freezes **its
+family** only (`Coordinator recovery: family <base> of map <m> frozen: no hello from <ids> after <s> s`): no operation,
+supervision or policy on it, until that cell says hello (start it; no command unfreezes a family yet). The cells' saves
+fail while the database manager is down, so host it apart from the central where you can (a central process that hosts
+it costs every cell up to about 40 s of failed saves).
+
+### 6a.10 In the logs
+
+On every cell: `LayoutHello sent`, `Layout <incarnation>/<version> applied: <cell> owns …`, `Layout gate open on …`,
+`Coordinator: <code>: …` (a note the central sent the cell), `Drain on <cell>: …`, `Building channel on <cell>: …`. On
+the central: the operation, policy, supervisor and recovery lines above and a load summary every `loadSummarySeconds`.
+
+### 6a.11 Settings reference
+
+Every field of the registry's `dynamicSettings`, read only when a map is Dynamic:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `bandWidth` | 80 m | See §6a.2. Rig override `MESH_BAND`. |
+| `defaultMinCellSize`, `defaultMaxCellsPerBase` | 100 m, 4 | For maps that set no `minCellSize`/`maxCellsPerBase`. |
+| `layoutGateWarnSeconds` | 10 s | Between warnings while a cell waits for its layout answer. |
+| `recoveryCeilingSeconds` | 60 s | See §6a.9. |
+| `coordinatorStorePath` | empty | See §6a.2. Rig override `MESH_COORDINATOR_STORE`. |
+| `handoffAckGuardSeconds` | 20 s | A handoff's ack wait (as the map servers'); added to a split's drain timeout. |
+| `drainRatePerSecond`, `drainEntityRatePerSecond` | 5, 20 | Character handoffs, and monster, static and drop handoffs, a draining cell starts per second. |
+| `maxConcurrentHandoffsPerDestination` | 20 | Handoffs in flight toward one cell while draining. |
+| `prewarmSeconds`, `prewarmSpawnBudgetShare` | 2 s, 0.25 | How long a new cell's band neighbours must stream to it before it takes its half; the share of a frame for queued puppet spawns. |
+| `splitStepTimeoutSeconds` | 60 s | A silent participant aborts a split before its hand-over and freezes it after. |
+| `splitCooldownSeconds` | 30 s | After any operation on a family before a command may cut it again. |
+| `drainMonsterAgeSeconds` | 5 s | A monster the shrunk parent spawned in the given-away half this recently is handed off, not counted. |
+| `retireMaxSeconds` | 90 s | A merged-away cell still draining after this is logged as straggling (players are never kicked). |
+| `childDownGraceSeconds` | 20 s | See §6a.7; must exceed `childFenceSeconds + fenceSaveSeconds + 3`. |
+| `childMaxRestarts`, `childRestartIntervalSeconds`, `childRestartStableSeconds` | 3, 10 s, 60 s | Failed restarts before a collapse; between attempts; up this long for a restart to count. |
+| `childHungSeconds`, `childFenceSeconds`, `fenceSaveSeconds`, `retireKillAfterSeconds` | 30, 10, 5, 270 s | See §6a.7. |
+| `splitUtil`, `splitDwellSeconds` | 0.8, 45 s | See §6a.6. Rig `MESH_SPLIT_UTIL`, `MESH_SPLIT_DWELL`. |
+| `fastPathSaturatedShare`, `fastPathUtil`, `fastPathSeconds` | 0.2, 0.95, 10 s | A saturated cell is planned sooner. |
+| `mergeUtil`, `mergeDwellSeconds` | 0.5, 300 s | The merge threshold is the smaller of `mergeUtil` and 0.6 x `splitUtil`. Rig `MESH_MERGE_UTIL`, `MESH_MERGE_AFTER`. |
+| `opCooldownSeconds` | 120 s | Never under `splitCooldownSeconds`. Rig `MESH_OP_COOLDOWN`. |
+| `splitBenefitRatio` | 0.75 | Rig `MESH_SPLIT_BENEFIT`. |
+| `reportFreshSeconds`, `measureAfterSeconds` | 15 s, 10 s | An older load report is no evidence; the relief is read this long after done. |
+| `flapWindowSeconds`, `flapReliefShare`, `flapMaxMultiplier` | 900 s, 0.1, 8 | See §6a.6; a relief at twice the share resets the multiplier. |
+| `hostHeadroomShare` | 0.8 | See §6a.6. Rig `MESH_HOST_CORES` sets the reported cores. |
+| `modelFloorPlayers`, `puppetPlayerWeight`, `ownedMonsterWeight`, `puppetMonsterWeight` | 9.1, 0.174, 0.126, 0.1 | The cost model in owned-player equivalents (DESIGN 0.71, 0.73). Rig `MESH_PLANNER_WEIGHTS`, `MESH_MONSTER_WEIGHT`. |
+| `buildingTransfersInFlight`, `buildingStorageCloseSeconds` | 2, 5 s | See §6a.8. |
+
+### 6a.12 Known limits
+
+- **One operation at a time, world-wide**: the drain is paced to the database's rate (DESIGN 0.75), not the hosts'.
+- **What a cut relieves**: a crowd narrower than twice the band, or on a base cell's edge, gets little; the kinematic cost
+  model accepts a crowd narrower than the band that only a steered fit would refuse; the weights are one machine's fits.
+- **Scale**: `linkAllZones` links every cell of a map to every other, and the link server takes 64 connections, so 64
+  cells is the ceiling (on-demand links are a follow-up); a cell streams to at most 32 band neighbours.
+- **Hosts**: a family runs on its base's host; a host without a spawner cannot serve a Dynamic map's cells.
+- **Settings for a run**: `MESH_BAND` changes the band the map servers and the layout rules use, but the central's
+  policy plans with the asset's `bandWidth` (and its minimum cell clamps to it); a base just over twice the minimum
+  cell splits by command but not by the policy (its cuts fall on the report's bucket).
+- **During an operation**: a new child's first window has one 150-200 ms frame (the pre-warm waits it out); a monster
+  idling on the cut is handed back and forth every 5-10 s, as on any border; after a drain timeout the parent watches its
+  old half until it is empty, then a settle shrinks it; between a merged cell's exit and the next layout its neighbours
+  retry its link (log noise); a hung quit holds the world-wide operation until `retireKillAfterSeconds`.
+- **Buildings**: scene-placed buildings and chests stay per-channel copies (their ids embed the channel), so a child's
+  scene rows accumulate under the base channel and a chest's contents depend on the serving cell; `buildLimit` is counted
+  per process; a building placed while its owner restarts has two owners for about a second; a drain counts a tree as one
+  entity though its release takes a few seconds; the kit's own race between a handoff and an item move in flight is
+  unchanged; an item moved into a chest on a cell where nobody has opened it trips the kit's `NotifyStorageItemsUpdated`
+  (the kit's UI always opens first); upstream patch 0008 (CE-10) is written but not pushed.
+- **A central restart**: a family whose child never says hello stays frozen (no command unfreezes it); a store lost
+  together with a partitioned cell can leave that cell holding a newer layout nobody adopts (it is answered with the
+  current one); the policy's multipliers and measurements and the supervisor's restart counts do not survive, and a
+  resumed operation is not measured; a staged commit held by its target alone lasts the whole outage; a frozen operation
+  is dropped; on the rig's split-process topology about half the first logins after the central process starts wait out
+  one 30 s kit request timeout before the retry gets in.
+
 ## 7. Verifying
 
-- **Harness:** `python Tools/ServerMeshing/regress.py` runs the ten scenarios (pet, party, crash, harvest, build,
-  seam, seamcold, sleep, pvp, wake; all but pvp and wake by default) on the rig and grades the logs of every cell that
+- **Harness:** `python Tools/ServerMeshing/regress.py` runs 25 scenarios: the eleven of the mesh itself (pet, party,
+  crash, harvest, build, seam, seamcold, sleep, pvp, wake, dynidle; the first eight by default) and the fourteen of
+  dynamic cells below, on the rig and grades the logs of every cell that
   logged, whatever its id; `--env KEY=VALUE` passes rig toggles, `--remote-cells E` serves a cell from a second machine
   and `--impair` degrades the link to it ([MULTIHOST.md](MULTIHOST.md) §8b, §8e). It refuses to run on a player build
   that does not match the working tree (the rig build records a SHA-1 of every player-side script and asset in
@@ -514,111 +715,45 @@ and, later, several hosts all reach one database, and SQLite is a single file on
   these lines (and the phantom `Phantoms: cell C port N …` and `Phantom step i/n: P a -> b` lines) and mirrors the
   three grammars; `python Tools/ServerMeshing/p0geom.py` computes the offline fight geometry (V per client in 3D and
   X/Z for A0 2 km and 3 km, ships within 1 km, pilots within 80 m, lock subscriptions) into `Logs/p0/geom/`.
-- **Dynamic cells on the rig:** `MESH_CELL_MODE=<map|all>:<Static|Dynamic>[,…]` sets maps' cell modes for a run
-  without touching the asset (`all` first, a map's own entry wins; e.g. `all:Dynamic`, or
+- **Dynamic cells on the rig** (what they do is §6a): `MESH_CELL_MODE=<map|all>:<Static|Dynamic>[,…]` sets maps' cell
+  modes for a run without touching the asset (`all` first, a map's own entry wins; e.g. `all:Dynamic`, or
   `ServerMeshTestMap:Dynamic`), and `MESH_COORDINATOR_STORE` moves the central's store. `regress.py` deletes the store
   before every scenario, grades every scenario's cells for the layout rules (a Dynamic map's cells apply the central's
   layout once per process, before any player registers; a Static map's apply none; no cell splits, merges, retires or
-  warns at the layout gate), and checks after each Play that the registry asset is unchanged on disk. The `dynidle`
-  scenario runs the test map Dynamic with a walk from C to E; `--env MESH_CELL_MODE=all:Dynamic` runs any other
-  scenario that way.
-- **Manual split (Slice 2b):** while the editor is in Play, write one line to `Temp/ServerMesh.LayoutCommand.txt`:
-  `<seq> split <baseCell> <x|z> <at> <+|-> <childId>` (e.g. `7 split C x 0 + C.1`: cut C at world x = 0 and give
-  the + side to a new cell C.1). The play runner hands it to the central (`MeshCentralNetworkManager.SubmitLayoutCommand`)
-  and mirrors every `Split <op>: …` and `Layout op refused: …` line to `Temp/ServerMesh.LayoutCommandStatus.txt` under
-  that seq; the harness clears both files before each scenario. The central adds the channel, has the spawner start
-  the child, stages and broadcasts the three steps (pre-warm, hand over, settle) and logs `done`, or `aborted` before
-  the hand-over and `frozen` after it. Scenarios `split` (C at x = 0, eight standing bots, a harvest-and-pickup bot and
-  40 synthetic players in C; `MESH_MONSTER_AREAS=Spawn_Interior_C`, which also takes a comma list of area names) and
-  `splitc2` (E at x = 200, the child touching C2 across the seam) grade the operation; both are skipped with
-  `--remote-cells` and `--remote-persist`.
-- **Manual merge (Slice 2c):** `<seq> merge <a> <b>` in the same command file joins a child back into its family's
-  base cell (either order; the two must share a full edge; a merge of two children is refused). The central widens the
-  base's interest, hands it the child's rectangle (the child drains everything it holds to the base), sends the child
-  `Retire` (it quits through the kit's quit path once it holds nothing), waits for it to leave the cluster, retires it
-  in the layout, and, when the family is back to its asset cut, broadcasts a layout without the family's entries.
-  Status lines `Merge <op>: …` are mirrored like a split's. Scenarios `merge` (`split`'s setup, then `merge C C.1`:
-  the bots migrate back, C.1 drains, quits and stays gone) and `mergec2` (`splitc2`'s, then `merge E E.1`: C2 drops
-  E.1 across the seam); both are skipped with `--remote-cells` and `--remote-persist`.
-- **Supervision and fencing (Slice 2d):** the central restarts a dead child with the same id and rectangle (or, after
-  `childMaxRestarts` failures, collapses it into its base) and has a hung cell killed by its spawner; an op whose member
-  dies before its e2 broadcast aborts, one that dies after pauses and resumes when the member is back. A cell of a
-  Dynamic map that loses the cluster for `childFenceSeconds` while a neighbour that never lost it still reports itself
-  registered fences itself: it saves its players (bounded by `fenceSaveSeconds`), kicks them (they re-log in, routed by
-  position) and kills its own process; with the central down nobody has such a witness and nobody fences. `<seq> kill
-  <cell>` in the command file has the cell's spawner kill it (an operator's escape for a hung process); lines starting
-  `Supervisor:` are mirrored to the status file. Scenarios `splitcrash_prewarm` (the child dies at e1: the split
-  aborts, the child stays gone), `splitcrash_drain` (it dies mid-drain: the bots fall back, it is restarted, the split
-  resumes and finishes) and `splitcrash_base` (the harness kills C with the child live: C comes back without R, the
-  child releases C's old monsters, the totals return to the area's 5, C's players re-log in); all three are skipped
-  with `--remote-cells` and `--remote-persist`. The headless bots log in again after a lost session (`Session lost …;
-  re-login <n>`; RESULT ` relogins=<n>`).
-- **Automatic policy (Slice 3):** with `autoSplit` or `autoMerge` set on a Dynamic map (rig: `MESH_AUTO_OPS=split`,
-  `merge` or `split,merge` on every Dynamic map of the run), the central reads the cells' load reports once a second,
-  plans a split of a cell hot for the dwell (`Policy: split of <cell> planned: <x|z> <at> <+|-> child <id>, util …
-  -> peak … (<cell> …, <id> …), <n> cut(s) tried`), says why it did not (`Policy: split of <cell> refused: best peak …
-  over 0.75 x util …`, once a minute, also as a `split-refused` note in the cell's log; `deferred: host … at <n>/<m>
-  cores` while the host has no headroom), merges a pair predicted cool together (`Policy: merge of <a> <b> planned:
-  predicted …`), measures every operation it planned two windows after its done (`Policy: split <op> measured:
-  predicted peak …, measured … (<parent> …, <child> …), relief … %`; `Policy: merge <op> measured: …`; `not measured
-  (<why>)` when it cannot) and slows a family that flaps (`Policy: flap on <base>: …; dwell and cooldown x2`). A merge
-  of two children is accepted (the one with more players survives) and a child that cannot collapse into its base
-  collapses into a sibling sharing a full edge. The play runner mirrors these lines, and the automatic operations'
-  own `Split`/`Merge` lines, to the status file under the seq `auto` while no command is live. Rig overrides:
-  `MESH_SPLIT_UTIL`, `MESH_SPLIT_DWELL`, `MESH_MERGE_UTIL`, `MESH_MERGE_AFTER` (the merge dwell), `MESH_OP_COOLDOWN`,
-  `MESH_SPLIT_BENEFIT`, `MESH_MONSTER_WEIGHT`, `MESH_PLANNER_WEIGHTS=<puppetPlayer>,<ownedMonster>,<puppetMonster>,<floor>`,
-  `MESH_HOST_CORES` (the spawner's reported cores), and `MESH_PROBE_BURN_MS=@<absolute path>` (the burn read from a
-  file at every load window: `[cell:]ms`, empty = off). Scenarios `autosplit` (eight bots 88 m either side of C's
-  centre line, a burn makes C hot, the central splits it, eases the burn and measures the relief, merges C.1 back once
-  the bots are gone), `autobenefit` (the 600 m Coarse cut, 200 spread synthetic players, no client: the measured relief
-  within 15 % of the prediction) and `autorefuse` (a 60 m crowd on the centre with steered puppets and the steered
-  fit: refused, once a minute, nothing splits); all three skipped with `--remote-cells` and `--remote-persist`. Every
-  other scenario fails on any `Policy:` line in the status file.
-- **Buildings across a cut (Slice 4):** on a Dynamic map a building tree (a root and the pieces snapped to it) follows
-  its root's ground: at a split's commit the parent hands the trees rooted in the given-away half to the child, at a
-  merge the child hands everything back, a placement lands on the cell that owns its position, and both drain gates
-  count buildings. The holder drops the tree from its handlers (the kit then refuses opens and item moves), closes and
-  waits out its chests (`buildingStorageCloseSeconds`), stops the saver, force-saves every piece and its storage, demotes
-  its copies to puppets and sends `BuildingTransfer`; the receiver loads each storage before it promotes its puppet or
-  creates the building without a database write. Lines: `Building channel on <cell>: <channel>`, `Buildings loaded on
-  <cell>: <n> placed in <t> tree(s) and <s> scene, ...`, `Building transfer <root> zone <from>-><to>: sent (<n> node(s))` /
-  `done` / `promoted <p>, spawned <s>, owned already <o>` / `released (<why>)` / `failed (<why>)`. A puppet's or a
-  demoted copy's despawn never deletes a row (only an owned building does). Scenario `splitbuild` (the tester in the
-  child's half places a wall with a chest and a door, keeps moving scrolls in and out, the split, the storage and the
-  door used on the child, the merge back, the rows all under C, C killed and loading exactly the tree, everyone
-  re-logged in); skipped with `--remote-cells` and `--remote-persist`. Test content: `TestStorage-CE` and `TestDoor-CE`
-  (`activatableDistance` 6: the kit's storage open is strict against it), their items in the tester's bag after the
-  wall stack; the tester mode `buildtree` writes its phases to the status file (`buildtree-placed`, `-ready`, `-checked`).
-- **A central restart with a cut map (Slice 5):** a restarted central adopts the runtime layout its store and the cells
-  hold instead of freezing the map. Per Dynamic map it waits (up to `recoveryCeilingSeconds`) for every registered map
-  server and every dynamic id the stored or held layouts name to say hello, picks the newest consistent pair among the
-  store, the cells' layouts and a stored staged step its target applied, applies it to its own registry, gives every
-  dynamic cell its channel back and answers every hello with it (`Coordinator recovery: map <m> adopted layout <pair>
-  from <the store|cell <c>> with <n> entries (<ids>)`; the cells log `Layout answer <pair> on <cell>: already applied`);
-  the login waits up to the login manager's `recoveryWaitSeconds` (15) for the recovery before it routes. A dynamic id
-  that never says hello by the ceiling freezes its **family** only (`Coordinator recovery: family <base> of map <m>
-  frozen: no hello from <ids> after <s> s`: no operation, supervision or policy on it until the id's hello unfreezes it;
-  its cells are still answered). The operation the old central was running is read back from the store: one still
-  before its commit broadcast is aborted through its own path (`<Kind> <op>: aborted the central restarted before
-  <step>`, the child retired, a merge reverted), a staged step its target applied is broadcast, one past its commit
-  resumes at its gate (`<Kind> <op>: resumed at <step> after a central restart`: a split's drain gate on fresh evidence,
-  a merge's drain, retire, e3 or tidy), a done split's pending settle resumes, a frozen one is dropped. The policy's
-  cooldowns start fresh for every cut family at the adoption (`Coordinator policy: cooldowns start fresh for <bases>
-  after the restart; ...`); flap multipliers, measurements and the supervisor's restart counts do not survive. A base
-  that crashes while the central recovers comes back gated and is answered with its kept rectangle: it never re-owns a
-  child's. A late hello holding a newer layout of the old central re-opens the recovery while the new central has
-  broadcast nothing of its own; afterwards it is answered with the current layout and logged as an error. **The rig's
-  split-process topology** (`regress.py`, used by the `splitcentral` scenarios and forced with `--topology split`): the
-  central, login and database manager run as one build process and the spawner as another (both started from
-  `Build/Server` with the project root as working directory, every port on the command line, `-spawnMaps
-  "ServerMeshTestMap|ServerMeshTestMap2"`), the editor's Play is a client only (`MESH_EDITOR_SERVERS=0`, honoured by
-  `ServerMeshEditorRole` on the server-instance object), the layout command and status files are served by the central
-  process (`ServerMeshCentralCommandWatcher`, `MESH_RIG_COMMAND_DIR`), and the harness kills and restarts the central
-  alone (its kit log is `Logs/Log_Database_Central_Login_<day>.<sev>.log`). Scenarios `splitcentral` (the split, the
-  central killed and restarted: the store adopted, every hello answered, a late login routed to C.1, nobody kicked),
-  `splitcentral_merge` (killed the moment the merge's e2 is broadcast: the merge resumes and finishes) and
-  `splitcentral_base` (C dies on its hello to the restarted central and comes back without R); all three skipped with
-  `--remote-cells` and `--remote-persist`.
+  warns at the layout gate unless the scenario does), fails every scenario but the policy's on any `Policy:` line, and
+  checks after each Play that the registry asset is unchanged on disk. **Commands:** while the editor is in Play, one
+  line in `Temp/ServerMesh.LayoutCommand.txt` (§6a.5's grammar) goes to the central through the play runner, which
+  mirrors every `Split`, `Merge`, `Layout op refused`, `Supervisor:` and `Policy:` line to
+  `Temp/ServerMesh.LayoutCommandStatus.txt` under that seq (the automatic operations' under `auto` while no command is
+  live); the harness clears both before each scenario. **Toggles:** `MESH_AUTO_OPS=split|merge|split,merge` (the policy
+  on every Dynamic map of the run), `MESH_SPLIT_UTIL`, `MESH_SPLIT_DWELL`, `MESH_MERGE_UTIL`, `MESH_MERGE_AFTER`,
+  `MESH_OP_COOLDOWN`, `MESH_SPLIT_BENEFIT`, `MESH_MONSTER_WEIGHT`,
+  `MESH_PLANNER_WEIGHTS=<puppetPlayer>,<ownedMonster>,<puppetMonster>,<floor>`, `MESH_HOST_CORES`,
+  `MESH_PROBE_BURN_MS=@<absolute path>` (the burn read from a file at every load window: `[cell:]ms`, empty = off), the
+  faults above and `MESH_EDITOR_SERVERS=0`. **The split-process topology** (`--topology split`, the default for the
+  `splitcentral` scenarios): the central, login and database manager as one build process and the spawner as another,
+  both started from `Build/Server` with the project root as working directory and every port on the command line
+  (`-spawnMaps "ServerMeshTestMap|ServerMeshTestMap2"`: one pipe-separated token), the editor's Play a client only
+  (`ServerMeshEditorRole` honours `MESH_EDITOR_SERVERS=0`), the command and status files served by the central process
+  (`ServerMeshCentralCommandWatcher`, `MESH_RIG_COMMAND_DIR`), and the central killed and restarted alone (its kit log
+  `Logs/Log_Database_Central_Login_<day>.<sev>.log`). **Scenarios** (all but `dynidle` skipped with `--remote-cells` and
+  `--remote-persist`): `dynidle` (the test map Dynamic, a walk from C to E, handed over in place); `split` (C cut at
+  x = 0: eight standing bots, a harvest-and-pickup bot and 40 synthetic players, `MESH_MONSTER_AREAS=Spawn_Interior_C`)
+  and `splitc2` (E cut at x = 200, the child touching C2 across the seam); `merge` and `mergec2` (the same, then merged
+  back: the bots migrate back, the child drains, quits and stays gone); `splitcrash_prewarm` (the child dies at e1: the
+  split aborts, the child stays gone), `splitcrash_drain` (it dies mid-drain: restarted, the split finishes) and
+  `splitcrash_base` (C killed with the child live: C returns without R, the monster totals return to the area's 5, C's
+  players re-log in); `autosplit` (a burn makes C hot, the policy splits it, measures the relief and merges C.1 back once
+  the bots are gone), `autobenefit` (the 600 m Coarse cut, 200 synthetic players inside C's inner 200 m square, no
+  client: the measured relief within 15 % of the prediction; the test map's outer ground has navmesh holes that snap
+  steered synthetics) and `autorefuse` (a 60 m crowd on the centre with steered puppets and the steered fit: refused once
+  a minute, nothing splits); `splitbuild` (a wall, a chest and a door in the child's half, scrolls moved in and out
+  across the split and the merge, the rows all under C, C killed and loading exactly the tree; the tester mode
+  `buildtree`, test content `TestStorage-CE` and `TestDoor-CE`); `splitcentral` (the split, the central killed and
+  restarted: the store adopted, every hello answered, a late login routed to C.1, nobody kicked), `splitcentral_merge`
+  (killed the moment the merge's e2 goes out: the merge resumes and finishes) and `splitcentral_base` (C dies on its hello
+  to the restarted central, `MESH_FAULT_DIE_ON_HELLO=C:2`, and comes back without R). The headless bots log in again
+  after a lost session (`Session lost …; re-login <n>`; RESULT ` relogins=<n>`).
 - **The play runner and the environment:** every Play request carries an id that the status file echoes as
   `playSeq=` while that Play runs, so the harness never mistakes a Play an earlier, abandoned request started late for
   its own; a stop that arrives while Play is starting is carried out once it has started. The environment variables a
@@ -640,24 +775,7 @@ and, later, several hosts all reach one database, and SQLite is a single file on
   not by the mesh: 500 people in one place is a kit AOI/update-rate question.
 - **Warp portals or spawn points exactly on a login position** do what they do in the kit: a character that stands up
   inside a portal trigger is warped. Not a mesh issue, but easy to trip over on a test map.
-- **Dynamic split/merge of cells at runtime** works by command and by the central's own policy (Slices 2b-3),
-  buildings follow the cut (Slice 4) and a central restart adopts the cut map's layout (Slice 5); still to come: the
-  Setup window's checks for Dynamic maps (Slice 6). A central restart: a family whose child never says hello again stays
-  frozen until an operator acts (the next slice; the supervisor cannot fence an incarnation the new central never saw); a
-  store lost together with a partitioned cell can leave that cell holding a newer layout nobody adopts (it is answered
-  with the current one and its unnamed children retired); a central process that also hosts the database manager costs
-  every cell up to 40 s of failed saves while it is down; on the rig's split-process topology a client's first login after
-  the central process starts (either start) can wait out one request timeout (30 s) before its retry gets in; an operation resumed after a restart is not measured by the
-  policy; a staged commit held by its target alone (a child owning its half while the parent still owns the whole) lasts
-  the whole outage instead of a moment; a frozen operation is dropped by a restart. Buildings: scene-placed
-  buildings and chests stay per-channel copies (their ids embed the channel), so a child's scene rows accumulate under
-  the base channel and a chest's contents depend on the serving cell; `buildLimit` is counted per process; a building
-  placed while its owner restarts has two owners for about a second (reconciled from the database at the hand-over);
-  the kit's own race between a player's handoff and an item move it had in flight is unchanged.
-  A client that moves items into a chest on a cell where nobody has opened that chest yet trips the kit's
-  `NotifyStorageItemsUpdated` (an exception line and a stuck storage user); the kit's own UI always opens first, and so
-  does the rig's tester after a hand-over. One operation runs at a time world-wide. Sleeping cells on a fine grid cover the
-  sandbox case meanwhile.
+- **Dynamic cells** have their own list of limits: §6a.12.
 - **One shared world frame per registry**: two maps meant to touch must be placed by their world origins; the
   registry does not derive placement from content.
 
@@ -681,7 +799,7 @@ hand-written `README.md` and `screenshot.png`; `Addons/README.md` has the rebuil
 - `ServerMeshing.unitypackage` — the add-on (`Assets/ServerMeshing/Mesh`, runtime and Editor) with this guide,
   DESIGN.md and MULTIHOST.md under `Documentation/`, and the top-level README. The spike notes, the upstream patch
   series and the raw capacity table stay in the repository. Import it into any project that has OpenMMORPG installed
-  (master at or after the four core changes of 2026-09-15), then follow §4.
+  (`develop` at bb9895f or later, with patch 0008 applied: §3), then follow §4.
 - `ServerMeshingTestRig.unitypackage` — `Assets/ServerMeshing/TestMap` (the two test maps, test items, auto client,
   launcher, play runner, load generator) plus a reference copy of the harnesses under `TestMap/Tools/`. It references
   the kit's demo (the enemy prefab, default weapon item and type), so it needs `BaseDemo` present, and it declares the
