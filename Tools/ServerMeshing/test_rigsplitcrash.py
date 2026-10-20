@@ -262,6 +262,11 @@ class BaseCrashTests(unittest.TestCase):
         self.assertEqual(rigsplitcrash.unreleased(held, later, "C", "C.1", self.KILL, 31), [])
         early = [at(99, "Monster handoff C:aa:6 C.1->C at (1, 0, 1) hp=5/5 home=C target=none")]
         self.assertEqual(rigsplitcrash.unreleased(["C:aa:6"], early, "C", "C.1", self.KILL), ["C:aa:6"])
+        # Handed to the dead base a second after the kill (the link has not timed out yet): gone, not unreleased.
+        after = [at(101, "Monster handoff C:aa:6 C.1->C at (1, 0, 1) hp=5/5 home=C target=none")]
+        self.assertEqual(rigsplitcrash.unreleased(["C:aa:6"], after, "C", "C.1", self.KILL), [])
+        late = [at(106, "Monster handoff C:aa:6 C.1->C at (1, 0, 1) hp=5/5 home=C target=none")]
+        self.assertEqual(rigsplitcrash.unreleased(["C:aa:6"], late, "C", "C.1", self.KILL), ["C:aa:6"])
         self.assertEqual(rigsplitcrash.statics_released(
             [at(101, "Borrowed static C:aa:s3 released (home zone restarted)", "WARN"),
              at(101, "Borrowed static E:bb:s4 released (home zone restarted)", "WARN")], "C:aa"), 1)

@@ -21,6 +21,8 @@ namespace MultiplayerARPG.MMO.Mesh
         public MeshWorldRegistry world;
         [Tooltip("Route selected characters by their saved position instead of the client's chosen channel.")]
         public bool routeByPosition = true;
+        [Tooltip("Slice 5: seconds a login waits for the central's layout coordinator to finish recovering (a restarted central adopting the cells' layout) before it routes; past it the layout as it stands routes.")]
+        public float recoveryWaitSeconds = 15f;
 
 #if NET || NETCOREAPP || ((UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE)
         protected override void RegisterMessages()
@@ -39,6 +41,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 : MeshLayoutOverride.Resolve(world);
             if (routeByPosition && world != null && !string.IsNullOrEmpty(request.characterId) && _userPeers.TryGetValue(requestHandler.ConnectionId, out CentralUserPeerInfo userPeerInfo))
             {
+                await WaitForRecovery();
                 DatabaseApiResult<CharacterResp> characterResp = await DatabaseClient.GetCharacterAsync(new GetCharacterReq()
                 {
                     UserId = userPeerInfo.userId,
@@ -68,6 +71,25 @@ namespace MultiplayerARPG.MMO.Mesh
                 }
             }
             HandleRequestSelectCharacter(requestHandler, request, result).Forget();
+        }
+
+        /// <summary>
+        /// WaitForRecovery (Slice 5 decision 9): while the central's coordinator recovers, the layout it will adopt is not
+        /// applied yet, so a login waits up to recoveryWaitSeconds for it (200 ms polls) and says how long it waited.
+        /// </summary>
+        private async UniTask WaitForRecovery()
+        {
+            MeshLayoutCoordinator coordinator = CentralNetworkManager is MeshCentralNetworkManager central ? central.Coordinator : null;
+            if (coordinator == null || coordinator.Phase != MeshCoordinatorPhase.Recovering)
+                return;
+            float started = Time.unscaledTime;
+            while (MeshRecoveryWait.KeepWaiting(coordinator.Phase == MeshCoordinatorPhase.Recovering, Time.unscaledTime - started, recoveryWaitSeconds))
+                await UniTask.Delay(200);
+            string line = MeshRecoveryWait.Line(true, coordinator.Phase == MeshCoordinatorPhase.Recovering, Time.unscaledTime - started, out bool warning);
+            if (warning)
+                Logging.LogWarning("Mesh", line);
+            else
+                Logging.Log("Mesh", line);
         }
 
         /// <summary>The cell owning the position when its server is up, else the nearest live cell of the map, else null (the kit's routing decides).</summary>

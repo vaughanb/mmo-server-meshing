@@ -19,6 +19,8 @@
 //   Temp/ServerMesh.PackageRequest.txt -> builds both .unitypackages (ServerMeshPackageBuilder); the outcome is written
 //                                     to Temp/ServerMesh.PackageStatus.txt as seq= and result=. Outside Play only.
 //   Temp/ServerMesh.PlayStatus.txt    written every second: editor state + auto-client phase/finished/passed.
+//   env.MESH_EDITOR_SERVERS=0 (Slice 5) makes the Play a client only (ServerMeshEditorRole clears the kit's start flags;
+//                                     the layout command leg below is skipped: a build-hosted central serves the file).
 //   Temp/ServerMesh.LayoutCommand.txt -> during Play: one line `<seq> split <baseCell> <x|z> <at> <+|-> <childId>` or
 //                                     `<seq> merge <a> <b>` (Slice 2c), handed to the central's SubmitLayoutCommand
 //                                     whatever its verb, and deleted. Every console line starting `Split `, `Merge ` or
@@ -168,7 +170,9 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                         EditorApplication.ExitPlaymode();
                     return;
                 }
-                if (EditorApplication.isPlaying && File.Exists(LayoutCommandPath))
+                // Slice 5: a client-only Play (MESH_EDITOR_SERVERS=0, the split-process topology) hosts no central; the build's
+                // central serves the command file through ServerMeshCentralCommandWatcher, so this leg stays out of its way.
+                if (EditorApplication.isPlaying && File.Exists(LayoutCommandPath) && !ServerMeshEditorRole.ClientOnly(Environment.GetEnvironmentVariable(ServerMeshEditorRole.EnvServers)))
                     HandleLayoutCommand();
                 if (EditorApplication.isPlayingOrWillChangePlaymode || ServerMeshTestRunner.IsRunning)
                     return; // a refresh, build or Play in the middle of an asynchronous test run would pull it down

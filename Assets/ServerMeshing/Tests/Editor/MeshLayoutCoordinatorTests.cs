@@ -66,7 +66,8 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             Assert.That(_store.TryLoad(out MeshCoordinatorStoreData data, out _), Is.True);
             Assert.That(data.lastIncarnation, Is.EqualTo(coordinator.Incarnation));
             Assert.That(_transport.layouts, Is.Empty);
-            Assert.That(_world.AppliedPair, Is.EqualTo(new MeshLayoutPair(coordinator.Incarnation, 1)));
+            Assert.That(_world.AppliedPair, Is.EqualTo(MeshLayoutPair.None), "the asset cut applies nothing (Slice 5: an empty newer pair would outrank a held cut)");
+            Assert.That(coordinator.BroadcastPair, Is.EqualTo(new MeshLayoutPair(coordinator.Incarnation, 1)));
             Assert.That(coordinator.OpsAllowed, Is.True);
         }
 
@@ -222,21 +223,31 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
         }
 
         [Test]
-        public void StoreWithAChild_QueuesNothing_FreezesAndAnswersNobody()
+        public void StoreWithAChild_WaitsForIt_ThenAdoptsTheStoredLayoutAndAnswersEverybody()
         {
             MeshCoordinatorStoreData data = new MeshCoordinatorStoreData { lastIncarnation = 10 };
             data.broadcast.pair = new MeshLayoutPair(10, 2);
+            data.broadcast.entries.Add(Active("C", "C", new MeshRect(-100f, -100f, 0f, 100f)));
             data.broadcast.entries.Add(Active("C.1", "C", new MeshRect(0f, -100f, 100f, 100f)));
             Assert.That(_store.TrySave(data, out _), Is.True);
             MeshLayoutCoordinator coordinator = Started();
             _transport.Register(7, "C", Map1);
 
-            coordinator.OnLayoutHello(7, Hello("C"));
+            coordinator.OnLayoutHello(7, Hello("C", held: data.broadcast));
 
-            Assert.That(coordinator.OutcomeOf(Map1), Is.EqualTo(MeshRecoveryOutcome.Frozen));
+            Assert.That(coordinator.OutcomeOf(Map1), Is.EqualTo(MeshRecoveryOutcome.Waiting), "the store names C.1: its hello is awaited");
             Assert.That(_transport.layouts, Is.Empty);
-            Assert.That(_transport.notes, Has.Some.Matches<(long connection, MeshCoordinatorNoteMessage message)>(n => n.message.code == "recovery-frozen"));
-            Assert.That(_log.errors, Has.Some.Contains("Slice 5 recovery"));
+
+            _transport.Register(8, "C.1", Map1);
+            coordinator.OnLayoutHello(8, Hello("C.1", incarnation: "x1", held: data.broadcast));
+
+            Assert.That(coordinator.OutcomeOf(Map1), Is.EqualTo(MeshRecoveryOutcome.AdoptStored));
+            Assert.That(coordinator.Phase, Is.EqualTo(MeshCoordinatorPhase.Running));
+            Assert.That(_transport.layouts.Count, Is.EqualTo(2), "both hellos answered with the stored layout");
+            Assert.That(_transport.layouts[0].message.snapshot.pair, Is.EqualTo(new MeshLayoutPair(10, 2)));
+            Assert.That(_world.AppliedPair, Is.EqualTo(new MeshLayoutPair(10, 2)));
+            Assert.That(coordinator.Incarnation, Is.GreaterThan(10));
+            Assert.That(_log.infos, Has.Some.Contains("adopted layout a/2 from the store with 2 entries (C, C.1)"));
         }
 
         [Test]
@@ -261,7 +272,7 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
         }
 
         [Test]
-        public void LateHelloHoldingALayout_ReopensRecoveryAndFreezes()
+        public void LateHelloHoldingALayout_ReopensRecovery_AndTheHeldLayoutIsAdoptedOnceItsCellsSaidHello()
         {
             MeshLayoutCoordinator coordinator = Started();
             _transport.Register(7, "C", Map1);
@@ -270,9 +281,16 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
 
             coordinator.OnLayoutHello(7, Hello("C", held: held));
 
-            Assert.That(coordinator.OutcomeOf(Map1), Is.EqualTo(MeshRecoveryOutcome.Frozen));
+            Assert.That(coordinator.OutcomeOf(Map1), Is.EqualTo(MeshRecoveryOutcome.Waiting), "re-opened: C.1's hello is awaited");
+            Assert.That(coordinator.Phase, Is.EqualTo(MeshCoordinatorPhase.Recovering));
             Assert.That(_log.warnings, Has.Some.Contains("re-opens recovery"));
             Assert.That(_transport.layouts, Is.Empty);
+
+            _transport.Register(8, "C.1", Map1);
+            coordinator.OnLayoutHello(8, Hello("C.1", incarnation: "x1", held: held));
+
+            Assert.That((coordinator.OutcomeOf(Map1), coordinator.AdoptedPair), Is.EqualTo((MeshRecoveryOutcome.AdoptStored, new MeshLayoutPair(1, 3))));
+            Assert.That(_transport.layouts.Count, Is.EqualTo(2));
         }
 
         [Test]

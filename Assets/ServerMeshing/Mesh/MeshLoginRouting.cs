@@ -54,4 +54,29 @@ namespace MultiplayerARPG.MMO.Mesh
             return best;
         }
     }
+
+    /// <summary>
+    /// MeshRecoveryWait is the login's wait for a recovering central (Slice 5, slices/slice5_design.md decision 9): a
+    /// login routes once the coordinator runs, or by the layout as it stands when the budget is spent. Pure.
+    /// </summary>
+    public static class MeshRecoveryWait
+    {
+        /// <summary>KeepWaiting: the coordinator still recovers and the budget is not spent.</summary>
+        public static bool KeepWaiting(bool recovering, float waitedSeconds, float budgetSeconds)
+        {
+            return recovering && waitedSeconds < Math.Max(0f, budgetSeconds);
+        }
+
+        /// <summary>Line is what the login logs once it stops waiting (null when it never waited): the Info line, or the Warning when it gave up.</summary>
+        public static string Line(bool waited, bool stillRecovering, float waitedSeconds, out bool warning)
+        {
+            warning = stillRecovering;
+            if (!waited)
+                return null;
+            string s = waitedSeconds.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+            return stillRecovering
+                ? $"Login routing: the layout recovery is not done after {s} s; routing by the layout as it stands"
+                : $"Login routing: waited {s} s for the layout recovery";
+        }
+    }
 }

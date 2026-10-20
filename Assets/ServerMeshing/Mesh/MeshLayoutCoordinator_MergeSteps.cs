@@ -102,14 +102,14 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             MeshLayoutSnapshot e2 = op.E2(_broadcast, NextPair());
             op.e2Pair = e2.pair;
+            op.staged = e2;
+            op.stagedStepName = "e2";
+            EnterStep(op, MeshMergeStep.E2Staged);   // the step is set before the save: the store names the step entered (Slice 5 decision 6)
             if (!SaveStore(op, _broadcast, e2, op.StepId("e2")))
             {
                 AbortMerge(op, "the coordinator store could not be written before e2");
                 return;
             }
-            op.staged = e2;
-            op.stagedStepName = "e2";
-            EnterStep(op, MeshMergeStep.E2Staged);
             _transport.Send(op.survivorConnection, new MeshLayoutMessage
             {
                 kind = MeshLayoutKind.Staged, targetCellId = op.survivorId, targetIncarnation = op.survivorIncarnation,

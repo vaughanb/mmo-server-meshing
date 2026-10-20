@@ -127,8 +127,10 @@ namespace MultiplayerARPG.MMO.Mesh
                 return $"cell {cellId} is not in the layout";
             if (!cell.OnDynamicMap)
                 return $"{cell.id} is on map {cell.mapId}, which is Static";
-            if (OutcomeOf(cell.mapId) != MeshRecoveryOutcome.AdoptStatic)
+            if (!OutcomeOf(cell.mapId).Answers())
                 return $"map {cell.mapId} is {OutcomeOf(cell.mapId)}";
+            if (FrozenFamilyReason(cell.baseId) is string frozen)
+                return $"family {cell.baseId} is frozen: {frozen}";   // Slice 5 decision 3
             if (cell.state != MeshCellState.Active || cell.owned.IsEmpty)
                 return $"{cell.id} is {cell.state}";
             binding = BindingOf(cell.id);
@@ -254,12 +256,15 @@ namespace MultiplayerARPG.MMO.Mesh
                     return false;   // a live child in the broadcast
                 if (IsOperationChild(id))
                     return false;
-                if (MeshRecoveryResolver.HeldReopensRecovery(HeldEntriesOf(hello), hello.held != null ? hello.held.pair : MeshLayoutPair.None, Incarnation))
+                if (RecoveryNames(id))
+                    return false;   // Slice 5 decision 5: named for a recovering map, or the stored operation's cell
+                if (MeshRecoveryResolver.HeldReopensRecovery(HeldEntriesOf(hello), HeldPair(hello), Incarnation, _adoptedPair, _ownBroadcastSent))
                     return false;
             }
             // Only a split aborts an id (a merge's abort retires nothing): the split in hand, or an earlier one.
             MeshSplitOperation aborter = _op is MeshSplitOperation split && SameId(split.childId, id) ? split : null;
-            string reason = aborted ? "aborted by " + (aborter != null ? aborter.opId : "an earlier split") : "not in the layout";
+            // Slice 5 decision 5: a cell whose own layout says it owns something is fenced (it saves, kicks and exits), not asked to retire.
+            string reason = (HeldOwnsSomething(hello) ? "fenced: " : string.Empty) + (aborted ? "aborted by " + (aborter != null ? aborter.opId : "an earlier split") : "not in the layout");
             _transport.Send(connectionId, new MeshRetireMessage { cellId = id, incarnation = hello.incarnation ?? string.Empty, pair = BroadcastPair, reason = reason });
             Line(true, aborted && aborter != null
                 ? $"{aborter.LinePrefix} {aborter.opId}: hello from aborted child {id} answered with Retire"

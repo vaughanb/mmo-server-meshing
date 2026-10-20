@@ -80,7 +80,7 @@ namespace MultiplayerARPG.MMO.Mesh
             for (int i = 0; i < cells.Count; ++i)
             {
                 MeshCell cell = cells[i];
-                if (!cell.OnDynamicMap || cell.state != MeshCellState.Active || cell.owned.IsEmpty || OutcomeOf(cell.mapId) != MeshRecoveryOutcome.AdoptStatic)
+                if (!cell.OnDynamicMap || cell.state != MeshCellState.Active || cell.owned.IsEmpty || !OutcomeOf(cell.mapId).Answers() || IsFamilyFrozen(cell.baseId))
                     continue;
                 MeshCellBinding binding = BindingOf(cell.id);
                 if (binding == null || !binding.answered || binding.unregisteredAt >= 0f || binding.staticNeighbour)

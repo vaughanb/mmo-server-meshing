@@ -35,6 +35,13 @@ namespace MultiplayerARPG.MMO.Mesh
         /// from one of them, or from one older, is answered with a fenced Retire. Optional: a file without it reads as empty.
         /// </summary>
         public List<MeshFencedIncarnation> fencedIncarnations = new List<MeshFencedIncarnation>();
+        /// <summary>
+        /// The operation in progress (or frozen, or a done split whose settle is pending) as Slice 5 rebuilds it after a
+        /// restart (MeshStoredOperation; JsonUtility cannot write a null object, so hasOperation says whether it is one).
+        /// Optional: a file without it reads as no operation.
+        /// </summary>
+        public bool hasOperation;
+        public MeshStoredOperation operation = new MeshStoredOperation();
         public string writtenAtUtc = "";
     }
 
@@ -122,6 +129,11 @@ namespace MultiplayerARPG.MMO.Mesh
                 data.abortedIds = new List<string>();
             if (data.fencedIncarnations == null)
                 data.fencedIncarnations = new List<MeshFencedIncarnation>();
+            if (data.operation == null)
+            {
+                data.operation = new MeshStoredOperation();
+                data.hasOperation = false;
+            }
             return true;
         }
 

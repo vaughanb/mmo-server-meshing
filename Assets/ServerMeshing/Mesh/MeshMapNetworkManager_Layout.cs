@@ -131,6 +131,7 @@ namespace MultiplayerARPG.MMO.Mesh
             ClusterClient.SendPacket(0, DeliveryMethod.ReliableOrdered, MeshClusterMsg.LayoutHello, writer => hello.Serialize(writer));
             _layoutGate.OnHelloSent(Time.unscaledTime, LayoutGateWarnSeconds);
             Logging.Log("Mesh", $"LayoutHello sent: cell {hello.cellId} incarnation {hello.incarnation} layout {held.pair}");
+            MeshFaultOnHelloSent(hello.cellId); // Slice 5 decision 12: MESH_FAULT_DIE_ON_HELLO=<cell>:<n> (MeshMapNetworkManager_Fence)
         }
 
         /// <summary>Server tick: warn while the gate waits, and create what it held once it opens (or once an item's time is up).</summary>
@@ -220,6 +221,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 SendLayoutAck(pair, MeshLayoutAckResult.Applied, "already at pair");
                 if (answer && _layoutGate.OnAnswered())
                     Logging.Log("Mesh", $"Layout gate open on {cellId} (already at {pair})");
+                else if (answer)
+                    Logging.Log("Mesh", $"Layout answer {pair} on {cellId}: already applied"); // Slice 5 decision 12: a restarted central's answer is visible
                 return;
             }
             if (RetiresInLayout(snapshot))

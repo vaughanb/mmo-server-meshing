@@ -374,7 +374,9 @@ and, later, several hosts all reach one database, and SQLite is a single file on
   switch on just those; `only:<names>` switches on those and off every other monster area, for an exact total),
   `MESH_FAULT_DIE_ON_PREWARM=<cell>` and `MESH_FAULT_DIE_ON_DRAIN=<cell>` (Slice 2d, one-shot like
   `MESH_FAULT_DIE_ON_NOTICE`: the cell dies on its split's e1 broadcast, or on its first incoming handoff after it owns
-  its rectangle), `MESH_SPAWN_CELLS` (which cells the spawner starts), `MESH_BAND` (ghost band
+  its rectangle), `MESH_FAULT_DIE_ON_HELLO=<cell>:<n>` (Slice 5: the cell dies right after its n-th `LayoutHello` of the
+  process, e.g. `C:2` for a base's hello to a restarted central), `MESH_EDITOR_SERVERS=0` (Slice 5: the editor's Play
+  hosts no server, set by the harness for the split-process topology), `MESH_SPAWN_CELLS` (which cells the spawner starts), `MESH_BAND` (ghost band
   and visible range together), `MESH_PROBE_BURN_MS` (`[cell:]ms` of busy work per frame), and, on a bare player with
   no rig at all, `MESH_PROBE_SELFTEST=0,5,10,24`.
 - **Measuring a tick (Phase 0):** the Work ticks line is always on; these rig toggles sharpen it (all unset = today):
@@ -587,6 +589,36 @@ and, later, several hosts all reach one database, and SQLite is a single file on
   re-logged in); skipped with `--remote-cells` and `--remote-persist`. Test content: `TestStorage-CE` and `TestDoor-CE`
   (`activatableDistance` 6: the kit's storage open is strict against it), their items in the tester's bag after the
   wall stack; the tester mode `buildtree` writes its phases to the status file (`buildtree-placed`, `-ready`, `-checked`).
+- **A central restart with a cut map (Slice 5):** a restarted central adopts the runtime layout its store and the cells
+  hold instead of freezing the map. Per Dynamic map it waits (up to `recoveryCeilingSeconds`) for every registered map
+  server and every dynamic id the stored or held layouts name to say hello, picks the newest consistent pair among the
+  store, the cells' layouts and a stored staged step its target applied, applies it to its own registry, gives every
+  dynamic cell its channel back and answers every hello with it (`Coordinator recovery: map <m> adopted layout <pair>
+  from <the store|cell <c>> with <n> entries (<ids>)`; the cells log `Layout answer <pair> on <cell>: already applied`);
+  the login waits up to the login manager's `recoveryWaitSeconds` (15) for the recovery before it routes. A dynamic id
+  that never says hello by the ceiling freezes its **family** only (`Coordinator recovery: family <base> of map <m>
+  frozen: no hello from <ids> after <s> s`: no operation, supervision or policy on it until the id's hello unfreezes it;
+  its cells are still answered). The operation the old central was running is read back from the store: one still
+  before its commit broadcast is aborted through its own path (`<Kind> <op>: aborted the central restarted before
+  <step>`, the child retired, a merge reverted), a staged step its target applied is broadcast, one past its commit
+  resumes at its gate (`<Kind> <op>: resumed at <step> after a central restart`: a split's drain gate on fresh evidence,
+  a merge's drain, retire, e3 or tidy), a done split's pending settle resumes, a frozen one is dropped. The policy's
+  cooldowns start fresh for every cut family at the adoption (`Coordinator policy: cooldowns start fresh for <bases>
+  after the restart; ...`); flap multipliers, measurements and the supervisor's restart counts do not survive. A base
+  that crashes while the central recovers comes back gated and is answered with its kept rectangle: it never re-owns a
+  child's. A late hello holding a newer layout of the old central re-opens the recovery while the new central has
+  broadcast nothing of its own; afterwards it is answered with the current layout and logged as an error. **The rig's
+  split-process topology** (`regress.py`, used by the `splitcentral` scenarios and forced with `--topology split`): the
+  central, login and database manager run as one build process and the spawner as another (both started from
+  `Build/Server` with the project root as working directory, every port on the command line, `-spawnMaps
+  "ServerMeshTestMap|ServerMeshTestMap2"`), the editor's Play is a client only (`MESH_EDITOR_SERVERS=0`, honoured by
+  `ServerMeshEditorRole` on the server-instance object), the layout command and status files are served by the central
+  process (`ServerMeshCentralCommandWatcher`, `MESH_RIG_COMMAND_DIR`), and the harness kills and restarts the central
+  alone (its kit log is `Logs/Log_Database_Central_Login_<day>.<sev>.log`). Scenarios `splitcentral` (the split, the
+  central killed and restarted: the store adopted, every hello answered, a late login routed to C.1, nobody kicked),
+  `splitcentral_merge` (killed the moment the merge's e2 is broadcast: the merge resumes and finishes) and
+  `splitcentral_base` (C dies on its hello to the restarted central and comes back without R); all three skipped with
+  `--remote-cells` and `--remote-persist`.
 - **The play runner and the environment:** every Play request carries an id that the status file echoes as
   `playSeq=` while that Play runs, so the harness never mistakes a Play an earlier, abandoned request started late for
   its own; a stop that arrives while Play is starting is carried out once it has started. The environment variables a
@@ -608,9 +640,16 @@ and, later, several hosts all reach one database, and SQLite is a single file on
   not by the mesh: 500 people in one place is a kit AOI/update-rate question.
 - **Warp portals or spawn points exactly on a login position** do what they do in the kit: a character that stands up
   inside a portal trigger is warped. Not a mesh issue, but easy to trip over on a test map.
-- **Dynamic split/merge of cells at runtime** works by command and by the central's own policy (Slices 2b-3), and
-  buildings follow the cut (Slice 4); still to come: a central restart with a cut map (Slice 5: the map freezes until
-  the cut is merged back by hand), and the Setup window's checks for Dynamic maps (Slice 6). Buildings: scene-placed
+- **Dynamic split/merge of cells at runtime** works by command and by the central's own policy (Slices 2b-3),
+  buildings follow the cut (Slice 4) and a central restart adopts the cut map's layout (Slice 5); still to come: the
+  Setup window's checks for Dynamic maps (Slice 6). A central restart: a family whose child never says hello again stays
+  frozen until an operator acts (the next slice; the supervisor cannot fence an incarnation the new central never saw); a
+  store lost together with a partitioned cell can leave that cell holding a newer layout nobody adopts (it is answered
+  with the current one and its unnamed children retired); a central process that also hosts the database manager costs
+  every cell up to 40 s of failed saves while it is down; on the rig's split-process topology a client's first login after
+  the central process starts (either start) can wait out one request timeout (30 s) before its retry gets in; an operation resumed after a restart is not measured by the
+  policy; a staged commit held by its target alone (a child owning its half while the parent still owns the whole) lasts
+  the whole outage instead of a moment; a frozen operation is dropped by a restart. Buildings: scene-placed
   buildings and chests stay per-channel copies (their ids embed the channel), so a child's scene rows accumulate under
   the base channel and a chest's contents depend on the serving cell; `buildLimit` is counted per process; a building
   placed while its owner restarts has two owners for about a second (reconciled from the database at the hand-over);

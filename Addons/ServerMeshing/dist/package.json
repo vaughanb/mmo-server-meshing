@@ -2,7 +2,7 @@
   "name": "Server Meshing",
   "guid": "87f3a860-3714-407a-8bd2-3ae097a78867",
   "packageUrl": "https://github.com/vaughanb/mmo-server-meshing/raw/refs/heads/master/Addons/ServerMeshing/dist/ServerMeshing.unitypackage",
-  "version": "0.81.0",
+  "version": "0.82.0",
   "updateDate": "2026-10-19",
   "category": "MMO",
   "description": "Splits a map across several map-server processes (\"cells\") with seamless handoff, ghosting across cell edges, seams between maps, cells of any size, on-demand (\"sleeping\") cells, and dynamic cells the central cuts and merges at runtime, by command or by its own load policy.\nPlayers cross a cell edge without a loading screen; neighbouring cells exchange ghosts of everything near their shared edge, so combat, loot, quests and building resolve across it. Empty land costs nothing: a cell with nobody near it does not run.\nSubclasses on the kit's managers and entity prefabs plus one world-registry asset — the kit's core is not modified. Includes a Setup window that validates a project and fixes what it can.",

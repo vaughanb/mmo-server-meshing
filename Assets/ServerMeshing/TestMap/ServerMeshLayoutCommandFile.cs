@@ -5,9 +5,10 @@
 // and mirrors the coordinator's `Split `, `Merge `, `Layout op ` and `Supervisor:` lines into
 // Temp/ServerMesh.LayoutCommandStatus.txt, one per line, prefixed with the latest command's seq (a late `Split ` line
 // lands under a merge's seq, and the supervisor's lines under whichever command came last: graders filter by kind).
-// Pure text: no editor state.
+// Pure text: no editor state. Runtime since Slice 5: the build-hosted central (ServerMeshCentralCommandWatcher) serves the
+// same files as the editor's play runner.
 
-namespace MultiplayerARPG.MMO.Mesh.Editor
+namespace MultiplayerARPG.MMO.Mesh
 {
     /// <summary>ServerMeshLayoutCommandFile parses the command file and shapes the status lines.</summary>
     public static class ServerMeshLayoutCommandFile

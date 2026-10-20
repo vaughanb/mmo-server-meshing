@@ -92,6 +92,8 @@ namespace MultiplayerARPG.MMO.Mesh
         public float killedAt = -1f;
         /// <summary>This incarnation's latest load report (null before the first; it arrived at lastReportAt): the policy's evidence (Slice 3).</summary>
         public MeshLoadReportMessage report;
+        /// <summary>The layout the cell said it holds in its latest hello (null before one): a recovery candidate (Slice 5).</summary>
+        public MeshLayoutSnapshot held;
     }
 
     /// <summary>

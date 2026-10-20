@@ -332,7 +332,7 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 MeshCell cell = cells[i];
                 if (cell.OnDynamicMap && cell.state == MeshCellState.Active && !cell.owned.IsEmpty
-                    && OutcomeOf(cell.mapId) == MeshRecoveryOutcome.AdoptStatic && _world.FamilyOf(cell.baseId).Count > 1)
+                    && OutcomeOf(cell.mapId).Answers() && !IsFamilyFrozen(cell.baseId) && _world.FamilyOf(cell.baseId).Count > 1)
                     into.Add(cell);
             }
         }

@@ -97,22 +97,31 @@ def wait_before_merge(r, m):
         time.sleep(cooldown_end - time.time())
 
 
+def guard_merge(rep, rig, r, m, attempt=1):
+    """Steps 4-5 (Slice 5 factored them out for a flow that kills the central mid-merge): the window guard and, on the
+    first attempt, the process positive control. True when the merge may be sent."""
+    spec = r.spec
+    left = window_left(r, m.observe_s)
+    if left < WINDOW_GUARD_S:
+        rep.check(False, f"merge: not sent, stand window too short ({left:.0f} s left on the earliest R-bot, "
+                         f"needs {WINDOW_GUARD_S:g})")
+        return False
+    rep.notes.append(f"   merge sent with {left:.0f} s left of the earliest R-bot's stand window")
+    if attempt == 1:
+        n = count_processes(rig, spec.child)
+        rep.check(n == 1, f"positive control: {n} process(es) with '{rigmerge.channel_filter(spec.child)}' "
+                          "before the merge, expected 1")
+    return True
+
+
 def send_merge(rep, rig, r, m):
     """Steps 4-6: the window guard, the process positive control, the command and its wait; one retry with a new seq
     on a cooldown refusal. Returns (seq, status), (None, None) when nothing was sent."""
     spec = r.spec
     seq, status = None, None
     for attempt in (1, 2):
-        left = window_left(r, m.observe_s)
-        if left < WINDOW_GUARD_S:
-            rep.check(False, f"merge: not sent, stand window too short ({left:.0f} s left on the earliest R-bot, "
-                             f"needs {WINDOW_GUARD_S:g})")
+        if not guard_merge(rep, rig, r, m, attempt):
             return seq, status
-        rep.notes.append(f"   merge sent with {left:.0f} s left of the earliest R-bot's stand window")
-        if attempt == 1:
-            n = count_processes(rig, spec.child)
-            rep.check(n == 1, f"positive control: {n} process(es) with '{rigmerge.channel_filter(spec.child)}' "
-                              "before the merge, expected 1")
         seq = new_seq(seq)
         regress_split.write_command(rig.LAYOUT_COMMAND, rigmerge.command_line(seq, spec.base, spec.child))
         status = wait_merge(rig.LAYOUT_COMMAND_STATUS, seq, MERGE_TIMEOUT_S)

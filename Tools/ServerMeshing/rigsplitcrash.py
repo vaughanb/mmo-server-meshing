@@ -318,10 +318,16 @@ def held_monsters(child_lines, base, child, head=None):
     return sorted(i for i in held if ours(i))
 
 
+HAND_BACK_AFTER_KILL_S = 5.0   # LiteNetLib's disconnect timeout: until then the child still hands monsters to the dead base
+
+
 def unreleased(held, child_lines, base, child, kill_second, within_s=30.0):
     """The held ids with neither a 'Borrowed monster <id> released (...)' line on the child within `within_s` of the
-    kill second, nor a hand-back to the base (or a death) stamped in the kill second itself."""
+    kill second, nor a hand-back to the base (or a death) stamped from the kill second until the child's link to the
+    base times out (HAND_BACK_AFTER_KILL_S): a monster handed to the dead base is no longer the child's to release (the
+    base's restart spawns it again; the pair-sum check counts it)."""
     end = kill_second + datetime.timedelta(seconds=within_s)
+    gone_by = kill_second + datetime.timedelta(seconds=HAND_BACK_AFTER_KILL_S)
     ok = set()
     for line in child_lines:
         t = rigtools.stamp_datetime(line)
@@ -331,10 +337,10 @@ def unreleased(held, child_lines, base, child, kill_second, within_s=30.0):
         if m and kill_second <= t <= end:
             ok.add(m.group(1))
         m = MONSTER_SENT.search(line)
-        if m and (m.group(2), m.group(3)) == (child, base) and t == kill_second:
+        if m and (m.group(2), m.group(3)) == (child, base) and kill_second <= t <= gone_by:
             ok.add(m.group(1))
         m = BORROWED_DIED.search(line)
-        if m and t == kill_second:
+        if m and kill_second <= t <= gone_by:
             ok.add(m.group(1))
     return [i for i in held if i not in ok]
 

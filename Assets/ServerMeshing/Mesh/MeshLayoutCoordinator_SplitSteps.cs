@@ -18,6 +18,8 @@ namespace MultiplayerARPG.MMO.Mesh
             MeshLayoutOperation op = _op;
             if (op != null && op.Paused)
                 return;
+            if (Phase != MeshCoordinatorPhase.Running)
+                return;   // Slice 5: an ack during a re-opened recovery advances nothing until every map adopted
             for (int guard = 0; guard < 8 && op != null && op.InProgress; ++guard)
             {
                 bool stepped = op is MeshSplitOperation s ? TryStep(s) : op is MeshMergeOperation m && TryMergeStep(m);
@@ -47,14 +49,13 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             MeshLayoutSnapshot settle = op.E3(_broadcast, NextPair(), drained: true);
             string reason = null;
+            op.settled = true;   // before the save, so the store never keeps a settle that went out (Slice 5 decision 6)
+            op.stragglers = 0;
             if (!SaveStore(op, settle, null, null) || !ApplyOnCentral(settle, out reason))
             {
                 Line(true, $"Split {op.opId}: the settle version could not be broadcast: {(reason ?? _store.LastError)}");
-                op.settled = true;
                 return;
             }
-            op.settled = true;
-            op.stragglers = 0;
             SendBroadcast(settle, op.StepId("settle"));
             OpLog(op, $"stragglers gone, settle broadcast {settle.pair}");
             _policy?.OpSettled(op.opId, _clock.Now);
@@ -135,14 +136,14 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             MeshLayoutSnapshot e1 = op.E1(_broadcast, NextPair());
             op.e1Pair = e1.pair;
+            op.staged = e1;
+            op.stagedStepName = "e1";
+            EnterStep(op, MeshSplitStep.E1Staged);   // the step is set before the save: the store names the step entered (Slice 5 decision 6)
             if (!SaveStore(op, _broadcast, e1, op.StepId("e1")))
             {
                 Abort(op, "the coordinator store could not be written before e1");
                 return;
             }
-            op.staged = e1;
-            op.stagedStepName = "e1";
-            EnterStep(op, MeshSplitStep.E1Staged);
             OpLog(op, "e1 staged");
         }
 
@@ -151,14 +152,14 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             MeshLayoutSnapshot e2 = op.E2(_broadcast, NextPair());
             op.e2Pair = e2.pair;
+            op.staged = e2;
+            op.stagedStepName = "e2";
+            EnterStep(op, MeshSplitStep.E2Staged);
             if (!SaveStore(op, _broadcast, e2, op.StepId("e2")))
             {
                 Abort(op, "the coordinator store could not be written before e2");
                 return;
             }
-            op.staged = e2;
-            op.stagedStepName = "e2";
-            EnterStep(op, MeshSplitStep.E2Staged);
             _transport.Send(op.childConnection, new MeshLayoutMessage
             {
                 kind = MeshLayoutKind.Staged, targetCellId = op.childId, targetIncarnation = op.childIncarnation,
@@ -180,6 +181,7 @@ namespace MultiplayerARPG.MMO.Mesh
         private bool BroadcastStep(MeshLayoutOperation op, MeshLayoutSnapshot snapshot, string name, Action enter, List<string> extra)
         {
             List<string> participants = Participants(op, _broadcast, snapshot, extra);
+            enter();   // the step is set before the save: the store names the step entered (Slice 5 decision 6)
             if (!SaveStore(op, snapshot, null, null))
             {
                 FailOp(op, $"the coordinator store could not be written before {name}");
@@ -194,7 +196,6 @@ namespace MultiplayerARPG.MMO.Mesh
             op.stagedStepName = "";
             op.participants.Clear();
             op.participants.AddRange(participants);
-            enter();
             SendBroadcast(snapshot, op.StepId(name));
             OpLog(op, $"{name} broadcast {snapshot.pair}");
             return true;
@@ -210,6 +211,7 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private void SendBroadcast(MeshLayoutSnapshot snapshot, string stepId)
         {
+            _ownBroadcastSent = true;   // Slice 5 decision 4: from here a late hello's older layout never re-opens recovery
             _peers.Clear();
             _transport.GetMapServers(_peers);
             foreach (MeshMapServerPeer peer in _peers)
@@ -244,6 +246,8 @@ namespace MultiplayerARPG.MMO.Mesh
             data.stagedFirstApplier = staged != null ? op.StagedTargetId : string.Empty;
             data.opId = op.InProgress ? op.opId : string.Empty;
             data.opStep = op.StepText;
+            data.hasOperation = MeshStoredOperation.ShouldStore(op);   // Slice 5 decision 6: enough to rebuild it after a restart
+            data.operation = data.hasOperation ? MeshStoredOperation.From(op) : new MeshStoredOperation();
             data.abortedIds = new List<string>(_abortedIds);
             data.fencedIncarnations = _fenced.ToStore();
             _storeData = data;

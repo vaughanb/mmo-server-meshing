@@ -178,9 +178,9 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
         [Test]
         public void RecoveryFix_OnlyAnotherCoordinatorsLayoutReopensRecovery()
         {
-            Assert.That(MeshRecoveryResolver.HeldReopensRecovery(2, new MeshLayoutPair(7, 3), 7), Is.False);
-            Assert.That(MeshRecoveryResolver.HeldReopensRecovery(2, new MeshLayoutPair(6, 3), 7), Is.True);
-            Assert.That(MeshRecoveryResolver.HeldReopensRecovery(0, new MeshLayoutPair(6, 3), 7), Is.False);
+            Assert.That(MeshRecoveryResolver.HeldReopensRecovery(2, new MeshLayoutPair(7, 3), 7, MeshLayoutPair.None, false), Is.False);
+            Assert.That(MeshRecoveryResolver.HeldReopensRecovery(2, new MeshLayoutPair(6, 3), 7, MeshLayoutPair.None, false), Is.True);
+            Assert.That(MeshRecoveryResolver.HeldReopensRecovery(0, new MeshLayoutPair(6, 3), 7, MeshLayoutPair.None, false), Is.False);
         }
 
         [Test]

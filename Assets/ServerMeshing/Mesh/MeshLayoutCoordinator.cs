@@ -1,9 +1,11 @@
 // Server Meshing add-on — the central's layout coordinator (DESIGN.md 0.72, plan D3). It owns the runtime layout of
-// every Dynamic map: it recovers it when the central starts, answers each cell's hello with the layout to hold (which
-// opens the cell's gate), and tells the cells what it decided. Splits run in MeshLayoutCoordinator_Split.cs (Slice 2b),
-// merges in MeshLayoutCoordinator_Merge.cs (Slice 2c). A plain class with its clock, transport, store and log injected,
-// so it is tested without Unity networking. Nothing throws out of a handler or out of Tick: each validates, then changes
-// state. Supervision (Slice 2d: restarts, collapse, kills, the fenced set, ops pausing for a crashed member) is in
+// every Dynamic map: it recovers it when the central starts (MeshLayoutCoordinator_Recovery.cs: the asset cut when nothing
+// dynamic exists anywhere, else the stored and held layouts, Slice 5), answers each cell's hello with the layout to hold
+// (which opens the cell's gate), and tells the cells what it decided. Splits run in MeshLayoutCoordinator_Split.cs (Slice
+// 2b), merges in MeshLayoutCoordinator_Merge.cs (Slice 2c), a stored operation's resumption after a restart in
+// MeshLayoutCoordinator_Resume.cs (Slice 5). A plain class with its clock, transport, store and log injected, so it is
+// tested without Unity networking. Nothing throws out of a handler or out of Tick: each validates, then changes state.
+// Supervision (Slice 2d: restarts, collapse, kills, the fenced set, ops pausing for a crashed member) is in
 // MeshLayoutCoordinator_Supervision.cs.
 using System;
 using System.Collections.Generic;
@@ -34,15 +36,6 @@ namespace MultiplayerARPG.MMO.Mesh
         private MeshLayoutSnapshot _broadcast;
         private bool _storeTrusted = true;
         private float _startedAt;
-
-        private sealed class MapRecovery
-        {
-            public MeshRecoveryOutcome outcome = MeshRecoveryOutcome.Waiting;
-            public int storedEntries;
-            public bool helloHeldEntries;
-            public string reason = "";
-            public readonly Dictionary<string, (long connection, string incarnation)> pending = new Dictionary<string, (long, string)>(StringComparer.OrdinalIgnoreCase);
-        }
 
         public MeshLayoutCoordinator(MeshWorldRegistry world, IMeshClock clock, IMeshCoordinatorTransport transport, MeshCoordinatorStore store, IMeshLog log)
         {
@@ -89,45 +82,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 _log.Error($"{saveError}; no operation will run until the store is writable again (hellos are still answered)");
             _storeData = data;
             SupervisionStart(data);
-            _broadcast = new MeshLayoutSnapshot { pair = new MeshLayoutPair(Incarnation, 1) };
-            Phase = MeshCoordinatorPhase.Recovering;
-            List<string> summary = new List<string>();
-            foreach (MeshMapLayout layout in _world.maps)
-            {
-                if (layout == null || string.IsNullOrEmpty(layout.mapId) || _maps.ContainsKey(layout.mapId))
-                    continue;
-                MapRecovery map = new MapRecovery { storedEntries = StoredEntries(data, layout.mapId) };
-                _maps[layout.mapId] = map;
-                if (!layout.IsDynamic && map.storedEntries > 0)
-                    _log.Warning($"Coordinator: map {layout.mapId} is Static now; {map.storedEntries} stored dynamic entries ignored");
-            }
-            ResolveAll();
-            foreach (KeyValuePair<string, MapRecovery> map in _maps)
-            {
-                if (_world.IsDynamicMap(map.Key))
-                    summary.Add($"{map.Key} {map.Value.outcome}");
-            }
-            _log.Info($"Coordinator {Incarnation:x}: Dynamic maps {(summary.Count > 0 ? string.Join(", ", summary) : "none")}; store {_store.Path} ({storeState}); broadcast {_broadcast.pair}");
+            RecoveryStart(data, storeState);
             PolicyStart();
-        }
-
-        private static int StoredEntries(MeshCoordinatorStoreData data, string mapId)
-        {
-            int count = 0;
-            foreach (MeshLayoutEntry entry in data.broadcast.entries)
-            {
-                if (entry != null && entry.mapId == mapId)
-                    count++;
-            }
-            if (data.hasStaged)
-            {
-                foreach (MeshLayoutEntry entry in data.staged.entries)
-                {
-                    if (entry != null && entry.mapId == mapId)
-                        count++;
-                }
-            }
-            return count;
         }
 
         /// <summary>Stop forgets every binding and recovery; the registry's own reset owns the applied layout.</summary>
@@ -136,6 +92,7 @@ namespace MultiplayerARPG.MMO.Mesh
             SplitStop();
             SupervisionStop();
             PolicyStop();
+            RecoveryStop();
             _bindings.Clear();
             _maps.Clear();
             _firstSeenWithoutHello.Clear();
@@ -157,15 +114,12 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             if (!_world.IsDynamicMap(hello.mapId))
             {
-                Answer(connectionId, hello.cellId, hello.incarnation);
-                if (!hello.dynamicMap && BandsWithDynamicMap(hello.cellId))
-                {
-                    // A Static neighbour of a Dynamic map: it takes every broadcast and acks it (Slice 2b decision 14).
-                    BindStaticNeighbour(connectionId, hello.cellId, hello.mapId, hello.incarnation);
-                    return;
-                }
-                Note(connectionId, MeshNoteLevel.Warning, hello.cellId, "mode-mismatch",
-                    $"map {hello.mapId} is Static on the central{(hello.dynamicMap ? " but Dynamic on cell " + hello.cellId : string.Empty)}; the cell was answered with no runtime layout");
+                // Slice 5 decision 1: a Static map's cell waits for the Dynamic maps' recovery, else it would apply an
+                // empty layout newer than the one the cells hold and prune its links to their children.
+                if (Phase == MeshCoordinatorPhase.Recovering)
+                    PendStaticHello(connectionId, hello);
+                else
+                    AnswerStaticHello(connectionId, hello);
                 return;
             }
             if (HelloGetsRetire(connectionId, hello) || HelloIsFenced(connectionId, hello))
@@ -188,6 +142,7 @@ namespace MultiplayerARPG.MMO.Mesh
             binding.helloAt = _clock.Now;
             binding.answered = false;
             binding.applied = hello.held != null ? hello.held.pair : MeshLayoutPair.None;
+            binding.held = hello.held != null ? hello.held.Clone() : new MeshLayoutSnapshot();
             binding.unregisteredAt = -1f;
             binding.mismatchLogged = false;
             binding.hasEvidence = false;
@@ -201,23 +156,12 @@ namespace MultiplayerARPG.MMO.Mesh
             _firstSeenWithoutHello.Remove(hello.cellId);
 
             MapRecovery map = MapOf(hello.mapId);
-            // A layout this coordinator sent (a split's cell registering again) is no reason to recover (decision 5b).
-            if (MeshRecoveryResolver.HeldReopensRecovery(HeldEntriesOf(hello), binding.applied, Incarnation) && !map.helloHeldEntries)
-            {
-                // A cell still holds a runtime layout from before this coordinator: the map cannot run its asset cut blindly.
-                map.helloHeldEntries = true;
-                if (map.outcome != MeshRecoveryOutcome.Frozen)
-                {
-                    map.outcome = MeshRecoveryOutcome.Waiting;
-                    Phase = MeshCoordinatorPhase.Recovering;
-                    _log.Warning($"Cell {hello.cellId} holds layout {hello.held.pair} of map {hello.mapId} from an earlier coordinator: map {hello.mapId} re-opens recovery");
-                }
-                ResolveAll();
-            }
+            RecoveryOnHello(hello, map);
             switch (map.outcome)
             {
                 case MeshRecoveryOutcome.Waiting:
                     map.pending[hello.cellId] = (connectionId, binding.incarnation);
+                    ResolveAll();
                     break;
                 case MeshRecoveryOutcome.Frozen:
                     Note(connectionId, MeshNoteLevel.Error, hello.cellId, "recovery-frozen", $"map {hello.mapId} is frozen: {map.reason}; cell {hello.cellId} gets no layout");
@@ -231,18 +175,18 @@ namespace MultiplayerARPG.MMO.Mesh
             }
         }
 
-        private int HeldEntriesOf(MeshLayoutHelloMessage hello)
+        /// <summary>AnswerStaticHello answers a Static map's cell with the current layout: a Static neighbour of a Dynamic map is bound (Slice 2b decision 14), anyone else noted.</summary>
+        private void AnswerStaticHello(long connectionId, MeshLayoutHelloMessage hello)
         {
-            int count = 0;
-            if (hello.held != null && hello.held.entries != null)
+            Answer(connectionId, hello.cellId, hello.incarnation);
+            if (!hello.dynamicMap && BandsWithDynamicMap(hello.cellId))
             {
-                foreach (MeshLayoutEntry entry in hello.held.entries)
-                {
-                    if (entry != null && entry.mapId == hello.mapId)
-                        count++;
-                }
+                MeshCellBinding binding = BindStaticNeighbour(connectionId, hello.cellId, hello.mapId, hello.incarnation);
+                binding.held = hello.held != null ? hello.held.Clone() : new MeshLayoutSnapshot();
+                return;
             }
-            return count;
+            Note(connectionId, MeshNoteLevel.Warning, hello.cellId, "mode-mismatch",
+                $"map {hello.mapId} is Static on the central{(hello.dynamicMap ? " but Dynamic on cell " + hello.cellId : string.Empty)}; the cell was answered with no runtime layout");
         }
 
         private void Answer(long connectionId, string cellId, string incarnation)
@@ -350,89 +294,6 @@ namespace MultiplayerARPG.MMO.Mesh
             if (!_maps.TryGetValue(mapId, out MapRecovery map))
                 _maps[mapId] = map = new MapRecovery();
             return map;
-        }
-
-        private void ResolveAll()
-        {
-            bool allSettled = true;
-            foreach (KeyValuePair<string, MapRecovery> pair in _maps)
-            {
-                MapRecovery map = pair.Value;
-                if (map.outcome != MeshRecoveryOutcome.Waiting)
-                    continue;
-                MeshRecoveryInput input = new MeshRecoveryInput
-                {
-                    mapId = pair.Key,
-                    mapDynamic = _world.IsDynamicMap(pair.Key),
-                    storeTrusted = _storeTrusted,
-                    storedEntries = map.storedEntries,
-                    helloHeldEntries = map.helloHeldEntries,
-                    elapsedSeconds = _clock.Now - _startedAt,
-                    ceilingSeconds = _world.dynamicSettings.recoveryCeilingSeconds,
-                };
-                _peers.Clear();
-                _transport.GetMapServers(_peers);
-                foreach (MeshMapServerPeer peer in _peers)
-                {
-                    if (peer.mapId == pair.Key && !string.IsNullOrEmpty(peer.cellId))
-                        input.registeredCells.Add(peer.cellId);
-                }
-                foreach (MeshCellBinding binding in _bindings.Values)
-                {
-                    if (binding.mapId == pair.Key && binding.unregisteredAt < 0f)
-                        input.helloCells.Add(binding.cellId);
-                }
-                MeshRecoveryDecision decision = MeshRecoveryResolver.Resolve(input);
-                if (decision.outcome == MeshRecoveryOutcome.Waiting)
-                {
-                    allSettled = false;
-                    continue;
-                }
-                map.outcome = decision.outcome;
-                map.reason = decision.reason;
-                if (decision.outcome == MeshRecoveryOutcome.AdoptStatic)
-                    Adopt(pair.Key, map, decision);
-                else
-                    Freeze(pair.Key, map, decision);
-            }
-            if (allSettled && Phase == MeshCoordinatorPhase.Recovering)
-                Phase = MeshCoordinatorPhase.Running;
-        }
-
-        private void Adopt(string mapId, MapRecovery map, MeshRecoveryDecision decision)
-        {
-            if (decision.isError)
-                _log.Error("Coordinator recovery: " + decision.reason);
-            else if (_world.IsDynamicMap(mapId))
-                _log.Info("Coordinator recovery: " + decision.reason);
-            // The central's own registry (read by the login) holds the broadcast pair too.
-            if (_world.IsDynamicMap(mapId) && _world.AppliedPair != _broadcast.pair && !_world.ApplyLayout(_broadcast, out string reason))
-            {
-                map.outcome = MeshRecoveryOutcome.Frozen;
-                map.reason = $"the central could not apply {_broadcast.pair}: {reason}";
-                _log.Error($"Coordinator recovery: map {mapId} frozen, {map.reason}");
-                return;
-            }
-            foreach (KeyValuePair<string, (long connection, string incarnation)> pending in map.pending)
-            {
-                MeshCellBinding binding = BindingOf(pending.Key);
-                if (binding == null || binding.connectionId != pending.Value.connection || binding.incarnation != pending.Value.incarnation)
-                    continue;
-                Answer(pending.Value.connection, pending.Key, pending.Value.incarnation);
-                binding.answered = true;
-            }
-            map.pending.Clear();
-        }
-
-        private void Freeze(string mapId, MapRecovery map, MeshRecoveryDecision decision)
-        {
-            _log.Error("Coordinator recovery: frozen: " + decision.reason);
-            foreach (MeshCellBinding binding in _bindings.Values)
-            {
-                if (binding.mapId == mapId && binding.unregisteredAt < 0f)
-                    Note(binding.connectionId, MeshNoteLevel.Error, binding.cellId, "recovery-frozen", $"map {mapId} is frozen: {decision.reason}");
-            }
-            map.pending.Clear();
         }
 
         /// <summary>Note logs a decision here and on the cell it concerns, at most once a minute per code and cell.</summary>

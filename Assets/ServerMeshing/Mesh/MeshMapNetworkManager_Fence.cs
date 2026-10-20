@@ -171,6 +171,7 @@ namespace MultiplayerARPG.MMO.Mesh
             _fenceKickedCount = 0;
             _fenceAdmitted.Clear();
             _fenceKicked.Clear();
+            _hellosSent = 0;
             // Only with the rig's pre-warm fault set: the layout handler peeks at each layout before the usual one runs.
             if (ClusterClient != null && MeshFault.Toggle(MeshFault.DieOnPrewarm) != null)
                 ClusterClient.RegisterMessageHandler(MeshClusterMsg.Layout, HandleLayoutMessageWithPrewarmFault);
@@ -436,6 +437,16 @@ namespace MultiplayerARPG.MMO.Mesh
                     MeshFault.FireOnce(MeshFault.DieOnPrewarm, cell, $"layout broadcast {peek.snapshot.pair} naming {cell} Pending");
             }
             HandleLayoutMessage(messageHandler);
+        }
+
+        private int _hellosSent;
+
+        /// <summary>SendLayoutHello's hook (Slice 5 decision 12): MESH_FAULT_DIE_ON_HELLO=&lt;cell&gt;:&lt;n&gt; kills the cell right after its n-th hello of this process.</summary>
+        private void MeshFaultOnHelloSent(string cellId)
+        {
+            _hellosSent++;
+            if (MeshFault.HelloFires(MeshFault.Toggle(MeshFault.DieOnHello), cellId, _hellosSent))
+                MeshFault.FireOnce(MeshFault.DieOnHello, cellId, $"layout hello {_hellosSent}");
         }
 
         /// <summary>OnHandoffNotice's hook: the notice fault (any cell it names) and the drain fault (a child that owns something).</summary>

@@ -40,7 +40,10 @@ import regress_split
 import regress_splitcrash
 import regress_auto
 import regress_building
+import regress_central
+import regress_procs
 import rigauto
+import rigprocs
 import rigtools
 from provision import ITEM_BOW, ITEM_YIELD, db_connect
 
@@ -119,8 +122,24 @@ ENV_KEYS = ["MESH_NO_MONSTER_HANDOFF", "MESH_FAULT_DIE_ON_NOTICE", "MESH_GHOST_L
             # Slice 3's automatic policy (regress_auto): which Dynamic maps split and merge by themselves, the triggers,
             # the cooldown, the benefit gate, the cost model's weights, and the spawner's core count
             "MESH_AUTO_OPS", "MESH_SPLIT_UTIL", "MESH_SPLIT_DWELL", "MESH_MERGE_UTIL", "MESH_MERGE_AFTER", "MESH_OP_COOLDOWN",
-            "MESH_SPLIT_BENEFIT", "MESH_MONSTER_WEIGHT", "MESH_PLANNER_WEIGHTS", "MESH_HOST_CORES"]
+            "MESH_SPLIT_BENEFIT", "MESH_MONSTER_WEIGHT", "MESH_PLANNER_WEIGHTS", "MESH_HOST_CORES",
+            # Slice 5 (regress_central, regress_procs): the editor as a client only (the split-process topology sets it), and
+            # the base-crash fault: a cell dies right after its n-th LayoutHello
+            "MESH_EDITOR_SERVERS", "MESH_FAULT_DIE_ON_HELLO"]
 EXTRA_ENV = {}   # --env KEY=VALUE from the command line, applied to every Play request of the run
+# Slice 5: the per-scenario topology. `editor`: the editor hosts central, login, database manager and spawner (every
+# scenario so far); `split`: the central (+ login + database manager) and the spawner are build processes started by
+# regress_procs with cwd = the project root, and the editor's Play is a client only. --topology forces one for the run.
+SPLIT_TOPOLOGY = set(regress_central.SCENARIOS)
+TOPOLOGY_OVERRIDE = None
+_current_scenario = None
+
+
+def topology_of(name):
+    """'split' or 'editor' for a scenario (TOPOLOGY_OVERRIDE wins)."""
+    if TOPOLOGY_OVERRIDE in ("split", "editor"):
+        return TOPOLOGY_OVERRIDE
+    return "split" if name in SPLIT_TOPOLOGY else "editor"
 
 # Two-machine runs (--remote-cells): the named cells are served by the other machine, started and read over SSH by
 # Tools/ServerMeshing/remoteb.py. Their logs live on that machine, so they are copied into Logs/remote before grading.
@@ -296,6 +315,11 @@ def request_play(mode, walk_x, walk_z, pet=False, mount=False, env=None, enabled
     if line_x is not None:
         lines.append(f"lineX={line_x:g}")
     env = dict(EXTRA_ENV, **(env or {}))
+    if topology_of(_current_scenario) == "split":
+        # Slice 5: the servers are build processes (started now, after the database rows were written and before the
+        # Play); the editor's Play hosts none of them.
+        env["MESH_EDITOR_SERVERS"] = "0"
+        regress_procs.start_cluster(sys.modules[__name__], _current_scenario, env)
     _play_env = env
     for key in ENV_KEYS:
         lines.append(f"env.{key}={env.get(key, '')}")   # every key set explicitly: an empty value clears it
@@ -420,6 +444,11 @@ def stop_play():
     except TimeoutError:
         print("  ! Play did not stop in time")
     kill_bots()
+    if topology_of(_current_scenario) == "split":
+        # Slice 5: the central, spawner and cells are build processes that outlive Play by design; the teardown ends
+        # them in an order that lets nothing respawn, and whatever is left afterwards is a survivor.
+        regress_procs.teardown(sys.modules[__name__])
+        return kit_process_count()
     end = time.time() + 15
     while time.time() < end and kit_process_count() > 0:
         time.sleep(1)
@@ -500,6 +529,8 @@ def db_reset(tester_pos, bot_pos, tester_party=1, bot_party=1, clear_buildings=F
     """
     if provision.editor_is_playing(STATUS):
         raise RuntimeError("the editor is still in Play; the test characters can only be reset while it is stopped")
+    if topology_of(_current_scenario) == "split" and regress_procs.database_running(sys.modules[__name__]):
+        raise RuntimeError("a build process still hosts the database manager; the test characters can only be reset once it is gone")
     conn = db_connect()
     try:
         provision.provision(conn, {TESTER: provision.Placement(tester_pos[0], tester_pos[1], tester_party),
@@ -600,6 +631,24 @@ def zone_lines(zone, start, day, map_id=MAP, suffixes=("info", "warn", "error"))
     for d in (day, next_day):
         for suffix in suffixes:
             path = zone_log(zone, suffix, d, map_id)
+            if not os.path.exists(path):
+                continue
+            for line in open(path, encoding="utf-8", errors="replace"):
+                stamp = rigtools.stamp_of(line)
+                if stamp and f"{stamp[0]} {stamp[1]}" >= since:
+                    out.append(line.rstrip("\n"))
+    return out
+
+
+def central_lines(start, day, suffixes=("info", "warn", "error")):
+    """Slice 5: every line of the build-hosted central's kit log (Logs/Log_Database_Central_Login_<day>.<sev>.log: one
+    file per day for every lifetime of the process) stamped at or after `start` on `day`, as zone_lines reads a cell's."""
+    since = f"{day} {start}"
+    next_day = (datetime.date.fromisoformat(day) + datetime.timedelta(days=1)).isoformat()
+    out = []
+    for d in (day, next_day):
+        for suffix in suffixes:
+            path = rigprocs.kit_log_path(LOGS, rigprocs.CENTRAL_LOG_PREFIX, d, suffix)
             if not os.path.exists(path):
                 continue
             for line in open(path, encoding="utf-8", errors="replace"):
@@ -748,6 +797,8 @@ def bot_result(log, kind):
 
 # ------------------------------------------------------------------ scenarios
 def run_scenario(name, rep):
+    global _current_scenario
+    _current_scenario = name
     day = datetime.date.today().isoformat()
     start = datetime.datetime.now().strftime("%H:%M:%S")
     for marker in os.listdir(TEMP) if os.path.isdir(TEMP) else []:
@@ -1019,13 +1070,16 @@ def run_scenario(name, rep):
     elif name in regress_building.SCENARIOS:
         split = regress_building.run(name, rep, sys.modules[__name__], start, day, bots)   # Slice 4: a BuildRun
 
+    elif name in regress_central.SCENARIOS:
+        split = regress_central.run(name, rep, sys.modules[__name__], start, day, bots)   # Slice 5: a CentralRun
+
     else:
         raise ValueError(f"unknown scenario {name}")
 
     # The sleeping-cell scenarios leave cells asleep on purpose; the Coarse ones run one cell; every other scenario
     # runs them all (autosplit: plus the child the policy makes).
     expect = {"wake": {"C", "E", "C2"}, "autosplit": {z for z, _ in ZONES} | {"C.1"}, **regress_auto.EXPECTED_ZONES,
-              **regress_building.EXPECTED_ZONES}
+              **regress_building.EXPECTED_ZONES, **regress_central.EXPECTED_ZONES}
     grade_common(rep, start, day, expect=expect.get(name))
     if name in regress_split.SCENARIOS:
         regress_split.grade_layout(rep, sys.modules[__name__], start, day, split)
@@ -1037,6 +1091,8 @@ def run_scenario(name, rep):
         regress_auto.grade_layout(rep, sys.modules[__name__], start, day, split)
     elif name in regress_building.SCENARIOS:
         regress_building.grade_layout(rep, sys.modules[__name__], start, day, split)
+    elif name in regress_central.SCENARIOS:
+        regress_central.grade_layout(rep, sys.modules[__name__], start, day, split)
     else:
         grade_layout(rep, start, day)
     for kind, log in bots:
@@ -1077,16 +1133,19 @@ TWO_HOST_SKIP = {
     **{n: regress_splitcrash.TWO_HOST_REASON for n in regress_splitcrash.SCENARIOS},
     **{n: regress_auto.TWO_HOST_REASON for n in regress_auto.SCENARIOS},
     **{n: regress_building.TWO_HOST_REASON for n in regress_building.SCENARIOS},
+    **{n: regress_central.TWO_HOST_REASON for n in regress_central.SCENARIOS},
 }
 ALL = (DEFAULT + ["pvp", "wake", "dynidle"] + list(regress_split.SCENARIOS) + list(regress_merge.SCENARIOS)
-       + list(regress_splitcrash.SCENARIOS) + list(regress_auto.SCENARIOS) + list(regress_building.SCENARIOS))
+       + list(regress_splitcrash.SCENARIOS) + list(regress_auto.SCENARIOS) + list(regress_building.SCENARIOS)
+       + list(regress_central.SCENARIOS))
 # A persisted remote cell outlives the Plays, so no scenario's environment reaches it.
 PERSIST_SKIP = {"dynidle": "runs the test map Dynamic through the environment, which a persisted remote cell never gets",
                 **{n: regress_split.PERSIST_REASON for n in regress_split.SCENARIOS},
                 **{n: regress_merge.PERSIST_REASON for n in regress_merge.SCENARIOS},
                 **{n: regress_splitcrash.PERSIST_REASON for n in regress_splitcrash.SCENARIOS},
                 **{n: regress_auto.PERSIST_REASON for n in regress_auto.SCENARIOS},
-                **{n: regress_building.PERSIST_REASON for n in regress_building.SCENARIOS}}
+                **{n: regress_building.PERSIST_REASON for n in regress_building.SCENARIOS},
+                **{n: regress_central.PERSIST_REASON for n in regress_central.SCENARIOS}}
 
 
 def main():
@@ -1117,7 +1176,15 @@ def main():
                     help="run the add-on's EditMode tests in the open editor first; a failure stops the run")
     ap.add_argument("--allow-stale-build", action="store_true",
                     help="run even though the player build is older than the add-on's runtime sources")
+    ap.add_argument("--topology", choices=["editor", "split"], default=None,
+                    help="force the rig topology for every scenario (Slice 5): 'editor' hosts every server in the editor, "
+                         "'split' runs the central (+ login + database manager) and the spawner as build processes with the "
+                         "editor as a client only; by default the splitcentral scenarios use 'split', every other 'editor'")
     args = ap.parse_args()
+    if args.topology and args.remote_cells:
+        print("--topology cannot be combined with --remote-cells: the two-machine run assumes the editor's cluster")
+        return 2
+    globals()["TOPOLOGY_OVERRIDE"] = args.topology
     for kv in args.env:
         k, _, v = kv.partition("=")
         if k not in ENV_KEYS:
@@ -1264,7 +1331,8 @@ def main():
                 rep.check(False, f"harness: {ex}")
             finally:
                 survivors = stop_play()
-                rep.check(survivors == 0, f"{survivors} rig process(es) outlived Play (killed)")
+                rep.check(survivors == 0, f"{survivors} rig process(es) "
+                          + ("survived the teardown" if topology_of(n) == "split" else "outlived Play (killed)"))
                 try:
                     rep.check(registry_state(registries) == registry_before, f"{len(registries)} registry asset(s) unchanged on disk")
                 except (OSError, RuntimeError) as ex:

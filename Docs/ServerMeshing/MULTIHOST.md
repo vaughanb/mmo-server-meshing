@@ -432,6 +432,15 @@ only through that cache.
   diagnostic names the three silent kicks (`the kit will kick silently -- alreadyInSocialRegistry=... databaseConnected=...`).
   (An earlier version of this note blamed a suppressed `LogError`; the prefab's log level is Info, so kit errors do
   log — the kick was silent because those three paths never log at all.)
+- **The production shape, on one machine for now (Slice 5).** The central, login and database manager can run as one
+  build process and the spawner as another, the editor being a client only: `regress.py --topology split` (the
+  `splitcentral` scenarios use it by default) starts them from `Build/Server` with the project root as working directory
+  (their logs in `Logs/`, the configuration from the project's `Config/`, the coordinator's store the editor's
+  `Temp/ServerMesh.Coordinator.json`); every port the central and the spawner bind goes on the command line, the cells
+  read `clusterPort` and the database manager's address from `Config/serverConfig.json`, and `-spawnMaps` is one
+  pipe-separated token. The central process can then be killed and started again alone: the cells reconnect, say hello
+  with the layout they hold, and the new central adopts it (SETUP §7, Slice 5). Not yet across two machines: the second
+  machine still runs no spawner, so its cell could not follow a central restarted here.
 - **A map-spawn server on the second machine.** The central now asks the spawner that owns a cell rather than the
   first one it knows (each spawner advertises its `servedCells` when it registers, and the central routes by that,
   falling back to the old behaviour for a cell nobody claimed). What is still missing is a spawner *process* on the

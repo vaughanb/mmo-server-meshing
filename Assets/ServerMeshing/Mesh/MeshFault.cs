@@ -17,6 +17,8 @@ namespace MultiplayerARPG.MMO.Mesh
         public const string DieOnNotice = "MESH_FAULT_DIE_ON_NOTICE";
         public const string DieOnPrewarm = "MESH_FAULT_DIE_ON_PREWARM";
         public const string DieOnDrain = "MESH_FAULT_DIE_ON_DRAIN";
+        /// <summary>Slice 5: <c>&lt;cell&gt;:&lt;n&gt;</c>, the cell dies right after it sent its n-th LayoutHello (a base crash while the central recovers).</summary>
+        public const string DieOnHello = "MESH_FAULT_DIE_ON_HELLO";
 
         private static readonly Dictionary<string, string> s_toggles = new Dictionary<string, string>(StringComparer.Ordinal);
 
@@ -62,6 +64,22 @@ namespace MultiplayerARPG.MMO.Mesh
         public static bool DrainFires(string toggle, string cellId, bool isChild, bool ownsSomething)
         {
             return NamesCell(toggle, cellId) && isChild && ownsSomething;
+        }
+
+        /// <summary>
+        /// HelloFires (Slice 5 decision 12): the toggle is <c>&lt;cell&gt;:&lt;n&gt;</c>, names this cell, and the cell has just sent its
+        /// n-th LayoutHello of this process (n from 1). Anything else, a malformed toggle included, never fires.
+        /// </summary>
+        public static bool HelloFires(string toggle, string cellId, int hellosSent)
+        {
+            if (string.IsNullOrEmpty(toggle) || string.IsNullOrEmpty(cellId))
+                return false;
+            int colon = toggle.LastIndexOf(':');
+            if (colon <= 0)
+                return false;
+            if (!string.Equals(toggle.Substring(0, colon).Trim(), cellId, StringComparison.Ordinal))
+                return false;
+            return int.TryParse(toggle.Substring(colon + 1).Trim(), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int n) && n >= 1 && hellosSent == n;
         }
 
         /// <summary>MarkerPath is the once-per-run marker of a fault on a zone: Temp/ServerMesh.FaultFired.&lt;key&gt;.&lt;zone&gt;.</summary>

@@ -108,7 +108,8 @@ class SplitWiringTests(unittest.TestCase):
 
     def test_registration(self):
         for name in ("split", "splitc2", "merge", "mergec2", "splitcrash_prewarm", "splitcrash_drain", "splitcrash_base",
-                     "autosplit", "autobenefit", "autorefuse", "splitbuild"):
+                     "autosplit", "autobenefit", "autorefuse", "splitbuild", "splitcentral", "splitcentral_merge",
+                     "splitcentral_base"):
             with self.subTest(name):
                 self.assertIn(name, regress.ALL)
                 self.assertNotIn(name, regress.DEFAULT)
@@ -116,9 +117,15 @@ class SplitWiringTests(unittest.TestCase):
                 self.assertIn(name, regress.PERSIST_SKIP)
         for key in ("MESH_FAULT_DIE_ON_PREWARM", "MESH_FAULT_DIE_ON_DRAIN", "MESH_FAULT_DIE_ON_NOTICE", "MESH_AUTO_OPS",
                     "MESH_SPLIT_UTIL", "MESH_SPLIT_DWELL", "MESH_MERGE_UTIL", "MESH_MERGE_AFTER", "MESH_OP_COOLDOWN",
-                    "MESH_SPLIT_BENEFIT", "MESH_MONSTER_WEIGHT", "MESH_PLANNER_WEIGHTS", "MESH_HOST_CORES", "MESH_PROBE_BURN_MS"):
+                    "MESH_SPLIT_BENEFIT", "MESH_MONSTER_WEIGHT", "MESH_PLANNER_WEIGHTS", "MESH_HOST_CORES", "MESH_PROBE_BURN_MS",
+                    "MESH_EDITOR_SERVERS", "MESH_FAULT_DIE_ON_HELLO"):
             self.assertIn(key, regress.ENV_KEYS)
         self.assertEqual(len(regress.ENV_KEYS), len(set(regress.ENV_KEYS)))
+        # Slice 5: the central-restart scenarios run the split-process topology, everything else the editor's.
+        for name in ("splitcentral", "splitcentral_merge", "splitcentral_base"):
+            self.assertEqual(regress.topology_of(name), "split")
+        for name in ("split", "merge", "pet", "splitcrash_base"):
+            self.assertEqual(regress.topology_of(name), "editor")
         # Slice 3: an expected id outside ZONES (a dynamic child) is graded on the test map; the Coarse set names three.
         self.assertEqual(regress.expected_zones({"C", "C.1", "C2"}), [("C", regress.MAP), ("C2", regress.MAP2), ("C.1", regress.MAP)])
         self.assertEqual(regress.expected_zones({"E"}), [("E", regress.MAP)])
