@@ -566,7 +566,7 @@ is needed by any of them; the registry of the few core touches stays in §17.*
 | **P3 Cross-border interaction** | Authority arbitration, ghost colliders, cross-cell lag comp, mob/projectile handoff. *2026-09-12: hits on ghosts are forwarded to and resolved by the owner (melee, both directions, verified); kill credit forwarded to the real character (verified); edge monsters aggro on ghosts (CE-7, verified); monsters hand off by position in place, respawn stays with the home spawn area (verified). 2026-09-15 (0.51): ✅ party and guild share, quest counters (graded), summons following their summoner (pet scenario) — done; projectiles were done in 0.30 (the fighter's arrows hit the neighbour's monsters in every party run; now graded explicitly); the kit's lag compensation covers ghosts, and the snapshot velocity lead brings a walking puppet within 0.02–0.2 m of the real entity. 0.52: the fight-phase residual was the puppet's replayed attack zeroing its move speed — puppets now move at the owner's reported speed (0.1–0.2 m in the fight phase). **P3 complete.*** | **See and fight** across |
 | **P4 Dynamic load** *(optional)* | Split/merge cells. *2026-09-15: ✅ the sandbox form — sleeping cells on a static grid (0.55), cells of any size (0.54) — is done. 2026-10-18: ✅ runtime cells on Dynamic maps — a manual split (0.76), merge (0.77), supervision and fencing (0.78) and the central's own policy (0.80: a hot cell splits where the cost model says, a cool pair merges, every operation is measured); buildings across the cut (0.81); a central restart with a cut map (0.82); the operator path (0.83: the Setup window's Dynamic checks, SETUP §6a). **The dynamic meshing plan is complete**; what it leaves is below* | Elastic scale |
 
-**Dynamic cells: what the plan leaves (known limits, 2026-10-19).** The operator's version, with the settings, is SETUP
+**Dynamic cells: what the plan leaves (known limits, 2026-10-20).** The operator's version, with the settings, is SETUP
 §6a.12; the measurements behind each are in the changelog rows named.
 - One operation runs at a time world-wide: the drain is paced to the database's sustained rate (0.75, 0.80).
 - A cut relieves little for a crowd narrower than twice the band or standing on a base cell's edge; the kinematic cost
@@ -580,7 +580,7 @@ is needed by any of them; the registry of the few core touches stays in §17.*
 - The central's policy plans with the asset's `bandWidth` whatever `MESH_BAND` a run sets, and cuts only on the load
   report's bucket, so a base just over twice the minimum cell splits by command but never by the policy (0.83).
 - Scene buildings and chests stay per-channel copies; `buildLimit` is per process; a building placed while its owner
-  restarts has two owners for about a second; upstream 0008 (CE-10) is written, not pushed (0.81).
+  restarts has two owners for about a second; upstream 0008 (CE-10) is in OpenMMORPG `develop` since 2026-10-20 (d077c5f, [PR #8](https://github.com/open-mmorpg/OpenMMORPG/pull/8)), so the kit needs no hand edit (0.81, 0.84).
 - After a central restart: a family whose child never says hello stays frozen (no command unfreezes it); a store lost
   together with a partitioned cell can leave that cell holding an unadopted layout; the policy's multipliers and
   measurements and the supervisor's counts are forgotten and a resumed operation is not measured; a staged commit held
