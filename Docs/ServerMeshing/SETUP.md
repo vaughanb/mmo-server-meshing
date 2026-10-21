@@ -188,12 +188,13 @@ All on `MeshMapNetworkManager` (the map-manager prefab). Defaults are the values
 | `puppetMotion` | Steered | How a character puppet follows its owner. Steered: the kit's movement component walks it toward each snapshot (today's behaviour). Kinematic (measurement, Phase 0): its pose is set from the snapshots, extrapolated to now, and sent to clients in the kit's own movement bytes, and an unobserved puppet moves only when a snapshot arrives; pets and mounted puppets stay steered. `MESH_PUPPET_MOTION=steered\|kinematic` overrides it at server start. |
 | `ghostMonsters`, `ghostHarvestables`, `ghostBuildings`, `forwardGhostHits`, `handoffMonsters`, `ownSpawnAreasByZone` | on | What crosses the edge. Monsters chasing across the line are handed over by position; a spawn area only spawns inside its own cell. |
 | `partyMemberOnlineWindowSeconds` | 5 s | A party member on another cell counts as online when the kit's online table saw it within this long (the cluster relays every online player once a second). |
-| `linkAllZones` | on | Link to every cell of the map, not only neighbours (party shares and such reach any cell). |
+| `linkAllZones` | on | Link to every cell of the map, not only neighbours (party shares and such reach any cell). A cell's link server takes 64 connections, so a map with more than about 64 live cells needs on-demand links instead (the map's `onDemandLinks` in the world registry, which overrides this for its cells). |
+| `linkIdleSeconds`, `linkOpenGraceSeconds` | 30 s, 10 s | Maps with `onDemandLinks` only: a link no longer needed closes after this long without a message either way (never under the handoff ack guard or the arrival reservation plus 5 s, 25 s by default); a link being opened is not taken for a dead cell before it has been tried this long. Rig `MESH_LINK_IDLE`. |
 | `linkSuspectTimeoutSeconds` | 2 s | A link a handoff came back over unclaimed is doubted (no handoff goes that way) until the neighbour is heard from; silent this long, it is reconnected — a restarted neighbour is reached at once instead of after the transport's timeout. |
 | `handoffLinkSettleSeconds` | 0.5 s | No handoff across a link that has been up for less than this, so the destination has a snapshot or two of the character and promotes its puppet instead of spawning fresh (which re-summons pets — a visible swap for observers). |
 | `meshLinkPortOffset` | 10000 | The server-to-server link listens on the map port plus this. |
 | `expectedMaxSpeed`, `meshStatsIntervalSeconds` | 8 m/s, 10 s | Band sizing check at start-up; the `Mesh stats` log line cadence. |
-| `databaseReconnectSeconds`, `databaseReconnectGraceSeconds`, `databaseDrainWaitSeconds` | 5 s, 15 s, 35 s | Re-open the **database** connection whenever this server has none: the kit opens it once at start-up and never again, so a map server that loses the database manager -- or starts before it exists -- runs on accepting players while every save fails. The grace period keeps the retry off the kit's own first attempt; the drain wait lets requests that were in flight expire before reconnecting clears their callbacks, then reconnects anyway and says how many it stranded. A process that *hosts* the database manager is left alone. |
+| `databaseReconnectSeconds`, `databaseReconnectGraceSeconds`, `databaseDrainWaitSeconds` | 5 s, 15 s, 35 s | Re-open the **database** connection whenever this server has none: the kit opens it once at start-up and never again, so a map server that loses the database manager -- or starts before it exists -- runs on accepting players while every save fails. The grace period keeps the retry off the kit's own first attempt. Requests still waiting when the connection is re-opened can never be answered, and the kit's reconnect would clear their callbacks and leave whoever awaits them waiting for ever, so the reconnect answers each with the kit's own timeout first (`Database connection lost; reconnecting to …, timing out N request(s) it can no longer answer`; DESIGN 0.87). The drain wait is only the fallback for a kit whose request table the add-on cannot reach: it lets those requests time out on their own for up to 35 s, then reconnects anyway and says how many it stranded. A process that *hosts* the database manager is left alone. |
 | `loadReportSeconds`, `occupancyBucketSize` | 5 s, 20 m | Every this many seconds the cell sends the central a **load report**: the work probe's window (main-thread work per frame without the frame limiter's wait, its p95, the share of frames that did not wait at all), what it owns and holds as puppets, and an occupancy grid of where they stand in buckets of this size. The central keeps the latest per cell and logs a one-line summary every `loadSummarySeconds` (30 s). 0 disables. |
 | `clusterConnectRetrySeconds` | 5 s | Re-open the cluster connection when the process could not open one at all. The kit handles every later failure by itself, but not this one: with no client socket it polls no events, so no disconnect is ever raised and the server runs on serving nobody. Matters when map servers can start before the central. 0 disables. |
 
@@ -306,7 +307,7 @@ and, later, several hosts all reach one database, and SQLite is a single file on
   that no interface of this machine has is another computer on the LAN (the prefab was saved for a two-machine run
   there), so cells started here advertise this machine's address on that subnet, or loopback, instead.
 - **Ports.** The rig's cluster uses the kit's defaults (central 7000, cluster 6010, map spawner 6001, database manager 6100,
-  login 7500, cells from 8000 with their links 10000 above; the checks cover 8000-8063 and 18000-18063, room for 64 cells). Another kit server on the same machine holding those ports makes the editor's
+  login 7500, cells from 8000 with their links 10000 above; the checks cover 8000-8063 and 18000-18063, room for 64 cells on one host). Another kit server on the same machine holding those ports makes the editor's
   servers fail to bind with `Only one usage of each socket address`, and its login server then joins the *other*
   cluster: the scenarios fail with no cell logging at all. `regress.py` and `abload.py` check the ports first and
   refuse to start, naming the process that holds them; stop it for the run.
@@ -344,6 +345,7 @@ anywhere, so a base just over twice the minimum may split by command and never b
 | `minCellSize` | 0 = `defaultMinCellSize` (100 m) | The narrowest a cut may leave a cell, on either axis. Never below the band: the central uses the band instead. |
 | `maxCellsPerBase` | 0 = `defaultMaxCellsPerBase` (4) | The most live cells one base cell may become. With the band neighbours (§6a.3) this is what bounds a world. |
 | `autoSplit`, `autoMerge` | off | Let the central split hot cells and merge cool ones by itself (§6a.6). Off: only operator commands cut. |
+| `onDemandLinks` | off | Any map, Static or Dynamic: its cells link only to the cells they need (band neighbours, and the cells a handoff, ghost, lent or borrowed record names), open a link the moment one is needed and close it once it has been unneeded and silent for `linkIdleSeconds`; `linkAllZones` is ignored for them, and a party share for a member no link reaches goes through the central. Needed past about 64 live cells on a map (§6a.12). In the logs: `Mesh links on demand: …` at start, a `Mesh links: …` line after every `Mesh stats` line, `opened on demand (<reason>)` and `closed on demand` lines. |
 
 The registry-wide settings that matter most (all of them are in §6a.11):
 
@@ -370,7 +372,7 @@ Panel 3's **Validate** judges every Dynamic map before anything starts (`!!` is 
 | `minCellSize … is under the … m band` (error) | The central uses the band in its place; the number you set is not the one that runs. | **Raise to band** sets the map's `minCellSize` to the band: nothing that runs changes. |
 | `… base cell(s) can never split` (warning) | No cut of those base cells leaves both sides at least the minimum cell (a cut needs twice the minimum on one axis and the minimum on the other), or `maxCellsPerBase` is 1. A `maxCellsPerBase` of 0 or less gets its own line: commands meet no limit and the policy never splits. | none: make the cell bigger or the minimum smaller. |
 | `up to <n> band neighbours … over the 32` (warning) | A cell streams to at most 32 band neighbours. If every base near this one is cut to `maxCellsPerBase` (never more cells than its area holds in minimum cells), one of its cells could pass that, and a layout change that would (a split, or a merge whose survivor reaches more cells) is refused. The count is an upper bound for a world started under these settings. | none: lower `maxCellsPerBase`, or cut the map coarser. |
-| `with linkAllZones a cell links to every live cell of its map … over the 64` (warning) | With `linkAllZones` on (the default) every cell links to every live cell of its map plus its band neighbours on other maps, and a cell's link server takes 64. Cut to `maxCellsPerBase` the map could pass it. | none: lower `maxCellsPerBase`, or turn `linkAllZones` off on the map managers (party shares then reach only linked cells). |
+| `with linkAllZones a cell links to every live cell of its map … over the 64` (warning) | With `linkAllZones` on (the default) every cell links to every live cell of its map plus its band neighbours on other maps, and a cell's link server takes 64. Cut to `maxCellsPerBase` the map could pass it. A map with `onDemandLinks` is not judged by this count. | none: turn the map's `onDemandLinks` on (its cells then link to their band neighbours and the cells they have business with, and a party share for a far member goes through the central), lower `maxCellsPerBase`, or turn `linkAllZones` off on the map managers (party shares then reach only linked cells). |
 | `servedCells of … leave out the Dynamic base cell(s) …` (warning) | Several hosts (§6a.4), judged over every spawner prefab's list together: a child, every supervised restart, a kill and the policy's host-headroom check go to the spawner that advertises the base. A host that runs its cells by hand advertises nothing, and the central then picks any registered spawner. | none: run Dynamic maps on hosts with a spawner. |
 | `an empty servedCells serves every cell but advertises none` (warning) | One spawner prefab lists its cells and another lists none: the second advertises nothing, so the children of the bases only it runs start on any spawner. | none: give every host its list. |
 | `servedCells names …, which is no cell of the registry` (warning) | A typo, or a child id: children are never listed (they start on their base's spawner). | none |
@@ -392,7 +394,9 @@ checks read the asset: a `MESH_BAND` or `MESH_SPAWN_CELLS` set for a run is not 
   next free map port from `spawnStartPort` (a port is reused once its process has exited), its mesh link
   `meshLinkPortOffset` above. A host's range must cover every process it runs at once: base cells, children, other maps,
   and a restart that overlaps its predecessor's exit. The rig opens 64 of each (`8000-8063`, `18000-18063`, MULTIHOST
-  §4); with `linkAllZones` a map passes 64 live cells only at the cost of refused links (§6a.3).
+  §4): that is a per-host limit. Per map, with `linkAllZones` a map passes 64 live cells only at the cost of refused
+  links (§6a.3); turn the map's `onDemandLinks` on and a cell takes only the links of its band neighbours and of the
+  cells it has business with.
 - **Several hosts** (MULTIHOST): give every host's spawner its base cells in `servedCells` (never a child's id). A
   Dynamic map's cells must be served by hosts that run a spawner; today's second rig machine starts its cell by hand, so
   keep its cells on a Static map (MULTIHOST §9).
@@ -413,13 +417,24 @@ test rig feeds the same lines from a file (§7).
   no whitespace, at most 50 characters). The central adds the channel, has the spawner start the child, **pre-warms**
   it (its band neighbours linked and streaming for `prewarmSeconds`), **hands over** the half (the parent drains its
   players at `drainRatePerSecond`, monsters, statics, drops and buildings faster) and **settles** (`Split <op>: done`).
-  A failure before the hand-over aborts (the child retired); after it the split freezes rather than guess.
+  A failure before the hand-over aborts (the child retired); after it the split freezes rather than guess (`unfreeze`
+  below resolves it).
 - `<seq> merge <a> <b>`: join two cells of one family that share a full edge. The base survives when it is one of them,
   else the one with more players. The retiring cell drains everything to the survivor, quits through the kit's quit
   path once it holds nothing, and leaves the layout; a family back to its asset cut drops out of the layout altogether.
 - `<seq> kill <cell>`: have the cell's spawner kill its process (an escape for a hung cell; it is then restarted like
   any dead cell).
-- Status lines: `Split <op>: …`, `Merge <op>: …`, `Layout op refused: …`, `Supervisor: …`, `Policy: …`.
+- `<seq> unfreeze <base>`: the escape from a freeze (§6a.9), named by the family's base cell. For a family frozen after a
+  central restart it declares the children that never said hello dead, fences every process of them started before the
+  central, collapses each one that owns a rectangle into the base (or a live sibling sharing a full edge) and retires one
+  that owns nothing; the live cells keep what they own. For an operation frozen after its hand-over (`Split <op>: frozen
+  …`, `Merge <op>: frozen …`) it does what a restarted central would: the hand-over re-sent if its target applied it, the
+  operation aborted if not, else resumed at the gate it froze at. Refused when nothing of that family is frozen (the
+  refusal names what holds the world-wide slot), or while a missing child's process is registered with the cluster.
+  **Before unfreezing a frozen family, make sure the missing child's process is gone on its host** (or kill it there):
+  a process the central cannot see does not fence itself after a central outage, and would keep serving its rectangle
+  beside the cell that takes it over.
+- Status lines: `Split <op>: …`, `Merge <op>: …`, `Layout op refused: …`, `Supervisor: …`, `Policy: …`, `Unfreeze <base>: …`.
 
 ### 6a.6 The automatic policy
 
@@ -470,7 +485,11 @@ children their channels back, and answers everyone with it; logins wait up to `r
 operation the old central was running is aborted, re-sent or resumed at its gate (`<Kind> <op>: resumed at <step> after
 a central restart`); the policy's cooldowns start fresh. A dynamic id that never says hello by the ceiling freezes **its
 family** only (`Coordinator recovery: family <base> of map <m> frozen: no hello from <ids> after <s> s`): no operation,
-supervision or policy on it, until that cell says hello (start it; no command unfreezes a family yet). The cells' saves
+supervision or policy on it, until that cell says hello or the operator sends `unfreeze <base>` (§6a.5): a child that
+died while the central was down never comes back by itself, since the kit's spawner does not restart a child it was
+asked to start. While the old central's operation waits for such a family, it holds the world-wide operation slot (`<op>:
+holds the world-wide operation slot until family <base> is unfrozen`): no split, merge or collapse runs anywhere until
+then. The cells' saves
 fail while the database manager is down, so host it apart from the central where you can (a central process that hosts
 it costs every cell up to about 40 s of failed saves).
 
@@ -518,8 +537,14 @@ Every field of the registry's `dynamicSettings`, read only when a map is Dynamic
 - **One operation at a time, world-wide**: the drain is paced to the database's rate (DESIGN 0.75), not the hosts'.
 - **What a cut relieves**: a crowd narrower than twice the band, or on a base cell's edge, gets little; the kinematic cost
   model accepts a crowd narrower than the band that only a steered fit would refuse; the weights are one machine's fits.
-- **Scale**: `linkAllZones` links every cell of a map to every other, and the link server takes 64 connections, so 64
-  cells is the ceiling (on-demand links are a follow-up); a cell streams to at most 32 band neighbours.
+- **Scale**: with `linkAllZones` every cell of a map links to every other, and a link server takes 64 connections, so
+  about 64 live cells is that map's ceiling; turn the map's `onDemandLinks` on to lift it (§6a.2). A cell streams to at
+  most 32 band neighbours, and one host's port range (64 map ports and 64 link ports on the rig) caps what one host runs.
+- **On-demand links**: a party share for a member that is neither on the killer's cell nor a ghost there goes through
+  the central (lost while the central is down, beyond the band neighbours); it reaches the cells of the killer's map
+  only, where `linkAllZones` also reached other maps' cells near the killer. A reply to the first request from a cell
+  that had no link to us can be lost while the link back comes up (the request's own guard retries it). A home notice
+  (a lent monster's or static's new owner, its death) waits up to 60 s for its link.
 - **Hosts**: a family runs on its base's host; a host without a spawner cannot serve a Dynamic map's cells.
 - **Settings for a run**: `MESH_BAND` changes the band the map servers and the layout rules use, but the central's
   policy plans with the asset's `bandWidth` (and its minimum cell clamps to it); a base just over twice the minimum
@@ -534,7 +559,12 @@ Every field of the registry's `dynamicSettings`, read only when a map is Dynamic
   entity though its release takes a few seconds; the kit's own race between a handoff and an item move in flight is
   unchanged; an item moved into a chest on a cell where nobody has opened it trips the kit's `NotifyStorageItemsUpdated`
   (the kit's UI always opens first); upstream patch 0008 (CE-10) is in `develop` since 2026-10-20 ([open-mmorpg/OpenMMORPG#8](https://github.com/open-mmorpg/OpenMMORPG/pull/8)).
-- **A central restart**: a family whose child never says hello stays frozen (no command unfreezes it); a store lost
+- **Unfreeze**: it asserts that a frozen family's missing children are gone; one still running out of the central's
+  sight keeps its rectangle beside the survivor until its next hello is fenced. A central restart before the collapse's
+  hand-over freezes the family again (unfreeze again). A dead child whose rectangle makes one with no live cell's is left
+  down, or waits for the family's other collapses; a live retiring cell of a merge dropped at the unfreeze stays
+  Draining (kill it). A resumed operation whose cause persists freezes again.
+- **A central restart**: a family whose child never says hello stays frozen until `unfreeze` (§6a.5); a store lost
   together with a partitioned cell can leave that cell holding a newer layout nobody adopts (it is answered with the
   current one); the policy's multipliers and measurements and the supervisor's restart counts do not survive, and a
   resumed operation is not measured; a staged commit held by its target alone lasts the whole outage; a frozen operation
@@ -545,9 +575,9 @@ Every field of the registry's `dynamicSettings`, read only when a map is Dynamic
 
 ## 7. Verifying
 
-- **Harness:** `python Tools/ServerMeshing/regress.py` runs 25 scenarios: the eleven of the mesh itself (pet, party,
-  crash, harvest, build, seam, seamcold, sleep, pvp, wake, dynidle; the first eight by default) and the fourteen of
-  dynamic cells below, on the rig and grades the logs of every cell that
+- **Harness:** `python Tools/ServerMeshing/regress.py` runs 27 scenarios: the eleven of the mesh itself (pet, party,
+  crash, harvest, build, seam, seamcold, sleep, pvp, wake, dynidle; the first eight by default), the fourteen of
+  dynamic cells below and the two of on-demand links (`linkcap`, `partyfar`), on the rig and grades the logs of every cell that
   logged, whatever its id; `--env KEY=VALUE` passes rig toggles, `--remote-cells E` serves a cell from a second machine
   and `--impair` degrades the link to it ([MULTIHOST.md](MULTIHOST.md) §8b, §8e). It refuses to run on a player build
   that does not match the working tree (the rig build records a SHA-1 of every player-side script and asset in
@@ -716,6 +746,15 @@ Every field of the registry's `dynamicSettings`, read only when a map is Dynamic
   these lines (and the phantom `Phantoms: cell C port N …` and `Phantom step i/n: P a -> b` lines) and mirrors the
   three grammars; `python Tools/ServerMeshing/p0geom.py` computes the offline fight geometry (V per client in 3D and
   X/Z for A0 2 km and 3 km, ships within 1 km, pilots within 80 m, lock subscriptions) into `Logs/p0/geom/`.
+- **On-demand links on the rig** (Slice 7): `MESH_LINKS=<map|all>:<OnDemand|Off>[,…]` sets maps' `onDemandLinks` for a
+  run (as `MESH_CELL_MODE` sets modes), `MESH_LINK_CAP=<n>` every cell's link server capacity (64), `MESH_LINK_IDLE=<s>`
+  the idle time (25 s floor). `linkcap` cuts the test map into a Static 4x4 of 150 m cells beside C2 with every map on
+  demand and a cap of 10 (all-zones links would need 15 or 16 per cell): every cell links with each touching neighbour,
+  refuses nobody and keeps its links near its neighbour count while the bot walks across four lines. `partyfar` is
+  `party` with a third member standing far off on W: its share arrives as a remote member's, through the central with
+  `MESH_LINKS`, by broadcast without. Every scenario run with `MESH_LINKS` checks that no cell refused a link and notes
+  the links opened and closed on demand (`split` checks that E closed its link to C after the cut); every scenario run
+  without it checks that no cell logged an on-demand line.
 - **Dynamic cells on the rig** (what they do is §6a): `MESH_CELL_MODE=<map|all>:<Static|Dynamic>[,…]` sets maps' cell
   modes for a run without touching the asset (`all` first, a map's own entry wins; e.g. `all:Dynamic`, or
   `ServerMeshTestMap:Dynamic`), and `MESH_COORDINATOR_STORE` moves the central's store. `regress.py` deletes the store
@@ -752,8 +791,10 @@ Every field of the registry's `dynamicSettings`, read only when a map is Dynamic
   across the split and the merge, the rows all under C, C killed and loading exactly the tree; the tester mode
   `buildtree`, test content `TestStorage-CE` and `TestDoor-CE`); `splitcentral` (the split, the central killed and
   restarted: the store adopted, every hello answered, a late login routed to C.1, nobody kicked), `splitcentral_merge`
-  (killed the moment the merge's e2 goes out: the merge resumes and finishes) and `splitcentral_base` (C dies on its hello
-  to the restarted central, `MESH_FAULT_DIE_ON_HELLO=C:2`, and comes back without R). The headless bots log in again
+  (killed the moment the merge's e2 goes out: the merge resumes and finishes), `splitcentral_base` (C dies on its hello
+  to the restarted central, `MESH_FAULT_DIE_ON_HELLO=C:2`, and comes back without R) and `splitcentral_unfreeze` (C.1
+  killed while the central is down, the family frozen at the restart's ceiling, `unfreeze C` collapsing C.1 into C, a
+  late login into R routed to C; every bot in the kept half). The headless bots log in again
   after a lost session (`Session lost …; re-login <n>`; RESULT ` relogins=<n>`).
 - **The play runner and the environment:** every Play request carries an id that the status file echoes as
   `playSeq=` while that Play runs, so the harness never mistakes a Play an earlier, abandoned request started late for
@@ -790,6 +831,7 @@ Every field of the registry's `dynamicSettings`, read only when a map is Dynamic
 | Character selection fails for a cell | The central must list the cell as a channel: use `MeshCentralNetworkManager`. |
 | Two servers both spawn a monster area | `ownSpawnAreasByZone` off, or the layout does not match the scene. |
 | Puppets lag or jitter | `Mesh stats … ghostSteer` — mean above ~0.3 m: check `ghostLeadSeconds` and the link traffic. |
+| A login right after a central restart (split-process topology) waits 30 s, then the client sits on the map server with no character | Before 0.87: the cell's database reconnect sat out a 35 s drain after a failed attempt (`Database connection lost with N request(s) in flight`), so the enter-game never got its character, and the kit's client threw on the unanswered request instead of disconnecting. Now the reconnect times those requests out at once and the client takes an unanswered enter-game as a refusal (`Enter-game Timeout without an answer from the map server`); select the character again. |
 
 ## 10. Packaging
 

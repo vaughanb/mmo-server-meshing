@@ -36,8 +36,8 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
     {
         // Release metadata. Version is the add-on version reported by the Addon Manager; UpdateDate drives its recency
         // filter and "New" badge, and is bumped by hand with the version rather than tracking the build clock.
-        public const string Version = "0.84.0";
-        public const string UpdateDate = "2026-10-20";
+        public const string Version = "0.87.0";
+        public const string UpdateDate = "2026-10-21";
 
         // Where the published packages will be fetched from. The Addon Manager downloads "packageUrl" verbatim, so this
         // has to point at wherever dist/ is finally hosted — change it here if these move to another repository.
@@ -66,7 +66,8 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 "cuts and merges at runtime, by command or by its own load policy.\n" +
                 "Dynamic cells are supervised (a dead or hung cell is restarted, a cell cut off from the cluster fences " +
                 "itself), buildings follow the cut, and a restarted central adopts the cut layout and resumes the operation " +
-                "it was running.\n" +
+                "it was running. A map can link its cells on demand (each cell only to the cells it needs), so a map is not " +
+                "capped at the 64 links one cell takes.\n" +
                 "Players cross a cell edge without a loading screen; neighbouring cells exchange ghosts of everything near " +
                 "their shared edge, so combat, loot, quests and building resolve across it. Empty land costs nothing: a cell " +
                 "with nobody near it does not run.\n" +
@@ -90,9 +91,9 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 "across a seam), test items, skills, quests, mounts, pets, harvestables and buildings that exercise every " +
                 "path across a cell edge.\n" +
                 "Adds an auto client, an editor launcher and play runner, a load generator, and the Python regression and " +
-                "capacity harnesses under TestMap/Tools: 25 scenarios, eleven of the mesh itself and fourteen of dynamic " +
+                "capacity harnesses under TestMap/Tools: 27 scenarios, eleven of the mesh itself, fourteen of dynamic " +
                 "cells (split, merge, crashes, the automatic policy, buildings across a cut, and a central restart with " +
-                "the central run as its own process).\n" +
+                "the central run as its own process) and two of on-demand links.\n" +
                 "Needs the Server Meshing add-on and the kit's BaseDemo (the test data references its enemy prefab and " +
                 "default weapon).",
             Dependencies = new[] { "87f3a860-3714-407a-8bd2-3ae097a78867" },

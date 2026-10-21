@@ -20,7 +20,7 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>NoSeq stands for the seq of a command whose seq could not be read.</summary>
         public const string NoSeq = "?";
 
-        private static readonly string[] s_mirroredPrefixes = { "Split ", "Merge ", "Layout op ", "Supervisor:", "Policy: " };
+        private static readonly string[] s_mirroredPrefixes = { "Split ", "Merge ", "Layout op ", "Supervisor:", "Policy: ", "Unfreeze " };
         /// <summary>AutoSeq is the seq the runner mirrors lines under while no command of this Play is live (Slice 3: automatic operations).</summary>
         public const string AutoSeq = "auto";
 
@@ -69,7 +69,7 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>
         /// MirroredPayload is the part of a console message the status file mirrors, or null: the message's first line with
         /// the kit logger's prefix (` INFO Mesh [date time] - `) or a `[tag] ` prefix removed, when it then starts with
-        /// `Split `, `Merge `, `Layout op `, `Supervisor:` or `Policy: `.
+        /// `Split `, `Merge `, `Layout op `, `Supervisor:`, `Policy: ` or `Unfreeze `.
         /// </summary>
         public static string MirroredPayload(string message)
         {

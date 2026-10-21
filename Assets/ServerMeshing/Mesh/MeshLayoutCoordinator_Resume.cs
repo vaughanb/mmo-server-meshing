@@ -16,8 +16,13 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>ResumeStoredOperation runs the stored operation's verdict (once; a Resume on a frozen family waits).</summary>
         private void ResumeStoredOperation()
         {
-            if (_storedOpResolved || Phase != MeshCoordinatorPhase.Running || _storeData == null || !_storeData.hasOperation)
+            if (_storedOpResolved || Phase != MeshCoordinatorPhase.Running)
                 return;
+            if (_storeData == null || !_storeData.hasOperation)
+            {
+                _storedOpResolved = true;   // DESIGN 0.85: nothing was stored; a later op's store entry is never "the stored one"
+                return;
+            }
             MeshStoredOperation stored = _storeData.operation;
             string prefix = stored.IsMerge ? "Merge" : "Split";
             if (!AdoptedRuntimeLayout)
@@ -42,6 +47,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 {
                     _resumeWaitLogged = frozen;
                     Line(true, $"{prefix} {stored.opId}: waits after the restart: family {stored.baseId} is frozen: {frozen}");
+                    Line(true, $"{prefix} {stored.opId}: holds the world-wide operation slot until family {stored.baseId} is unfrozen (unfreeze {stored.baseId})");
                 }
                 return;
             }
@@ -75,10 +81,10 @@ namespace MultiplayerARPG.MMO.Mesh
                     }
                     return;
                 case MeshOperationVerdictKind.ResendStaged:
-                    ResumeAt(stored, verdict, storedBroadcast, true);
+                    ResumeAt(stored, verdict, storedBroadcast, _storeData.hasStaged ? _storeData.staged : null, "a central restart");
                     return;
                 case MeshOperationVerdictKind.Resume:
-                    ResumeAt(stored, verdict, storedBroadcast, false);
+                    ResumeAt(stored, verdict, storedBroadcast, null, "a central restart");
                     return;
                 case MeshOperationVerdictKind.ResumeSettle:
                     MeshSplitOperation done = stored.ToSplit(MeshSplitStep.Done, storedBroadcast);
@@ -90,8 +96,11 @@ namespace MultiplayerARPG.MMO.Mesh
             }
         }
 
-        /// <summary>ResumeAt rebuilds the operation at the verdict's step (with its staged snapshot when re-sent) and lets the gates run.</summary>
-        private void ResumeAt(MeshStoredOperation stored, MeshOperationVerdict verdict, MeshLayoutPair storedBroadcast, bool staged)
+        /// <summary>
+        /// ResumeAt rebuilds the operation at the verdict's step (with <paramref name="staged"/>, the staged snapshot, when it
+        /// is re-sent) and lets the gates run; <paramref name="after"/> names what it resumes after (a restart, the unfreeze).
+        /// </summary>
+        private MeshLayoutOperation ResumeAt(MeshStoredOperation stored, MeshOperationVerdict verdict, MeshLayoutPair storedBroadcast, MeshLayoutSnapshot staged, string after)
         {
             MeshLayoutOperation op;
             if (stored.IsSplit)
@@ -111,9 +120,9 @@ namespace MultiplayerARPG.MMO.Mesh
                 merge.nextStraggleAt = -1f;
                 op = merge;
             }
-            if (staged && _storeData.hasStaged)
+            if (staged != null)
             {
-                op.staged = _storeData.staged.Clone();
+                op.staged = staged.Clone();
                 op.stagedStepName = stored.IsSplit && verdict.splitStep == MeshSplitStep.E1Staged ? "e1" : "e2";
             }
             op.participants.Clear();
@@ -123,14 +132,15 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (binding.unregisteredAt < 0f && !binding.staticNeighbour && _world.IsDynamicMap(binding.mapId))
                     op.participants.Add(binding.cellId);
             }
-            if (!staged)
+            if (staged == null)
                 op.prewarmNeighbours.AddRange(BandNeighboursOf(_broadcast, stored.IsSplit ? stored.childId : stored.survivorId));
             _op = op;
             StepStarted(op);
-            OpLog(op, $"resumed at {op.StepText} after a central restart");
+            OpLog(op, $"resumed at {op.StepText} after {after}");
             if (op is MeshMergeOperation retiring && retiring.step == MeshMergeStep.Retiring)
                 SendRetire(retiring);
             Advance();
+            return op;
         }
 
         private void BindMembers(MeshSplitOperation op)

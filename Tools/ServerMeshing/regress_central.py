@@ -2,7 +2,7 @@
 split-process topology (regress_procs: the central, login and database manager one build process, the spawner another,
 the editor a client only):
 
-    python Tools/ServerMeshing/regress.py splitcentral splitcentral_merge splitcentral_base
+    python Tools/ServerMeshing/regress.py splitcentral splitcentral_merge splitcentral_base splitcentral_unfreeze
 
 splitcentral: regress_split's `split` of C at x = 0 (child C.1) with the eight stand bots and the tester in R; 10 s after
   the split's done the central is killed and started again: it adopts the stored layout, answers every hello with it,
@@ -12,6 +12,8 @@ splitcentral_merge: the same split, then `merge C C.1`; the moment e2 is broadca
 splitcentral_base: the same split with no tester and MESH_FAULT_DIE_ON_HELLO=C:2; the central is killed and started
   again, and C dies on its hello to the new central (while the map still waits): the kit's spawner restarts C, which
   comes back gated and is answered with its kept half; it never re-owns R.
+splitcentral_unfreeze (DESIGN 0.85): the same split with every bot in the kept half; C.1 is killed while the central is
+  down, the restarted central freezes family C, and `unfreeze C` collapses C.1 into C (regress_unfreeze's flow).
 
 regress.py hands itself in as `rig` (as for regress_split and regress_splitcrash: request_play, launch_bot, zone_lines,
 central_lines, ps, EXE, ...), so this module never imports it; the unit tests hand in a fake. The graders are rigcentral's.
@@ -20,19 +22,21 @@ import collections
 import datetime
 import json
 import re
+import sys
 import time
 
 import regress_merge
 import regress_procs
 import regress_split
 import regress_splitcrash
+import regress_unfreeze
 import rigcentral
 import rigmerge
 import rigsplit
 import rigsplitcrash
 import rigtools
 
-SCENARIOS = ("splitcentral", "splitcentral_merge", "splitcentral_base")
+SCENARIOS = ("splitcentral", "splitcentral_merge", "splitcentral_base", "splitcentral_unfreeze")
 TWO_HOST_REASON = ("runs the central and the spawner as build processes on this host and kills and restarts the central; "
                    "the other machine runs no spawner and its cell could not follow a central restarted here")
 PERSIST_REASON = regress_split.PERSIST_REASON
@@ -57,12 +61,14 @@ RESULT_SLACK_S = 90
 STAND_TIMEOUT_S = 60
 LATE_STAND_TIMEOUT_S = 120  # the late bot's stand wait; its login retries are reported (0 since DESIGN 0.84's connect fix)
 LOGIN_RETRY = "Login timed out (attempt"
+ENTER_RETRY = "Enter-game refused ("   # the bot selected again after a refused or unanswered enter-game (DESIGN 0.87)
 
 Case = collections.namedtuple("Case", "kind enabled env")
 CASES = {
     "splitcentral": Case("split", True, {}),
     "splitcentral_merge": Case("merge", True, {}),
     "splitcentral_base": Case("base", False, {"MESH_FAULT_DIE_ON_HELLO": "C:2"}),
+    "splitcentral_unfreeze": Case("unfreeze", False, {}),
 }
 # What run() hands grade_layout: the split phase's SplitRun, the case, the merge's pairs (e1, e2 from the status file;
 # e3, tidy from the central's second lifetime), the adopted pair and the kill time.
@@ -80,13 +86,17 @@ def run(name, rep, rig, start, day, bots):
     # The tester stands as long as the bots (OBSERVE_S): the runner's default 100 s ended before the merge variant's
     # drain handed it back (its RESULT counted the split's migration only).
     kwargs = {"tester": TESTER, "observe_seconds": OBSERVE_S} if case.enabled else {}
+    if case.kind == "unfreeze":
+        kwargs = {"tester": TESTER}   # no tester runs; the fixture bot's row is put at its point, in R, for the late login
+    plan = regress_unfreeze.kept_plan() if case.kind == "unfreeze" else regress_splitcrash.stand_plan()
     r = regress_split.start_split(name, rep, rig, start, day, bots, spec_name="split", observe_s=OBSERVE_S,
-                                  plan=regress_splitcrash.stand_plan(), load_plan="", enabled=case.enabled, env=env_of(case),
-                                  **kwargs)
+                                  plan=plan, load_plan="", enabled=case.enabled, env=env_of(case), **kwargs)
     cr = CentralRun(name, case, r, {}, None, None)
     if not r.sent or r.applied is None:
         rep.check(False, f"{name}: the split did not reach {r.spec.base}'s e3 apply; the central is not restarted")
         return cr
+    if case.kind == "unfreeze":
+        return regress_unfreeze.flow(rep, rig, sys.modules[__name__], cr, start, day, bots)
     return {"split": flow_split, "merge": flow_merge, "base": flow_base}[case.kind](rep, rig, cr, start, day, bots)
 
 
@@ -239,9 +249,12 @@ def flow_split(rep, rig, cr, start, day, bots):
                          channel=spec.channel, observe_seconds=LATE_BOT_OBSERVE_S, line_x=spec.at)
     bots.append(("stand", log))
     standing = regress_split.wait_standing([log], LATE_STAND_TIMEOUT_S)
-    retries = sum(LOGIN_RETRY in line for line in regress_split.read_lines(log))
+    lines = regress_split.read_lines(log)
+    retries = sum(LOGIN_RETRY in line for line in lines)
+    enters = sum(ENTER_RETRY in line for line in lines)
     rep.check(standing[log] is not None, f"the late bot {user} logged in and stood after the restart ({standing[log]}"
-              + f", {retries} login retr{'y' if retries == 1 else 'ies'} after a request timeout)")
+              + f", {retries} login retr{'y' if retries == 1 else 'ies'} after a request timeout"
+              + f", {enters} enter-game retr{'y' if enters == 1 else 'ies'})")
     second = lifetimes(rig, start, day)[1]
     routes = rigcentral.login_routes(second, user + "Char")
     rep.check(routes and routes[-1][1] == spec.child, f"the late bot's login was routed to {spec.child} ({routes or 'no routing line'})")
@@ -406,5 +419,5 @@ def grade_layout(rep, rig, start, day, cr):
         applies=lambda zone, info: rigcentral.lifetime_apply_violations(
             zone, info, split, lambda own: rigcentral.expected_lives(kind, split, zone, own, status["pairs"], cr.merge_pairs, cr.adopted, status.get("settle")),
             label=f"the {kind} case"),
-        ops=lambda zone, lines: len(rigcentral.disallowed_lines(zone, lines, retiring=child if kind == "merge" else None)),
+        ops=lambda zone, lines: len(rigcentral.disallowed_lines(zone, lines, retiring=child if kind in ("merge", "unfreeze") else None)),
         how_split=f"split map ({kind} case): layouts by rectangle per process lifetime, a second coordinator incarnation allowed")

@@ -211,11 +211,12 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             RegisterGhostActionHandlers();
             _cellIncarnation = System.DateTime.UtcNow.Ticks.ToString("x");
+            LinksOnStartServer(); // Slice 7: on-demand links, the link cap toggle, the party-share relay (MeshMapNetworkManager_Links)
             if (!enableBorderGhosting)
                 return;
             _linkServer = new MeshLinkServer(this);
             int port = networkPort + meshLinkPortOffset;
-            if (_linkServer.StartServer(port, 64))
+            if (_linkServer.StartServer(port, LinkServerCapacity))
                 Logging.Log("Mesh", $"Mesh link listening on {port}");
             else
                 Logging.LogError("Mesh", $"Mesh link failed to listen on {port}");
@@ -236,6 +237,7 @@ namespace MultiplayerARPG.MMO.Mesh
             foreach (MeshLinkClient client in _linkClients.Values)
                 client.StopClient();
             _linkClients.Clear();
+            LinksOnStopServer(); // Slice 7
             _linkServer?.StopServer();
             _linkServer = null;
             _tmpIds.Clear(); _tmpIds.AddRange(_ghosts.Keys);
@@ -374,6 +376,7 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 _nextStatsTime = Time.unscaledTime + meshStatsIntervalSeconds;
                 LogMeshStats();
+                LogLinkSummary(); // Slice 7: on-demand cells only
                 if (puppetMotion == MeshPuppetMotion.Kinematic)
                     LogPuppetsWindow();
             }
@@ -413,6 +416,7 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private void EnsureNeighbourLinks()
         {
+            if (EnsureLinksOnDemand()) return; // Slice 7: a map with onDemandLinks wants, opens and closes its links there (MeshMapNetworkManager_Links)
             if (linkAllZones)
             {
                 IReadOnlyList<MeshCell> cells = world.CellsOf(OwnCell.mapId);
@@ -1348,6 +1352,7 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 float linkUpAt = _linkClients.TryGetValue(zoneId, out MeshLinkClient link) && link.IsConnected
                     ? Time.unscaledTime - link.ConnectedFor : float.MaxValue;
+                linkUpAt = RestartCutoff(incarnation, linkUpAt); // Slice 7: an on-demand cell sees a restart late; cut at the restart itself
                 Logging.LogWarning("Mesh", $"Neighbour zone {zoneId} restarted (incarnation {previous} -> {incarnation}); releasing what the old process held");
                 ReleaseLentMonsters(zoneId, "neighbour restarted", linkUpAt);
                 ReleaseBorrowedMonsters(zoneId, "home zone restarted", incarnation);
@@ -1374,6 +1379,7 @@ namespace MultiplayerARPG.MMO.Mesh
             Vector3 frameOffset = sender != null && OwnCell != null ? sender.OffsetTo(OwnCell) : Vector3.zero;
             _frameOffsetByConnection[connectionId] = frameOffset;
             Logging.Log("Mesh", $"Neighbour zone {zoneId} linked (conn {connectionId}){(frameOffset != Vector3.zero ? $", frame offset {frameOffset}" : string.Empty)}");
+            NoteLinkPeerHello(zoneId); // Slice 7: an on-demand cell links back (MeshMapNetworkManager_Links)
         }
 
         /// <summary>
@@ -1386,6 +1392,7 @@ namespace MultiplayerARPG.MMO.Mesh
         /// </summary>
         internal void OnMeshNeighbourDisconnected(long connectionId)
         {
+            if (OnIdleClosedDisconnect(connectionId)) return; // Slice 7: an announced idle close is no loss (MeshMapNetworkManager_Links)
             ForgetRegistrationReportOf(connectionId); // Slice 2d: a report is live only with its connection (Readiness)
             if (_neighbourZoneByConnection.TryGetValue(connectionId, out string zoneId))
             {
@@ -1394,7 +1401,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 // Monsters are released only once the zone is unreachable both ways (ReleaseRecordsOfUnreachableZones):
                 // with our own link to it still up this is a one-way loss or a dead incarnation's late timeout, and
                 // respawning here while the neighbour still holds the monster would put two of it in the world.
-                if (!IsNeighbourLinked(zoneId))
+                if (!IsNeighbourLinked(zoneId) && !LinkStillOpening(zoneId)) // Slice 7: not while an on-demand link to it comes up
                 {
                     ReleaseLentMonsters(zoneId, "neighbour link lost");
                     ReleaseBorrowedMonsters(zoneId, "home zone link lost");
@@ -1409,7 +1416,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     if (_pendingHandoffAcks.Count > 0)
                         Logging.Log("Mesh", $"Inbound connection from zone {zoneId} lost while our link to it is up; handoffs toward it stay pending");
                 }
-                else
+                else if (!LinkStillOpening(zoneId)) // Slice 7: an on-demand link coming up; the ack guard still applies
                     RollBackHandoffsToward(zoneId, "link to the destination lost");
             }
         }
@@ -1449,6 +1456,7 @@ namespace MultiplayerARPG.MMO.Mesh
             foreach (string zone in _unreachableZones)
             {
                 if (IsRetiredZone(zone)) continue; // Slice 2c: pruned when the layout retired it
+                if (LinkStillOpening(zone)) continue; // Slice 7: an on-demand link still coming up is not a dead zone
                 if (IsInboundLinked(zone) || IsNeighbourLinked(zone))
                     continue;
                 bool wasLinked = _neighbourIncarnation.ContainsKey(zone)
@@ -2577,7 +2585,7 @@ namespace MultiplayerARPG.MMO.Mesh
             string targetMeshId = string.Empty;
             if (monster.TryGetTargetEntity(out BaseCharacterEntity target) && target != null)
                 targetMeshId = MeshEntityIdOf(target);
-            if (!string.Equals(homeZone, OwnZoneId) && !string.Equals(homeZone, zone.id) && _linkClients.TryGetValue(homeZone, out MeshLinkClient homeLink) && homeLink.IsConnected)
+            if (!string.Equals(homeZone, OwnZoneId) && !string.Equals(homeZone, zone.id) && !DeferWhileUnlinked(homeZone, l => l.SendLentMonsterOwner(meshId, zone.id), $"lent monster owner {meshId}") && _linkClients.TryGetValue(homeZone, out MeshLinkClient homeLink) && homeLink.IsConnected) // Slice 7: kept for the link
                 homeLink.SendLentMonsterOwner(meshId, zone.id); // the home's respawn accounting follows the monster
             link.SendMonsterHandoff(new MonsterHandoffMessage
             {
@@ -2735,7 +2743,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 CharacterEntityKilledDelegate killHook = (target, instigator) => OnBorrowedMonsterKilled(capturedMeshId, home);
                 monster.onKilled += killHook;
                 _borrowedKillHooks[msg.meshId] = killHook;
-                if (!string.Equals(home, fromZone) && _linkClients.TryGetValue(home, out MeshLinkClient homeLink) && homeLink.IsConnected)
+                if (!string.Equals(home, fromZone) && !DeferWhileUnlinked(home, l => l.SendLentMonsterOwner(capturedMeshId, OwnZoneId), $"lent monster owner {capturedMeshId}") && _linkClients.TryGetValue(home, out MeshLinkClient homeLink) && homeLink.IsConnected) // Slice 7: kept for the link
                     homeLink.SendLentMonsterOwner(msg.meshId, OwnZoneId); // Slice 3: a hand-on from a cell not linked to the home still reaches it (idempotent)
             }
             TrackOwned(monster);
@@ -2762,6 +2770,7 @@ namespace MultiplayerARPG.MMO.Mesh
             _borrowedKillHooks.Remove(meshId);
             if (_ownedCharacters.TryGet(meshId, out BaseCharacterEntity dead))
                 UntrackOwned(dead);
+            if (DeferWhileUnlinked(homeZone, l => l.SendMonsterGone(meshId), $"monster gone {meshId}")) return; // Slice 7: kept for the link (MeshMapNetworkManager_LinkReports)
             if (!_linkClients.TryGetValue(homeZone, out MeshLinkClient link) || !link.IsConnected)
             {
                 Logging.LogWarning("Mesh", $"Borrowed monster {meshId} died but home zone {homeZone} is not linked: its respawn is lost");
@@ -3132,7 +3141,7 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>A member neither here nor a ghost here that a broadcast can still reach: linked, online, not mid-handoff.</summary>
         internal bool IsRemotePartyMember(PartyData party, string memberId)
         {
-            return linkAllZones && !_pendingHandoffAcks.ContainsKey(memberId) && IsPartyMemberOnline(party, memberId);
+            return (linkAllZones || LinksOnDemand) && !_pendingHandoffAcks.ContainsKey(memberId) && IsPartyMemberOnline(party, memberId);
         }
 
         /// <summary>
@@ -3292,6 +3301,7 @@ namespace MultiplayerARPG.MMO.Mesh
         internal void BroadcastPartyShare(string memberId, int exp, float expMultiplier, int gold, float goldMultiplier, IEnumerable<CurrencyAmount> currencies, int giverLevel, int sourceLevel, int monsterDataId, bool countKill)
         {
             GhostPartyShareMessage msg = BuildPartyShare(memberId, exp, expMultiplier, gold, goldMultiplier, currencies, giverLevel, sourceLevel, monsterDataId, countKill, true);
+            if (TryRelayPartyShare(msg)) return; // Slice 7: an on-demand cell sends it through the central to every cell of the map
             int sent = 0;
             foreach (MeshLinkClient link in _linkClients.Values)
             {

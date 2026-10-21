@@ -66,7 +66,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 return;
             float now = _clock.Now;
             CollectPolicyCells(_policyCells);
-            bool busy = _op != null && (_op.InProgress || _op.IsFrozen);
+            bool busy = OpSlotHeld;
             _policyDecisions.Clear();
             _policy.Evaluate(now, _policyCells, busy, HostOf, _policyDecisions);
             ActOnDecisions(_policyDecisions);

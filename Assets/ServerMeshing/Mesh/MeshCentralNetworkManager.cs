@@ -95,6 +95,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 ClusterServer.RegisterMessageHandler(MeshClusterMsg.LayoutHello, HandleLayoutHello);
                 ClusterServer.RegisterMessageHandler(MeshClusterMsg.LayoutAck, HandleLayoutAck);
                 ClusterServer.RegisterMessageHandler(MeshClusterMsg.LayoutEvidence, HandleLayoutEvidence);
+                ClusterServer.RegisterMessageHandler(MeshClusterMsg.PartyShareRelay, HandlePartyShareRelay); // Slice 7 (MeshCentralNetworkManager_Relay)
                 // Answered whether or not cells sleep: a cell asks whenever a neighbour it needs is not registered, and an
                 // unregistered request type makes the kit log an error for every one of them.
                 ClusterServer.RegisterRequestHandler<MeshWakeRequest, MeshWakeResponse>(MeshClusterMsg.Wake, HandleWakeRequest);

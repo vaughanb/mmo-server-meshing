@@ -1,7 +1,7 @@
 // Server Meshing add-on — an operator's layout command as one line (Slice 2b decision 2; the rig writes it to
 // Temp/ServerMesh.LayoutCommand.txt and its PlayRunner hands it to MeshCentralNetworkManager.SubmitLayoutCommand):
-// `<seq> split <cell> <x|z> <at> <+|-> <childId>` or (Slice 2c) `<seq> merge <a> <b>`. Pure: parsed and judged here, run by
-// the coordinator.
+// `<seq> split <cell> <x|z> <at> <+|-> <childId>`, (Slice 2c) `<seq> merge <a> <b>`, (2d) `<seq> kill <cell>` or (0.85)
+// `<seq> unfreeze <base>`. Pure: parsed and judged here, run by the coordinator.
 using System;
 using System.Globalization;
 
@@ -14,12 +14,14 @@ namespace MultiplayerARPG.MMO.Mesh
         Merge,
         /// <summary>Kill (Slice 2d): have a cell's spawner kill its process (an operator's escape for a hung cell).</summary>
         Kill,
+        /// <summary>Unfreeze (DESIGN 0.85): resolve a family frozen after a central restart, or a frozen operation of it (unfreeze_design.md).</summary>
+        Unfreeze,
     }
 
     /// <summary>MeshLayoutCommand is one parsed layout command.</summary>
     public sealed class MeshLayoutCommand
     {
-        public const string Usage = "<seq> split <cell> <x|z> <at> <+|-> <childId> | <seq> merge <a> <b> | <seq> kill <cell>";
+        public const string Usage = "<seq> split <cell> <x|z> <at> <+|-> <childId> | <seq> merge <a> <b> | <seq> kill <cell> | <seq> unfreeze <base>";
 
         public long seq;
         public MeshLayoutCommandKind kind;
@@ -75,9 +77,19 @@ namespace MultiplayerARPG.MMO.Mesh
                 command = new MeshLayoutCommand { seq = seq, kind = MeshLayoutCommandKind.Kill, verb = "kill", cellId = words[2] };
                 return true;
             }
+            if (words.Length >= 2 && string.Equals(words[1], "unfreeze", StringComparison.OrdinalIgnoreCase))
+            {
+                if (words.Length != 3)
+                {
+                    error = $"layout command {seq} has {words.Length} words, an unfreeze takes 3 ({Usage})";
+                    return false;
+                }
+                command = new MeshLayoutCommand { seq = seq, kind = MeshLayoutCommandKind.Unfreeze, verb = "unfreeze", cellId = words[2] };
+                return true;
+            }
             if (words.Length < 2 || !string.Equals(words[1], "split", StringComparison.OrdinalIgnoreCase))
             {
-                error = words.Length < 2 ? $"layout command {seq} has no verb ({Usage})" : $"layout command {seq}: unknown verb '{words[1]}' (split, merge or kill)";
+                error = words.Length < 2 ? $"layout command {seq} has no verb ({Usage})" : $"layout command {seq}: unknown verb '{words[1]}' (split, merge, kill or unfreeze)";
                 return false;
             }
             if (words.Length != 7)

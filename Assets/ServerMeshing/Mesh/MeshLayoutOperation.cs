@@ -41,6 +41,8 @@ namespace MultiplayerARPG.MMO.Mesh
         public readonly List<string> prewarmNeighbours = new List<string>();
         public string lastGateWait = "";
         public string endReason = "";
+        /// <summary>The step a frozen operation was at when it froze (its StepText; empty before any freeze): what the unfreeze resolves it by.</summary>
+        public string frozenStep = "";
 
         /// <summary>
         /// Pause (Slice 2d decision 6): after its e2 broadcast an operation whose member is down waits for it instead of

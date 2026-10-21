@@ -66,6 +66,33 @@ class LogNameTests(unittest.TestCase):
                 with self.subTest(name):
                     self.assertEqual(rigtools.discover_cells(logs, days), expected)
 
+    def test_discover_cells_since(self):
+        """With `since`, a day file says nothing: only a line stamped in the window puts its cell in the graded set."""
+        def line(day, t):
+            return f" INFO Mesh [{day} {t}] - Mesh stats\n"
+        files = {
+            "C": ("2026-10-20", "info", "no stamp\n" + line("2026-10-20", "09:00:00") + line("2026-10-20", "10:00:00")),
+            "C.1": ("2026-10-20", "info", line("2026-10-20", "08:00:00")),          # an earlier split's child
+            "E.1": ("2026-10-20", "warn", line("2026-10-20", "09:59:59")),
+            "N": ("2026-10-21", "error", line("2026-10-21", "00:00:05")),         # past midnight, in the next file
+            "SILENT": ("2026-10-20", "info", ""),
+        }
+        with tempfile.TemporaryDirectory() as logs:
+            for cell, (day, sev, text) in files.items():
+                with open(os.path.join(logs, f"Log_Map(M)-Ch({cell})-Alloc(False)-Instance()_{day}.{sev}.log"), "w") as f:
+                    f.write(text)
+            days = {"2026-10-20", "2026-10-21"}
+            cases = {
+                "no window: every file": (None, days, [("C", "M"), ("C.1", "M"), ("E.1", "M"), ("N", "M"), ("SILENT", "M")]),
+                "a window: lines in it only": ("2026-10-20 10:00:00", days, [("C", "M"), ("N", "M")]),
+                "the stamp's date counts, not its time alone": ("2026-10-20 23:00:00", days, [("N", "M")]),
+                "one day read: the next day's file is not": ("2026-10-20 10:00:00", {"2026-10-20"}, [("C", "M")]),
+                "a window after every line": ("2026-10-21 01:00:00", days, []),
+            }
+            for name, (since, d, expected) in cases.items():
+                with self.subTest(name):
+                    self.assertEqual(rigtools.discover_cells(logs, d, since), expected)
+
 
 class FreshnessTests(unittest.TestCase):
     def test_build_is_stale(self):

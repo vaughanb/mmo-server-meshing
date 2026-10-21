@@ -10,9 +10,10 @@ The rig ships the content needed to exercise every path that crosses a cell edge
 a kill quest, a bow and missile, a mount, a pet, a harvestable and a placeable building. It adds an **auto client** that
 walks characters over edges on its own, an editor **launcher** and **play runner** that bring up all ten cell processes,
 a **load generator**, and the Python regression and capacity harnesses under `TestMap/Tools`. The regression harness
-runs 25 scenarios: eleven of the mesh itself (handoff, ghosts, combat, parties, buildings, seams, sleeping cells) and
+runs 27 scenarios: eleven of the mesh itself (handoff, ghosts, combat, parties, buildings, seams, sleeping cells),
 fourteen of dynamic cells (split, merge, crashes mid-operation, the automatic policy, buildings across a cut, and a
-central restart, the last with the central run as a build process of its own so it can be killed alone).
+central restart, the last with the central run as a build process of its own so it can be killed alone) and two of
+on-demand links (a map of more cells than a capped link server takes, and a party share for a far member).
 
 ## Requirements
 

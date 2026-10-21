@@ -314,7 +314,33 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             Assert.That(MeshDynamicSetupChecks.WorstCaseLinkCounts(world)["G4"], Is.EqualTo(71));
             Assert.That(findings, Has.Count.EqualTo(1));
             Assert.That(findings[0].cellIds, Has.Count.EqualTo(9));
-            Assert.That(findings[0].text, Does.Contain("could need up to 71 links, over the 64 its link server takes"));
+            Assert.That(findings[0].text, Does.Contain("could need up to 71 links, over the 64 its link server takes (turn onDemandLinks on for the map"));
+        }
+
+        [Test]
+        public void LinkFindings_OnDemandMap_IsNotJudgedByTheAllZonesCount()
+        {
+            MeshWorldRegistry world = BigGrid();
+            world.maps[0].onDemandLinks = true;
+
+            Assert.That(MeshDynamicSetupChecks.LinkFindings(world, linkAllZones: true), Is.Empty);
+            Assert.That(MeshDynamicSetupChecks.OnDemandLinks(world, Map1), Is.True);
+        }
+
+        [Test]
+        public void LinkFindings_MixedWorld_JudgesOnlyTheAllZonesMap()
+        {
+            MeshWorldRegistry world = BigGrid();
+            MeshCellRect[] rects = new MeshCellRect[9];
+            for (int i = 0; i < 9; ++i)
+                rects[i] = new MeshCellRect { id = "H" + i, min = new Vector2(1200f + (i % 3) * 400f, (i / 3) * 400f), size = new Vector2(400f, 400f) };
+            world.maps.Add(new MeshMapLayout { mapId = Map2, cellRects = rects, cellMode = MeshCellMode.Dynamic, minCellSize = 100f, maxCellsPerBase = 8, onDemandLinks = true });
+            world.Rebuild();
+
+            List<MeshSetupFinding> findings = MeshDynamicSetupChecks.LinkFindings(world, linkAllZones: true);
+
+            Assert.That(findings, Has.Count.EqualTo(1));
+            Assert.That(findings[0].mapId, Is.EqualTo(Map1));
         }
 
         [Test]

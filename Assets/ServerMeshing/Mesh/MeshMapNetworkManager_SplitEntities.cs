@@ -165,7 +165,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 CharacterEntityKilledDelegate killHook = (target, instigator) => OnBorrowedMonsterKilled(capturedMeshId, home);
                 monster.onKilled += killHook;
                 _borrowedKillHooks[msg.meshId] = killHook;
-                if (_linkClients.TryGetValue(home, out MeshLinkClient homeLink) && homeLink.IsConnected)
+                if (!DeferWhileUnlinked(home, l => l.SendLentMonsterOwner(capturedMeshId, OwnZoneId), $"lent monster owner {capturedMeshId}") && _linkClients.TryGetValue(home, out MeshLinkClient homeLink) && homeLink.IsConnected) // Slice 7
                     homeLink.SendLentMonsterOwner(msg.meshId, OwnZoneId);
             }
             TrackOwned(monster);

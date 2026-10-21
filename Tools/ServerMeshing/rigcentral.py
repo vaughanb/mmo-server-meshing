@@ -31,6 +31,8 @@ LOGIN_NO_SERVER = re.compile(r"Login routing: no server for cell (\S+) of (\S+) 
 LOGIN_WAITED = re.compile(r"Login routing: waited ([\d.]+) s for the layout recovery")
 RECOVERY_FROZEN_NOTE = re.compile(r"recovery-frozen")
 LAYOUT_REFUSED = re.compile(r"Layout op refused: (.*)$")
+# The operator's unfreeze (DESIGN 0.85, slices/unfreeze_design.md): its own lines start "Unfreeze <base>: ".
+UNFREEZE = re.compile(r"^Unfreeze (\S+): (.*)$")
 
 # ------------------------------------------------------------------ the cells' lines (decisions 12, 13)
 ANSWER = re.compile(r"Layout answer ([0-9a-f]+/\d+) on (\S+): already applied")
@@ -117,6 +119,17 @@ def login_routes(lines, character=None):
             and (character is None or m.group(1) == character)]
 
 
+def unfreeze_lines(lines, base=None):
+    """[(base, text)] of the central's 'Unfreeze <base>: <text>' lines (one base's when given), in order."""
+    return [(m.group(1), m.group(2)) for text in payloads(lines) for m in [UNFREEZE.match(text)] if m
+            and (base is None or m.group(1) == base)]
+
+
+def frozen_families(lines):
+    """[(base, map, reason)] of the central's 'family <base> of map <m> frozen: <reason>' lines."""
+    return [(m.group(1), m.group(2), m.group(3).strip()) for line in lines for m in [FROZEN_FAMILY.search(line)] if m]
+
+
 def refusals(lines):
     return [m.group(1) for text in payloads(lines) for m in [LAYOUT_REFUSED.search(text)] if m]
 
@@ -163,7 +176,9 @@ def expected_lives(case, split, cell, own_rect, split_pairs, merge_pairs=None, a
     merge (splitcentral_merge): one lifetime: the split's applies, the merge's e1 and e2 (first incarnation), e3 and tidy
     (second incarnation; pairs from the central's log when known, else None). The child quits after e2.
     base (splitcentral_base): the base two lifetimes, the second with one apply (kept, kept) at the adopted pair; the
-    child and the others one lifetime, the split's applies. A settle adds one apply to the split's lifetime."""
+    child and the others one lifetime, the split's applies. A settle adds one apply to the split's lifetime.
+    unfreeze (splitcentral_unfreeze): as merge, but the child was killed after the split and applies nothing more; the
+    collapse's e1 (kept, base), e2, e3 and tidy (base, base) come from the second incarnation (merge_pairs)."""
     kept, given = rigsplit.split_rects(split.base_rect, split.axis, split.at, split.side)
     p, nothing, any_rect = split.base_rect, rigsplit.NOTHING, rigsplit.ANY
     sp, mp = split_pairs or {}, merge_pairs or {}
@@ -179,11 +194,11 @@ def expected_lives(case, split, cell, own_rect, split_pairs, merge_pairs=None, a
         tail = (own_rect, any_rect)
     if settle:
         first.append(tail + (settle,))
-    if case == "merge":
+    if case in ("merge", "unfreeze"):
         if cell == split.base:
             first += [(kept, p, mp.get("e1")), (p, p, mp.get("e2")), (p, p, mp.get("e3")), (p, p, mp.get("tidy"))]
         elif cell == split.child:
-            first += [(given, given, mp.get("e1")), (nothing, given, mp.get("e2"))]
+            first += [] if case == "unfreeze" else [(given, given, mp.get("e1")), (nothing, given, mp.get("e2"))]
         else:
             first += [(own_rect, any_rect, mp.get(s)) for s in ("e1", "e2", "e3", "tidy")]
         return [first]

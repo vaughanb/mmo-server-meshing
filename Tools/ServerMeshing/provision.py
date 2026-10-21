@@ -258,6 +258,42 @@ def bot_characters(cur, first, n):
     return found
 
 
+CLEAR_BOT_PARTIES_SQL = ("update characters c join userlogin u on c.userId = u.id set c.partyId = 0 "
+                         "where u.username like 'meshbot%%' and u.username <> 'meshbot' "
+                         "and c.characterName = concat(u.username, 'Char')")
+
+
+def clear_bot_parties(cur):
+    """Slice 7: meshbot2 and up in no party (partyfar alone puts meshbot2 in party 1); only the bots' own characters."""
+    cur.execute(CLEAR_BOT_PARTIES_SQL)
+
+
+def place_bot_in_party(first, point, party, connect=None, status_path=PLAY_STATUS):
+    """Slice 7 (partyfar): meshbot<first>'s character at the point (x, z) and in the party, as bot_characters allows;
+    refuses as reset_bot_positions does. Returns its character id."""
+    if first < 2:
+        raise ProvisionError(f"meshbot{first}: the extra party member is meshbot2 or up (meshbot is the regress fixture)")
+    if editor_is_playing(status_path):
+        raise ProvisionError("the editor is still in Play; a bot can only be placed while it is stopped")
+    conn = (connect or db_connect)()
+    cur = conn.cursor()
+    try:
+        conn.begin()
+        (user, character_id), = bot_characters(cur, first, 1)
+        cur.execute("update characters set currentPositionX=%s, currentPositionY=0, currentPositionZ=%s, partyId=%s "
+                    "where id=%s and currentMapName=%s", (float(point[0]), float(point[1]), party, character_id, MAP))
+        if cur.rowcount != 1:
+            raise ProvisionError(f"{user}Char ({character_id}) matched {cur.rowcount} rows")
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+        conn.close()
+    return character_id
+
+
 def reset_bot_positions(first, n, points, connect=None, status_path=PLAY_STATUS):
     """Saves step 8b's bots meshbot<first>..meshbot<first+n-1> at the run's points ((x, z[, ...]) each, on cell C's
     channel) in one transaction, so a bot never starts where the last run left it (decision 6); returns n. Refuses

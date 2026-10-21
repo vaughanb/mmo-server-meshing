@@ -27,7 +27,7 @@ in OpenMMORPG `develop` (d077c5f, 2026-10-20).
 - One cell process holds about **270 players at a 60 fps server tick** on a modern core; size cells so no expected crowd
   exceeds 250 (250–300 m suits a sandbox where towns can appear anywhere).
 - Ten cells over two maps are exercised by the regression harness in the [Server Meshing Test Rig](../ServerMeshingTestRig)
-  add-on, on one machine or across two: 25 scenarios, fourteen of them dynamic cells.
+  add-on, on one machine or across two: 27 scenarios, fourteen of them dynamic cells and two on-demand links.
 
 ## Requirements
 
@@ -53,7 +53,8 @@ in OpenMMORPG `develop` (d077c5f, 2026-10-20).
 4. Press **Validate** and use the **Fix** buttons to put the add-on's subclasses onto your manager and entity prefabs
    and to assign the registry, the gameplay rule and the server tick. For a map set Dynamic it also says, before
    anything starts, which base cells could never split, whether a fully cut world would pass the 32 band neighbours or
-   64 links a cell takes, and whether the hosts' served cells keep each family on its base's host.
+   the 64 links a cell takes when every cell links to every other (a map with `onDemandLinks` links each cell only to
+   the cells it needs, and has no such ceiling), and whether the hosts' served cells keep each family on its base's host.
 5. Run. The kit's server instance starts one process per cell; with sleeping cells on, cells start on demand.
 
 `Documentation/SETUP.md` in the package is the full operator's guide, `Documentation/DESIGN.md` the design record with

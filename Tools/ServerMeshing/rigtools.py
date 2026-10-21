@@ -37,17 +37,32 @@ def parse_log_name(name):
     return m.group("map"), m.group("cell"), m.group("day"), m.group("sev")
 
 
-def discover_cells(logs_dir, days):
-    """Every (cell, map) that has a map-server log in logs_dir for any of the given days, sorted.
+def discover_cells(logs_dir, days, since=None):
+    """Every (cell, map) that has a map-server log in logs_dir for any of the given days, sorted; with `since`
+    ("YYYY-MM-DD HH:MM:SS"), only those with at least one line stamped at or after it.
 
-    Dynamic cells get ids at runtime, so the graded set cannot be a fixed list; the log files say who ran.
+    Dynamic cells get ids at runtime, so the graded set cannot be a fixed list; the log files say who ran. A day file
+    only says the cell ran at some point that day: a child of an earlier split scenario keeps its file all day, so a
+    scenario grades by `since` (its start) or every later scenario that day grades that child on no lines.
     """
     found = set()
     for path in glob.glob(os.path.join(logs_dir, "Log_Map(*)-Ch(*)-Alloc(False)-Instance()_*.log")):
         parsed = parse_log_name(path)
-        if parsed and parsed[2] in days:
+        if not parsed or parsed[2] not in days or (parsed[1], parsed[0]) in found:
+            continue
+        if since is None or logged_since(path, since):
             found.add((parsed[1], parsed[0]))
     return sorted(found)
+
+
+def logged_since(path, since):
+    """Whether the kit log at path has a line stamped at or after `since` ("YYYY-MM-DD HH:MM:SS")."""
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            stamp = stamp_of(line)
+            if stamp and f"{stamp[0]} {stamp[1]}" >= since:
+                return True
+    return False
 
 
 def newest_mtime(paths):

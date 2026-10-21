@@ -65,6 +65,8 @@ namespace MultiplayerARPG.MMO.Mesh
         public bool autoSplit;
         [Tooltip("Dynamic maps: let the central merge quiet cells back by itself.")]
         public bool autoMerge;
+        [Tooltip("On: this map's cells link only to the cells they need (band neighbours, and the cells a handoff, ghost or lent record names), opening a link when one is needed and closing it once idle; linkAllZones is ignored for them. Off: the map managers' linkAllZones decides (every cell of the map, which a link server's 64 connections caps at about 64 cells).")]
+        public bool onDemandLinks;
 
         public bool IsExplicit => cellRects != null && cellRects.Length > 0;
         public bool IsDynamic => cellMode == MeshCellMode.Dynamic;
@@ -79,6 +81,7 @@ namespace MultiplayerARPG.MMO.Mesh
             maxCellsPerBase = other.maxCellsPerBase;
             autoSplit = other.autoSplit;
             autoMerge = other.autoMerge;
+            onDemandLinks = other.onDemandLinks;
         }
 
         public string CellIdAt(int x, int y)

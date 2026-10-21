@@ -41,8 +41,10 @@ import regress_splitcrash
 import regress_auto
 import regress_building
 import regress_central
+import regress_links
 import regress_procs
 import rigauto
+import riglinks
 import rigprocs
 import rigtools
 from provision import ITEM_BOW, ITEM_YIELD, db_connect
@@ -125,7 +127,9 @@ ENV_KEYS = ["MESH_NO_MONSTER_HANDOFF", "MESH_FAULT_DIE_ON_NOTICE", "MESH_GHOST_L
             "MESH_SPLIT_BENEFIT", "MESH_MONSTER_WEIGHT", "MESH_PLANNER_WEIGHTS", "MESH_HOST_CORES",
             # Slice 5 (regress_central, regress_procs): the editor as a client only (the split-process topology sets it), and
             # the base-crash fault: a cell dies right after its n-th LayoutHello
-            "MESH_EDITOR_SERVERS", "MESH_FAULT_DIE_ON_HELLO"]
+            "MESH_EDITOR_SERVERS", "MESH_FAULT_DIE_ON_HELLO",
+            # Slice 7 (regress_links): maps that link on demand, every link server's capacity, an on-demand link's idle time
+            "MESH_LINKS", "MESH_LINK_CAP", "MESH_LINK_IDLE"]
 EXTRA_ENV = {}   # --env KEY=VALUE from the command line, applied to every Play request of the run
 # Slice 5: the per-scenario topology. `editor`: the editor hosts central, login, database manager and spawner (every
 # scenario so far); `split`: the central (+ login + database manager) and the spawner are build processes started by
@@ -536,6 +540,8 @@ def db_reset(tester_pos, bot_pos, tester_party=1, bot_party=1, clear_buildings=F
     try:
         provision.provision(conn, {TESTER: provision.Placement(tester_pos[0], tester_pos[1], tester_party),
                                    BOT: provision.Placement(bot_pos[0], bot_pos[1], bot_party)})
+        with conn.cursor() as cur:
+            provision.clear_bot_parties(cur)   # Slice 7: only partyfar puts a bot in the test party
         if clear_buildings:
             with conn.cursor() as cur:
                 # Every channel of the test map, and nothing else: the database may be shared with another game. A
@@ -681,11 +687,19 @@ def expected_zones(expect):
             + [(z, MAP) for z in sorted(expect) if z not in known and z not in REMOTE_CELLS])
 
 
-def graded_zones(day):
-    """The static rig cells plus every cell that logged today or tomorrow: dynamic cells have runtime ids."""
+def graded_zones(day, start=None, expect=None):
+    """The static rig cells, the cells the scenario expects, and every other cell that logged since `start` on `day`
+    (or the day after): dynamic cells have runtime ids.
+
+    By the window, not by the day file: a child of an earlier split scenario keeps its day file, and graded on no
+    lines it added three vacuous checks to every later scenario that day, so one scenario's check count depended on
+    the time of day and what ran before it. An expected cell is graded even when silent, so it still fails. Without
+    `start` every cell with a file for the day is listed (the split and merge graders skip the silent ones themselves).
+    """
     next_day = (datetime.date.fromisoformat(day) + datetime.timedelta(days=1)).isoformat()
     zones = list(ZONES)
-    for cell, map_id in rigtools.discover_cells(LOGS, {day, next_day}):
+    since = None if start is None else f"{day} {start}"
+    for cell, map_id in expected_zones(expect) + rigtools.discover_cells(LOGS, {day, next_day}, since):
         if (cell, map_id) not in zones and cell not in REMOTE_CELLS:
             zones.append((cell, map_id))
     return zones
@@ -714,7 +728,7 @@ def grade_common(rep, start, day, expect=None):
     # watches for entities appearing and vanishing, not for jumping. A player popping is the one that matters, so
     # the two are counted apart. Do NOT anchor this on a character name: a monster puppet has none, and the first
     # version of this check ("Ghost \S+ teleported") passed while the stats line beside it said teleports=2.
-    zones = graded_zones(day)
+    zones = graded_zones(day, start, expect)
     # A cell that should have run and logged nothing (every cell logs its Mesh stats every 10 s) was never started, or
     # died before logging: its zero teleports and zero exceptions below would otherwise pass for it.
     for zone, map_id in expected_zones(expect):
@@ -733,7 +747,25 @@ def grade_common(rep, start, day, expect=None):
             rep.notes.append(f"   {z}: {line[:160]}")
 
 
-def grade_layout(rep, start, day):
+def grade_links(rep, name, start, day, expect=None):
+    """Slice 7 decisions 15-16: with MESH_LINKS, no cell refused a link (a note sums the on-demand opens, closes and
+    peaks) and `split` closed E's link to C after the cut; without it, no cell logged any on-demand line (byte identity)."""
+    lines = {zone: zone_lines(zone, start, day, map_id) for zone, map_id in graded_zones(day, start, expect)}
+    if not _play_env.get("MESH_LINKS", "").strip():
+        found = riglinks.byte_identity_problems(lines)
+        rep.check(not found, "no on-demand link line without MESH_LINKS" + (f" ({found[0][0]}: {found[0][1][:100]})" if found else ""))
+        return
+    refused = {zone: riglinks.count(cell, riglinks.REFUSED) for zone, cell in lines.items()}
+    refused = {zone: n for zone, n in refused.items() if n}
+    rep.check(not refused, "no link refused" + (f" ({refused})" if refused else ""))
+    far, closed, peak_out, peak_in = riglinks.on_demand_summary(lines)
+    rep.notes.append(f"   links on demand: {far} opened for a record, demand or reply, {closed} closed idle; peak out {peak_out}, peak in {peak_in}")
+    if name == "split":
+        rep.check(riglinks.closed_to(lines.get("E", []), "C") and riglinks.unlinked_from(lines.get("C", []), "E"),
+                  "E closed its link to C on demand after the cut, and C logged the idle close")
+
+
+def grade_layout(rep, start, day, expect=None):
     """Dynamic cells as far as 2a goes (DESIGN.md 0.72): a Dynamic map's cells apply the central's layout once per
     process, before a player registers; a Static map's cells apply none; no cell splits, merges, retires or waits at
     the layout gate. Which maps are Dynamic comes from the rig's registry asset and the Play's MESH_CELL_MODE."""
@@ -743,7 +775,7 @@ def grade_layout(rep, start, day):
     except (OSError, ValueError) as ex:
         rep.check(False, f"layout: cannot tell which maps are Dynamic: {ex}")
         return
-    for zone, map_id in graded_zones(day):
+    for zone, map_id in graded_zones(day, start, expect):
         if zone in REMOTE_CELLS and REMOTE_PERSIST:
             continue    # a persisted remote cell got no environment from this Play: its mode is the asset's
         info = zone_lines(zone, start, day, map_id, suffixes=("info",))
@@ -1074,14 +1106,18 @@ def run_scenario(name, rep):
     elif name in regress_central.SCENARIOS:
         split = regress_central.run(name, rep, sys.modules[__name__], start, day, bots)   # Slice 5: a CentralRun
 
+    elif name in regress_links.SCENARIOS:
+        regress_links.run(name, rep, sys.modules[__name__], start, day, bots)   # Slice 7
+
     else:
         raise ValueError(f"unknown scenario {name}")
 
     # The sleeping-cell scenarios leave cells asleep on purpose; the Coarse ones run one cell; every other scenario
     # runs them all (autosplit: plus the child the policy makes).
     expect = {"wake": {"C", "E", "C2"}, "autosplit": {z for z, _ in ZONES} | {"C.1"}, **regress_auto.EXPECTED_ZONES,
-              **regress_building.EXPECTED_ZONES, **regress_central.EXPECTED_ZONES}
+              **regress_building.EXPECTED_ZONES, **regress_central.EXPECTED_ZONES, **regress_links.EXPECTED_ZONES}
     grade_common(rep, start, day, expect=expect.get(name))
+    grade_links(rep, name, start, day, expect.get(name))
     if name in regress_split.SCENARIOS:
         regress_split.grade_layout(rep, sys.modules[__name__], start, day, split)
     elif name in regress_merge.SCENARIOS:
@@ -1095,7 +1131,7 @@ def run_scenario(name, rep):
     elif name in regress_central.SCENARIOS:
         regress_central.grade_layout(rep, sys.modules[__name__], start, day, split)
     else:
-        grade_layout(rep, start, day)
+        grade_layout(rep, start, day, expect.get(name))
     for kind, log in bots:
         try:
             txt = open(log, encoding="utf-8", errors="replace").read()
@@ -1135,10 +1171,11 @@ TWO_HOST_SKIP = {
     **{n: regress_auto.TWO_HOST_REASON for n in regress_auto.SCENARIOS},
     **{n: regress_building.TWO_HOST_REASON for n in regress_building.SCENARIOS},
     **{n: regress_central.TWO_HOST_REASON for n in regress_central.SCENARIOS},
+    **{n: regress_links.TWO_HOST_REASON for n in regress_links.SCENARIOS},
 }
 ALL = (DEFAULT + ["pvp", "wake", "dynidle"] + list(regress_split.SCENARIOS) + list(regress_merge.SCENARIOS)
        + list(regress_splitcrash.SCENARIOS) + list(regress_auto.SCENARIOS) + list(regress_building.SCENARIOS)
-       + list(regress_central.SCENARIOS))
+       + list(regress_central.SCENARIOS) + list(regress_links.SCENARIOS))
 # A persisted remote cell outlives the Plays, so no scenario's environment reaches it.
 PERSIST_SKIP = {"dynidle": "runs the test map Dynamic through the environment, which a persisted remote cell never gets",
                 **{n: regress_split.PERSIST_REASON for n in regress_split.SCENARIOS},
@@ -1146,7 +1183,8 @@ PERSIST_SKIP = {"dynidle": "runs the test map Dynamic through the environment, w
                 **{n: regress_splitcrash.PERSIST_REASON for n in regress_splitcrash.SCENARIOS},
                 **{n: regress_auto.PERSIST_REASON for n in regress_auto.SCENARIOS},
                 **{n: regress_building.PERSIST_REASON for n in regress_building.SCENARIOS},
-                **{n: regress_central.PERSIST_REASON for n in regress_central.SCENARIOS}}
+                **{n: regress_central.PERSIST_REASON for n in regress_central.SCENARIOS},
+                **{n: regress_links.PERSIST_REASON for n in regress_links.SCENARIOS}}
 
 
 def main():

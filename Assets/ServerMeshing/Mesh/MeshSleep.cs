@@ -45,6 +45,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public const ushort LayoutEvidence = 30019;  // map server -> central: split-gate evidence (MeshLayoutEvidenceMessage, Slice 2b)
         public const ushort KillChannel = 30020;     // central -> spawner: kill one map-server process it started (MeshKillChannelMessage, Slice 2d)
         public const ushort HostReport = 30021;      // spawner -> central: the host it runs on and its cores (MeshHostReportMessage, Slice 3)
+        public const ushort PartyShareRelay = 30022; // map server -> central -> every other map server of the map: a party share no link can address (MeshPartyShareRelayMessage, Slice 7)
     }
 
     /// <summary>Central to a map server: nobody needs this cell; save and exit (ignored while a player is on it).</summary>

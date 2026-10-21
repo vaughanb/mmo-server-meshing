@@ -58,8 +58,10 @@ default, so a cell on map port 8001 listens for links on 18001.
 The ranges are 64 ports wide (2026-10-19, Slice 6; they were 8000-8010 before dynamic cells). A host's spawner hands
 out map ports from `spawnStartPort` upward and reuses one only after its process has exited, so the range must cover
 every process the host runs at once: its base cells, the children a split starts beside them, other maps, and a
-restart that overlaps its predecessor's exit. 64 is also where the mesh links stop: with `linkAllZones` every cell
-links to every live cell of its map and a cell's link server takes 64 (SETUP §6a.3 warns before a map can pass it).
+restart that overlaps its predecessor's exit. That is a per-host limit. The mesh links have their own, per map: with
+`linkAllZones` every cell links to every live cell of its map and a cell's link server takes 64 (SETUP §6a.3 warns
+before a map can pass it); a map with `onDemandLinks` (2026-10-20, Slice 7) links each cell only to its band neighbours
+and the cells it has business with, so its size is bounded by its hosts' port ranges, not by the links.
 `regress.py` checks the same ranges for foreign processes before a run.
 
 **On A, allow inbound from B:**

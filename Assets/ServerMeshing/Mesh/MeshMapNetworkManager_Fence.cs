@@ -263,6 +263,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 link.SendRegistrationState(registered);
                 _registrationStateSent[kv.Key] = new RegistrationStateSent { at = now, connectedSince = connectedSince };
             }
+            SendReverseRegistrationStates(now, registered, changed); // Slice 7: on-demand cells, back over the inbound links (MeshMapNetworkManager_LinkReports)
         }
 
         /// <summary>A neighbour's RegistrationState: per zone, its current state and when it last reported each one (the witness rule reads both).</summary>
@@ -299,7 +300,13 @@ namespace MultiplayerARPG.MMO.Mesh
                 return false;
             MeshCell target = world != null ? world.GetCellById(zoneId) : null;
             bool reported = _neighbourRegistration.TryGetValue(zoneId, out NeighbourRegistration state) && state.live;
-            return MeshFenceRule.BlocksHandoffTo(target != null && target.OnDynamicMap, reported, state.registered);
+            bool registered = state.registered;
+            if (!reported && TryReverseReport(zoneId, out bool reverse)) // Slice 7: the report that came back over our own link
+            {
+                reported = true;
+                registered = reverse;
+            }
+            return MeshFenceRule.BlocksHandoffTo(target != null && target.OnDynamicMap, reported, registered);
         }
 
         // ---- incarnations only move forward (decision 5, map part) ----

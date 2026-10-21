@@ -131,6 +131,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 return $"map {cell.mapId} is {OutcomeOf(cell.mapId)}";
             if (FrozenFamilyReason(cell.baseId) is string frozen)
                 return $"family {cell.baseId} is frozen: {frozen}";   // Slice 5 decision 3
+            if (StoredOpWaitRefusal() is string waits)
+                return waits;   // unfreeze_design.md decision 9: a stored op waiting on a frozen family holds the slot
             if (cell.state != MeshCellState.Active || cell.owned.IsEmpty)
                 return $"{cell.id} is {cell.state}";
             binding = BindingOf(cell.id);
@@ -402,6 +404,7 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>Freeze (after e2): the operation stops where it is; nothing else runs until supervision (Slice 2d) or a restart.</summary>
         private void Freeze(MeshLayoutOperation op, string reason)
         {
+            op.frozenStep = StepToResolve(op);   // memory only: the unfreeze resolves it by this step (the store keeps "Frozen")
             op.MarkFrozen();
             op.endReason = reason;
             Line(true, $"{op.LinePrefix} {op.opId}: frozen {reason}");

@@ -48,6 +48,18 @@ namespace MultiplayerARPG.MMO.Mesh
         // Slice 4 (buildings across a cut, slices/slice4_design.md decisions 9 and 10):
         public const ushort BuildingTransfer = 131;       // a building tree whose root stands in the receiver's owned rectangle: take it (rows already saved)
         public const ushort BuildingTransferReply = 132;  // receiver -> sender: taken (promoted, spawned, owned already), or refused with a reason
+        // Slice 7 (on-demand links, slices/slice7_design.md decision 6):
+        public const ushort LinkClose = 133;              // sender -> receiver: this link is idle and not needed; the sender stops it next tick
+
+        /// <summary>Counts as traffic for an on-demand link's idle time: everything but the hello, the 2 s registration state and the close notice.</summary>
+        public static bool IsCountedTraffic(ushort messageType) => messageType != Hello && messageType != RegistrationState && messageType != LinkClose;
+    }
+
+    /// <summary>The close notice of an on-demand link (Slice 7 decision 6): no payload.</summary>
+    public struct LinkCloseMessage : INetSerializable
+    {
+        public void Serialize(NetDataWriter writer) { }
+        public void Deserialize(NetDataReader reader) { }
     }
 
     /// <summary>
@@ -668,6 +680,7 @@ namespace MultiplayerARPG.MMO.Mesh
             RegisterMessageHandler(MeshLinkMessageTypes.RegistrationState, HandleRegistrationState);
             RegisterMessageHandler(MeshLinkMessageTypes.BuildingTransfer, HandleBuildingTransfer);
             RegisterMessageHandler(MeshLinkMessageTypes.BuildingTransferReply, HandleBuildingTransferReply);
+            RegisterMessageHandler(MeshLinkMessageTypes.LinkClose, HandleLinkClose);
         }
 
         public override void OnServerReceive(TransportEventData eventData)
@@ -679,6 +692,8 @@ namespace MultiplayerARPG.MMO.Mesh
                     ConnectionIds.Add(eventData.connectionId);
                     break;
                 case ENetworkEvent.DataEvent:
+                    if (_manager.LinksOnDemand)
+                        NoteTraffic(eventData.connectionId, eventData.reader);
                     ReadPacket(eventData.connectionId, eventData.reader);
                     break;
                 case ENetworkEvent.DisconnectEvent:
@@ -690,6 +705,21 @@ namespace MultiplayerARPG.MMO.Mesh
                     Logging.LogError(LogTag, $"Network error {eventData.endPoint} {eventData.socketError} {eventData.errorMessage}");
                     break;
             }
+        }
+
+        /// <summary>Slice 7 decision 8: peeks at the packet's message type (the reader is put back) and tells an on-demand cell it heard from that connection.</summary>
+        private void NoteTraffic(long connectionId, NetDataReader reader)
+        {
+            int position = reader.Position;
+            ushort messageType = reader.GetPackedUShort();
+            reader.SetPosition(position);
+            if (MeshLinkMessageTypes.IsCountedTraffic(messageType))
+                _manager.NoteLinkHeard(connectionId);
+        }
+
+        private void HandleLinkClose(MessageHandlerData messageHandler)
+        {
+            _manager.OnLinkClose(messageHandler.ConnectionId);
         }
 
         private void HandleHello(MessageHandlerData messageHandler)
@@ -861,10 +891,19 @@ namespace MultiplayerARPG.MMO.Mesh
         public override string LogTag => $"MeshLinkClient:{TargetZoneId}";
 
         public string TargetZoneId { get; }
-        public bool IsConnected { get; private set; }
+        /// <summary>Up, and not closing (Slice 7: a link whose close notice went out reads as down to every sender).</summary>
+        public bool IsConnected { get => _connected && !_closing; private set => _connected = value; }
+        private bool _connected;
+        private bool _closing;
+        /// <summary>The last connect attempt was refused by the target (its link server is full): a full cell, not a dead one.</summary>
+        public bool Refused { get; private set; }
+        /// <summary>When the current connection came up (unscaled time; -1 while down): a reverse report is live only for it.</summary>
+        public float ConnectedAt => IsConnected ? _connectedSince : -1f;
         /// <summary>The link has been up at least once since it was created: the neighbour was reachable from here.</summary>
         public bool EverConnected { get; private set; }
         public float LastConnectAttempt { get; private set; } = -999f;
+        /// <summary>When this link last carried counted traffic (Slice 7: an on-demand link's idle time); -999 before any.</summary>
+        public float LastSentAt { get; private set; } = -999f;
         /// <summary>Seconds this link has been up (0 while down).</summary>
         public float ConnectedFor => IsConnected ? Time.unscaledTime - _connectedSince : 0f;
         private float _connectedSince;
@@ -912,12 +951,28 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             _manager = manager;
             TargetZoneId = targetZoneId;
+            // Slice 7 decision 6a: an on-demand cell reports its readiness back over the links others opened to it.
+            RegisterMessageHandler(MeshLinkMessageTypes.RegistrationState, HandleReverseRegistrationState);
+        }
+
+        private void HandleReverseRegistrationState(MessageHandlerData messageHandler)
+        {
+            RegistrationStateMessage msg = messageHandler.ReadMessage<RegistrationStateMessage>();
+            _manager.OnReverseRegistrationState(TargetZoneId, msg.registered, _connectedSince);
+        }
+
+        /// <summary>Slice 7 decision 6: the close notice goes out, then the link reads as down until it is stopped or reconnected.</summary>
+        public void BeginClose()
+        {
+            SendLinkClose();
+            _closing = true;
         }
 
         public void Connect(string address, int port)
         {
             LastConnectAttempt = Time.unscaledTime;
             IsConnected = false;
+            _closing = false;
             _suspectSince = -1f;
             StopClient();
             Logging.Log(LogTag, $"Connecting to neighbour {TargetZoneId} at {address}:{port}");
@@ -933,6 +988,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 case ENetworkEvent.ConnectEvent:
                     IsConnected = true;
                     EverConnected = true;
+                    Refused = false;
                     _connectedSince = Time.unscaledTime;
                     Logging.Log(LogTag, "Connected to neighbour");
                     SendPacket(0, DeliveryMethod.ReliableOrdered, MeshLinkMessageTypes.Hello, writer => new MeshHelloMessage { zoneId = _manager.OwnZoneId, incarnation = _manager.CellIncarnation }.Serialize(writer));
@@ -942,6 +998,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     break;
                 case ENetworkEvent.DisconnectEvent:
                     IsConnected = false;
+                    Refused = eventData.disconnectInfo.Reason == DisconnectReason.ConnectionRejected;
                     Logging.Log(LogTag, $"Disconnected from neighbour ({eventData.disconnectInfo.Reason})");
                     StopClient();
                     break;
@@ -962,6 +1019,8 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (!IsConnected) return;
             SendPacket(channel, delivery, msgType, writer => msg.Serialize(writer));
+            if (MeshLinkMessageTypes.IsCountedTraffic(msgType))
+                LastSentAt = Time.unscaledTime;
         }
 
         public void SendGhostSnapshot(GhostSnapshotMessage msg)
@@ -1082,6 +1141,11 @@ namespace MultiplayerARPG.MMO.Mesh
         public void SendBuildingTransferReply(BuildingTransferReplyMessage msg)
         {
             Send(MeshLinkMessageTypes.BuildingTransferReply, msg);
+        }
+
+        public void SendLinkClose()
+        {
+            Send(MeshLinkMessageTypes.LinkClose, new LinkCloseMessage());
         }
     }
 }

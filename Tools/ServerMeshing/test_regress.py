@@ -109,7 +109,7 @@ class SplitWiringTests(unittest.TestCase):
     def test_registration(self):
         for name in ("split", "splitc2", "merge", "mergec2", "splitcrash_prewarm", "splitcrash_drain", "splitcrash_base",
                      "autosplit", "autobenefit", "autorefuse", "splitbuild", "splitcentral", "splitcentral_merge",
-                     "splitcentral_base"):
+                     "splitcentral_base", "splitcentral_unfreeze"):
             with self.subTest(name):
                 self.assertIn(name, regress.ALL)
                 self.assertNotIn(name, regress.DEFAULT)
@@ -122,7 +122,7 @@ class SplitWiringTests(unittest.TestCase):
             self.assertIn(key, regress.ENV_KEYS)
         self.assertEqual(len(regress.ENV_KEYS), len(set(regress.ENV_KEYS)))
         # Slice 5: the central-restart scenarios run the split-process topology, everything else the editor's.
-        for name in ("splitcentral", "splitcentral_merge", "splitcentral_base"):
+        for name in ("splitcentral", "splitcentral_merge", "splitcentral_base", "splitcentral_unfreeze"):
             self.assertEqual(regress.topology_of(name), "split")
         for name in ("split", "merge", "pet", "splitcrash_base"):
             self.assertEqual(regress.topology_of(name), "editor")
@@ -131,6 +131,62 @@ class SplitWiringTests(unittest.TestCase):
         self.assertEqual(regress.expected_zones({"E"}), [("E", regress.MAP)])
         self.assertEqual(regress.LAYOUT_COMMAND, os.path.join(regress.TEMP, "ServerMesh.LayoutCommand.txt"))
         self.assertEqual(regress.LAYOUT_COMMAND_STATUS, os.path.join(regress.TEMP, "ServerMesh.LayoutCommandStatus.txt"))
+
+
+class GradedZonesTests(unittest.TestCase):
+    """The graded set is the cells that logged in the scenario's window plus the ones it expects, not every cell with a
+    day file: a child of an earlier split scenario kept its file all day and added three vacuous checks to each later
+    scenario, so the same scenario's check count changed at midnight (2026-10-20, all:Dynamic)."""
+
+    def write(self, logs, cell, day, *times, map_id=regress.MAP):
+        with open(os.path.join(logs, f"Log_Map({map_id})-Ch({cell})-Alloc(False)-Instance()_{day}.info.log"), "w") as f:
+            f.writelines(f" INFO Mesh [{day} {t}] - Mesh stats\n" for t in times)
+
+    def graded(self, logs, start, day, expect=None):
+        with mock.patch.multiple(regress, LOGS=logs, REMOTE_CELLS=[]):
+            return regress.graded_zones(day, start, expect)
+
+    def test_a_day_file_with_no_lines_in_the_window_is_not_graded(self):
+        with tempfile.TemporaryDirectory() as logs:
+            self.write(logs, "C.1", "2026-10-20", "08:00:00")      # an earlier split scenario's child
+            self.write(logs, "E.1", "2026-10-20", "08:00:00", "10:00:01")
+            self.assertEqual(self.graded(logs, "10:00:00", "2026-10-20"), regress.ZONES + [("E.1", regress.MAP)])
+            # Without a start the day file still lists it (the split and merge graders skip silent cells themselves).
+            self.assertIn(("C.1", regress.MAP), self.graded(logs, None, "2026-10-20"))
+
+    def test_an_expected_zone_with_no_lines_is_still_graded(self):
+        with tempfile.TemporaryDirectory() as logs:
+            self.assertEqual(self.graded(logs, "10:00:00", "2026-10-20", expect={"C", "C.1"}),
+                             regress.ZONES + [("C.1", regress.MAP)])
+            # ...and grade_common fails it rather than passing its zero teleports and exceptions.
+            rep = regress.Report("x")
+            with mock.patch.multiple(regress, LOGS=logs, REMOTE_CELLS=[]):
+                regress.grade_common(rep, "10:00:00", "2026-10-20", expect={"C.1"})
+            self.assertIn((False, "zone C.1: logged since the scenario started"), rep.checks)
+            self.assertIn((True, "zone C.1: 0 exception lines"), rep.checks)
+
+    def test_a_scenario_across_midnight_reads_both_days(self):
+        with tempfile.TemporaryDirectory() as logs:
+            self.write(logs, "C.1", "2026-10-21", "00:00:30")       # split after midnight: only the next day's file
+            self.write(logs, "E.1", "2026-10-20", "23:59:50")
+            self.write(logs, "N.1", "2026-10-20", "12:00:00")       # earlier that day: out of the window
+            self.write(logs, "S.1", "2026-10-22", "00:00:30")       # two days on: not this scenario's
+            self.assertEqual(self.graded(logs, "23:59:00", "2026-10-20"),
+                             regress.ZONES + [("C.1", regress.MAP), ("E.1", regress.MAP)])
+
+    def test_the_check_count_does_not_depend_on_earlier_scenarios(self):
+        with tempfile.TemporaryDirectory() as logs:
+            for zone, map_id in regress.ZONES:
+                self.write(logs, zone, "2026-10-20", "10:00:05", map_id=map_id)
+            counts = []
+            for leftovers in ((), ("C.1", "E.1")):
+                for cell in leftovers:
+                    self.write(logs, cell, "2026-10-20", "08:00:00")
+                rep = regress.Report("x")
+                with mock.patch.multiple(regress, LOGS=logs, REMOTE_CELLS=[]):
+                    regress.grade_common(rep, "10:00:00", "2026-10-20")
+                counts.append(len(rep.checks))
+            self.assertEqual(counts[0], counts[1])
 
 
 class RigPortsTests(unittest.TestCase):

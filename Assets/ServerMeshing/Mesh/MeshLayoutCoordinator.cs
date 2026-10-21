@@ -285,6 +285,7 @@ namespace MultiplayerARPG.MMO.Mesh
             if (Phase == MeshCoordinatorPhase.Recovering)
                 ResolveAll();
             SupervisionTick();
+            UnfreezeTick();
             OpTick();
             PolicyTick();
         }

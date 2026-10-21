@@ -357,6 +357,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 _migrationRefusedAttempt = MigrationAttempt;
                 Logging.LogWarning("Mesh", $"Enter-game refused ({responseCode}) on migration attempt {MigrationAttempt}");
             }
+            if (EnterGameUnanswered(ref responseHandler, responseCode)) return; // the kit throws on an unanswered request (MeshMapNetworkManager_EnterGame)
             base.HandleEnterGameResponse(responseHandler, responseCode, response);
         }
 
@@ -554,98 +555,6 @@ namespace MultiplayerARPG.MMO.Mesh
             Logging.LogWarning("Mesh", $"Cluster link lost: forgot {dropped} mirrored user(s) of other cells, kept {kept} of this cell's own; the central re-sends the live ones");
         }
 
-        [Tooltip("Seconds between attempts to open the database connection whenever this server does not have one. " +
-                 "The kit opens it once at start-up and never again: the transport calls Manager.StopClient() on a " +
-                 "disconnect and nothing restarts it, so a map server that loses the database manager -- or that " +
-                 "started before it existed -- keeps running and keeps accepting players while every save silently " +
-                 "fails. 0 disables.")]
-        public float databaseReconnectSeconds = 5f;
-        [Tooltip("How long after this server starts to leave the database connection alone, so the retry never " +
-                 "races the kit's own first StartClient.")]
-        public float databaseReconnectGraceSeconds = 15f;
-        [Tooltip("How long to let database requests that were still in flight when the connection dropped expire " +
-                 "before reconnecting anyway. Reconnecting clears the callback table, so anything still waiting is " +
-                 "stranded; but a busy server always has a request in flight, so waiting for the table to empty is " +
-                 "waiting for a gap that may never come. Slightly over the kit's 30 s request timeout.")]
-        public float databaseDrainWaitSeconds = 35f;
-        private float _nextDatabaseReconnect;
-        private DatabaseNetworkManager _databaseManager;
-        private bool _databaseWasConnected;
-        private bool _databaseDrainLogged;
-        private float _databaseDrainSince;
-        private bool _databaseEverConnected;
-        private float _databaseGraceUntil;
-
-        /// <summary>
-        /// Whether the database manager is actually reachable, which is not what the kit's own flags report:
-        /// IsClient and IsClientConnected both go true as soon as a socket exists and Connect() returned a peer,
-        /// seconds before that peer connects and even when it never does. Only the transport knows.
-        /// </summary>
-        private bool IsDatabaseConnected
-        {
-            get
-            {
-                return _databaseManager != null && _databaseManager.IsClient && _databaseManager.Client != null
-                    && _databaseManager.Client.Transport != null && _databaseManager.Client.Transport.IsClientStarted;
-            }
-        }
-
-        /// <summary>Server tick: re-open the database connection when it drops, which the kit never does.</summary>
-        private void DatabaseConnectTick()
-        {
-            if (databaseReconnectSeconds <= 0f || _databaseManager == null)
-                return;
-            if (_databaseManager.IsServer)
-                return;     // this process hosts the database manager itself; there is no client to re-open
-            bool connected = IsDatabaseConnected;
-            if (connected != _databaseWasConnected)
-            {
-                _databaseWasConnected = connected;
-                if (connected)
-                {
-                    Logging.Log("Mesh", $"Database connection to {_databaseManager.networkAddress}:{_databaseManager.networkPort} is open");
-                    _databaseEverConnected = true;
-                    _databaseDrainLogged = false;
-                }
-            }
-            if (connected || _databaseManager.IsClient)
-            {
-                // Either reachable, or a connection attempt is in flight. A failed attempt ends in ConnectionFailed,
-                // which the transport turns into a disconnect and the kit into StopClient, so it lands back here.
-                return;
-            }
-            if (!_databaseEverConnected && Time.unscaledTime < _databaseGraceUntil)
-                return;     // the kit's own first StartClient may still be in flight; do not race it
-            if (Time.unscaledTime < _nextDatabaseReconnect)
-                return;
-            int inFlight = _databaseManager.Client != null ? _databaseManager.Client.RequestsCount : 0;
-            if (inFlight > 0)
-            {
-                // Requests that were in flight when the connection dropped are still waiting on their own 30 s
-                // timeout, and StartClient clears the callback table, so reconnecting strands whoever awaits them.
-                // Give them that long to expire -- but no longer: this server keeps issuing new requests that can
-                // never be sent, so the count rarely reaches zero, and waiting for it cost 2m16s of total database
-                // outage on the first run that tried it (2026-09-17). A few stranded callbacks that were doomed
-                // anyway beat every save failing for minutes.
-                if (_databaseDrainSince <= 0f)
-                    _databaseDrainSince = Time.unscaledTime;
-                if (Time.unscaledTime - _databaseDrainSince < databaseDrainWaitSeconds)
-                {
-                    if (!_databaseDrainLogged)
-                    {
-                        _databaseDrainLogged = true;
-                        Logging.LogWarning("Mesh", $"Database connection lost with {inFlight} request(s) in flight; letting them time out for up to {databaseDrainWaitSeconds:0}s");
-                    }
-                    return;
-                }
-            }
-            _databaseDrainSince = 0f;
-            _nextDatabaseReconnect = Time.unscaledTime + databaseReconnectSeconds;
-            string stranded = inFlight > 0 ? $", stranding {inFlight} request(s) that waited out {databaseDrainWaitSeconds:0}s" : string.Empty;
-            Logging.LogWarning("Mesh", $"Database connection lost; reconnecting to {_databaseManager.networkAddress}:{_databaseManager.networkPort}{stranded}");
-            _databaseManager.StartClient();
-        }
-
         private void OnMeshAppServerRegister(AckResponseCode responseCode)
         {
             FenceOnRegisterResponse(responseCode); // Slice 2d: the fence counts registrations and refusals (MeshMapNetworkManager_Fence)
@@ -690,13 +599,7 @@ namespace MultiplayerARPG.MMO.Mesh
             TryResolveOwnZone();
             _clusterHandedToKit = false;
             _clusterWasRegistered = false;
-            _databaseManager = MMOServerInstance.Singleton != null ? MMOServerInstance.Singleton.DatabaseClient as DatabaseNetworkManager : null;
-            _databaseWasConnected = false;
-            _databaseEverConnected = false;
-            _databaseGraceUntil = Time.unscaledTime + Mathf.Max(1f, databaseReconnectGraceSeconds);
-            _databaseDrainLogged = false;
-            _databaseDrainSince = 0f;
-            _nextDatabaseReconnect = 0f;
+            DatabaseOnStartServer(); // the database reconnect starts over with this server (MeshMapNetworkManager_Database)
             _nextClusterConnectRetry = Time.unscaledTime + Mathf.Max(1f, clusterConnectRetrySeconds);
             if (ClusterClient != null)
             {
@@ -965,6 +868,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 // The cluster still lists the peer but our link to it is down: the notice and the ack could not be
                 // delivered and the client might be warped to a dead cell. Stay, retry after the backoff.
                 WarnThrottled($"Mesh link to zone {zone.id} is down; player {entity.CharacterName} stays on {OwnZoneId} (retry in {handoffRetrySeconds:0.#} s).");
+                DemandLink(zone.id, "handoff"); // Slice 7: an on-demand cell opens it now (MeshMapNetworkManager_Links)
                 _handoffRetryAfter[entity.Id] = Time.unscaledTime + handoffRetrySeconds;
                 return;
             }

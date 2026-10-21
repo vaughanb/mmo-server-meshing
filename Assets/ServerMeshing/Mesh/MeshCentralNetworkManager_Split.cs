@@ -19,8 +19,8 @@ namespace MultiplayerARPG.MMO.Mesh
 
         /// <summary>
         /// SubmitLayoutCommand runs one command line, `&lt;seq&gt; split &lt;cell&gt; &lt;x|z&gt; &lt;at&gt; &lt;+|-&gt; &lt;childId&gt;`
-        /// (world frame), `&lt;seq&gt; merge &lt;a&gt; &lt;b&gt;` (either order) or `&lt;seq&gt; kill &lt;cell&gt;` (Slice 2d: its spawner
-        /// kills the cell's process). True when the operation started (or the kill was sent); false with the reason, also
+        /// (world frame), `&lt;seq&gt; merge &lt;a&gt; &lt;b&gt;` (either order), `&lt;seq&gt; kill &lt;cell&gt;` (Slice 2d: its spawner
+        /// kills the cell's process) or `&lt;seq&gt; unfreeze &lt;base&gt;` (DESIGN 0.85: a frozen family or operation resolved). True when the operation started (or the kill was sent); false with the reason, also
         /// logged "Layout op refused: reason".
         /// </summary>
         public bool SubmitLayoutCommand(string line, out string error)
@@ -40,6 +40,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 return _coordinator.RequestMerge(command.mergeA, command.mergeB, out error);
             if (command.kind == MeshLayoutCommandKind.Kill)
                 return _coordinator.RequestKill(command.cellId, out error);
+            if (command.kind == MeshLayoutCommandKind.Unfreeze)
+                return _coordinator.RequestUnfreeze(command.cellId, out error);
             return _coordinator.RequestSplit(command.cellId, command.axis, command.at, command.childOnPositiveSide, command.childId, out error);
         }
 

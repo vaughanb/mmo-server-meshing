@@ -263,7 +263,8 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>
         /// LinkFindings: with linkAllZones on (any map manager prefab), one warning per map whose worst case gives a cell
         /// more links than its link server takes. Judged on a world with a Dynamic map only (a Static world's count is
-        /// its asset cut, which the registry's own check sees).
+        /// its asset cut, which the registry's own check sees). A map with onDemandLinks is not judged (Slice 7 decision
+        /// 12): its cells link to their band neighbours, which the band check bounds, and to the cells their records name.
         /// </summary>
         public static List<MeshSetupFinding> LinkFindings(MeshWorldRegistry world, bool linkAllZones)
         {
@@ -275,7 +276,7 @@ namespace MultiplayerARPG.MMO.Mesh
             Dictionary<string, int> most = new Dictionary<string, int>(StringComparer.Ordinal);
             foreach (MeshLayoutBaseCell cell in world.ValidationWorld().baseCells)
             {
-                if (!counts.TryGetValue(cell.id, out int count) || count <= MaxLinks)
+                if (!counts.TryGetValue(cell.id, out int count) || count <= MaxLinks || OnDemandLinks(world, cell.mapId))
                     continue;
                 if (!byMap.TryGetValue(cell.mapId, out MeshSetupFinding finding))
                     byMap[cell.mapId] = finding = new MeshSetupFinding { severity = MeshSetupSeverity.Warning, mapId = cell.mapId };
@@ -284,10 +285,17 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             foreach (KeyValuePair<string, MeshSetupFinding> pair in byMap)
             {
-                pair.Value.text = $"Map {pair.Key}: with linkAllZones a cell links to every live cell of its map, and cut to maxCellsPerBase a cell of {Ids(pair.Value.cellIds)} could need up to {most[pair.Key]} links, over the {MaxLinks} its link server takes (lower maxCellsPerBase, or turn linkAllZones off on the map managers)";
+                pair.Value.text = $"Map {pair.Key}: with linkAllZones a cell links to every live cell of its map, and cut to maxCellsPerBase a cell of {Ids(pair.Value.cellIds)} could need up to {most[pair.Key]} links, over the {MaxLinks} its link server takes (turn onDemandLinks on for the map, lower maxCellsPerBase, or turn linkAllZones off on the map managers)";
                 findings.Add(pair.Value);
             }
             return findings;
+        }
+
+        /// <summary>OnDemandLinks: the map's layout links on demand (Slice 7).</summary>
+        public static bool OnDemandLinks(MeshWorldRegistry world, string mapId)
+        {
+            MeshMapLayout layout = world != null ? world.GetLayout(mapId) : null;
+            return layout != null && layout.onDemandLinks;
         }
 
         /// <summary>

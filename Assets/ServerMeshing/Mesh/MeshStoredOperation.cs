@@ -212,6 +212,8 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>
         /// AbortableId (decision 3): the operation's dynamic cell while the operation is before its commit broadcast (or
         /// frozen): its absence at the ceiling never freezes its family, because the verdict retires or reverts it anyway.
+        /// Not a collapse's retiring cell (DESIGN 0.85): a reverted collapse gives the dead cell its rectangle back, so its
+        /// absence must freeze the family again for the operator's unfreeze.
         /// </summary>
         public string AbortableId
         {
@@ -220,7 +222,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (IsSplit && TrySplitStep(out MeshSplitStep split))
                     return split <= MeshSplitStep.E2Staged || split == MeshSplitStep.Frozen ? childId : null;
                 if (IsMerge && TryMergeStep(out MeshMergeStep merge))
-                    return merge <= MeshMergeStep.E2Staged || merge == MeshMergeStep.Frozen ? retiringId : null;
+                    return !collapse && (merge <= MeshMergeStep.E2Staged || merge == MeshMergeStep.Frozen) ? retiringId : null;
                 return null;
             }
         }

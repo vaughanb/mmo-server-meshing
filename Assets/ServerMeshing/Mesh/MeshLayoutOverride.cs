@@ -8,6 +8,7 @@
 //   MESH_LAYOUT_OVERRIDE=ServerMeshTestMap=C@-300,-300,600,600
 // MESH_CELL_MODE=<mapId|all>:<Static|Dynamic>[,...] sets maps' cell modes in the same copy ("all" first, then each map
 // named; no | & < > ^, so it survives a .cmd file's set line). Example: MESH_CELL_MODE=all:Dynamic
+// MESH_LINKS=<mapId|all>:<OnDemand|Off>[,...] sets maps' onDemandLinks in the same copy the same way (Slice 7).
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -118,14 +119,16 @@ namespace MultiplayerARPG.MMO.Mesh
                 return configured; // already the process's copy
             string layoutValue = Environment.GetEnvironmentVariable(ENV);
             string modeValue = Environment.GetEnvironmentVariable(ENV_CELL_MODE);
+            string linkValue = Environment.GetEnvironmentVariable(MeshLinkEnv.ENV_LINKS);
             bool policyEnv = MeshPolicyEnv.AnySet(Environment.GetEnvironmentVariable);
-            if (string.IsNullOrWhiteSpace(layoutValue) && string.IsNullOrWhiteSpace(modeValue) && !policyEnv)
+            if (string.IsNullOrWhiteSpace(layoutValue) && string.IsNullOrWhiteSpace(modeValue) && string.IsNullOrWhiteSpace(linkValue) && !policyEnv)
                 return configured;
             if (s_resolved.TryGetValue(configured, out MeshWorldRegistry copy) && copy != null)
                 return copy;
             Dictionary<string, MeshCellRect[]> maps = ParseOrIgnore(layoutValue, Parse);
             Dictionary<string, MeshCellMode> modes = ParseOrIgnore(modeValue, ParseCellModes);
-            if (maps.Count == 0 && modes.Count == 0 && !policyEnv)
+            Dictionary<string, bool> links = ParseOrIgnore(linkValue, MeshLinkEnv.ParseLinkModes);
+            if (maps.Count == 0 && modes.Count == 0 && links.Count == 0 && !policyEnv)
                 return configured;
             copy = UnityEngine.Object.Instantiate(configured);
             copy.name = configured.name + " (" + (maps.Count > 0 && modes.Count > 0 ? ENV + ", " + ENV_CELL_MODE : maps.Count > 0 ? ENV : ENV_CELL_MODE) + ")";
@@ -140,6 +143,10 @@ namespace MultiplayerARPG.MMO.Mesh
                 layout.cellRects = kv.Value;
             }
             ApplyCellModes(copy, modes, configured.name);
+            List<string> unknownLinkMaps = new List<string>();
+            ApplyLinkModes(copy.maps, links, unknownLinkMaps);
+            foreach (string mapId in unknownLinkMaps)
+                Debug.LogError($"[Mesh] {MeshLinkEnv.ENV_LINKS}: map '{mapId}' has no layout in {configured.name}; ignored");
             List<string> policyApplied = new List<string>(), policyWarnings = new List<string>();
             if (policyEnv)
             {
@@ -154,6 +161,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 Debug.Log($"[Mesh] {ENV}={layoutValue}: using a re-cut copy of {configured.name}");
             if (modes.Count > 0)
                 Debug.Log($"[Mesh] {ENV_CELL_MODE}={modeValue}: maps {DynamicMapList(copy)} run Dynamic");
+            if (links.Count > 0)
+                Debug.Log($"[Mesh] {MeshLinkEnv.ENV_LINKS}={linkValue}: maps {OnDemandMapList(copy)} link on demand");
             foreach (string warning in policyWarnings)
                 Debug.LogWarning("[Mesh] " + warning);
             if (policyApplied.Count > 0)
@@ -198,6 +207,47 @@ namespace MultiplayerARPG.MMO.Mesh
                 }
                 layout.cellMode = kv.Value;
             }
+        }
+
+        /// <summary>
+        /// ApplyLinkModes sets maps' onDemandLinks from a parsed MESH_LINKS value: "all" first, then each map named; a named
+        /// map with no layout goes to <paramref name="unknown"/>.
+        /// </summary>
+        public static void ApplyLinkModes(List<MeshMapLayout> maps, Dictionary<string, bool> modes, List<string> unknown)
+        {
+            if (maps == null || modes == null || modes.Count == 0)
+                return;
+            if (modes.TryGetValue(AllMaps, out bool every))
+            {
+                foreach (MeshMapLayout layout in maps)
+                {
+                    if (layout != null)
+                        layout.onDemandLinks = every;
+                }
+            }
+            foreach (KeyValuePair<string, bool> kv in modes)
+            {
+                if (kv.Key == AllMaps)
+                    continue;
+                MeshMapLayout layout = maps.Find(l => l != null && l.mapId == kv.Key);
+                if (layout == null)
+                {
+                    unknown?.Add(kv.Key);
+                    continue;
+                }
+                layout.onDemandLinks = kv.Value;
+            }
+        }
+
+        private static string OnDemandMapList(MeshWorldRegistry copy)
+        {
+            List<string> ids = new List<string>();
+            foreach (MeshMapLayout layout in copy.maps)
+            {
+                if (layout != null && layout.onDemandLinks)
+                    ids.Add(layout.mapId);
+            }
+            return ids.Count > 0 ? string.Join(", ", ids) : "(none)";
         }
 
         private static string DynamicMapList(MeshWorldRegistry copy)

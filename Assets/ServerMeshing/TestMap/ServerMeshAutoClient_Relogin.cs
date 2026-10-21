@@ -29,6 +29,9 @@ namespace MultiplayerARPG.MMO.Mesh
         public float reloginRetrySeconds = 2f;
         [Tooltip("Seconds a re-login waits for the character to spawn after a select before it tries again.")]
         public float reloginEnterSeconds = 30f;
+        [Tooltip("How many times the first login selects and enters the map in all when the map server refuses " +
+                 "enter-game or never answers it (DESIGN.md 0.87).")]
+        public int enterGameAttempts = 3;
 
         /// <summary>Relogins counts the sessions this bot has re-logged in after (each 'Session lost' line).</summary>
         public int Relogins { get; private set; }
@@ -67,6 +70,19 @@ namespace MultiplayerARPG.MMO.Mesh
         public static string ReloginRoutedLine(string address, int port)
         {
             return string.Format(CultureInfo.InvariantCulture, "Re-login routed to {0}:{1}", string.IsNullOrEmpty(address) ? "?" : address, port);
+        }
+
+        /// <summary>EnterGameRetryLine is the line the first login logs before it selects again after an enter-game refusal or timeout.</summary>
+        public static string EnterGameRetryLine(AckResponseCode code, string address, int port, int attempt, float retrySeconds)
+        {
+            return string.Format(CultureInfo.InvariantCulture, "Enter-game refused ({0}) by {1}:{2}, attempt {3}; selecting again in {4:0.#}s",
+                code, string.IsNullOrEmpty(address) ? "?" : address, port, System.Math.Max(1, attempt), System.Math.Max(0f, retrySeconds));
+        }
+
+        /// <summary>Whether the map client's latest enter-game answer after the count `before` is not a success (a migration hop's belong to the controller).</summary>
+        private static bool EnterGameRefused(MeshMapNetworkManager mesh, int before)
+        {
+            return mesh != null && !mesh.IsMigrating && mesh.EnterGameAnswers > before && mesh.LastEnterGameAnswer != AckResponseCode.Success;
         }
 
         /// <summary>ReloginSuffix is what a RESULT carrying the migration fields gains, with a leading space.</summary>
@@ -249,44 +265,62 @@ namespace MultiplayerARPG.MMO.Mesh
         /// 4) Select and enter the map: the select is retried while the map server is not ready (first login) or on any
         /// refusal (a re-login: the cluster still lists the user on the dead cell for a few seconds); then the map
         /// client, the spawned character (waited for enterSeconds after the select, or until the deadline when negative)
-        /// and a respawn of a character loaded dead.
+        /// and a respawn of a character loaded dead. When the map server refuses enter-game or never answers it (DESIGN.md
+        /// 0.87: a cell whose database connection is still coming back), the first login selects again, up to
+        /// enterGameAttempts times in all; a re-login's own loop retries that.
         /// </summary>
         private IEnumerator SelectAndEnter(MMOClientInstance client, float deadline, float enterSeconds, LoginStep step)
         {
-            SetPhase("select-character");
             bool done = false; AckResponseCode code = AckResponseCode.Unimplemented;
             ResponseSelectCharacterMessage sel = default;
-            // Map servers spawned by MapSpawn take a few seconds to register; retry while "not ready".
-            while (true)
+            for (int enterAttempt = 1; ; ++enterAttempt)
             {
-                done = false;
-                client.RequestSelectCharacter(_character.Id, (h, c, r) => { code = c; sel = r; done = true; });
-                while (!done && Time.realtimeSinceStartup < deadline) yield return null;
-                if (code == AckResponseCode.Success) break;
-                bool retry = _relogging ? client.IsConnectedToCentralServer() : sel.message == UITextKeys.UI_ERROR_MAP_SERVER_NOT_READY;
-                if (!retry || Time.realtimeSinceStartup >= deadline)
+                SetPhase("select-character");
+                // Map servers spawned by MapSpawn take a few seconds to register; retry while "not ready".
+                while (true)
                 {
-                    step.Failed($"Select character failed: {code}/{sel.message}");
+                    done = false;
+                    client.RequestSelectCharacter(_character.Id, (h, c, r) => { code = c; sel = r; done = true; });
+                    while (!done && Time.realtimeSinceStartup < deadline) yield return null;
+                    if (code == AckResponseCode.Success) break;
+                    bool retry = _relogging ? client.IsConnectedToCentralServer() : sel.message == UITextKeys.UI_ERROR_MAP_SERVER_NOT_READY;
+                    if (!retry || Time.realtimeSinceStartup >= deadline)
+                    {
+                        step.Failed($"Select character failed: {code}/{sel.message}");
+                        yield break;
+                    }
+                    if (_relogging)
+                        Log($"Select refused ({code}/{sel.message}); retrying select in {reloginRetrySeconds:0.#}s ...");
+                    else
+                        Log("Map server not ready yet; retrying select in 2s ...");
+                    yield return new WaitForSecondsRealtime(_relogging ? reloginRetrySeconds : 2f);
+                }
+                if (!GameInstance.MapInfos.TryGetValue(sel.mapName, out BaseMapInfo mapInfo)) { step.Failed($"Unknown map '{sel.mapName}'"); yield break; }
+                _mapAddress = sel.networkAddress; _mapPort = sel.networkPort;
+                Log($"Selected '{_character.CharacterName}' on map '{sel.mapName}' -> {_mapAddress}:{_mapPort} (channel {client.SelectedChannelId})");
+                if (_relogging)
+                    Log(ReloginRoutedLine(_mapAddress, _mapPort));
+                MeshMapNetworkManager mesh = client.MapNetworkManager as MeshMapNetworkManager;
+                int answersBefore = mesh != null ? mesh.EnterGameAnswers : 0;
+                client.StartMapClient(mapInfo, _mapAddress, _mapPort);
+
+                SetPhase("enter-map");
+                float enterDeadline = enterSeconds < 0f ? deadline : Mathf.Min(deadline, Time.realtimeSinceStartup + enterSeconds);
+                while (GameInstance.PlayingCharacterEntity == null && Time.realtimeSinceStartup < enterDeadline && !EnterGameRefused(mesh, answersBefore)
+                       && (!_relogging || client.MapNetworkManager == null || client.MapNetworkManager.IsClientConnected))
+                    yield return null;
+                if (GameInstance.PlayingCharacterEntity != null || _relogging || !EnterGameRefused(mesh, answersBefore))
+                    break;
+                if (enterAttempt >= enterGameAttempts || Time.realtimeSinceStartup >= deadline)
+                {
+                    step.Failed($"Enter-game refused ({mesh.LastEnterGameAnswer}) {enterAttempt} time(s)");
                     yield break;
                 }
-                if (_relogging)
-                    Log($"Select refused ({code}/{sel.message}); retrying select in {reloginRetrySeconds:0.#}s ...");
-                else
-                    Log("Map server not ready yet; retrying select in 2s ...");
-                yield return new WaitForSecondsRealtime(_relogging ? reloginRetrySeconds : 2f);
+                Log(EnterGameRetryLine(mesh.LastEnterGameAnswer, _mapAddress, _mapPort, enterAttempt, reloginRetrySeconds));
+                if (client.MapNetworkManager.IsClientConnected)
+                    client.StopMapClient();
+                yield return new WaitForSecondsRealtime(reloginRetrySeconds);
             }
-            if (!GameInstance.MapInfos.TryGetValue(sel.mapName, out BaseMapInfo mapInfo)) { step.Failed($"Unknown map '{sel.mapName}'"); yield break; }
-            _mapAddress = sel.networkAddress; _mapPort = sel.networkPort;
-            Log($"Selected '{_character.CharacterName}' on map '{sel.mapName}' -> {_mapAddress}:{_mapPort} (channel {client.SelectedChannelId})");
-            if (_relogging)
-                Log(ReloginRoutedLine(_mapAddress, _mapPort));
-            client.StartMapClient(mapInfo, _mapAddress, _mapPort);
-
-            SetPhase("enter-map");
-            float enterDeadline = enterSeconds < 0f ? deadline : Mathf.Min(deadline, Time.realtimeSinceStartup + enterSeconds);
-            while (GameInstance.PlayingCharacterEntity == null && Time.realtimeSinceStartup < enterDeadline
-                   && (!_relogging || client.MapNetworkManager == null || client.MapNetworkManager.IsClientConnected))
-                yield return null;
             if (GameInstance.PlayingCharacterEntity == null) { step.Failed("Player never spawned"); yield break; }
             Log($"In map at {GameInstance.PlayingCharacterEntity.EntityTransform.position}");
             yield return new WaitForSecondsRealtime(settleSeconds);

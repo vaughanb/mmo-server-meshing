@@ -413,7 +413,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 return;
             }
             _borrowedStatics[meshId] = home;
-            if (!string.Equals(home, fromZone, System.StringComparison.OrdinalIgnoreCase) && _linkClients.TryGetValue(home, out MeshLinkClient homeLink) && homeLink.IsConnected)
+            if (!string.Equals(home, fromZone, System.StringComparison.OrdinalIgnoreCase) && !DeferWhileUnlinked(home, l => l.SendLentStatic(meshId, OwnZoneId, false), $"lent static {meshId}") && _linkClients.TryGetValue(home, out MeshLinkClient homeLink) && homeLink.IsConnected) // Slice 7
                 homeLink.SendLentStatic(meshId, OwnZoneId, false);
         }
 
@@ -427,6 +427,8 @@ namespace MultiplayerARPG.MMO.Mesh
             if (meshId == null || !_borrowedStatics.TryGetValue(meshId, out string home))
                 return;
             _borrowedStatics.Remove(meshId);
+            if (DeferWhileUnlinked(home, l => l.SendLentStatic(meshId, OwnZoneId, true), $"static gone {meshId}"))
+                return; // Slice 7: kept for the link
             if (_linkClients.TryGetValue(home, out MeshLinkClient link) && link.IsConnected)
                 link.SendLentStatic(meshId, OwnZoneId, true);
             else

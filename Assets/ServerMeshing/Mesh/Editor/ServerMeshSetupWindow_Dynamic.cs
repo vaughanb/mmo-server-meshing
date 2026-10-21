@@ -52,7 +52,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 _checks.Add(new Check
                 {
                     ok = true,
-                    text = $"Dynamic map {mapId}: every base can split, minimum cell {minCell.ToString("0.##", CultureInfo.InvariantCulture)} m, at most {most} band neighbours ({busiest}).",
+                    text = $"Dynamic map {mapId}: every base can split, minimum cell {minCell.ToString("0.##", CultureInfo.InvariantCulture)} m, at most {most} band neighbours ({busiest}){(MeshDynamicSetupChecks.OnDemandLinks(_registry, mapId) ? ", links on demand" : string.Empty)}.",
                 });
             }
         }

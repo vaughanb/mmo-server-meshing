@@ -93,6 +93,7 @@ namespace MultiplayerARPG.MMO.Mesh
         private void RecoveryStop()
         {
             _pendingStatic.Clear();
+            _retireQueued.Clear();
             _adoptedPair = MeshLayoutPair.None;
             AdoptedRuntimeLayout = false;
             _ownBroadcastSent = false;
