@@ -55,7 +55,7 @@ MERGE_END_S = 300          # the resumed merge's done (the database outage stall
 ANSWER_TIMEOUT_S = 120     # base: C's second lifetime applying the central's answer
 RESULT_SLACK_S = 90
 STAND_TIMEOUT_S = 60
-LATE_STAND_TIMEOUT_S = 120  # the late bot: its first login right after the restart can wait out one kit request timeout (30 s)
+LATE_STAND_TIMEOUT_S = 120  # the late bot's stand wait; its login retries are reported (0 since DESIGN 0.84's connect fix)
 LOGIN_RETRY = "Login timed out (attempt"
 
 Case = collections.namedtuple("Case", "kind enabled env")

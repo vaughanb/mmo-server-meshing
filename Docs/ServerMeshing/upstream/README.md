@@ -29,7 +29,7 @@ calls `IEntityMovementServerStateFlags.ConsumeServerStateFlags()` from 0006, so 
 0008 (2026-10-19, Slice 4 of the dynamic cells) is one `protected virtual string BuildingPersistenceChannelId => ChannelId;`
 read at the kit's seven building database sites (the load, the in-scene create, the quit save, the two saves, the
 create, the delete); no behaviour change unless overridden. Generated from the kit copy with the `MESH-EDIT: CE-10`
-markers stripped; the doc comment stays. **Not yet pushed.**
+markers stripped; the doc comment stays. Applies cleanly to `develop` at 3897b326 (2026-10-20).
 
 ## Status
 
@@ -42,6 +42,10 @@ markers stripped; the doc comment stays. **Not yet pushed.**
 [PR #3](https://github.com/open-mmorpg/OpenMMORPG/pull/3) merged them into `develop` on 2026-10-02 (bb9895f), after the
 add-on's kit copy had compiled them (CE-12/CE-13), passed 1094 EditMode tests and passed accept-a on the rig.
 From Phase 0 step 6 the add-on requires 0006 (Mesh/Sync references its interface).
+
+**0008: merged.** Pushed as the upstream branch `building-persistence-channel` off `develop` at 3897b326 on 2026-10-20
+(`git am` applied it unchanged); [PR #8](https://github.com/open-mmorpg/OpenMMORPG/pull/8) merged it into `develop` the
+same day (d077c5f), after both CI checks passed. Every kit change the add-on relies on is now upstream.
 
 ## Pushing (how it was done; for a re-run)
 

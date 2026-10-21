@@ -47,18 +47,17 @@ right for a sandbox where towns can appear anywhere.
 ## 3. Prerequisites
 
 - The add-on folder `Assets/ServerMeshing/` (it compiles into the game assembly; no asmdef needed).
-- OpenMMORPG `develop` at bb9895f (2026-10-02) or later. It carries seven of the eight kit changes the add-on relies on
+- OpenMMORPG `develop` at d077c5f (2026-10-20) or later. It carries all eight kit changes the add-on relies on
   (DESIGN.md §17, [upstream/README.md](upstream/README.md)): patches 0001-0004 (on `master` too since 2026-09-15: an
   owner-change movement fix, frame-granular request waits, a virtual `IsWatched()` on the monster activity component, a
   protected pending-spawn dictionary on the map manager), 0005 (on `master` since 2026-10-01: a cache finalizer that
-  corrupted pooled collections) and 0006-0007 (`develop` only: movement flags sent to every receiver of a tick, entity
-  states read to their length). The state sender calls 0006's `IEntityMovementServerStateFlags`, so the add-on does
-  not compile without it.
-- **Upstream patch 0008 (CE-10), not merged yet:** `protected virtual string BuildingPersistenceChannelId => ChannelId;`
-  on the kit's `MapNetworkManager`, read at its seven building database sites. `MeshMapNetworkManager` overrides it
-  (§6a.8), so **the add-on does not compile without it**, Dynamic maps or not. Apply
-  [upstream/0008-MapNetworkManager-let-subclasses-choose-the-building-persistence-channel.patch](upstream/0008-MapNetworkManager-let-subclasses-choose-the-building-persistence-channel.patch) to the kit (from the project root, `git apply
-  --directory=Assets/OpenMMORPG <patch>`, or by hand where a kit with local edits refuses a hunk) until upstream merges it; `MeshKitEditTests` fails if a kit update drops it.
+  corrupted pooled collections), 0006-0007 (`develop` since 2026-10-02: movement flags sent to every receiver of a
+  tick, entity states read to their length) and 0008 (`develop` since 2026-10-20, [open-mmorpg/OpenMMORPG#8](https://github.com/open-mmorpg/OpenMMORPG/pull/8): a virtual
+  `BuildingPersistenceChannelId` on the kit's `MapNetworkManager`, read at its seven building database sites). The add-on
+  does not compile without 0006 (the state sender calls its `IEntityMovementServerStateFlags`) or without 0008
+  (`MeshMapNetworkManager` overrides the property, §6a.8), Dynamic maps or not. On an older kit, apply
+  [upstream/0008-MapNetworkManager-let-subclasses-choose-the-building-persistence-channel.patch](upstream/0008-MapNetworkManager-let-subclasses-choose-the-building-persistence-channel.patch) (from the project root, `git apply
+  --directory=Assets/OpenMMORPG <patch>`); `MeshKitEditTests` fails if a kit update drops it.
 - Your map scenes in the build settings, your map infos in the game database.
 
 ## 4. Step by step
@@ -534,13 +533,15 @@ Every field of the registry's `dynamicSettings`, read only when a map is Dynamic
   per process; a building placed while its owner restarts has two owners for about a second; a drain counts a tree as one
   entity though its release takes a few seconds; the kit's own race between a handoff and an item move in flight is
   unchanged; an item moved into a chest on a cell where nobody has opened it trips the kit's `NotifyStorageItemsUpdated`
-  (the kit's UI always opens first); upstream patch 0008 (CE-10) is written but not pushed.
+  (the kit's UI always opens first); upstream patch 0008 (CE-10) is in `develop` since 2026-10-20 ([open-mmorpg/OpenMMORPG#8](https://github.com/open-mmorpg/OpenMMORPG/pull/8)).
 - **A central restart**: a family whose child never says hello stays frozen (no command unfreezes it); a store lost
   together with a partitioned cell can leave that cell holding a newer layout nobody adopts (it is answered with the
   current one); the policy's multipliers and measurements and the supervisor's restart counts do not survive, and a
   resumed operation is not measured; a staged commit held by its target alone lasts the whole outage; a frozen operation
-  is dropped; on the rig's split-process topology about half the first logins after the central process starts wait out
-  one 30 s kit request timeout before the retry gets in.
+  is dropped. (The rig's first-login timeouts on its split-process topology, listed here until 0.84, were not a central
+  restart limit: the test client sent its login before the login server had accepted its peer, which the kit drops
+  silently. A client of your own that logs in by code should wait for the transport's `IsClientStarted`, not the kit's
+  `IsClientConnected`, before its first request.)
 
 ## 7. Verifying
 
@@ -799,7 +800,7 @@ hand-written `README.md` and `screenshot.png`; `Addons/README.md` has the rebuil
 - `ServerMeshing.unitypackage` — the add-on (`Assets/ServerMeshing/Mesh`, runtime and Editor) with this guide,
   DESIGN.md and MULTIHOST.md under `Documentation/`, and the top-level README. The spike notes, the upstream patch
   series and the raw capacity table stay in the repository. Import it into any project that has OpenMMORPG installed
-  (`develop` at bb9895f or later, with patch 0008 applied: §3), then follow §4.
+  (`develop` at d077c5f or later: §3), then follow §4.
 - `ServerMeshingTestRig.unitypackage` — `Assets/ServerMeshing/TestMap` (the two test maps, test items, auto client,
   launcher, play runner, load generator) plus a reference copy of the harnesses under `TestMap/Tools/`. It references
   the kit's demo (the enemy prefab, default weapon item and type), so it needs `BaseDemo` present, and it declares the

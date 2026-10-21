@@ -36,7 +36,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
     {
         // Release metadata. Version is the add-on version reported by the Addon Manager; UpdateDate drives its recency
         // filter and "New" badge, and is bumped by hand with the version rather than tracking the build clock.
-        public const string Version = "0.83.0";
+        public const string Version = "0.84.0";
         public const string UpdateDate = "2026-10-20";
 
         // Where the published packages will be fetched from. The Addon Manager downloads "packageUrl" verbatim, so this
@@ -71,9 +71,8 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 "their shared edge, so combat, loot, quests and building resolve across it. Empty land costs nothing: a cell " +
                 "with nobody near it does not run.\n" +
                 "Subclasses on the kit's managers and entity prefabs plus one world-registry asset; the package changes no " +
-                "kit file. Needs OpenMMORPG develop at bb9895f or later and, until it is merged upstream, patch 0008 (CE-10: " +
-                "a virtual building persistence channel on the kit's MapNetworkManager) applied to the kit: the add-on " +
-                "does not compile without it (see the README). Includes a Setup window that validates a project, judges " +
+                "kit file. Needs OpenMMORPG develop at d077c5f (2026-10-20) or later: the add-on does not compile on an " +
+                "older kit (see the README). Includes a Setup window that validates a project, judges " +
                 "every Dynamic map's cut and settings before anything starts, and fixes what it can.",
             // The marker sits inside Mesh/ so it lands with the code wherever the Addon Manager installs the add-on.
             MarkerFolder = AddOnRoot + "/Mesh",

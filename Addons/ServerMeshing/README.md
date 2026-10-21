@@ -21,9 +21,8 @@ never own one piece of ground, buildings follow the cut (a chest and its content
 on), and a central that restarts adopts the cut layout the cells hold and finishes the operation it was running.
 
 The add-on is subclasses on the kit's managers and entity prefabs plus one world-registry asset; the package changes no
-kit file. It does build on **eight small kit changes** (bug fixes and extension seams, DESIGN §17): seven are merged in
-OpenMMORPG `develop` (bb9895f, 2026-10-02), and the eighth, **CE-10** (upstream patch 0008, the building persistence
-channel), is not upstream yet and has to be applied to the kit by hand (see Requirements).
+kit file. It does build on **eight small kit changes** (bug fixes and extension seams, DESIGN §17), all of them merged
+in OpenMMORPG `develop` (d077c5f, 2026-10-20).
 
 - One cell process holds about **270 players at a 60 fps server tick** on a modern core; size cells so no expected crowd
   exceeds 250 (250–300 m suits a sandbox where towns can appear anywhere).
@@ -32,21 +31,16 @@ channel), is not upstream yet and has to be applied to the kit by hand (see Requ
 
 ## Requirements
 
-- OpenMMORPG `develop` at **bb9895f (2026-10-02) or later**. It carries seven of the kit changes the add-on relies on:
+- OpenMMORPG `develop` at **d077c5f (2026-10-20) or later**. It carries all eight kit changes the add-on relies on:
   upstream patches 0001-0004 (also on `master` since 2026-09-15: an owner-change movement fix, frame-granular request
   waits, a virtual `IsWatched()` on the monster activity component, a protected pending-spawn dictionary on the map
-  manager), 0005 (on `master` since 2026-10-01: a cache finalizer that corrupted pooled collections under load) and
-  0006-0007 (on `develop` only: one-shot movement flags sent to every receiver of a tick, entity states read to their
-  length). The add-on does not compile without 0006.
-- **Upstream patch 0008 (CE-10), not merged yet.** It adds one virtual to the kit's `MapNetworkManager`,
-  `protected virtual string BuildingPersistenceChannelId => ChannelId;`, read at its seven building database sites
-  (no behaviour change unless overridden). `MeshMapNetworkManager` overrides it, so that every cell of a Dynamic map's
-  split family keeps its buildings under the base cell's channel. **The add-on does not compile without it, whether or
-  not a map is Dynamic.** The patch is in the source repository at
+  manager), 0005 (on `master` since 2026-10-01: a cache finalizer that corrupted pooled collections under load),
+  0006-0007 (one-shot movement flags sent to every receiver of a tick, entity states read to their length) and 0008
+  ([open-mmorpg/OpenMMORPG#8](https://github.com/open-mmorpg/OpenMMORPG/pull/8): a virtual `BuildingPersistenceChannelId` on the kit's `MapNetworkManager`, which
+  `MeshMapNetworkManager` overrides so a Dynamic map's split family keeps its buildings under the base cell's channel).
+  The add-on does not compile without 0006 or 0008. On an older kit, the patch is in the source repository at
   [`Docs/ServerMeshing/upstream/0008-MapNetworkManager-let-subclasses-choose-the-building-persistence-channel.patch`](../../Docs/ServerMeshing/upstream/0008-MapNetworkManager-let-subclasses-choose-the-building-persistence-channel.patch)
-  (not in the package); from the project root, `git apply --directory=Assets/OpenMMORPG <patch>`, or make the edit by
-  hand (the property and seven `ChannelId` → `BuildingPersistenceChannelId` reads in `MapNetworkManager.cs` and
-  `MapNetworkManager_DatabaseFunction.cs`). It retires once upstream merges it.
+  (`git apply --directory=Assets/OpenMMORPG <patch>` from the project root).
 - Unity 6000.3 or newer, matching the kit.
 - Your map scenes in the build settings and your map infos in the game database.
 

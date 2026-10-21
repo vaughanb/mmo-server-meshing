@@ -29,6 +29,13 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
         }
 
         [Test]
+        public void LoginConnectedLine_SaysHowLongThePeerTook()
+        {
+            Assert.That(ServerMeshAutoClient.LoginConnectedLine(2, 17.4f), Is.EqualTo("Connected to login server (peer up after 2 frame(s), 17 ms)"));
+            Assert.That(ServerMeshAutoClient.LoginConnectedLine(-1, float.NaN), Is.EqualTo("Connected to login server (peer up after 0 frame(s), 0 ms)"));
+        }
+
+        [Test]
         public void ReloginRoutedLine_AndSuffix_AreTheContractFormat()
         {
             Assert.That(ServerMeshAutoClient.ReloginRoutedLine("192.168.0.2", 8004), Is.EqualTo("Re-login routed to 192.168.0.2:8004"));

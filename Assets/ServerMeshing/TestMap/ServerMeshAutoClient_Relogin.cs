@@ -109,25 +109,52 @@ namespace MultiplayerARPG.MMO.Mesh
             yield return SelectAndEnter(client, deadline, -1f, step);
         }
 
-        /// <summary>0) Connect to the login server (retried every 3 s), after giving in-process servers a moment.</summary>
+        /// <summary>
+        /// 0) Connect to the login server (retried every 3 s), after giving in-process servers a moment. Connected means
+        /// the transport's peer is (LoginPeerUp), not the kit's IsClientConnected: that goes true as soon as a socket
+        /// exists, and a request sent before the server has accepted the peer is dropped without a word while its
+        /// callback waits out the kit's 30 s request timeout (DESIGN.md 0.84: the split topology's first-login timeouts).
+        /// A socket whose peer is not up when the next attempt is due is stopped and opened again.
+        /// </summary>
         private IEnumerator ConnectLoginServer(MMOClientInstance client, float deadline, LoginStep step)
         {
             SetPhase("connect-login");
             yield return new WaitForSecondsRealtime(1f);
             float nextAttempt = 0f;
-            while (!client.IsConnectedToCentralServer() && Time.realtimeSinceStartup < deadline)
+            float opened = 0f;
+            int openedFrame = 0;
+            while (!LoginPeerUp(client) && Time.realtimeSinceStartup < deadline)
             {
                 if (Time.realtimeSinceStartup >= nextAttempt)
                 {
                     nextAttempt = Time.realtimeSinceStartup + 3f;
+                    if (client.IsConnectedToCentralServer())
+                        client.StopCentralClient();
                     Log($"Connecting to login server {client.LoginNetworkManager.networkAddress}:{client.LoginNetworkManager.networkPort} ...");
                     client.StartCentralClient();
+                    opened = Time.realtimeSinceStartup;
+                    openedFrame = Time.frameCount;
                 }
                 yield return null;
             }
-            if (!client.IsConnectedToCentralServer()) { step.Failed("Could not connect to the login server"); yield break; }
-            Log("Connected to login server");
+            if (!LoginPeerUp(client)) { step.Failed("Could not connect to the login server"); yield break; }
+            Log(LoginConnectedLine(Time.frameCount - openedFrame, (Time.realtimeSinceStartup - opened) * 1000f));
             step.ok = true;
+        }
+
+        /// <summary>Whether the login server has accepted this client's peer (the transport's state, not the kit's flag).</summary>
+        private static bool LoginPeerUp(MMOClientInstance client)
+        {
+            LoginNetworkManager login = client.LoginNetworkManager;
+            return login != null && login.IsClientConnected && login.Client != null && login.Client.Transport != null
+                && login.Client.Transport.IsClientStarted;
+        }
+
+        /// <summary>LoginConnectedLine is the line a bot logs once its login peer is up: how many frames and ms after the socket opened.</summary>
+        public static string LoginConnectedLine(int frames, float milliseconds)
+        {
+            return string.Format(CultureInfo.InvariantCulture, "Connected to login server (peer up after {0} frame(s), {1:0} ms)",
+                System.Math.Max(0, frames), Finite(System.Math.Max(0f, milliseconds)));
         }
 
         /// <summary>1) Login; on the first login a refusal registers the user and logs in again (a re-login never registers).</summary>
@@ -140,8 +167,9 @@ namespace MultiplayerARPG.MMO.Mesh
                 done = false;
                 client.RequestUserLogin(username, password, (h, c, r) => { code = c; msg = r.message; done = true; });
                 while (!done && Time.realtimeSinceStartup < deadline) yield return null;
-                // Sixteen bots logging in at once queue behind the login server's database: a timeout is not "no such
-                // user" (registering then fails with USERNAME_EXISTED), so try again before falling back to register.
+                // A timeout is not "no such user" (registering then fails with USERNAME_EXISTED), so try again before
+                // falling back to register. (The split topology's first-login timeouts were a request sent before the
+                // peer was up, which ConnectLoginServer now waits for; DESIGN.md 0.84.)
                 if (code == AckResponseCode.Success || code != AckResponseCode.Timeout || attempt >= 4) break;
                 Log($"Login timed out (attempt {attempt}); retrying");
                 yield return new WaitForSecondsRealtime(2f * attempt);
