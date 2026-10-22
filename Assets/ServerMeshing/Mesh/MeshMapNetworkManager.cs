@@ -923,6 +923,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     Logging.LogWarning("Mesh", $"Handoff ABORTED {entity?.CharacterName} -> zone {zone.id}: saved={saved}; character stays on {OwnZoneId}");
                     if (entity != null && entity.Identity != null && !entity.Identity.IsDestroyed && ContainsConnectionId(connectionId))
                         RegisterPlayerCharacter(connectionId, entity);
+                    else ReleaseAbandonedHandoff(entity, saved, () => WaitAndSaveCharacter(TransactionUpdateCharacterState.All, entity.CloneTo(new PlayerCharacterData()), true, mapName, savePosition, true, rotation)).Forget(); // nobody else will (MeshMapNetworkManager_HandoffAbort)
                     _handoffRetryAfter[characterId] = Time.unscaledTime + handoffRetrySeconds;
                     return;
                 }

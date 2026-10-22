@@ -90,5 +90,24 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             if (ok)
                 Assert.That((parsedMs, parsedCell), Is.EqualTo((ms, cell)));
         }
+
+        [Test]
+        public void TryParseBurns_ReadsACommaList_AndEachCellTakesItsOwnEntry()
+        {
+            List<KeyValuePair<string, float>> burns = new List<KeyValuePair<string, float>>();
+            Assert.That(MeshMapNetworkManager.TryParseBurns("C:14, e:7,3", burns), Is.True);
+            Assert.That(burns.Count, Is.EqualTo(3));
+            Assert.That(MeshMapNetworkManager.BurnFor(burns, "C"), Is.EqualTo(14f));
+            Assert.That(MeshMapNetworkManager.BurnFor(burns, "E"), Is.EqualTo(7f), "ignoring case");
+            Assert.That(MeshMapNetworkManager.BurnFor(burns, "C.1"), Is.EqualTo(3f), "a cell no entry names takes the one naming none");
+            Assert.That(MeshMapNetworkManager.DescribeBurns(burns), Is.EqualTo("14 ms on C, 7 ms on e, 3 ms on every cell"));
+            Assert.That(MeshMapNetworkManager.TryParseBurns("C:14", burns), Is.True);
+            Assert.That(MeshMapNetworkManager.BurnFor(burns, "E"), Is.EqualTo(0f), "a one-entry list burns on its cell only");
+            Assert.That(MeshMapNetworkManager.DescribeBurns(burns), Is.EqualTo("14 ms on C"), "the Slice 3 line's text");
+            Assert.That(MeshMapNetworkManager.TryParseBurns("C:14,", burns), Is.False, "an empty entry fails the list");
+            Assert.That(burns, Is.Empty, "and leaves nothing burning");
+            Assert.That(MeshMapNetworkManager.TryParseBurns("C:14,E:x", burns), Is.False);
+            Assert.That(MeshMapNetworkManager.TryParseBurns("", burns), Is.False);
+        }
     }
 }

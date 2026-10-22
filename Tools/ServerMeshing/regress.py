@@ -28,6 +28,7 @@ import datetime
 import hashlib
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -41,7 +42,9 @@ import regress_splitcrash
 import regress_auto
 import regress_building
 import regress_central
+import regress_family
 import regress_links
+import regress_policy
 import regress_procs
 import rigauto
 import riglinks
@@ -760,7 +763,7 @@ def grade_links(rep, name, start, day, expect=None):
     rep.check(not refused, "no link refused" + (f" ({refused})" if refused else ""))
     far, closed, peak_out, peak_in = riglinks.on_demand_summary(lines)
     rep.notes.append(f"   links on demand: {far} opened for a record, demand or reply, {closed} closed idle; peak out {peak_out}, peak in {peak_in}")
-    if name == "split":
+    if name in ("split", "autosplit_links", "splitcentral_links"):
         rep.check(riglinks.closed_to(lines.get("E", []), "C") and riglinks.unlinked_from(lines.get("C", []), "E"),
                   "E closed its link to C on demand after the cut, and C logged the idle close")
 
@@ -836,7 +839,12 @@ def run_scenario(name, rep):
     start = datetime.datetime.now().strftime("%H:%M:%S")
     for marker in os.listdir(TEMP) if os.path.isdir(TEMP) else []:
         if marker.startswith("ServerMesh.FaultFired."):
-            os.remove(os.path.join(TEMP, marker))
+            # DESIGN 0.88: regress_family arms a fault for every incarnation by making its marker a directory.
+            path = os.path.join(TEMP, marker)
+            if os.path.isdir(path):
+                shutil.rmtree(path)
+            else:
+                os.remove(path)
     # The central's layout coordinator keeps its store across Plays; one left by an earlier run would be recovered
     # from, so every scenario starts without one. A layout command or its status left by an earlier run would be
     # carried out again or read as this run's (Slice 2b decision 17).
@@ -1109,13 +1117,20 @@ def run_scenario(name, rep):
     elif name in regress_links.SCENARIOS:
         regress_links.run(name, rep, sys.modules[__name__], start, day, bots)   # Slice 7
 
+    elif name in regress_family.SCENARIOS:
+        split = regress_family.run(name, rep, sys.modules[__name__], start, day, bots)   # DESIGN 0.88: a FamilyRun
+
+    elif name in regress_policy.SCENARIOS:
+        split = regress_policy.run(name, rep, sys.modules[__name__], start, day, bots)   # DESIGN 0.88: a PolicyRun
+
     else:
         raise ValueError(f"unknown scenario {name}")
 
     # The sleeping-cell scenarios leave cells asleep on purpose; the Coarse ones run one cell; every other scenario
     # runs them all (autosplit: plus the child the policy makes).
     expect = {"wake": {"C", "E", "C2"}, "autosplit": {z for z, _ in ZONES} | {"C.1"}, **regress_auto.EXPECTED_ZONES,
-              **regress_building.EXPECTED_ZONES, **regress_central.EXPECTED_ZONES, **regress_links.EXPECTED_ZONES}
+              **regress_building.EXPECTED_ZONES, **regress_central.EXPECTED_ZONES, **regress_links.EXPECTED_ZONES,
+              **regress_family.EXPECTED_ZONES, **regress_policy.EXPECTED_ZONES}
     grade_common(rep, start, day, expect=expect.get(name))
     grade_links(rep, name, start, day, expect.get(name))
     if name in regress_split.SCENARIOS:
@@ -1130,6 +1145,10 @@ def run_scenario(name, rep):
         regress_building.grade_layout(rep, sys.modules[__name__], start, day, split)
     elif name in regress_central.SCENARIOS:
         regress_central.grade_layout(rep, sys.modules[__name__], start, day, split)
+    elif name in regress_family.SCENARIOS:
+        regress_family.grade_layout(rep, sys.modules[__name__], start, day, split)
+    elif name in regress_policy.SCENARIOS:
+        regress_policy.grade_layout(rep, sys.modules[__name__], start, day, split)
     else:
         grade_layout(rep, start, day, expect.get(name))
     for kind, log in bots:
@@ -1172,10 +1191,13 @@ TWO_HOST_SKIP = {
     **{n: regress_building.TWO_HOST_REASON for n in regress_building.SCENARIOS},
     **{n: regress_central.TWO_HOST_REASON for n in regress_central.SCENARIOS},
     **{n: regress_links.TWO_HOST_REASON for n in regress_links.SCENARIOS},
+    **{n: regress_family.TWO_HOST_REASON for n in regress_family.SCENARIOS},
+    **{n: regress_policy.TWO_HOST_REASON for n in regress_policy.SCENARIOS},
 }
 ALL = (DEFAULT + ["pvp", "wake", "dynidle"] + list(regress_split.SCENARIOS) + list(regress_merge.SCENARIOS)
        + list(regress_splitcrash.SCENARIOS) + list(regress_auto.SCENARIOS) + list(regress_building.SCENARIOS)
-       + list(regress_central.SCENARIOS) + list(regress_links.SCENARIOS))
+       + list(regress_central.SCENARIOS) + list(regress_links.SCENARIOS) + list(regress_family.SCENARIOS)
+       + list(regress_policy.SCENARIOS))
 # A persisted remote cell outlives the Plays, so no scenario's environment reaches it.
 PERSIST_SKIP = {"dynidle": "runs the test map Dynamic through the environment, which a persisted remote cell never gets",
                 **{n: regress_split.PERSIST_REASON for n in regress_split.SCENARIOS},
@@ -1184,7 +1206,9 @@ PERSIST_SKIP = {"dynidle": "runs the test map Dynamic through the environment, w
                 **{n: regress_auto.PERSIST_REASON for n in regress_auto.SCENARIOS},
                 **{n: regress_building.PERSIST_REASON for n in regress_building.SCENARIOS},
                 **{n: regress_central.PERSIST_REASON for n in regress_central.SCENARIOS},
-                **{n: regress_links.PERSIST_REASON for n in regress_links.SCENARIOS}}
+                **{n: regress_links.PERSIST_REASON for n in regress_links.SCENARIOS},
+                **{n: regress_family.PERSIST_REASON for n in regress_family.SCENARIOS},
+                **{n: regress_policy.PERSIST_REASON for n in regress_policy.SCENARIOS}}
 
 
 def main():

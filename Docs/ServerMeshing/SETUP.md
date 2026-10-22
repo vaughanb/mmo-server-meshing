@@ -195,6 +195,8 @@ All on `MeshMapNetworkManager` (the map-manager prefab). Defaults are the values
 | `meshLinkPortOffset` | 10000 | The server-to-server link listens on the map port plus this. |
 | `expectedMaxSpeed`, `meshStatsIntervalSeconds` | 8 m/s, 10 s | Band sizing check at start-up; the `Mesh stats` log line cadence. |
 | `databaseReconnectSeconds`, `databaseReconnectGraceSeconds`, `databaseDrainWaitSeconds` | 5 s, 15 s, 35 s | Re-open the **database** connection whenever this server has none: the kit opens it once at start-up and never again, so a map server that loses the database manager -- or starts before it exists -- runs on accepting players while every save fails. The grace period keeps the retry off the kit's own first attempt. Requests still waiting when the connection is re-opened can never be answered, and the kit's reconnect would clear their callbacks and leave whoever awaits them waiting for ever, so the reconnect answers each with the kit's own timeout first (`Database connection lost; reconnecting to …, timing out N request(s) it can no longer answer`; DESIGN 0.87). The drain wait is only the fallback for a kit whose request table the add-on cannot reach: it lets those requests time out on their own for up to 35 s, then reconnects anyway and says how many it stranded. A process that *hosts* the database manager is left alone. |
+| `resendStrandedDatabaseReads` | on | A database request is sent again, under its own request id, once the reconnect is up when that is safe: a **read** (`Get*`, `Find*`, `Validate*`, `MailList`) that was on its way when the connection dropped, or **any** request the transport refused while the connection was down or still connecting (it never left the process). Lines: `... and keeping N to send again` at the reconnect, then `Database connection open again: sent R stranded read(s) again and U request(s) it had refused while down`. The kit's caller -- an arrival's access-token check, its character or its gold, a handoff's save -- then gets the database's answer instead of a timeout. A write that went out is never sent twice (it may have been applied before the drop) and still ends in a timeout. Each request's kit 30 s timer still bounds it (DESIGN 0.89). |
+| `arrivalLoadRetrySeconds` | 90 s | A handoff arrival's relates data (gold, cash, user level) loads in the background; the kit kicks the player on the first failed query. When the query failed because the database connection dropped under it, it is asked again once the connection is back, for up to this long (`Arrival <name> conn=<id>: <what> failed with the database connection lost; asking again once it is back (retry n)`); a failure over a live connection, or running out of time, ends in the kit's kick. 0 restores the kit's kick. |
 | `loadReportSeconds`, `occupancyBucketSize` | 5 s, 20 m | Every this many seconds the cell sends the central a **load report**: the work probe's window (main-thread work per frame without the frame limiter's wait, its p95, the share of frames that did not wait at all), what it owns and holds as puppets, and an occupancy grid of where they stand in buckets of this size. The central keeps the latest per cell and logs a one-line summary every `loadSummarySeconds` (30 s). 0 disables. |
 | `clusterConnectRetrySeconds` | 5 s | Re-open the cluster connection when the process could not open one at all. The kit handles every later failure by itself, but not this one: with no client socket it polls no events, so no disconnect is ever raised and the server runs on serving nobody. Matters when map servers can start before the central. 0 disables. |
 
@@ -575,8 +577,8 @@ Every field of the registry's `dynamicSettings`, read only when a map is Dynamic
 
 ## 7. Verifying
 
-- **Harness:** `python Tools/ServerMeshing/regress.py` runs 27 scenarios: the eleven of the mesh itself (pet, party,
-  crash, harvest, build, seam, seamcold, sleep, pvp, wake, dynidle; the first eight by default), the fourteen of
+- **Harness:** `python Tools/ServerMeshing/regress.py` runs 34 scenarios: the eleven of the mesh itself (pet, party,
+  crash, harvest, build, seam, seamcold, sleep, pvp, wake, dynidle; the first eight by default), the twenty-one of
   dynamic cells below and the two of on-demand links (`linkcap`, `partyfar`), on the rig and grades the logs of every cell that
   logged, whatever its id; `--env KEY=VALUE` passes rig toggles, `--remote-cells E` serves a cell from a second machine
   and `--impair` degrades the link to it ([MULTIHOST.md](MULTIHOST.md) §8b, §8e). It refuses to run on a player build
@@ -609,7 +611,8 @@ Every field of the registry's `dynamicSettings`, read only when a map is Dynamic
   its rectangle), `MESH_FAULT_DIE_ON_HELLO=<cell>:<n>` (Slice 5: the cell dies right after its n-th `LayoutHello` of the
   process, e.g. `C:2` for a base's hello to a restarted central), `MESH_EDITOR_SERVERS=0` (Slice 5: the editor's Play
   hosts no server, set by the harness for the split-process topology), `MESH_SPAWN_CELLS` (which cells the spawner starts), `MESH_BAND` (ghost band
-  and visible range together), `MESH_PROBE_BURN_MS` (`[cell:]ms` of busy work per frame), and, on a bare player with
+  and visible range together), `MESH_PROBE_BURN_MS` (`[cell:]ms` of busy work per frame, or a comma list such as `C:14,E:7`, where an entry naming
+  the cell wins over one naming none; `@<path>` reads the same text from a file at every load window), and, on a bare player with
   no rig at all, `MESH_PROBE_SELFTEST=0,5,10,24`.
 - **Measuring a tick (Phase 0):** the Work ticks line is always on; these rig toggles sharpen it (all unset = today):
   `MESH_RATES=<fps>/<step>` sets the frame cap and physics step for every cell (`30/0.02` for a space server,
@@ -794,7 +797,17 @@ Every field of the registry's `dynamicSettings`, read only when a map is Dynamic
   (killed the moment the merge's e2 goes out: the merge resumes and finishes), `splitcentral_base` (C dies on its hello
   to the restarted central, `MESH_FAULT_DIE_ON_HELLO=C:2`, and comes back without R) and `splitcentral_unfreeze` (C.1
   killed while the central is down, the family frozen at the restart's ceiling, `unfreeze C` collapsing C.1 into C, a
-  late login into R routed to C; every bot in the kept half). The headless bots log in again
+  late login into R routed to C; every bot in the kept half). DESIGN 0.88 closed the paths only EditMode tests had run:
+  `mergechildren` (C split at x = 0, then C.1 at z = 0 into C.2, the two children sharing a full edge; `merge C.1 C.2`
+  keeps the child with more owned players, C.2 with three bots against C.1's two, and C.1's bots migrate once more,
+  C.1 drains and stays gone, the store keeps C and C.2), `collapsesibling` (the same family with C.2 empty; C.2 killed
+  while its restarts die on their first hello, `MESH_FAULT_DIE_ON_HELLO=C.2:1` behind a fault marker the harness turns
+  into a directory: three failed restarts, then the collapse into its sibling C.1, since C shares no full edge with it),
+  `autoqueue` (C and E hot at once with the burn list `C:14,E:14`: one is split, the other waits for the one op slot and
+  is planned only after that split's done, never refused), `autodefer` (`MESH_HOST_CORES` set so the host's headroom
+  lies between C hot alone and C with the eight other cells burning 24 ms: C is deferred until their burn is removed,
+  then split), and `autosplit_links` and `splitcentral_links` (`autosplit` and `splitcentral` with
+  `MESH_LINKS=all:OnDemand`). The headless bots log in again
   after a lost session (`Session lost …; re-login <n>`; RESULT ` relogins=<n>`).
 - **The play runner and the environment:** every Play request carries an id that the status file echoes as
   `playSeq=` while that Play runs, so the harness never mistakes a Play an earlier, abandoned request started late for
@@ -831,7 +844,8 @@ Every field of the registry's `dynamicSettings`, read only when a map is Dynamic
 | Character selection fails for a cell | The central must list the cell as a channel: use `MeshCentralNetworkManager`. |
 | Two servers both spawn a monster area | `ownSpawnAreasByZone` off, or the layout does not match the scene. |
 | Puppets lag or jitter | `Mesh stats … ghostSteer` — mean above ~0.3 m: check `ghostLeadSeconds` and the link traffic. |
-| A login right after a central restart (split-process topology) waits 30 s, then the client sits on the map server with no character | Before 0.87: the cell's database reconnect sat out a 35 s drain after a failed attempt (`Database connection lost with N request(s) in flight`), so the enter-game never got its character, and the kit's client threw on the unanswered request instead of disconnecting. Now the reconnect times those requests out at once and the client takes an unanswered enter-game as a refusal (`Enter-game Timeout without an answer from the map server`); select the character again. |
+| A login right after a central restart (split-process topology) waits 30 s, then the client sits on the map server with no character | Before 0.87: the cell's database reconnect sat out a 35 s drain after a failed attempt (`Database connection lost with N request(s) in flight`), so the enter-game never got its character, and the kit's client threw on the unanswered request instead of disconnecting. Now the reconnect times those requests out at once (and, since 0.89, sends the stranded reads again) and the client takes an unanswered enter-game as a refusal (`Enter-game Timeout without an answer from the map server`); select the character again. |
+| Players handed over during a central restart are kicked (`Session lost (... UI_ERROR_KICKED_FROM_SERVER)`), or a merge's drain never empties the retiring cell | Before 0.89: the arrival's access-token check or relates data was on its way when the database connection dropped, the reconnect answered it with a timeout, and the kit refused or kicked. Look for `keeping N to send again`, `Arrival ... asking again` and `Handoff ABORTED with its client gone`; a `kicked as the kit does` line names a failure that was not the drop's. |
 
 ## 10. Packaging
 

@@ -2,7 +2,7 @@
 split-process topology (regress_procs: the central, login and database manager one build process, the spawner another,
 the editor a client only):
 
-    python Tools/ServerMeshing/regress.py splitcentral splitcentral_merge splitcentral_base splitcentral_unfreeze
+    python Tools/ServerMeshing/regress.py splitcentral splitcentral_merge splitcentral_base splitcentral_unfreeze splitcentral_links
 
 splitcentral: regress_split's `split` of C at x = 0 (child C.1) with the eight stand bots and the tester in R; 10 s after
   the split's done the central is killed and started again: it adopts the stored layout, answers every hello with it,
@@ -14,6 +14,7 @@ splitcentral_base: the same split with no tester and MESH_FAULT_DIE_ON_HELLO=C:2
   comes back gated and is answered with its kept half; it never re-owns R.
 splitcentral_unfreeze (DESIGN 0.85): the same split with every bot in the kept half; C.1 is killed while the central is
   down, the restarted central freezes family C, and `unfreeze C` collapses C.1 into C (regress_unfreeze's flow).
+splitcentral_links (DESIGN 0.88): splitcentral with every map's links on demand (MESH_LINKS=all:OnDemand, Slice 7).
 
 regress.py hands itself in as `rig` (as for regress_split and regress_splitcrash: request_play, launch_bot, zone_lines,
 central_lines, ps, EXE, ...), so this module never imports it; the unit tests hand in a fake. The graders are rigcentral's.
@@ -36,7 +37,7 @@ import rigsplit
 import rigsplitcrash
 import rigtools
 
-SCENARIOS = ("splitcentral", "splitcentral_merge", "splitcentral_base", "splitcentral_unfreeze")
+SCENARIOS = ("splitcentral", "splitcentral_merge", "splitcentral_base", "splitcentral_unfreeze", "splitcentral_links")
 TWO_HOST_REASON = ("runs the central and the spawner as build processes on this host and kills and restarts the central; "
                    "the other machine runs no spawner and its cell could not follow a central restarted here")
 PERSIST_REASON = regress_split.PERSIST_REASON
@@ -69,6 +70,7 @@ CASES = {
     "splitcentral_merge": Case("merge", True, {}),
     "splitcentral_base": Case("base", False, {"MESH_FAULT_DIE_ON_HELLO": "C:2"}),
     "splitcentral_unfreeze": Case("unfreeze", False, {}),
+    "splitcentral_links": Case("split", True, {"MESH_LINKS": "all:OnDemand"}),
 }
 # What run() hands grade_layout: the split phase's SplitRun, the case, the merge's pairs (e1, e2 from the status file;
 # e3, tidy from the central's second lifetime), the adopted pair and the kill time.

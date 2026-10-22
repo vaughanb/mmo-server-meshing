@@ -3677,7 +3677,7 @@ namespace MultiplayerARPG.MMO.Mesh
             if (fastSpawnOnHandoff && playerCharacterEntity != null && TryClaimIncomingHandoff(playerCharacterEntity.Id))
             {
                 Stamp($"handoff arrival {playerCharacterEntity.CharacterName}: relates data loading in background");
-                base.LoadPlayerCharacterEntityRelatesData(connectionId, playerCharacterEntity, userId, accessToken).Forget();
+                LoadArrivalRelatesData(connectionId, playerCharacterEntity, userId, accessToken).Forget(); // the kit's load, asked again across a database drop (MeshMapNetworkManager_ArrivalLoad)
                 return UniTask.CompletedTask;
             }
             return base.LoadPlayerCharacterEntityRelatesData(connectionId, playerCharacterEntity, userId, accessToken);

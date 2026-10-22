@@ -13,6 +13,7 @@
 // fallback for a kit whose request table cannot be reached.
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using LiteNetLib.Utils;
 using LiteNetLibManager;
 using UnityEngine;
 
@@ -35,6 +36,11 @@ namespace MultiplayerARPG.MMO.Mesh
                  "their callbacks, which strands their awaiters). Normally they are answered with a timeout at the " +
                  "reconnect and nothing waits. Slightly over the kit's 30 s request timeout.")]
         public float databaseDrainWaitSeconds = 35f;
+        [Tooltip("Send a database request again once the connection is up when that is safe: a READ the drop stranded, " +
+                 "or any request the transport refused while the connection was down or connecting (it never left). " +
+                 "The kit's caller then gets the database's answer instead of a timeout; a write that went out is never " +
+                 "sent twice. Off: every stranded request is answered with a timeout at the reconnect (DESIGN.md 0.89).")]
+        public bool resendStrandedDatabaseReads = true;
         private float _nextDatabaseReconnect;
         private DatabaseNetworkManager _databaseManager;
         private bool _databaseWasConnected;
@@ -42,6 +48,10 @@ namespace MultiplayerARPG.MMO.Mesh
         private float _databaseDrainSince;
         private bool _databaseEverConnected;
         private float _databaseGraceUntil;
+        private int _databaseDrops;
+        private readonly MeshDatabaseReplayBook _databaseReplays = new MeshDatabaseReplayBook();
+        private readonly HashSet<uint> _databaseResends = new HashSet<uint>();
+        private float _nextDatabaseReplayPrune;
         private static System.Reflection.FieldInfo s_requestCallbacksField;
         private static bool s_requestCallbacksMissingLogged;
 
@@ -58,6 +68,16 @@ namespace MultiplayerARPG.MMO.Mesh
                     && _databaseManager.Client.Transport != null && _databaseManager.Client.Transport.IsClientStarted;
             }
         }
+
+        /// <summary>
+        /// DatabaseDrops counts the times this server saw its database connection go down, so a caller can tell a
+        /// request that failed because the connection that carried it dropped (the count moved, or it was down when
+        /// sent) from one the database manager failed over a live connection (DESIGN.md 0.89).
+        /// </summary>
+        internal int DatabaseDrops => _databaseDrops;
+
+        /// <summary>Whether this server watches (and re-opens) its own database client: false in a process that hosts the database manager, or with the reconnect off.</summary>
+        internal bool DatabaseClientWatched => databaseReconnectSeconds > 0f && _databaseManager != null && !_databaseManager.IsServer;
 
         /// <summary>OnStartServer's hook: a new server start has not connected yet and leaves the kit's first attempt alone for the grace period.</summary>
         private void DatabaseOnStartServer()
@@ -78,15 +98,19 @@ namespace MultiplayerARPG.MMO.Mesh
                 return;
             if (_databaseManager.IsServer)
                 return;     // this process hosts the database manager itself; there is no client to re-open
+            DatabaseReplayTick();
             bool connected = IsDatabaseConnected;
             if (connected != _databaseWasConnected)
             {
                 _databaseWasConnected = connected;
+                if (!connected)
+                    _databaseDrops++;   // a request sent before this can no longer be answered (DatabaseDrops)
                 if (connected)
                 {
                     Logging.Log("Mesh", $"Database connection to {_databaseManager.networkAddress}:{_databaseManager.networkPort} is open");
                     _databaseEverConnected = true;
                     _databaseDrainLogged = false;
+                    ResendStrandedRequests();
                 }
             }
             if (connected || _databaseManager.IsClient)
@@ -107,13 +131,100 @@ namespace MultiplayerARPG.MMO.Mesh
             _databaseDrainSince = 0f;
             _nextDatabaseReconnect = Time.unscaledTime + databaseReconnectSeconds;
             List<LiteNetLibRequestCallback> waiting = TakeRequestCallbacks(table);
-            string note = waiting.Count > 0 ? $", timing out {waiting.Count} request(s) it can no longer answer"
+            List<LiteNetLibRequestCallback> kept = resendStrandedDatabaseReads ? SplitResendable(waiting, _databaseReplays) : new List<LiteNetLibRequestCallback>();
+            string note = waiting.Count > 0 || kept.Count > 0 ? $", timing out {waiting.Count} request(s) it can no longer answer" + (kept.Count > 0 ? $" and keeping {kept.Count} to send again" : string.Empty)
                 : inFlight > 0 ? $", stranding {inFlight} request(s) that waited out {databaseDrainWaitSeconds:0}s" : string.Empty;
             Logging.LogWarning("Mesh", $"Database connection lost; reconnecting to {_databaseManager.networkAddress}:{_databaseManager.networkPort}{note}");
             _databaseManager.StartClient();
+            WrapDatabaseTransport();
+            foreach (LiteNetLibRequestCallback callback in kept)
+            {
+                // Back into the table StartClient just cleared, under its own id: the answer to the packet sent again
+                // finds it, and its kit timer (from the first send) still bounds it.
+                if (table.TryAdd(callback.RequestId, callback))
+                    _databaseResends.Add(callback.RequestId);
+            }
             int failed = ExpireRequestCallbacks(waiting, out string firstFailure);
             if (failed > 0)
                 Logging.LogWarning("Mesh", $"Database reconnect: {failed} of {waiting.Count} timed-out request handler(s) failed: {firstFailure}");
+        }
+
+        /// <summary>
+        /// Every server tick: the database client's transport is wrapped (MeshReplayingTransport) whenever the kit's
+        /// StartClient has put a fresh one in, and every 5 s the kept packets of answered requests are forgotten.
+        /// </summary>
+        private void DatabaseReplayTick()
+        {
+            if (!resendStrandedDatabaseReads)
+                return;
+            WrapDatabaseTransport();
+            if (Time.unscaledTime < _nextDatabaseReplayPrune)
+                return;
+            _nextDatabaseReplayPrune = Time.unscaledTime + 5f;
+            ConcurrentDictionary<uint, LiteNetLibRequestCallback> table = RequestCallbacksOf(_databaseManager.Client);
+            if (table != null)
+                _databaseReplays.Prune(table.ContainsKey);
+        }
+
+        private void WrapDatabaseTransport()
+        {
+            LiteNetLibClient client = _databaseManager != null ? _databaseManager.Client : null;
+            if (!resendStrandedDatabaseReads || client == null || client.Transport == null || client.Transport is MeshReplayingTransport)
+                return;
+            client.Transport = new MeshReplayingTransport(client.Transport, client, _databaseReplays);
+        }
+
+        /// <summary>
+        /// The connection is up: the reads kept at the reconnect, and every request the transport refused while it was
+        /// down or connecting, are sent under their own ids while they are still waiting.
+        /// </summary>
+        private void ResendStrandedRequests()
+        {
+            if (!resendStrandedDatabaseReads)
+                return;
+            foreach (uint requestId in _databaseReplays.Undelivered())
+                _databaseResends.Add(requestId);
+            if (_databaseResends.Count == 0)
+                return;
+            LiteNetLibClient client = _databaseManager.Client;
+            ConcurrentDictionary<uint, LiteNetLibRequestCallback> table = RequestCallbacksOf(client);
+            int reads = 0, refused = 0, expired = 0;
+            foreach (uint requestId in _databaseResends)
+            {
+                if (table == null || !table.ContainsKey(requestId) || !_databaseReplays.TryGet(requestId, out MeshDatabaseReplayBook.Packet packet))
+                {
+                    expired++;   // answered meanwhile, or its own timer did
+                    continue;
+                }
+                if (!client.Transport.ClientSend(packet.channel, packet.deliveryMethod, NetDataWriter.FromBytes(packet.bytes, false)))
+                    continue;    // still refused: kept for the next time the connection comes up
+                if (packet.delivered)
+                    reads++;
+                else
+                    refused++;
+            }
+            _databaseResends.Clear();
+            if (reads + refused + expired > 0)
+                Logging.Log("Mesh", $"Database connection open again: sent {reads} stranded read(s) again and {refused} request(s) it had refused while down" + (expired > 0 ? $"; {expired} had been answered or timed out meanwhile" : string.Empty));
+        }
+
+        /// <summary>
+        /// Takes out of the taken callbacks those whose packet the book kept (a read, or a request never sent): they are sent after the
+        /// reconnect instead of being answered with a timeout. What is left in waiting is timed out.
+        /// </summary>
+        public static List<LiteNetLibRequestCallback> SplitResendable(List<LiteNetLibRequestCallback> waiting, MeshDatabaseReplayBook book)
+        {
+            List<LiteNetLibRequestCallback> kept = new List<LiteNetLibRequestCallback>();
+            for (int i = waiting.Count - 1; i >= 0; --i)
+            {
+                if (book != null && book.TryGet(waiting[i].RequestId, out _))
+                {
+                    kept.Add(waiting[i]);
+                    waiting.RemoveAt(i);
+                }
+            }
+            kept.Reverse();
+            return kept;
         }
 
         /// <summary>

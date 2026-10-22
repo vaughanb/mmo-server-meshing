@@ -347,11 +347,12 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>
         /// Headless (-batchmode -nographics) client: the kit's RaycastButtonManager3D (created by the vending sign's
         /// RaycastButton3D on every player character) polls the Input System mouse each frame, and Mouse.current is null
-        /// without a display — an NRE per frame. Test tooling only: keep it disabled while the bot runs.
+        /// without a display — an NRE per frame. Test tooling only: keep it disabled while the bot runs. Checked every
+        /// frame (DESIGN 0.88): a hop re-creates the manager with the new entity, and the 0.1 s poll this replaced let
+        /// 3-5 frames of NREs into about one bot log in a hundred migrations, which the regression grades fail on.
         /// </summary>
         private IEnumerator HeadlessGuards()
         {
-            WaitForSecondsRealtime wait = new WaitForSecondsRealtime(0.1f); // the manager is created with the player entity; every frame until then is one NRE
             while (true)
             {
                 foreach (UtilsComponents.RaycastButtonManager3D m in FindObjectsByType<UtilsComponents.RaycastButtonManager3D>(FindObjectsInactive.Include, FindObjectsSortMode.None))
@@ -359,7 +360,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     if (m != null && m.enabled)
                         m.enabled = false;
                 }
-                yield return wait;
+                yield return null;   // after this frame's Updates: a manager created in it is off before its first Update
             }
         }
 

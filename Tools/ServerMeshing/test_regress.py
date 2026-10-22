@@ -106,10 +106,22 @@ class SplitWiringTests(unittest.TestCase):
                 regress.run_scenario("no such scenario", regress.Report("x"))
             self.assertEqual(os.listdir(d), [])
 
+    def test_scenario_start_clears_fault_markers_files_and_directories(self):
+        # DESIGN 0.88: regress_family arms a fault for every incarnation by turning its marker into a directory.
+        with tempfile.TemporaryDirectory() as d:
+            open(os.path.join(d, "ServerMesh.FaultFired.MESH_FAULT_DIE_ON_DRAIN.C.1"), "w").close()
+            os.makedirs(os.path.join(d, "ServerMesh.FaultFired.MESH_FAULT_DIE_ON_HELLO.C.2"))
+            paths = {name: os.path.join(d, f"{name}.txt") for name in
+                     ("COORDINATOR_STORE", "LAYOUT_COMMAND", "LAYOUT_COMMAND_STATUS")}
+            with mock.patch.multiple(regress, TEMP=d, **paths), self.assertRaises(ValueError):
+                regress.run_scenario("no such scenario", regress.Report("x"))
+            self.assertEqual(os.listdir(d), [])
+
     def test_registration(self):
         for name in ("split", "splitc2", "merge", "mergec2", "splitcrash_prewarm", "splitcrash_drain", "splitcrash_base",
                      "autosplit", "autobenefit", "autorefuse", "splitbuild", "splitcentral", "splitcentral_merge",
-                     "splitcentral_base", "splitcentral_unfreeze"):
+                     "splitcentral_base", "splitcentral_unfreeze", "splitcentral_links", "autosplit_links", "mergechildren",
+                     "collapsesibling", "autoqueue", "autodefer"):
             with self.subTest(name):
                 self.assertIn(name, regress.ALL)
                 self.assertNotIn(name, regress.DEFAULT)
@@ -122,9 +134,9 @@ class SplitWiringTests(unittest.TestCase):
             self.assertIn(key, regress.ENV_KEYS)
         self.assertEqual(len(regress.ENV_KEYS), len(set(regress.ENV_KEYS)))
         # Slice 5: the central-restart scenarios run the split-process topology, everything else the editor's.
-        for name in ("splitcentral", "splitcentral_merge", "splitcentral_base", "splitcentral_unfreeze"):
+        for name in ("splitcentral", "splitcentral_merge", "splitcentral_base", "splitcentral_unfreeze", "splitcentral_links"):
             self.assertEqual(regress.topology_of(name), "split")
-        for name in ("split", "merge", "pet", "splitcrash_base"):
+        for name in ("split", "merge", "pet", "splitcrash_base", "mergechildren", "autoqueue", "autosplit_links"):
             self.assertEqual(regress.topology_of(name), "editor")
         # Slice 3: an expected id outside ZONES (a dynamic child) is graded on the test map; the Coarse set names three.
         self.assertEqual(regress.expected_zones({"C", "C.1", "C2"}), [("C", regress.MAP), ("C2", regress.MAP2), ("C.1", regress.MAP)])

@@ -27,7 +27,8 @@ namespace MultiplayerARPG.MMO.Mesh
         public const string ENV_BAND = "MESH_BAND";
 
         /// <summary>Rig toggle: busy-wait this many milliseconds every server frame, to prove the work probe measures work.
-        /// "8" burns on every cell, "C:8" on cell C only (so one cell's figure is not inflated by ten others spinning).
+        /// "8" burns on every cell, "C:8" on cell C only (so one cell's figure is not inflated by ten others spinning),
+        /// "C:14,E:7" a comma list (DESIGN 0.88: an entry naming the cell wins over one naming none).
         /// "@&lt;path&gt;" (Slice 3) names a file holding the same text, re-read at every load window: an absent or empty
         /// file burns nothing, so a running cell's burn can be switched on and off.</summary>
         public const string ENV_PROBE_BURN_MS = "MESH_PROBE_BURN_MS";
@@ -46,8 +47,7 @@ namespace MultiplayerARPG.MMO.Mesh
 #if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
         private float _nextLoadReport;
         private float _lastLoadReportTime;
-        private float _probeBurnMs;
-        private string _probeBurnCell;
+        private readonly List<KeyValuePair<string, float>> _probeBurns = new List<KeyValuePair<string, float>>();
         private string _probeBurnFile;
         private string _probeBurnFileText;
         private long _loadClientBytesOut, _loadLinkBytesOut;
@@ -118,8 +118,7 @@ namespace MultiplayerARPG.MMO.Mesh
             _loadGen0Collections = System.GC.CollectionCount(0);
             _hasWorkWindow = false;
             _probeOverdueLogged = false;
-            _probeBurnMs = 0f;
-            _probeBurnCell = null;
+            _probeBurns.Clear();
             _probeBurnFile = null;
             _probeBurnFileText = null;
             string burn = System.Environment.GetEnvironmentVariable(ENV_PROBE_BURN_MS);
@@ -131,14 +130,10 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             else if (!string.IsNullOrEmpty(burn))
             {
-                if (TryParseBurn(burn, out float ms, out string cell))
-                {
-                    _probeBurnMs = ms;
-                    _probeBurnCell = cell;
-                    Logging.Log("Mesh", $"{ENV_PROBE_BURN_MS}={burn}: burning {ms:0.##} ms of main-thread work every frame on {(_probeBurnCell ?? "every cell")}");
-                }
+                if (TryParseBurns(burn, _probeBurns))
+                    Logging.Log("Mesh", $"{ENV_PROBE_BURN_MS}={burn}: burning main-thread work every frame, {DescribeBurns(_probeBurns)}");
                 else
-                    Logging.LogWarning("Mesh", $"{ENV_PROBE_BURN_MS}={burn} is not [cell:]milliseconds; ignored");
+                    Logging.LogWarning("Mesh", $"{ENV_PROBE_BURN_MS}={burn} is not a list of [cell:]milliseconds; ignored");
             }
             bool logBins = System.Environment.GetEnvironmentVariable(ENV_WORK_BINS) == "1";
             MeshWorkProbe.Meter.LogBins = logBins;
@@ -166,6 +161,48 @@ namespace MultiplayerARPG.MMO.Mesh
             return true;
         }
 
+        /// <summary>
+        /// TryParseBurns reads a comma list of "[cell:]milliseconds" entries (one entry, the Slice 3 form, is a list of one)
+        /// into <paramref name="into"/> (cleared first, and left empty when any entry does not parse).
+        /// </summary>
+        public static bool TryParseBurns(string text, List<KeyValuePair<string, float>> into)
+        {
+            into.Clear();
+            foreach (string entry in (text ?? string.Empty).Split(','))
+            {
+                if (!TryParseBurn(entry, out float ms, out string cell))
+                {
+                    into.Clear();
+                    return false;
+                }
+                into.Add(new KeyValuePair<string, float>(cell, ms));
+            }
+            return into.Count > 0;
+        }
+
+        /// <summary>BurnFor is a cell's burn under a parsed list: the entry naming it (ignoring case), else one naming no cell, else 0.</summary>
+        public static float BurnFor(List<KeyValuePair<string, float>> burns, string cellId)
+        {
+            float every = 0f;
+            for (int i = 0; i < burns.Count; ++i)
+            {
+                if (burns[i].Key == null)
+                    every = burns[i].Value;
+                else if (string.Equals(burns[i].Key, cellId, System.StringComparison.OrdinalIgnoreCase))
+                    return burns[i].Value;
+            }
+            return every;
+        }
+
+        /// <summary>DescribeBurns: "14 ms on C, 7 ms on every cell" (one entry reads as the Slice 3 line did).</summary>
+        public static string DescribeBurns(List<KeyValuePair<string, float>> burns)
+        {
+            string[] parts = new string[burns.Count];
+            for (int i = 0; i < burns.Count; ++i)
+                parts[i] = $"{burns[i].Value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)} ms on {burns[i].Key ?? "every cell"}";
+            return string.Join(", ", parts);
+        }
+
         /// <summary>ReadBurnFile re-reads the burn file (file mode): its first line sets the burn, nothing or an empty file clears it; changes are logged.</summary>
         private void ReadBurnFile()
         {
@@ -184,27 +221,28 @@ namespace MultiplayerARPG.MMO.Mesh
             _probeBurnFileText = text;
             if (text.Length == 0)
             {
-                if (_probeBurnMs > 0f)
+                if (_probeBurns.Count > 0)
                     Logging.Log("Mesh", "Burn off");
-                _probeBurnMs = 0f;
-                _probeBurnCell = null;
+                _probeBurns.Clear();
                 return;
             }
-            if (!TryParseBurn(text, out float ms, out string cell))
+            List<KeyValuePair<string, float>> parsed = new List<KeyValuePair<string, float>>();
+            if (!TryParseBurns(text, parsed))
             {
-                Logging.LogWarning("Mesh", $"Burn file {_probeBurnFile} holds '{text}', not [cell:]milliseconds; the burn is unchanged");
+                Logging.LogWarning("Mesh", $"Burn file {_probeBurnFile} holds '{text}', not a list of [cell:]milliseconds; the burn is unchanged");
                 return;
             }
-            _probeBurnMs = ms;
-            _probeBurnCell = cell;
-            Logging.Log("Mesh", $"Burn {ms:0.##} ms on {(cell ?? "every cell")}");
+            _probeBurns.Clear();
+            _probeBurns.AddRange(parsed);
+            Logging.Log("Mesh", $"Burn {DescribeBurns(_probeBurns)}");
         }
 
         private void LoadTick()
         {
-            if (_probeBurnMs > 0f && (_probeBurnCell == null || string.Equals(_probeBurnCell, OwnZoneId, System.StringComparison.OrdinalIgnoreCase)))
+            float burnMs = _probeBurns.Count > 0 ? BurnFor(_probeBurns, OwnZoneId) : 0f;
+            if (burnMs > 0f)
             {
-                long until = System.Diagnostics.Stopwatch.GetTimestamp() + (long)(_probeBurnMs / 1000f * System.Diagnostics.Stopwatch.Frequency);
+                long until = System.Diagnostics.Stopwatch.GetTimestamp() + (long)(burnMs / 1000f * System.Diagnostics.Stopwatch.Frequency);
                 while (System.Diagnostics.Stopwatch.GetTimestamp() < until) { }
             }
             if (Time.unscaledTime < _nextLoadReport)

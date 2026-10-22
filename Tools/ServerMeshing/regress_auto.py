@@ -1,6 +1,6 @@
 """Slice 3's automatic-policy scenarios for regress.py (Docs/ServerMeshing/slices/slice3_design.md decisions 17-19):
 
-    python Tools/ServerMeshing/regress.py autosplit autobenefit autorefuse
+    python Tools/ServerMeshing/regress.py autosplit autobenefit autorefuse autosplit_links
 
 autosplit: the test map Dynamic with automatic split and merge on; eight bots stand 88 m either side of C's centre
   line; a switchable burn makes C hot, the central splits it by itself (x 0, child C.1), measures the relief once the
@@ -9,6 +9,7 @@ autobenefit: the 600 m Coarse cut of the test map, 200 spread synthetic players 
   by itself and its measured relief is held to its prediction (the plan's +-15 %).
 autorefuse: the same with a 60 m crowd on the centre, steered puppets and the steered fit: the planner refuses the
   cut and says so, once a minute, and nothing splits.
+autosplit_links (DESIGN 0.88): autosplit with every map's links on demand (MESH_LINKS=all:OnDemand, Slice 7).
 
 regress.py hands itself in as `rig` (request_play, launch_bot, zone_lines, kill_bots, TEMP, ...), so this module never
 imports it; the unit tests hand in a fake. The readers are rigauto's.
@@ -25,7 +26,7 @@ import rigmerge
 import rigsplit
 import rigtools
 
-SCENARIOS = ("autosplit", "autobenefit", "autorefuse")
+SCENARIOS = ("autosplit", "autobenefit", "autorefuse", "autosplit_links")
 TWO_HOST_REASON = regress_split.TWO_HOST_REASON
 PERSIST_REASON = regress_split.PERSIST_REASON
 
@@ -65,13 +66,16 @@ AUTOSPLIT_ENV = dict(COMMON_ENV, MESH_SPLIT_UTIL="0.6", MESH_MERGE_UTIL="0.5", M
 COARSE_ENV = {"MESH_LAYOUT_OVERRIDE": None, "MESH_AUTO_OPS": "split", "MESH_SPLIT_UTIL": "0.3", "MESH_SPLIT_DWELL": "20",
               "MESH_OP_COOLDOWN": "600", "MESH_NO_MONSTERS": "1", "MESH_LOAD_PLAN": f"C:{BENEFIT_PLAYERS}",
               "MESH_LOAD_SEED": "7", "MESH_LOAD_AREA": BENEFIT_AREA}
+LINKS_ENV = {"MESH_LINKS": "all:OnDemand"}   # autosplit_links
 REFUSE_ENV = {"MESH_LOAD_AREA": REFUSE_AREA, "MESH_PUPPET_MOTION": "steered", "MESH_PLANNER_WEIGHTS": "1,0.126,0.2,9.1"}
 ALLOWED = {
     "autosplit": ("split of C planned", "split split-1 measured", "merge of C C.1 planned", "merge merge-1 measured"),
     "autobenefit": ("split of C planned", "split split-1 measured"),
     "autorefuse": ("split of C refused: best peak",),
+    "autosplit_links": ("split of C planned", "split split-1 measured", "merge of C C.1 planned", "merge merge-1 measured"),
 }
-EXPECTED_ZONES = {"autobenefit": {"C", "C.1", "C2"}, "autorefuse": {"C", "C2"}}
+EXPECTED_ZONES = {"autobenefit": {"C", "C.1", "C2"}, "autorefuse": {"C", "C2"},
+                  "autosplit_links": {"SW", "S", "SE", "W", "C", "E", "NW", "N", "NE", "C2", "C.1"}}
 # What run() leaves for grade_layout: the rigsplit.Split the policy performed (None when it never planned one) and the
 # statuses of its split and merge.
 AutoRun = collections.namedtuple("AutoRun", "name split split_status merge_status")
@@ -113,8 +117,8 @@ def stand_plan():
 
 
 def run(name, rep, rig, start, day, bots):
-    if name == "autosplit":
-        return flow_autosplit(rep, rig, start, day, bots)
+    if name in ("autosplit", "autosplit_links"):
+        return flow_autosplit(rep, rig, start, day, bots, name)
     if name in ("autobenefit", "autorefuse"):
         return flow_coarse(name, rep, rig, start, day)
     raise ValueError(f"unknown scenario {name}")
@@ -132,7 +136,7 @@ def grade_policy_lines(rep, name, lines):
 
 
 # ------------------------------------------------------------------ autosplit (decision 17)
-def flow_autosplit(rep, rig, start, day, bots):
+def flow_autosplit(rep, rig, start, day, bots, name="autosplit"):
     spec = regress_split.SPECS["split"]
     split = regress_split.split_of("split", rig.MAP)
     plan = stand_plan()
@@ -140,14 +144,15 @@ def flow_autosplit(rep, rig, start, day, bots):
     provision.reset_bot_positions(2, regress_split.STAND_BOTS, [b.point for b in plan], status_path=rig.STATUS)
     burn = burn_path(rig)
     write_burn(burn, "")
-    env = dict(AUTOSPLIT_ENV, MESH_CELL_MODE=f"{rig.MAP}:Dynamic", MESH_PROBE_BURN_MS="@" + burn)
+    env = dict(AUTOSPLIT_ENV, MESH_CELL_MODE=f"{rig.MAP}:Dynamic", MESH_PROBE_BURN_MS="@" + burn,
+               **(LINKS_ENV if name == "autosplit_links" else {}))
     rig.request_play("stand", spec.tester[0], spec.tester[1], env=env, enabled=False)
     rig.wait_play(60)
     time.sleep(20)
     logs = {}
     for b in plan:
         args = ["-meshAutoMode", "stand", "-meshWalkX", f"{b.point[0]:g}", "-meshWalkZ", f"{b.point[1]:g}"]
-        logs[b.user] = rig.launch_bot("autosplit", b.user, args, channel=spec.channel, observe_seconds=OBSERVE_S, line_x=spec.at)
+        logs[b.user] = rig.launch_bot(name, b.user, args, channel=spec.channel, observe_seconds=OBSERVE_S, line_x=spec.at)
         bots.append(("stand", logs[b.user]))
     standing = regress_split.wait_standing(list(logs.values()), STAND_TIMEOUT_S)
     for b in plan:
@@ -156,7 +161,7 @@ def flow_autosplit(rep, rig, start, day, bots):
                   f"{b.user} stood on the {'child' if b.side == '+' else 'kept'} side (at {at}, planned {b.point})")
     if not all(standing.values()):
         rep.check(False, "autosplit: no burn, a bot never logged 'Standing at'")
-        return AutoRun("autosplit", split, None, None)
+        return AutoRun(name, split, None, None)
     before = status_lines(rig)
     rep.check(rigauto.split_count(before) == 0 and not any(t.startswith("split of") for t in rigauto.policy_texts(before)),
               "nothing split or planned before the burn (idle C is not hot)")
@@ -191,8 +196,8 @@ def flow_autosplit(rep, rig, start, day, bots):
     regress_split.grade_bots(rep, rig, plan, logs, results, spec, start, day)
     regress_merge.grade_exit(rep, rig, spec.child, start, day)
     regress_merge.grade_store(rep, rig, split)
-    grade_policy_lines(rep, "autosplit", status_lines(rig))
-    return AutoRun("autosplit", split, split_status, merge_status)
+    grade_policy_lines(rep, name, status_lines(rig))
+    return AutoRun(name, split, split_status, merge_status)
 
 
 # ------------------------------------------------------------------ autobenefit and autorefuse (decisions 18, 19)
@@ -307,7 +312,7 @@ def grade_refusal(rep, rig):
 def grade_layout(rep, rig, start, day, ar):
     """autosplit: the split's and the merge's layouts by rectangle, as regress_merge grades them (policy lines allowed
     in the status file); the Coarse scenarios: C and the child by rectangle, C2 as a Static map, no other zone."""
-    if ar.name == "autosplit":
+    if ar.name in ("autosplit", "autosplit_links"):
         split_pairs = (ar.split_status or {}).get("pairs", {})
         merge_pairs = (ar.merge_status or {}).get("pairs", {})
         regress_split.grade_layout(
