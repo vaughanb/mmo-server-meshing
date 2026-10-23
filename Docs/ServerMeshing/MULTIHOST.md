@@ -1,15 +1,16 @@
 # Cross-network test: running the mesh on two machines
 
 What to prepare on the second machine, and how to run the mesh across two of them. Everything the add-on does had only
-ever crossed loopback; it now crosses a real network adapter, and six of the eight regression scenarios run that way
-(§8b, §8c).
+ever crossed loopback; it now crosses a real network adapter. The Static scenarios run that way with a hand-started cell
+on the second machine (§8b, §8c), and since DESIGN 0.90 the Dynamic ones do too, with a map-spawn server of the second
+machine's own starting, restarting and killing its cells and their children (§6b, §8g).
 
 Machine names used below:
 
 | Name | Role |
 |---|---|
-| **A** | This desktop, `192.168.50.83`. Runs the Unity editor, which hosts the central, login, database-manager and map-spawn servers, plus MySQL and the harness. |
-| **B** | The second machine. Runs map-server processes only. No Unity, no database, no editor. |
+| **A** | This desktop, `10.168.168.83` (`192.168.50.83` until 2026-10-22, when the LAN was renumbered; the dated results below keep the addresses of their day). Runs the Unity editor, which hosts the central, login, database-manager and map-spawn servers, plus MySQL and the harness. |
+| **B** | The second machine. Runs map servers only: started by hand (§6, Static cells), or by its own map-spawn server (§6b, any cell, a Dynamic map's included). No Unity, no database, no editor. |
 
 ## 1. What we are proving
 
@@ -89,31 +90,41 @@ New-NetFirewallRule -DisplayName "MeshTest" -Direction Inbound -Protocol UDP -Lo
 
 and the same on B with only the map and link ranges. Remove the rule when the test is over.
 
+B's map-spawn server (§6b) needs no rule of its own: it binds its port (6001) on B but nobody connects to it there; the
+central reaches it over the spawner's own connection to the cluster on A's 6010. (On the rig, A's rule still opens only
+8000-8010 and 18000-18010, the ranges before dynamic cells: enough while each host runs at most eleven cells at once,
+which every scenario does; widen it to the table above before running more.)
+
 ## 5. Changes on A
 
-1. **Advertise A's real address.** In `Build/Server/Config/serverConfig.json` set `publicAddress` to `192.168.50.83`.
-   It is currently `127.0.0.1`, which B cannot reach. A's own cells still work, because the LAN address is reachable
-   from A too.
+1. **Advertise A's real address.** In `Build/Server/Config/serverConfig.json` set `publicAddress` to `10.168.168.83`,
+   and give the server-instance prefab's map spawner the same (the editor rig reads the prefab, not the file). `127.0.0.1`
+   is unreachable from B. A's own cells still work, because the LAN address is reachable from A too. In the editor a
+   private address that no interface of this machine has is replaced by this machine's address on the same /24, or by
+   loopback when it has none there, with a warning: after a renumbering that is loopback, and B reaches none of A's
+   cells, so update the prefab with the network.
 2. **Give A's map spawner only A's cells.** `MeshMapSpawnNetworkManager` now has a `servedCells` list. Set it to
    `C, N, NE` on the server-instance prefab, or start the editor with `MESH_SPAWN_CELLS=C,N,NE`. Without this, A starts
    a server for every cell in the registry, B's included, and the cluster rejects B's duplicate registration. List
    base cells only, never a child such as `C.1`: a child of a Dynamic map, a restart of any cell of a cut family, a kill
    and the policy's host-headroom check all go to the spawner that advertises the **base** cell, so a family stays on
-   its base's host. The Setup window's Validate judges every spawner prefab's list together (SETUP §6a.3).
-3. **Leave sleeping cells off for this test.** The central still asks the first map-spawn server it knows about when it
-   wakes a cell, so with two hosts a sleeping cell can wake on the wrong one. Placement-aware waking is the next piece
-   of work; until then, run with `sleepCells` off so every cell is started by its own host.
+   its base's host (§6b says why it never moves). The Setup window's Validate judges every spawner prefab's list
+   together (SETUP §6a.3).
+3. **Leave sleeping cells off for this test.** The central wakes a cell through the spawner that advertised it (§9),
+   but a hand-started cell (§6) has no spawner to wake it, and with B's own spawner (§6b) waking has not been run
+   across two hosts yet; run with `sleepCells` off so every cell is started by its own host at boot.
 
 ## 6. Launching B's cells
 
-B runs its cells by hand, one process per cell. No spawner and no editor is involved. From `C:\MeshTest\Server`:
+For a Static map B can run its cells by hand, one process per cell, with no spawner and no editor involved (a Dynamic
+map's cells need B's own spawner, §6b). From `C:\MeshTest\Server`:
 
 ```powershell
 .\kit-ce-project.exe -batchmode -nographics -startMapServer `
   -mapName ServerMeshTestMap -channelId E `
   -mapPort 8001 -publicAddress <B-IP> `
-  -centralAddress 192.168.50.83 -centralPort 6010 `
-  -databaseManagerAddress 192.168.50.83 -databaseManagerPort 6100
+  -centralAddress 10.168.168.83 -centralPort 6010 `
+  -databaseManagerAddress 10.168.168.83 -databaseManagerPort 6100
 ```
 
 Points worth knowing:
@@ -123,6 +134,55 @@ Points worth knowing:
 - `-publicAddress` must be B's own address. It is what A's cells and the clients are told to connect to.
 - Start A first, so the cluster is up; B's cell will retry registration anyway, but the logs are easier to read in order.
 - For a second cell on B, repeat with a different `-channelId` and `-mapPort`.
+
+## 6b. B's own map-spawn server (Dynamic maps)
+
+A hand-started cell is enough for a Static map, and nothing else can serve a Dynamic map's cells: their children, every
+supervised restart and every kill are asked of a spawner, and a family runs on its base's host. So a host that serves a
+Dynamic base runs the kit's map-spawn server (DESIGN 0.90), a build process registered with A's central:
+
+```powershell
+cd C:\MeshTest\Rig            # its own folder: Config, Logs and Temp live here, the build stays in C:\MeshTest\Server
+$env:MESH_SPAWN_CELLS = "C"      # the base cells this host serves (or servedCells on the prefab)
+C:\MeshTest\Server\kit-ce-project.exe -batchmode -nographics -startMapSpawnServer `
+  -centralAddress 10.168.168.83 -clusterPort 6010 -mapSpawnPort 6001 `
+  -spawnExePath C:\MeshTest\Server\kit-ce-project.exe -spawnStartPort 8000 -publicAddress <B-IP> `
+  -spawnMaps "ServerMeshTestMap|ServerMeshTestMap2" -logFile C:\MeshTest\Rig\Logs\spawner.log
+```
+
+and the folder's `Config\serverConfig.json` names A for the database manager (`databaseManagerAddress`) and the
+cluster port (`clusterPort` 6010), and B as `publicAddress`. That is the part that is easy to miss: the kit's spawner
+hands its cells the central's address, their port and the public address on the command line, but **not the database
+manager's** -- each cell reads that from `./Config/serverConfig.json` of its working directory, which it inherits from
+the spawner. A hand-started cell is given `-databaseManagerAddress` instead (§6). `-spawnExePath` must be absolute and
+`-spawnMaps` is one `|`-separated token (quoted in PowerShell and cmd, where `|` is a pipe).
+
+`remoteb.py spawner-start --cells C [--env KEY=VALUE ...]` does all of it over SSH: it creates the folder, writes its
+config from A's project `Config/serverConfig.json` with the addresses replaced (B's own `Config` is never touched),
+starts the spawner detached with the scenario's environment (its cells inherit it), and `remoteb.py stop` kills the
+spawner first (a live one restarts the cells it started) and then every cell. `fetch --from-rig` copies the folder's
+logs into `Logs/remote/rig/`; `marker` and `tempfile` write the fault markers and the burn file under its `Temp`.
+
+What then crosses the network, and what does not:
+
+- **Children, restarts and kills stay on B.** The central sends them to the spawner that advertised the base (`Serves`,
+  at every registration). Since 0.90 every spawner advertises, an empty list meaning "every cell no other spawner
+  advertises", and the central (`SpawnerForFamily`) never falls back to another host: while the spawner that advertised
+  a family's base is away, a split of the family is refused and a restart fails (and is retried by the supervisor),
+  rather than starting a child on A. A spawner whose list has not arrived yet is not asked either.
+- **Why a child never starts on another host.** Three things key on the host: the kill check compares the process's
+  start time with the incarnation's (both on the cell's own clock, so it holds only on the host that started it), the
+  fence orders a cell's incarnations by their start ticks (a cell restarted on a host whose clock runs behind could look
+  older than the incarnation the supervisor gave up on, and be fenced), and the policy's headroom rule judges the
+  family by its spawner's host report. A family that could move would need all three re-keyed; it cannot, by design.
+- **The host report per host.** Each spawner reports its own machine's cores and cores in use; the policy defers a split
+  of a family on B by B's load, not A's.
+- **Links, frames, on-demand links, buildings and the database** need nothing host-specific: cells learn each other's
+  addresses from the cluster, frames come from the registry both builds share, and every cell talks to A's database
+  manager. One clock rule: a cell on an on-demand map releases a restarted neighbour's old records by the neighbour's
+  incarnation start less 2 s, so keep the two hosts' clocks within that (§2.3).
+- **A central restart** with cells on both hosts: B's spawner and cells reconnect to the restarted central like A's,
+  re-advertise and say hello with the layout they hold (§8g measures it).
 
 ## 7. Checking that it came up
 
@@ -138,7 +198,7 @@ In B's `.info.log`:
 
 - `Own cell from channel id: E of map ServerMeshTestMap, grid (1,0), world x [100, 300) …` with the expected rectangle
   and neighbour count. A wrong rectangle here means the two builds differ.
-- `Zone peer registered: C_ServerMeshTestMap -> 192.168.50.83:8000` for each of A's cells, with **A's LAN address**,
+- `Zone peer registered: C_ServerMeshTestMap -> 10.168.168.83:8000` for each of A's cells, with **A's LAN address**,
   not loopback.
 - `Neighbour zone C linked (conn N)`.
 
@@ -234,11 +294,30 @@ what the design predicted: the band is sized by visible range, not by link laten
   missing. A missing log reads as "no lines", which turns every check on that cell into a silent pass: the first
   two-machine run reported `zone E: 0 exception lines` while copying nothing at all.
 
-Two scenarios are skipped in this mode and say so when they are:
+Since DESIGN 0.90 a scenario runs in one of two modes. **Cell mode** (the Static scenarios) is the above. **Spawner
+mode** (every scenario of a Dynamic map, `sleep`, `wake` and `dynidle`, or every scenario with `--remote-spawner`)
+starts B's map-spawn server instead (§6b), serving the `--remote-cells` (several are allowed here), with the scenario's
+environment: a path under A's `Temp` (the burn file) is pointed at B's, A's own keys (`MESH_SPAWN_CELLS`, the
+coordinator's store, the editor's role) stay here. The harness then
+
+- waits for every remote base cell's `Own cell` line (or, with sleeping cells, for the spawner's word to the central);
+- reads a remote family's cells -- the base and its children under their runtime ids -- from `Logs/remote/rig/`, and
+  runs the scenarios' process snippets (count a cell's processes, kill one) on B against B's executable;
+- writes fault markers and the burn file where the cell runs (`collapsesibling`'s directory marker on B);
+- stops B's spawner when the scenario ends, so it never registers with the next one's cluster;
+- checks that no cell of the remote family logged on A (the family stayed on its base's host) and notes the family
+  cells B ran and its spawner's kill lines;
+- before the first scenario, deploys this machine's build to B when B's `Assembly-CSharp.dll` differs (by SHA-256).
+
+`--topology split` (the `splitcentral` scenarios) works with spawner mode: the central and A's spawner are build
+processes here, A's spawner advertising A's LAN address, and B's spawner joins A's cluster like the editor's.
+
+These are skipped in both modes and say so when they are:
 
 | Scenario | Why |
 |---|---|
-| `sleep` | needs the central to start a cell on demand, and it asks the first map-spawn server it knows; B runs no spawner, so placement-aware waking (§9) comes first |
+| `linkcap`, `partyfar` | re-cut the test map or place a third bot through this machine's database and spawner |
+| `autodefer` | its `MESH_HOST_CORES` is calibrated to this machine's cores in use; across two hosts C's family is judged by B's |
 
 `crash` **does** run across both machines. Its fault variable is handed to the remote cell explicitly (A's cells
 inherit it from the editor through the spawner; B's cannot), `remoteb.py start --restart` stands in for the spawner,
@@ -428,6 +507,38 @@ that run and the local `seamcold` passes. Worth knowing if it recurs: the kit's 
 saves (`characterSaveMinIntervalSeconds`, 20 s) and answers reads from its cache, so "saved before the notice" holds
 only through that cache.
 
+## 8g. Dynamic cells across two machines (2026-10-22, DESIGN 0.90)
+
+A served SW, S, SE, W, E, NW, N, NE and C2 from the editor (or, for `splitcentral`, from build processes); B served C
+through its own map-spawn server (§6b), so every child of C, every restart and every kill ran on B, and every link
+between C's family and its eight neighbours crossed the LAN. `python Tools/ServerMeshing/regress.py split merge
+splitcrash_drain splitbuild autosplit collapsesibling splitcentral --remote-cells C`, three passes:
+
+| Scenario | Checks | Passes | What it proves across the network |
+|---|---|---|---|
+| `split` | 119/119 | 3/3 | B's spawner starts C.1 beside C; bots, monsters, statics and synthetics cross the cut on B |
+| `merge` | 144/144 | 3/3 | C.1 drains and quits on B (3/3 after a fix to the test bot; 4 of 6 before it, below) |
+| `splitcrash_drain` | 104/104 | 3/3 | the child dies mid-drain on B and the supervisor restarts it through B's spawner |
+| `splitbuild` | 142/142 | 3/3 | buildings follow the cut and the merge on B's cells, rows in A's database |
+| `autosplit` | 116/116 | 3/3 | the policy plans C's split by C's load and B's host report (`BRENDOSERVER with 24 core(s)`) |
+| `collapsesibling` | 122/122 | 3/3 | C.2's restarts on B die on the directory marker armed on B; the collapse runs into C.1 |
+| `splitcentral` | 161/161 | 3/3 | the central (a build process on A) killed and restarted: adopted 12 s after the kill, B's cells reconnected and reopened their database |
+
+Every run also checked that no cell of C's family ever logged on A. B's base cell served 12-26 s after its spawner
+started. A separate check (`kill C.1` with C.1 on B) saw B's spawner kill the process after its executable and
+start-time check (`Spawner: killed C.1 pid ... (operator)`) and the supervisor restart it there; in the collapse and
+crash scenarios B's spawner refused the kills of pids that had already exited, as it should.
+
+The first build's two `merge` misses were the test bot, not the mesh: the harvest bot, walking from beside the node
+it had just harvested to its drop 41 m away, stalled against the node's box, which the baked navmesh does not know, and
+never picked the drop up (`pickup=False`, every mesh check passing). DESIGN 0.88 saw the same stall on one machine. The
+bot now steps a stalled walk aside past what holds it, and `merge` passed 3/3 across both machines on that build.
+
+Two things the network change of that day taught (§9a): an allow rule scoped to the old subnet drops everything from
+B without a word, and a network Windows reclassifies as Public silently disables Private-only rules. And B's clock ran
+3.1 s behind A's: the harness now measures the offset at the start of a run and reads B's log stamps on A's clock, and
+the hosts should still be resynchronised, since on-demand links allow 2 s (§6b).
+
 ## 9. What we already know is missing
 
 - **A handoff refusal is acted on** — fixed 2026-09-18 (§8d, *Resolution*): the client honours a refusal per attempt,
@@ -451,19 +562,13 @@ only through that cache.
   `Temp/ServerMesh.Coordinator.json`); every port the central and the spawner bind goes on the command line, the cells
   read `clusterPort` and the database manager's address from `Config/serverConfig.json`, and `-spawnMaps` is one
   pipe-separated token. The central process can then be killed and started again alone: the cells reconnect, say hello
-  with the layout they hold, and the new central adopts it (SETUP §6a.9). Not yet across two machines: the second
-  machine still runs no spawner, so its cell could not follow a central restarted here.
-- **A map-spawn server on the second machine.** The central now asks the spawner that owns a cell rather than the
-  first one it knows (each spawner advertises its `servedCells` when it registers, and the central routes by that,
-  falling back to the old behaviour for a cell nobody claimed). What is still missing is a spawner *process* on the
-  other machine: its cell is started by hand through `remoteb.py`, so there is nothing there to receive a start
-  request and `sleep` still cannot run across two hosts.
-  **The two-host limit of dynamic cells (Slice 6).** A Dynamic map's children run on their base cell's host: the
-  central asks the spawner that advertises the base to start a child, and to restart, kill or judge the headroom of any
-  cell of its family. Machine B has no spawner, so a Dynamic base served from B would have its children started on
-  whichever spawner the central picks (A's), apart from their base, and its kills sent where no such process runs. Keep
-  B's cells on a Static map (as the rig does: the split scenarios are skipped with `--remote-cells`), or run a spawner
-  on every host that serves a Dynamic map's cells.
+  with the layout they hold, and the new central adopts it (SETUP §6a.9). Across two machines since 0.90 (§8g): B's
+  spawner and its cells follow the restarted central like A's.
+- **A map-spawn server on the second machine** -- done in DESIGN 0.90 (§6b): B runs the kit's spawner as a build
+  process, and a Dynamic family based on B has its children, restarts and kills there. The central asks the spawner
+  that advertised a cell (its base's, for a family); an asset cell nobody advertised still goes to the first spawner it
+  knows when it wakes (sleeping cells, Static behaviour kept), while a Dynamic family never goes to another host.
+  `sleep` and `wake` run in spawner mode but have not been run across two hosts yet.
 - **A fault path to a persisting cell.** `crash` runs across both machines when the cell is started per scenario
   (`remoteb.py start --env --restart` carries the fault and stands in for the spawner); a cell kept across scenarios
   with `--remote-persist` never receives the variable, so the crash and the central-restart survival cannot yet be
@@ -477,6 +582,8 @@ only through that cache.
 | Symptom | Cause |
 |---|---|
 | B's cell logs `Own cell ...` but never `Zone peer registered`, and every database call times out | **A is blocking inbound traffic to the Unity editor.** Driven from the editor, the cluster, login and database manager all run inside `Unity.exe`, and a Windows Firewall **block** rule for Unity beats any port-based allow rule. Windows creates one silently if a firewall prompt for Unity was ever dismissed. This cost an hour on the first attempt; look for it first. |
+| B's spawner logs `Connecting to Cluster Server: <A>:6010` and `ConnectionFailed` every ten seconds, while SSH and RDP between the machines work | **A's allow rule is scoped to an old subnet.** A rule made with a `-RemoteAddress` keeps it when the LAN is renumbered (2026-10-22: `192.168.50.0/24` after the move to `10.168.168.x`), and everything from B is dropped. `Get-NetFirewallRule -DisplayName MeshTest \| Get-NetFirewallAddressFilter` shows it; change it on **A** with `Set-NetFirewallRule -DisplayName MeshTest -RemoteAddress <new subnet>` in an elevated shell. A datagram sent from B to a listener on A's 6010 proves the path before a run. |
+| SSH to B times out after a network change although sshd runs | Windows classed the new network as **Public** while the OpenSSH (and `MeshTest`) rules allow Private only. `Get-NetConnectionProfile` on B; `Set-NetConnectionProfile -NetworkCategory Private`. A changed address also needs a new `known_hosts` entry here: compare its keys with the old address's (`ssh-keygen -F`, `ssh-keyscan`) before adding them. |
 | Ping between the two machines fails although everything else works | Windows blocks inbound ICMP by default. Ping proves nothing here. Send a UDP datagram to a port in the allowed range instead. |
 | A cell started over SSH disappears seconds later | OpenSSH kills the session's process tree on disconnect. Launch through `Win32_Process.Create`, which is what `remoteb.py start` does. |
 | Peers register but no link comes up | The link port is the map port plus 10 000 and is a separate firewall entry. |

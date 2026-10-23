@@ -255,4 +255,71 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             Assert.That((spawner, advertised), Is.EqualTo((9L, true)));
         }
     }
+
+    public class MeshSpawnerForFamilyTests
+    {
+        private static long For(string baseId, Dictionary<string, long> byCell, long[] servingAll, long[] registered, out string error)
+        {
+            return MeshCentralNetworkManager.SpawnerForFamily(baseId, byCell, new HashSet<long>(servingAll), new List<long>(registered), out error);
+        }
+
+        [Test]
+        public void AdvertisedBase_GetsItsSpawner()
+        {
+            long spawner = For("C", new Dictionary<string, long> { { "C", 9 }, { "E", 5 } }, new long[0], new long[] { 5, 9 }, out string error);
+
+            Assert.That((spawner, error), Is.EqualTo((9L, (string)null)));
+        }
+
+        [Test]
+        public void AdvertisedBaseWhoseSpawnerIsAway_GoesToNoOtherHost()
+        {
+            long spawner = For("C", new Dictionary<string, long> { { "C", 9 }, { "E", 5 } }, new long[] { 6 }, new long[] { 5, 6 }, out string error);
+
+            Assert.That(spawner, Is.EqualTo(-1));
+            Assert.That(error, Does.Contain("serves C").And.Contain("no other host"));
+        }
+
+        [Test]
+        public void UnadvertisedBase_GoesToASpawnerThatServesEveryCell()
+        {
+            long spawner = For("C", new Dictionary<string, long> { { "E", 5 } }, new long[] { 6 }, new long[] { 5, 6 }, out string error);
+
+            Assert.That((spawner, error), Is.EqualTo((6L, (string)null)));
+        }
+
+        [Test]
+        public void UnadvertisedBase_WithEveryHostListingOthers_IsRefused()
+        {
+            long spawner = For("C", new Dictionary<string, long> { { "E", 5 } }, new long[0], new long[] { 5 }, out string error);
+
+            Assert.That(spawner, Is.EqualTo(-1));
+            Assert.That(error, Does.Contain("no registered map-spawn server serves C"));
+        }
+
+        [Test]
+        public void SpawnerWhoseListHasNotArrived_IsNotAsked()
+        {
+            long spawner = For("C", new Dictionary<string, long>(), new long[0], new long[] { 5 }, out string error);
+
+            Assert.That(spawner, Is.EqualTo(-1));
+            Assert.That(error, Does.Contain("none serves every cell"));
+        }
+
+        [Test]
+        public void NoSpawner_SaysSo()
+        {
+            long spawner = For("C", new Dictionary<string, long>(), new long[] { 6 }, new long[0], out string error);
+
+            Assert.That((spawner, error), Is.EqualTo((-1L, "no map-spawn server is registered")));
+        }
+
+        [Test]
+        public void ServingAllSpawnerThatLeft_IsNotAsked()
+        {
+            long spawner = For("C", new Dictionary<string, long>(), new long[] { 6 }, new long[] { 7 }, out _);
+
+            Assert.That(spawner, Is.EqualTo(-1));
+        }
+    }
 }

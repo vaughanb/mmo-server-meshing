@@ -253,6 +253,9 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>Which map-spawn server may start a given cell, from what each spawner advertised at registration.</summary>
         private readonly Dictionary<string, long> _spawnerByCell = new Dictionary<string, long>(System.StringComparer.OrdinalIgnoreCase); // cell ids compare as the spawner's Serves does
 
+        /// <summary>The spawners that advertised an empty list: each serves every cell no other spawner advertised (DESIGN 0.90).</summary>
+        private readonly HashSet<long> _spawnersServingAll = new HashSet<long>();
+
         /// <summary>Each spawner's host, by its cluster connection (Slice 3 decision 8: the policy's headroom rule reads it).</summary>
         private readonly Dictionary<long, MeshHostInfo> _hostBySpawner = new Dictionary<long, MeshHostInfo>();
 
@@ -269,13 +272,21 @@ namespace MultiplayerARPG.MMO.Mesh
         private void HandleServesMessage(MessageHandlerData messageHandler)
         {
             MeshServesMessage message = messageHandler.ReadMessage<MeshServesMessage>();
-            if (message.cellIds == null)
-                return;
-            for (int i = 0; i < message.cellIds.Length; ++i)
+            int listed = 0;
+            for (int i = 0; message.cellIds != null && i < message.cellIds.Length; ++i)
             {
-                if (!string.IsNullOrEmpty(message.cellIds[i]))
-                    _spawnerByCell[message.cellIds[i]] = messageHandler.ConnectionId;
+                if (string.IsNullOrEmpty(message.cellIds[i]))
+                    continue;
+                _spawnerByCell[message.cellIds[i]] = messageHandler.ConnectionId;
+                listed++;
             }
+            if (listed == 0)
+            {
+                _spawnersServingAll.Add(messageHandler.ConnectionId);
+                Logging.Log("Mesh", $"Map-spawn server on connection {messageHandler.ConnectionId} serves every cell no other spawner advertises");
+                return;
+            }
+            _spawnersServingAll.Remove(messageHandler.ConnectionId);
             Logging.Log("Mesh", $"Map-spawn server on connection {messageHandler.ConnectionId} serves {string.Join(",", message.cellIds)}");
         }
 
@@ -386,7 +397,8 @@ namespace MultiplayerARPG.MMO.Mesh
 
         /// <summary>
         /// SpawnerFor is the map-spawn server to ask for a cell: the one that advertised it (for a dynamic cell, its base
-        /// cell's) while that one is still registered, else the first registered spawner, else -1.
+        /// cell's) while that one is still registered, else the first registered spawner, else -1. The awake set's start
+        /// path (asset cells); a Dynamic family's spawner is SpawnerForFamily's, which never falls back to another host.
         /// </summary>
         public static long SpawnerFor(MeshCell cell, IReadOnlyDictionary<string, long> spawnerByCell, ICollection<long> registered, out bool advertised)
         {

@@ -20,8 +20,6 @@ import rigsplit
 import rigtools
 
 SCENARIOS = ("split", "splitc2")
-TWO_HOST_REASON = ("starts a child cell through the central's spawner request; the other machine runs no spawner, so "
-                   "a child of its cell could not start there")
 PERSIST_REASON = "runs the test map Dynamic through the environment, which a persisted remote cell never gets"
 
 OBSERVE_S = 300          # each bot's stand window (-meshObserveSeconds), from its "Standing at"

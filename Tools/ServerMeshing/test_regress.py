@@ -125,7 +125,10 @@ class SplitWiringTests(unittest.TestCase):
             with self.subTest(name):
                 self.assertIn(name, regress.ALL)
                 self.assertNotIn(name, regress.DEFAULT)
-                self.assertIn("spawner", regress.TWO_HOST_SKIP[name])
+                # DESIGN 0.90: across two machines every one runs with the other machine's spawner; autodefer alone
+                # is skipped (calibrated to this machine's cores).
+                self.assertEqual(regress.remote_mode_of(name), "spawner")
+                self.assertEqual(name in regress.TWO_HOST_SKIP, name == "autodefer")
                 self.assertIn(name, regress.PERSIST_SKIP)
         for key in ("MESH_FAULT_DIE_ON_PREWARM", "MESH_FAULT_DIE_ON_DRAIN", "MESH_FAULT_DIE_ON_NOTICE", "MESH_AUTO_OPS",
                     "MESH_SPLIT_UTIL", "MESH_SPLIT_DWELL", "MESH_MERGE_UTIL", "MESH_MERGE_AFTER", "MESH_OP_COOLDOWN",

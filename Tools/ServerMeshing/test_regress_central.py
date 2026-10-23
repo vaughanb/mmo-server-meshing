@@ -325,7 +325,6 @@ class RegistrationTests(unittest.TestCase):
         for name in regress_central.SCENARIOS:
             self.assertIn("C.1", regress_central.EXPECTED_ZONES[name])
             self.assertIn("C2", regress_central.EXPECTED_ZONES[name])
-        self.assertIn("spawner", regress_central.TWO_HOST_REASON)
 
 
 if __name__ == "__main__":

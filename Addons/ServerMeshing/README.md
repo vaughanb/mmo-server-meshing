@@ -28,7 +28,8 @@ in OpenMMORPG `develop` (d077c5f, 2026-10-20).
   exceeds 250 (250–300 m suits a sandbox where towns can appear anywhere).
 - Ten cells over two maps are exercised by the regression harness in the [Server Meshing Test Rig](../ServerMeshingTestRig)
   add-on, on one machine or across two: 34 scenarios, twenty-one of them dynamic cells (two run with links on demand, and
-  one is the operator's `unfreeze` of a family a central restart left frozen) and two on-demand links.
+  one is the operator's `unfreeze` of a family a central restart left frozen) and two on-demand links. Across two
+  machines the dynamic scenarios run with the cut family on the second machine's own map spawner.
 
 ## Requirements
 

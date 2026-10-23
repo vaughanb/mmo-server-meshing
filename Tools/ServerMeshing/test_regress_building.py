@@ -154,7 +154,6 @@ class SplitBuildTests(unittest.TestCase):
 
     def test_registration(self):
         self.assertEqual(regress_building.SCENARIOS, ("splitbuild",))
-        self.assertIn("spawner", regress_building.TWO_HOST_REASON)
         self.assertEqual(rigbuilding.SCROLLS, 20)
         self.assertGreaterEqual(regress_building.OBSERVE_S, regress_merge.MERGE_OBSERVE_S)
 

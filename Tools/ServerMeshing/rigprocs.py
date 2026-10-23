@@ -35,12 +35,14 @@ def central_args(logs, scenario, lifetime):
                           "-logFile", f"{logs}/regress_{scenario}_central{lifetime}.log"]
 
 
-def spawner_args(exe, logs, scenario):
+def spawner_args(exe, logs, scenario, public=ADDRESS):
     """The spawner process's arguments: the cluster to join, its own port, the cells from the build (absolute: the path
-    is cwd-relative in the config), their first port, the two test maps (ONE token split on '|' by the kit's ReadArgs)."""
+    is cwd-relative in the config), their first port, the address its cells advertise (`public`: this machine's LAN
+    address when another machine's cells link to them, DESIGN 0.90), the two test maps (ONE token split on '|' by the
+    kit's ReadArgs)."""
     return list(BATCH) + [SPAWNER_FLAG, "-centralAddress", ADDRESS, "-clusterPort", str(PORTS["cluster"]),
                           "-mapSpawnPort", str(PORTS["spawner"]), "-spawnExePath", exe,
-                          "-spawnStartPort", str(PORTS["cells"]), "-publicAddress", ADDRESS,
+                          "-spawnStartPort", str(PORTS["cells"]), "-publicAddress", public,
                           "-spawnMaps", "|".join(MAPS),
                           "-logFile", f"{logs}/regress_{scenario}_spawner.log"]
 

@@ -22,7 +22,6 @@ import rigsplit
 import rigsplitcrash
 
 SCENARIOS = ("splitbuild",)
-TWO_HOST_REASON = regress_split.TWO_HOST_REASON
 PERSIST_REASON = regress_split.PERSIST_REASON
 EXPECTED_ZONES = {}
 
@@ -131,7 +130,7 @@ def restart_base(rep, rig, r, split, merge_done_at, start, day):
         return None
     time.sleep(max(0.0, merge_done_at + KILL_AFTER_DONE_S - time.time()))
     try:
-        killed = rigmerge.parse_count(rig.ps(rigsplitcrash.kill_script(rig.EXE, split.base)))
+        killed = rigmerge.parse_count(rig.cell_ps(split.base, rigsplitcrash.kill_script))
     except RuntimeError as ex:
         rep.check(False, f"restart: the kill of {split.base} failed ({ex})")
         return None

@@ -20,11 +20,13 @@ so B needs nothing but the OpenSSH server, the build unpacked somewhere, and thi
                                          [--rig-ships WIRE:SEED:SCALE] [--stagger 1]
                                          start meshbot<first>.. on B against A's login (Phase 0 step 8b; remotebots)
     python Tools/ServerMeshing/remoteb.py bots-stop | bots-count | bots-fetch   (bots-fetch: into Logs/remote/bots/)
+    python Tools/ServerMeshing/remoteb.py spawner-start --cells C [--env KEY=VALUE]   B's map-spawn server (remotespawner)
+    python Tools/ServerMeshing/remoteb.py fetch --from-rig | marker --name N --kind dir | tempfile --name N --text T
 
 status prints B's cells, bots and sinks, B's clock, and whether RelicTestServer or a Relics process runs.
 Defaults match Docs/ServerMeshing/MULTIHOST.md; override with --host/--user/--key/--dir or the MESH_B_* environment
 variables. Nothing here changes B's configuration: it only starts, stops and reads. The SSH plumbing lives in
-remotessh, the bots in remotebots (the ~500-line rule); their names used here stay importable from remoteb.
+remotessh, the bots in remotebots, B's spawner in remotespawner (the ~500-line rule); their names stay importable here.
 
     remoteb.state(args)                # one SSH query: counts, clock, host, CPU, free memory, Relic (parse_state)
     remoteb.state_problems(state)      # why no step 8b run may use B as it is ([] when it may)
@@ -43,11 +45,12 @@ import time
 
 import remotebots
 import remoteimpair
+import remotespawner
 import remotessh
 # Re-exported for remoteb's callers and tests; calls go through remotessh.<name>, so one patch reaches them all.
-from remotessh import (CRLF, DEFAULTS, IS_BOT, IS_CELL, IS_SINK, NOT_THIS_SESSION, ROOT, SINK_FLAG,  # noqa: F401
-                       SINK_SIZES_FLAG, STOP_BOTS, STOP_CELLS, STOP_SINK, Unreachable, clean, count_command,
-                       stop_command)
+from remotessh import (CRLF, DEFAULTS, IS_BOT, IS_CELL, IS_SINK, IS_SPAWNER, NOT_THIS_SESSION, ROOT,  # noqa: F401
+                       SINK_FLAG, SINK_SIZES_FLAG, STOP_BOTS, STOP_CELLS, STOP_SINK, STOP_SPAWNER, Unreachable, clean,
+                       count_command, stop_command)
 from remoteimpair import PROFILES, NoAdmin, clumsy_count, start_impair, stop_impair  # noqa: F401 (p0peer's names)
 
 
@@ -216,16 +219,11 @@ def cmd_start(args):
 
 
 def cmd_clearmarkers(args):
-    """Delete the fault markers in the remote build's Temp folder.
-
-    MESH_FAULT_DIE_ON_NOTICE fires once per marker file, and the marker is written relative to the WORKING
-    directory, which on the other machine is its own build folder. Clearing this machine's Temp does nothing for it.
-    """
-    out, err, _ = remotessh.ssh(args, "$p = '" + args.dir + "\\Temp'; if (Test-Path $p) { "
-                            "$f = Get-ChildItem $p -Filter 'ServerMesh.FaultFired.*' -ErrorAction SilentlyContinue; "
-                            "$f | Remove-Item -Force -ErrorAction SilentlyContinue; 'cleared ' + $f.Count } "
-                            "else { 'cleared 0' }")
-    print(out.strip() or err[:160])
+    """Delete the fault markers (files, and directories that arm a fault for every incarnation) in the Temp folders of
+    the remote build and of B's spawner: a marker is written relative to the WORKING directory, which on the other
+    machine is one of those two. Clearing this machine's Temp does nothing for it."""
+    out = remotespawner.run_script(args, remotespawner.clearmarkers_script([args.dir, args.rig]))
+    print(out.strip())
     return 0
 
 
@@ -258,8 +256,10 @@ def cmd_impair(args):
 
 
 def cmd_stop(args):
-    # Also kill the launcher script: with --restart it would otherwise start the cell straight back up. A phantom
-    # sink and bots are left running (sink-stop and bots-stop stop them).
+    # Also kill the launcher script: with --restart it would otherwise start the cell straight back up. The spawner
+    # goes first (DESIGN 0.90): a live one restarts the cells it started. A phantom sink and bots are left running
+    # (sink-stop and bots-stop stop them).
+    remotessh.stop(args, STOP_SPAWNER, IS_SPAWNER)
     print("B server processes remaining:", remotessh.stop(args, STOP_CELLS, IS_CELL))
     return 0
 
@@ -348,19 +348,23 @@ def cmd_log(args):
 
 
 def fetch(args):
-    """Copies B's Logs/*.log (its cells' logs and sink.log) into Logs/remote/; returns the folder's files, sorted.
-    RuntimeError when scp fails or the folder stays empty."""
-    dest = os.path.join(ROOT, "Logs", "remote")
+    """Copies B's Logs/*.log (its cells' logs and sink.log) into Logs/remote/, or with args.from_rig the spawner
+    folder's (its cells' logs and spawner.log) into Logs/remote/rig/; returns that folder's files, sorted. RuntimeError
+    when scp fails or the folder stays empty; a spawner folder with no log yet (before its first start) is no error:
+    a cell whose log is missing fails its own grading (regress.zone_lines)."""
+    from_rig = getattr(args, "from_rig", False)
+    dest = os.path.join(ROOT, "Logs", "remote", *(["rig"] if from_rig else []))
     os.makedirs(dest, exist_ok=True)
     # Forward slashes: scp splits user@host:path on the first colon, and a backslash path with a drive letter
     # gets mangled by the remote shell, so the copy silently matches nothing.
-    src = f"{args.user}@{args.host}:{args.dir}/Logs/*.log".replace("\\", "/")
+    folder = args.rig if from_rig else args.dir
+    src = f"{args.user}@{args.host}:{folder}/Logs/*.log".replace("\\", "/")
     r = subprocess.run(["scp", "-i", args.key, "-o", "BatchMode=yes", src, dest],
                        capture_output=True, text=True, timeout=300)
-    if r.returncode != 0:
+    if r.returncode != 0 and not (from_rig and "No such file or directory" in r.stderr):
         raise RuntimeError("scp failed: " + clean(r.stderr)[:300])
     files = sorted(name for name in os.listdir(dest) if os.path.isfile(os.path.join(dest, name)))
-    if not files:
+    if not files and not from_rig:
         raise RuntimeError("scp reported success but copied nothing; check the remote log folder")
     return files
 
@@ -372,7 +376,7 @@ def cmd_fetch(args):
     except RuntimeError as ex:
         print(ex)
         return 1
-    print(f"fetched {len(files)} file(s) into Logs/remote/")
+    print(f"fetched {len(files)} file(s) into Logs/remote/" + ("rig/" if getattr(args, "from_rig", False) else ""))
     for f in files[-6:]:
         print("   ", f)
     return 0
@@ -444,7 +448,8 @@ COMMANDS = {"start": cmd_start, "stop": cmd_stop, "status": cmd_status, "log": c
             "deploy": cmd_deploy, "clearmarkers": cmd_clearmarkers, "impair": cmd_impair,
             "sink-start": cmd_sink_start, "sink-stop": cmd_sink_stop, "bots-start": remotebots.cmd_bots_start,
             "bots-stop": remotebots.cmd_bots_stop, "bots-count": remotebots.cmd_bots_count,
-            "bots-fetch": remotebots.cmd_bots_fetch}
+            "bots-fetch": remotebots.cmd_bots_fetch, "spawner-start": remotespawner.cmd_spawner_start,
+            "marker": remotespawner.cmd_marker, "tempfile": remotespawner.cmd_tempfile}
 
 
 def build_parser():
@@ -477,6 +482,11 @@ def build_parser():
     ap.add_argument("--restart", action="store_true",
                     help="relaunch the cell if it exits, the way A's spawner does (needed by the crash scenario)")
     ap.add_argument("--suffix", default="info", choices=["info", "warn", "error"])
+    ap.add_argument("--cells", default="", help="spawner-start: the base cells B's spawner serves, comma-separated")
+    ap.add_argument("--from-rig", action="store_true", help="fetch: the spawner folder's logs (--rig), not the build's")
+    ap.add_argument("--name", default="", help="marker, tempfile: the file's name under the spawner folder's Temp")
+    ap.add_argument("--kind", default="file", choices=remotespawner.MARKER_KINDS, help="marker: file, dir or clear")
+    ap.add_argument("--text", default="", help="tempfile: the file's whole text")
     for k, v in DEFAULTS.items():
         ap.add_argument("--" + k.replace("_", "-"), default=v)
     return ap

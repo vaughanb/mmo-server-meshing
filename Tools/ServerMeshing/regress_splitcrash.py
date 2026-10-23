@@ -26,7 +26,6 @@ import rigsplitcrash
 import rigtools
 
 SCENARIOS = ("splitcrash_prewarm", "splitcrash_drain", "splitcrash_base")
-TWO_HOST_REASON = regress_split.TWO_HOST_REASON
 PERSIST_REASON = regress_split.PERSIST_REASON
 
 MONSTER_AREAS = "only:Spawn_Interior_C"   # decision 13: every other monster area off, so the total is exact
@@ -243,7 +242,7 @@ def flow_base(rep, rig, cr, samples, start, day):
         return
     time.sleep(max(0.0, r.done_at + KILL_AFTER_DONE_S - time.time()))
     try:
-        killed = rigmerge.parse_count(rig.ps(rigsplitcrash.kill_script(rig.EXE, spec.base)))
+        killed = rigmerge.parse_count(rig.cell_ps(spec.base, rigsplitcrash.kill_script))
     except (RuntimeError, ValueError) as ex:
         rep.check(False, f"{spec.base}: the kill failed ({str(ex)[:120]})")
         return

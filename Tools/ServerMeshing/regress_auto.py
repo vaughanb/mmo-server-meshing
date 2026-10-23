@@ -27,7 +27,6 @@ import rigsplit
 import rigtools
 
 SCENARIOS = ("autosplit", "autobenefit", "autorefuse", "autosplit_links")
-TWO_HOST_REASON = regress_split.TWO_HOST_REASON
 PERSIST_REASON = regress_split.PERSIST_REASON
 
 BURN_FILE_NAME = "ServerMesh.ProbeBurn.txt"
@@ -85,13 +84,16 @@ def burn_path(rig):
     return os.path.join(rig.TEMP, BURN_FILE_NAME)
 
 
-def write_burn(path, text):
+def write_burn(path, text, rig=None):
     """Writes the burn file whole (a temporary file renamed over it): a cell reading between a truncate and a write
-    would see an empty file and switch its burn off for a window."""
+    would see an empty file and switch its burn off for a window. With `rig`, the other machine's copy too (DESIGN
+    0.90: its cells read the same name under their own Temp, rig.mirror_temp)."""
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         f.write(text)
     os.replace(tmp, path)
+    if rig is not None:
+        rig.mirror_temp(os.path.basename(path), text)
 
 
 def status_lines(rig):
@@ -143,7 +145,7 @@ def flow_autosplit(rep, rig, start, day, bots, name="autosplit"):
     rig.db_reset(spec.tester, spec.tester)
     provision.reset_bot_positions(2, regress_split.STAND_BOTS, [b.point for b in plan], status_path=rig.STATUS)
     burn = burn_path(rig)
-    write_burn(burn, "")
+    write_burn(burn, "", rig)
     env = dict(AUTOSPLIT_ENV, MESH_CELL_MODE=f"{rig.MAP}:Dynamic", MESH_PROBE_BURN_MS="@" + burn,
                **(LINKS_ENV if name == "autosplit_links" else {}))
     rig.request_play("stand", spec.tester[0], spec.tester[1], env=env, enabled=False)
@@ -166,10 +168,10 @@ def flow_autosplit(rep, rig, start, day, bots, name="autosplit"):
     rep.check(rigauto.split_count(before) == 0 and not any(t.startswith("split of") for t in rigauto.policy_texts(before)),
               "nothing split or planned before the burn (idle C is not hot)")
 
-    write_burn(burn, BURN_HOT)
+    write_burn(burn, BURN_HOT, rig)
     lines = wait_lines(rig, lambda ls: rigsplit.op_outcome(rigauto.split_status(ls)) is not None, SPLIT_TIMEOUT_S)
     split_status = rigauto.split_status(lines)
-    write_burn(burn, BURN_WARM)
+    write_burn(burn, BURN_WARM, rig)
     regress_split.grade_status(rep, split_status, spec)
     planned = rigauto.first(rigauto.policy_texts(lines), rigauto.parse_planned)
     rep.check(planned is not None and (planned["cell"], planned["axis"], planned["at"], planned["side"], planned["child"]) == ("C", "x", 0.0, "+", "C.1")
@@ -183,7 +185,7 @@ def flow_autosplit(rep, rig, start, day, bots, name="autosplit"):
     results = regress_split.wait_results(list(logs.values()), OBSERVE_S + RESULT_SLACK_S)
     rep.check(not rigauto.has_merge_line(status_lines(rig)), "no merge while the bots stood (the warm burn kept the pair from cooling)")
     rig.kill_bots()
-    write_burn(burn, "")
+    write_burn(burn, "", rig)
     lines = wait_lines(rig, lambda ls: rigsplit.op_outcome(rigauto.merge_status(ls)) is not None, MERGE_TIMEOUT_S)
     merge_status = rigauto.merge_status(lines)
     merge_planned = rigauto.first(rigauto.policy_texts(lines), rigauto.parse_merge_planned)

@@ -133,7 +133,7 @@ neighbour count; at runtime the lines are drawn as debug lines and the player's 
   (plus the central, login and database servers) with the right arguments, or copies the commands to the clipboard.
 - **Several hosts:** give each host's `MeshMapSpawnNetworkManager` a `servedCells` list of base cells (or
   `MESH_SPAWN_CELLS=C,N`) so two machines never start the same cell; see [MULTIHOST.md](MULTIHOST.md), and §6a.4 for
-  Dynamic maps (a family runs on its base's host).
+  Dynamic maps (every host serving a Dynamic base runs a spawner; a family runs on its base's host).
 - **Production:** the kit's `MMOServerInstance` runs unchanged. Its map spawner (`MeshMapSpawnNetworkManager`) starts
   one process per cell for every map that has a layout (maps without a layout keep the kit's single-server behaviour);
   the central (`MeshCentralNetworkManager`) lists every cell as a channel, so no channel has to be typed into
@@ -375,8 +375,9 @@ Panel 3's **Validate** judges every Dynamic map before anything starts (`!!` is 
 | `… base cell(s) can never split` (warning) | No cut of those base cells leaves both sides at least the minimum cell (a cut needs twice the minimum on one axis and the minimum on the other), or `maxCellsPerBase` is 1. A `maxCellsPerBase` of 0 or less gets its own line: commands meet no limit and the policy never splits. | none: make the cell bigger or the minimum smaller. |
 | `up to <n> band neighbours … over the 32` (warning) | A cell streams to at most 32 band neighbours. If every base near this one is cut to `maxCellsPerBase` (never more cells than its area holds in minimum cells), one of its cells could pass that, and a layout change that would (a split, or a merge whose survivor reaches more cells) is refused. The count is an upper bound for a world started under these settings. | none: lower `maxCellsPerBase`, or cut the map coarser. |
 | `with linkAllZones a cell links to every live cell of its map … over the 64` (warning) | With `linkAllZones` on (the default) every cell links to every live cell of its map plus its band neighbours on other maps, and a cell's link server takes 64. Cut to `maxCellsPerBase` the map could pass it. A map with `onDemandLinks` is not judged by this count. | none: turn the map's `onDemandLinks` on (its cells then link to their band neighbours and the cells they have business with, and a party share for a far member goes through the central), lower `maxCellsPerBase`, or turn `linkAllZones` off on the map managers (party shares then reach only linked cells). |
-| `servedCells of … leave out the Dynamic base cell(s) …` (warning) | Several hosts (§6a.4), judged over every spawner prefab's list together: a child, every supervised restart, a kill and the policy's host-headroom check go to the spawner that advertises the base. A host that runs its cells by hand advertises nothing, and the central then picks any registered spawner. | none: run Dynamic maps on hosts with a spawner. |
-| `an empty servedCells serves every cell but advertises none` (warning) | One spawner prefab lists its cells and another lists none: the second advertises nothing, so the children of the bases only it runs start on any spawner. | none: give every host its list. |
+| `servedCells of … leave out the Dynamic base cell(s) …` (warning) | Several hosts (§6a.4), judged over every spawner prefab's list together: a child, every supervised restart, a kill and the policy's host-headroom check go to the spawner that advertises the base, never to another host. With no spawner listing a base (and none with an empty list), the central refuses the family's splits and restarts; a host that runs its cells by hand cannot serve a Dynamic map's cells. | none: run a spawner on every host serving Dynamic bases, and list them. |
+| `an empty servedCells starts every cell at boot, the cells … list too` (warning) | One spawner prefab lists its cells and another lists none: the second starts every cell at boot, the others' too (the cluster keeps the first registration of each), and takes the family of every Dynamic base no list names. | none: give every host its list. |
+| `… is listed by more than one of …` (warning) | Two spawner prefabs list the same cell: both hosts start it at boot, and its family goes to whichever spawner registered last. | none: list each base on one host. |
 | `servedCells names …, which is no cell of the registry` (warning) | A typo, or a child id: children are never listed (they start on their base's spawner). | none |
 | `Registry: dynamicSettings.…` (error) | A setting the central would reject at start (the supervision grace, the policy's ranges, the cost model's weights). | none |
 
@@ -399,11 +400,20 @@ checks read the asset: a `MESH_BAND` or `MESH_SPAWN_CELLS` set for a run is not 
   §4): that is a per-host limit. Per map, with `linkAllZones` a map passes 64 live cells only at the cost of refused
   links (§6a.3); turn the map's `onDemandLinks` on and a cell takes only the links of its band neighbours and of the
   cells it has business with.
-- **Several hosts** (MULTIHOST): give every host's spawner its base cells in `servedCells` (never a child's id). A
-  Dynamic map's cells must be served by hosts that run a spawner; today's second rig machine starts its cell by hand, so
-  keep its cells on a Static map (MULTIHOST §9).
-- **The production shape** is the split-process one: the central, login and database manager in one process, the
-  spawner in another (MULTIHOST §9). The central's process can then be restarted alone (§6a.9).
+- **Several hosts** (MULTIHOST §6b, DESIGN 0.90): every host that serves a Dynamic map's base cells runs a map-spawn
+  server, with those bases in `servedCells` (never a child's id); a host that starts its cells by hand can serve Static
+  cells only. Every spawner tells the central what it serves when it registers (an empty list: every cell no other
+  spawner lists), and a family's children, restarts, kills and headroom go to the spawner that listed its base and
+  **never to another host**: while that spawner is away (its host down, or restarting), a split of the family is refused
+  (`no registered map-spawn server serves C`, `the map-spawn server that serves C ... is not registered`) and a restart
+  fails and is retried, up to the supervisor's limit. A family does not move because the kill check, the fence and the
+  headroom rule are keyed on its host's clock and load (MULTIHOST §6b). Cells on different hosts link, ghost, hand off
+  and place buildings as on one; keep the hosts' clocks within 2 s (on-demand links compare a restarted neighbour's
+  start with their own clock). Each cell of a spawner reads the database manager's address from
+  `./Config/serverConfig.json` of the spawner's working directory, not from the spawner's command line.
+- **The production shape** is the split-process one: the central, login and database manager in one process, a
+  spawner per host (MULTIHOST §6b, §9). The central's process can then be restarted alone, with cells on every host
+  (§6a.9).
 
 ### 6a.5 Splitting and merging by hand
 
@@ -547,7 +557,9 @@ Every field of the registry's `dynamicSettings`, read only when a map is Dynamic
   only, where `linkAllZones` also reached other maps' cells near the killer. A reply to the first request from a cell
   that had no link to us can be lost while the link back comes up (the request's own guard retries it). A home notice
   (a lent monster's or static's new owner, its death) waits up to 60 s for its link.
-- **Hosts**: a family runs on its base's host; a host without a spawner cannot serve a Dynamic map's cells.
+- **Hosts**: a family runs on its base's host and never moves, so a host that is down leaves its families unsplittable
+  and their dead cells unrestarted until it is back (DESIGN 0.90); a host without a spawner cannot serve a Dynamic map's
+  cells; sleeping cells have not been run across two hosts.
 - **Settings for a run**: `MESH_BAND` changes the band the map servers and the layout rules use, but the central's
   policy plans with the asset's `bandWidth` (and its minimum cell clamps to it); a base just over twice the minimum
   cell splits by command but not by the policy (its cuts fall on the report's bucket).
@@ -581,7 +593,9 @@ Every field of the registry's `dynamicSettings`, read only when a map is Dynamic
   crash, harvest, build, seam, seamcold, sleep, pvp, wake, dynidle; the first eight by default), the twenty-one of
   dynamic cells below and the two of on-demand links (`linkcap`, `partyfar`), on the rig and grades the logs of every cell that
   logged, whatever its id; `--env KEY=VALUE` passes rig toggles, `--remote-cells E` serves a cell from a second machine
-  and `--impair` degrades the link to it ([MULTIHOST.md](MULTIHOST.md) §8b, §8e). It refuses to run on a player build
+  (started by hand for a Static scenario; by the second machine's own map-spawn server, its children too, for every
+  Dynamic one and with `--remote-spawner`) and `--impair` degrades the link to it ([MULTIHOST.md](MULTIHOST.md) §8b,
+  §8e, §8g). It refuses to run on a player build
   that does not match the working tree (the rig build records a SHA-1 of every player-side script and asset in
   `Build/Server/rigbuild-manifest.txt`, and any change, addition or removal since then makes it stale), on an editor
   with compile errors, and it fails a scenario when a cell that should have run logged nothing or when a rig process
@@ -779,8 +793,9 @@ Every field of the registry's `dynamicSettings`, read only when a map is Dynamic
   (`-spawnMaps "ServerMeshTestMap|ServerMeshTestMap2"`: one pipe-separated token), the editor's Play a client only
   (`ServerMeshEditorRole` honours `MESH_EDITOR_SERVERS=0`), the command and status files served by the central process
   (`ServerMeshCentralCommandWatcher`, `MESH_RIG_COMMAND_DIR`), and the central killed and restarted alone (its kit log
-  `Logs/Log_Database_Central_Login_<day>.<sev>.log`). **Scenarios** (all but `dynidle` skipped with `--remote-cells` and
-  `--remote-persist`): `dynidle` (the test map Dynamic, a walk from C to E, handed over in place); `split` (C cut at
+  `Logs/Log_Database_Central_Login_<day>.<sev>.log`). **Scenarios** (all but `autodefer` run with `--remote-cells`, in
+  spawner mode, since DESIGN 0.90; every one skipped with `--remote-persist`): `dynidle` (the test map Dynamic, a walk from C
+  to E, handed over in place); `split` (C cut at
   x = 0: eight standing bots, a harvest-and-pickup bot and 40 synthetic players, `MESH_MONSTER_AREAS=Spawn_Interior_C`)
   and `splitc2` (E cut at x = 200, the child touching C2 across the seam); `merge` and `mergec2` (the same, then merged
   back: the bots migrate back, the child drains, quits and stays gone); `splitcrash_prewarm` (the child dies at e1: the

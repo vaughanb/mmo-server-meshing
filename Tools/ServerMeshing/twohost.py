@@ -150,7 +150,7 @@ def main():
     ap.add_argument("--cells", default="C,N,NE", help="cells THIS machine serves (default C,N,NE)")
     ap.add_argument("--remote", default="E", help="cell the other machine serves (default E)")
     ap.add_argument("--remote-port", type=int, default=8001, help="map port B should use for its cell")
-    ap.add_argument("--host", default="192.168.50.83", help="this machine's LAN address, as B should address it")
+    ap.add_argument("--host", default="10.168.168.83", help="this machine's LAN address, as B should address it")
     ap.add_argument("--wait", type=int, default=300, help="seconds to wait for B's cell")
     args = ap.parse_args()
     args.cells = [c.strip() for c in args.cells.split(",") if c.strip()]

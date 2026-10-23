@@ -20,7 +20,6 @@ import rigsplit
 import rigtools
 
 SCENARIOS = ("merge", "mergec2")
-TWO_HOST_REASON = regress_split.TWO_HOST_REASON
 PERSIST_REASON = regress_split.PERSIST_REASON
 
 MERGE_OBSERVE_S = 480      # merge's stand window: the split, the harvest wait, the cooldown and the merge fit in it
@@ -73,7 +72,7 @@ def r_bots(r):
 def count_processes(rig, cell):
     """How many of the build's processes serve `cell` (one CIM query), or None when the count failed."""
     try:
-        return rigmerge.parse_count(rig.ps(rigmerge.process_count_script(rig.EXE, cell)))
+        return rigmerge.parse_count(rig.cell_ps(cell, rigmerge.process_count_script))
     except (RuntimeError, ValueError):
         return None
 

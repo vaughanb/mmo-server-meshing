@@ -372,7 +372,8 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             Assert.That(findings, Has.Count.EqualTo(1));
             Assert.That(findings[0].severity, Is.EqualTo(MeshSetupSeverity.Warning));
             Assert.That(findings[0].cellIds, Is.EqualTo(new[] { "SW", "S", "SE", "W", "E", "NW" }));
-            Assert.That(findings[0].text, Does.StartWith("servedCells of A leave out the Dynamic base cell(s) SW, S, SE, W, E, NW of map Map1: a child, every supervised restart, a kill and the policy's host headroom go to the spawner that advertises the base"));
+            Assert.That(findings[0].text, Does.StartWith("servedCells of A leave out the Dynamic base cell(s) SW, S, SE, W, E, NW of map Map1: a child, every supervised restart, a kill and the policy's host headroom go to the spawner that advertises the base, never to another host"));
+            Assert.That(findings[0].text, Does.Contain("refuses their splits and restarts").And.Contain("run a map-spawn server there"));
         }
 
         [Test]
@@ -380,9 +381,19 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
         {
             List<MeshSetupFinding> findings = MeshDynamicSetupChecks.ServedCellsFindings(Rig(), Spawners(("A", new string[0]), ("B", new[] { "E" })));
 
-            Assert.That(findings, Has.Count.EqualTo(2));
-            Assert.That(findings[0].text, Does.StartWith("A: an empty servedCells serves every cell but advertises none, while B list theirs"));
-            Assert.That(findings[1].cellIds, Has.Count.EqualTo(8));
+            Assert.That(findings, Has.Count.EqualTo(1), "the bases B leaves out go to A's family host, warned once");
+            Assert.That(findings[0].text, Does.StartWith("A: an empty servedCells starts every cell at boot, the cells B list too"));
+            Assert.That(findings[0].text, Does.Contain("takes the family of every Dynamic base no list names"));
+        }
+
+        [Test]
+        public void ServedCellsFindings_CellListedByTwoHosts_IsWarned()
+        {
+            List<MeshSetupFinding> findings = MeshDynamicSetupChecks.ServedCellsFindings(Rig(), Spawners(("A", new[] { "SW", "S", "SE", "W", "C", "E" }), ("B", new[] { "E", "NW", "N", "NE", "C2" })));
+
+            Assert.That(findings, Has.Count.EqualTo(1));
+            Assert.That(findings[0].cellIds, Is.EqualTo(new[] { "E" }));
+            Assert.That(findings[0].text, Is.EqualTo("E is listed by more than one of A, B: each host starts it at boot (the cluster keeps the first) and its family goes to whichever spawner registered last: list each base on one host"));
         }
 
         [Test]

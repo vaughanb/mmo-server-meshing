@@ -3,7 +3,8 @@
 // only the kit can do: a channel added to the live channel list at runtime (and removed once a merged-away cell exited),
 // and the child's process asked from its base cell's map-spawn server. Supervision (Slice 2d): a cell's process restarted
 // through the same spawn request (its channel kept), the `kill` command, and KillChannel (30020) sent to the base cell's
-// map-spawn server, which kills the process by the pid the cell's hello named.
+// map-spawn server, which kills the process by the pid the cell's hello named. Several hosts (DESIGN 0.90): every one of
+// these goes to the spawner that advertised the family's base, never to another host while that one is away.
 using System;
 using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
@@ -89,18 +90,34 @@ namespace MultiplayerARPG.MMO.Mesh
             return cell.isDynamic || (_coordinator != null && cell.OnDynamicMap && _coordinator.IsSplitFamily(cell.baseId));
         }
 
-        /// <summary>SpawnerFor by the cell id a spawner advertised (a child asks its base cell's): see SpawnerFor(MeshCell, ...).</summary>
-        public static long SpawnerForKey(string key, IReadOnlyDictionary<string, long> spawnerByCell, ICollection<long> registered, out bool advertised)
+        /// <summary>
+        /// SpawnerForFamily is the map-spawn server a Dynamic base cell's family runs on (its children, every restart, a kill
+        /// and the policy's host headroom): the one that advertised the base while it is registered, else the first
+        /// registered one that serves every cell (an empty servedCells), else -1 with the reason. A family never moves
+        /// (DESIGN 0.90): while the spawner that advertised its base is away, no other host is asked.
+        /// </summary>
+        public static long SpawnerForFamily(string baseId, IReadOnlyDictionary<string, long> spawnerByCell, ICollection<long> servingAll, ICollection<long> registered, out string error)
         {
-            advertised = false;
-            if (!string.IsNullOrEmpty(key) && spawnerByCell.TryGetValue(key, out long owner) && registered.Contains(owner))
+            error = null;
+            if (!string.IsNullOrEmpty(baseId) && spawnerByCell.TryGetValue(baseId, out long owner))
             {
-                advertised = true;
-                return owner;
+                if (registered.Contains(owner))
+                    return owner;
+                error = $"the map-spawn server that serves {baseId} (connection {owner}) is not registered, and its family starts on no other host";
+                return -1;
             }
             foreach (long connectionId in registered)
-                return connectionId;
+            {
+                if (servingAll.Contains(connectionId))
+                    return connectionId;
+            }
+            error = registered.Count == 0 ? "no map-spawn server is registered" : $"no registered map-spawn server serves {baseId} (none advertised it, and none serves every cell)";
             return -1;
+        }
+
+        private long FamilySpawner(string baseId, out string error)
+        {
+            return SpawnerForFamily(baseId, _spawnerByCell, _spawnersServingAll, ClusterServer.MapSpawnServerPeers.Keys, out error);
         }
 
         private UniTaskVoid SpawnChild(long spawnerConnectionId, string opId, string childId, string mapId)
@@ -161,12 +178,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     error = "the cluster server is not running";
                     return false;
                 }
-                if (Cluster.MapSpawnServerPeers.Count == 0)
-                {
-                    error = "no map-spawn server is registered";
-                    return false;
-                }
-                return true;
+                return _central.FamilySpawner(baseId, out error) >= 0;
             }
 
             public bool AddChannel(string cellId, out string error)
@@ -194,13 +206,10 @@ namespace MultiplayerARPG.MMO.Mesh
                 error = null;
                 if (!CanSpawn(baseId, out error))
                     return false;
-                long spawner = SpawnerForKey(baseId, _central._spawnerByCell, Cluster.MapSpawnServerPeers.Keys, out bool advertised);
+                long spawner = _central.FamilySpawner(baseId, out error);
                 if (spawner < 0)
-                {
-                    error = "no map-spawn server is registered";
                     return false;
-                }
-                Logging.Log("Mesh", $"Child {childId} of {baseId} ({mapId}): start requested from map-spawn server {spawner}{(advertised ? string.Empty : $", which did not advertise {baseId}")}");
+                Logging.Log("Mesh", $"Child {childId} of {baseId} ({mapId}): start requested from map-spawn server {spawner}");
                 _central.SpawnChild(spawner, opId, childId, mapId).Forget();
                 return true;
             }
@@ -212,7 +221,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 host = default;
                 if (Cluster == null || !Cluster.IsNetworkActive)
                     return false;
-                long spawner = SpawnerForKey(baseId, _central._spawnerByCell, Cluster.MapSpawnServerPeers.Keys, out _);
+                long spawner = _central.FamilySpawner(baseId, out _);
                 return spawner >= 0 && _central._hostBySpawner.TryGetValue(spawner, out host);
             }
 
@@ -221,16 +230,13 @@ namespace MultiplayerARPG.MMO.Mesh
                 error = null;
                 if (!CanSpawn(baseId, out error))
                     return false;
-                long spawner = SpawnerForKey(baseId, _central._spawnerByCell, Cluster.MapSpawnServerPeers.Keys, out bool advertised);
+                long spawner = _central.FamilySpawner(baseId, out error);
                 if (spawner < 0)
-                {
-                    error = "no map-spawn server is registered";
                     return false;
-                }
                 // A child's channel was added by its split and stays until a merge removes it; put it back if it is gone.
                 if (!_central.Channels.ContainsKey(cellId))
                     AddChannel(cellId, out _);
-                Logging.Log("Mesh", $"Restart of {cellId} ({mapId}): start requested from map-spawn server {spawner}{(advertised ? string.Empty : $", which did not advertise {baseId}")}");
+                Logging.Log("Mesh", $"Restart of {cellId} ({mapId}): start requested from map-spawn server {spawner}");
                 MeshLayoutCoordinator coordinator = _central._coordinator;
                 _central.SpawnCellProcess(spawner, cellId, mapId, (success, detail) => coordinator?.OnRestartSpawnResult(cellId, success, detail)).Forget();
                 return true;
@@ -244,12 +250,9 @@ namespace MultiplayerARPG.MMO.Mesh
                     error = "the cluster server is not running";
                     return false;
                 }
-                long spawner = SpawnerForKey(baseId, _central._spawnerByCell, Cluster.MapSpawnServerPeers.Keys, out _);
+                long spawner = _central.FamilySpawner(baseId, out error);
                 if (spawner < 0)
-                {
-                    error = "no map-spawn server is registered";
                     return false;
-                }
                 Cluster.SendPacket(spawner, 0, DeliveryMethod.ReliableOrdered, MeshClusterMsg.KillChannel, writer => message.Serialize(writer));
                 Logging.Log("Mesh", $"Kill of {message.channelId} pid {message.processId} incarnation {message.incarnation} sent to map-spawn server {spawner} ({message.reason})");
                 return true;

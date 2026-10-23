@@ -3,8 +3,9 @@ PowerShell command over plain OpenSSH, the Win32_Process filters that tell B's c
 the detached launch that outlives the SSH session. remoteb (cells, sink, status, deploy, the command line) and
 remotebots (step 8b's bots) build on it; nothing here runs at import.
 
-    remotessh.defaults(host="...")              # an argparse.Namespace with host, user, key, dir, a_ip, map
+    remotessh.defaults(host="...")              # an argparse.Namespace with host, user, key, dir, rig, a_ip, map
     remotessh.ssh(args, command)                # (stdout, stderr, exit code); Unreachable when ssh itself failed
+    remotessh.ssh_script(args, script)          # the same for any PowerShell text (sent encoded)
     remotessh.count(args, remotessh.IS_BOT)     # how many processes on B pass a filter
     remotessh.launch_detached(args, name, body) # copy a .cmd to B and start it outside this SSH session
 
@@ -12,17 +13,20 @@ Defaults match Docs/ServerMeshing/MULTIHOST.md; override with --host/--user/--ke
 variables.
 """
 import argparse
+import base64
 import os
 import subprocess
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 CRLF = "\r\n"
 DEFAULTS = {
-    "host": os.environ.get("MESH_B_HOST", "192.168.50.211"),
+    "host": os.environ.get("MESH_B_HOST", "10.168.168.211"),
     "user": os.environ.get("MESH_B_USER", "brend"),
     "key": os.environ.get("MESH_B_KEY", os.path.expanduser("~/.ssh/meshtest_ed25519")),
     "dir": os.environ.get("MESH_B_DIR", r"C:\MeshTest\Server"),
-    "a_ip": os.environ.get("MESH_A_HOST", "192.168.50.83"),
+    # DESIGN 0.90: B's map-spawn server runs here (its Config, Logs and Temp), the build staying in "dir" (remotespawner).
+    "rig": os.environ.get("MESH_B_RIG", r"C:\MeshTest\Rig"),
+    "a_ip": os.environ.get("MESH_A_HOST", "10.168.168.83"),
     "map": os.environ.get("MESH_MAP", "ServerMeshTestMap"),
 }
 NOISE = ("WARNING:", "** WARNING", "post-quantum", "openssh.com", "store now")
@@ -39,6 +43,19 @@ def clean(text):
 
 class Unreachable(RuntimeError):
     """The other machine did not answer SSH at all -- asleep, off, or sshd stopped."""
+
+
+def ssh_script(args, script, timeout=120):
+    """ssh() for any PowerShell text: sent as -EncodedCommand (UTF-16LE, base64), so double quotes, pipes and braces
+    reach PowerShell untouched (ssh() wraps its command in double quotes for B's cmd.exe)."""
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+    base = ["ssh", "-i", args.key, "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", f"{args.user}@{args.host}"]
+    r = subprocess.run(base + ["powershell", "-NoProfile", "-EncodedCommand", encoded],
+                       capture_output=True, text=True, timeout=timeout)
+    err = clean(r.stderr).strip()
+    if r.returncode == 255:
+        raise Unreachable(f"{args.host} did not answer: {err.splitlines()[-1] if err else 'ssh exit 255'}")
+    return clean(r.stdout).strip(), err, r.returncode
 
 
 def ssh(args, command, timeout=120):
@@ -62,6 +79,8 @@ SINK_SIZES_FLAG = "-meshPhantomSinkSizes"   # ServerMeshPhantomSink.ArgSinkSizes
 BOT_FLAG = "-meshAutoClient"                # ServerMeshAutoClient's ARG_ENABLE
 IS_BOT = "($_.Name -eq 'kit-ce-project.exe' -and $_.CommandLine -like '*" + BOT_FLAG + "*')"
 IS_SINK = "($_.Name -eq 'kit-ce-project.exe' -and $_.CommandLine -like '*" + SINK_FLAG + "*')"
+SPAWNER_FLAG = "-startMapSpawnServer"       # the kit's ProcessArguments; B's spawner (remotespawner) carries it
+IS_SPAWNER = "($_.Name -eq 'kit-ce-project.exe' -and $_.CommandLine -like '*" + SPAWNER_FLAG + "*')"
 IS_CELL = ("($_.Name -eq 'kit-ce-project.exe' -and $_.CommandLine -notlike '*" + SINK_FLAG + "*'"
            " -and $_.CommandLine -notlike '*" + BOT_FLAG + "*')")
 # Stop filters also catch the launch scripts. Their own text names those scripts, so the session running one (and
@@ -69,6 +88,7 @@ IS_CELL = ("($_.Name -eq 'kit-ce-project.exe' -and $_.CommandLine -notlike '*" +
 NOT_THIS_SESSION = ("$me = $PID; $parent = (Get-CimInstance Win32_Process -Filter \"ProcessId=$PID\").ParentProcessId; "
                     "Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $me -and $_.ProcessId -ne $parent")
 STOP_CELLS = IS_CELL + " -or $_.CommandLine -like '*start-cell-*'"
+STOP_SPAWNER = IS_SPAWNER + " -or $_.CommandLine -like '*start-spawner*'"   # first: a live spawner restarts its cells
 STOP_SINK = "$_.CommandLine -like '*" + SINK_FLAG + "*' -or $_.CommandLine -like '*start-sink*'"
 STOP_BOTS = IS_BOT + " -or $_.CommandLine -like '*start-bots*'"
 

@@ -25,7 +25,10 @@ import rigpolicy
 import rigsplit
 
 SCENARIOS = ("autoqueue", "autodefer")
-TWO_HOST_REASON = regress_split.TWO_HOST_REASON
+# DESIGN 0.90: autodefer's MESH_HOST_CORES is calibrated to this machine (host-headroom calibration); across two
+# hosts C's family is judged by the other machine's cores in use.
+TWO_HOST_SKIP = {"autodefer": "its MESH_HOST_CORES is calibrated to this machine's cores in use; across two hosts "
+                              "C's family is judged by the other machine's"}
 PERSIST_REASON = regress_split.PERSIST_REASON
 ZONE_IDS = {"SW", "S", "SE", "W", "C", "E", "NW", "N", "NE", "C2"}
 EXPECTED_ZONES = {"autoqueue": ZONE_IDS | {"C.1", "E.1"}, "autodefer": ZONE_IDS | {"C.1"}}
@@ -67,7 +70,7 @@ def play(rig, extra=None):
     """The Dynamic Play with the policy's triggers, no client, the burn file empty; returns the burn file's path."""
     rig.db_reset(PARK, PARK)
     burn = regress_auto.burn_path(rig)
-    regress_auto.write_burn(burn, "")
+    regress_auto.write_burn(burn, "", rig)
     env = dict(COMMON_ENV, MESH_CELL_MODE=f"{rig.MAP}:Dynamic", MESH_PROBE_BURN_MS="@" + burn, **(extra or {}))
     rig.request_play("none", PARK[0], PARK[1], env=env, enabled=False)
     rig.wait_play(60)
@@ -119,7 +122,7 @@ def flow_queue(rep, rig, start, day):
     burn = play(rig)
     grade_idle(rep, rig)
     burns = {cell: HOT_MS for cell in QUEUE_CELLS}
-    regress_auto.write_burn(burn, rigpolicy.burn_text(burns))
+    regress_auto.write_burn(burn, rigpolicy.burn_text(burns), rig)
     lines = wait_lines(rig, lambda ls: any(rigsplit.op_outcome(rigpolicy.op_status(ls, op)) for op in rigpolicy.split_ops(ls)), PLAN_TIMEOUT_S + SPLIT_TIMEOUT_S)
     ops = rigpolicy.split_ops(lines)
     plans = rigpolicy.planned(lines)
@@ -130,7 +133,7 @@ def flow_queue(rep, rig, start, day):
     first_done_at = time.time()
     rep.check(len(plans) == 1 and len(ops) == 1, f"one split while the first ran ({len(plans)} planned, ops {ops})")
     burns[first["cell"]] = WARM_MS
-    regress_auto.write_burn(burn, rigpolicy.burn_text(burns))
+    regress_auto.write_burn(burn, rigpolicy.burn_text(burns), rig)
     other = next(c for c in QUEUE_CELLS if c != first["cell"])
     lines = wait_lines(rig, lambda ls: rigpolicy.index_of(ls, rigpolicy.is_planned(other)) is not None, SECOND_TIMEOUT_S)
     second_planned_at = time.time()
@@ -144,7 +147,7 @@ def flow_queue(rep, rig, start, day):
                        SPLIT_TIMEOUT_S)
     ops, plans = rigpolicy.split_ops(lines), rigpolicy.planned(lines)
     burns[other] = WARM_MS
-    regress_auto.write_burn(burn, rigpolicy.burn_text(burns))
+    regress_auto.write_burn(burn, rigpolicy.burn_text(burns), rig)
     lines = wait_lines(rig, lambda ls: len(rigpolicy.measured(ls)) >= 2, MEASURED_TIMEOUT_S)
     statuses = [rigpolicy.op_status(lines, op) for op in ops]
     rep.check(len(ops) == 2 and sorted(p["cell"] for p in plans) == sorted(QUEUE_CELLS),
@@ -167,7 +170,7 @@ def flow_defer(rep, rig, start, day):
     burn = play(rig, {"MESH_HOST_CORES": str(HOST_CORES)})
     grade_idle(rep, rig)
     busy = dict({"C": HOT_MS}, **{cell: BUSY_MS for cell in BUSY_CELLS})
-    regress_auto.write_burn(burn, rigpolicy.burn_text(busy))
+    regress_auto.write_burn(burn, rigpolicy.burn_text(busy), rig)
     lines = wait_lines(rig, lambda ls: any(d["cell"] == "C" for d in rigpolicy.deferrals(ls)) or rigpolicy.planned(ls), PLAN_TIMEOUT_S)
     first = next((d for d in rigpolicy.deferrals(lines) if d["cell"] == "C"), None)
     rep.check(first is not None and first["cores"] == HOST_CORES and first["projected"] > 0.8 * HOST_CORES,
@@ -177,7 +180,7 @@ def flow_defer(rep, rig, start, day):
     deferred = [d for d in rigpolicy.deferrals(lines) if d["cell"] == "C"]
     rep.check(len(deferred) >= 2 and not rigpolicy.planned(lines) and not rigpolicy.split_ops(lines),
               f"C stayed deferred while the host was busy ({len(deferred)} deferral line(s) in {DEFER_HOLD_S} s, nothing planned)")
-    regress_auto.write_burn(burn, rigpolicy.burn_text({"C": HOT_MS}))
+    regress_auto.write_burn(burn, rigpolicy.burn_text({"C": HOT_MS}), rig)
     released = len(rigauto.status_texts(lines))
     lines = wait_lines(rig, lambda ls: rigpolicy.planned(ls), PLAN_TIMEOUT_S)
     plans = rigpolicy.planned(lines)
@@ -190,7 +193,7 @@ def flow_defer(rep, rig, start, day):
                        SPLIT_TIMEOUT_S)
     ops = rigpolicy.split_ops(lines)
     status = rigpolicy.op_status(lines, ops[0]) if ops else rigsplit.parse_op_status([], "auto")
-    regress_auto.write_burn(burn, rigpolicy.burn_text({"C": WARM_MS}))
+    regress_auto.write_burn(burn, rigpolicy.burn_text({"C": WARM_MS}), rig)
     grade_split(rep, status, plans[0])
     lines = wait_lines(rig, lambda ls: rigpolicy.measured(ls), MEASURED_TIMEOUT_S)
     rep.check(len(rigpolicy.split_ops(lines)) == 1, f"exactly one split ({rigpolicy.split_ops(lines)})")

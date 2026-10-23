@@ -2,7 +2,7 @@
 // Pure: they read a registry's asset cut and settings as the runtime computes them and return findings, which the
 // window shows as Validate lines. They say before Play what the central would only find out later: a base cell that can
 // never split, a minimum cell the band overrides, a world whose cut can pass the 32 band neighbours a cell streams to or
-// the 64 links a cell takes, spawners' served cells that send a base's children elsewhere, and the settings the central
+// the 64 links a cell takes, spawners' served cells that leave a base's family without a host, and the settings the central
 // checks at start. They judge the asset's band: a MESH_BAND or MESH_SPAWN_CELLS set for a run is not seen.
 using System;
 using System.Collections.Generic;
@@ -299,19 +299,22 @@ namespace MultiplayerARPG.MMO.Mesh
         }
 
         /// <summary>
-        /// ServedCellsFindings (decision 6), over every spawner prefab at once: a child, every supervised restart (a base's
-        /// only with sleeping cells), a kill and the policy's host headroom go to the spawner that advertised the base's
-        /// id. With any list set (several hosts), a Dynamic base no list names, a host whose empty list advertises nothing,
-        /// and entries that name no asset cell are warned.
+        /// ServedCellsFindings (decision 6, DESIGN 0.90), over every spawner prefab at once: a child, every supervised restart
+        /// (a base's only with sleeping cells), a kill and the policy's host headroom go to the spawner that advertised the
+        /// base's id, or to one that serves every cell when none did, and never to another host. With any list set (several
+        /// hosts), an empty list beside them, a Dynamic base no list names (the central refuses its family), a cell two
+        /// lists name, and entries that name no asset cell are warned.
         /// </summary>
         public static List<MeshSetupFinding> ServedCellsFindings(MeshWorldRegistry world, IReadOnlyList<MeshSetupSpawner> spawners)
         {
             List<MeshSetupFinding> findings = new List<MeshSetupFinding>();
             if (world == null || spawners == null || !world.HasDynamicMap)
                 return findings;
-            HashSet<string> served = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, string> ownerOf = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             List<string> listing = new List<string>(), empty = new List<string>();
             Dictionary<string, List<string>> entriesByOwner = new Dictionary<string, List<string>>();
+            MeshSetupFinding twice = new MeshSetupFinding { severity = MeshSetupSeverity.Warning };
+            List<string> twiceOwners = new List<string>();
             foreach (MeshSetupSpawner spawner in spawners)
             {
                 if (spawner == null)
@@ -333,7 +336,19 @@ namespace MultiplayerARPG.MMO.Mesh
                 listing.Add(spawner.owner);
                 entriesByOwner[spawner.owner ?? string.Empty] = entries;
                 foreach (string id in entries)
-                    served.Add(id);
+                {
+                    if (!ownerOf.TryGetValue(id, out string first))
+                        ownerOf[id] = spawner.owner;
+                    else if (first != spawner.owner && !twice.cellIds.Contains(id))
+                    {
+                        twice.cellIds.Add(id);
+                        foreach (string owner in new[] { first, spawner.owner })
+                        {
+                            if (!twiceOwners.Contains(owner))
+                                twiceOwners.Add(owner);
+                        }
+                    }
+                }
             }
             if (listing.Count == 0)
                 return findings; // one host serving every cell: nothing to judge
@@ -342,20 +357,28 @@ namespace MultiplayerARPG.MMO.Mesh
             foreach (MeshLayoutBaseCell cell in validation.baseCells)
                 assetIds.Add(cell.id);
             string owners = string.Join(", ", listing);
-            const string Route = "a child, every supervised restart, a kill and the policy's host headroom go to the spawner that advertises the base";
+            const string Route = "a child, every supervised restart, a kill and the policy's host headroom go to the spawner that advertises the base, never to another host";
             if (empty.Count > 0)
-                findings.Add(new MeshSetupFinding { severity = MeshSetupSeverity.Warning, text = $"{string.Join(", ", empty)}: an empty servedCells serves every cell but advertises none, while {owners} list theirs; {Route}, so a Dynamic base only that host runs has them started on any spawner: give every host its list" });
+                findings.Add(new MeshSetupFinding { severity = MeshSetupSeverity.Warning, text = $"{string.Join(", ", empty)}: an empty servedCells starts every cell at boot, the cells {owners} list too (the cluster keeps the first of each), and takes the family of every Dynamic base no list names: give every host its list" });
+            if (twice.cellIds.Count > 0)
+            {
+                bool one = twice.cellIds.Count == 1;
+                twice.text = $"{Ids(twice.cellIds)} {(one ? "is" : "are")} listed by more than one of {string.Join(", ", twiceOwners)}: each host starts {(one ? "it" : "them")} at boot (the cluster keeps the first) and {(one ? "its family goes" : "their families go")} to whichever spawner registered last: list each base on one host";
+                findings.Add(twice);
+            }
             foreach (string mapId in DynamicMaps(world))
             {
+                if (empty.Count > 0)
+                    break; // the empty list's host takes them (warned above)
                 MeshSetupFinding missing = new MeshSetupFinding { severity = MeshSetupSeverity.Warning, mapId = mapId };
                 foreach (MeshLayoutBaseCell cell in validation.baseCells)
                 {
-                    if (cell.mapId == mapId && !served.Contains(cell.id))
+                    if (cell.mapId == mapId && !ownerOf.ContainsKey(cell.id))
                         missing.cellIds.Add(cell.id);
                 }
                 if (missing.cellIds.Count == 0)
                     continue;
-                missing.text = $"servedCells of {owners} leave out the Dynamic base cell(s) {Ids(missing.cellIds)} of map {mapId}: {Route}; a host that starts its cells by hand (MULTIHOST: machine B) advertises nothing, and the central then picks any registered spawner";
+                missing.text = $"servedCells of {owners} leave out the Dynamic base cell(s) {Ids(missing.cellIds)} of map {mapId}: {Route}, so with no spawner advertising them the central refuses their splits and restarts; a host that starts its cells by hand cannot serve a Dynamic map's cells: run a map-spawn server there (MULTIHOST §6b)";
                 findings.Add(missing);
             }
             foreach (KeyValuePair<string, List<string>> pair in entriesByOwner)

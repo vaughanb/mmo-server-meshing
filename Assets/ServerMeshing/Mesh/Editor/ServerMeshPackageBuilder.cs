@@ -36,8 +36,8 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
     {
         // Release metadata. Version is the add-on version reported by the Addon Manager; UpdateDate drives its recency
         // filter and "New" badge, and is bumped by hand with the version rather than tracking the build clock.
-        public const string Version = "0.89.0";
-        public const string UpdateDate = "2026-10-21";
+        public const string Version = "0.90.0";
+        public const string UpdateDate = "2026-10-22";
 
         // Where the published packages will be fetched from. The Addon Manager downloads "packageUrl" verbatim, so this
         // has to point at wherever dist/ is finally hosted — change it here if these move to another repository.
@@ -66,7 +66,8 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 "cuts and merges at runtime, by command or by its own load policy.\n" +
                 "Dynamic cells are supervised (a dead or hung cell is restarted, a cell cut off from the cluster fences " +
                 "itself), buildings follow the cut, and a restarted central adopts the cut layout and resumes the operation " +
-                "it was running. A map can link its cells on demand (each cell only to the cells it needs), so a map is not " +
+                "it was running. A world can span several machines, each running its own map spawner: a cut family's " +
+                "cells start, restart and stop on the machine that serves its base. A map can link its cells on demand (each cell only to the cells it needs), so a map is not " +
                 "capped at the 64 links one cell takes.\n" +
                 "Players cross a cell edge without a loading screen; neighbouring cells exchange ghosts of everything near " +
                 "their shared edge, so combat, loot, quests and building resolve across it. Empty land costs nothing: a cell " +

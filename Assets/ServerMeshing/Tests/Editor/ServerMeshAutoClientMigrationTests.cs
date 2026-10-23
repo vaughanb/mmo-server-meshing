@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Threading;
 using NUnit.Framework;
+using UnityEngine;
 
 namespace MultiplayerARPG.MMO.Mesh.Tests
 {
@@ -153,6 +154,53 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             Assert.That(s.hasLineX, Is.False);
             Assert.That(s.hasObserveSeconds, Is.False);
             Assert.That(s.harvestAfterMigration, Is.False);
+        }
+
+        // merge 143/144 on 2026-10-22: the bot stalled here, 41 m from the drop, beside the node it had harvested.
+        private static readonly Vector3 StallSelf = new Vector3(69.95f, -0.19f, -61.19f);
+        private static readonly Vector3 StallDrop = new Vector3(75.10f, 0f, -19.78f);
+        private static readonly Vector3 StallNode = new Vector3(69.81f, 0f, -59.79f);
+
+        [Test]
+        public void SidestepPoint_StepsSquareToTheWalk_AwayFromTheObstacle_AtTheBotsHeight()
+        {
+            Vector3 p = ServerMeshAutoClient.SidestepPoint(StallSelf, StallDrop, StallNode, 1.5f);
+
+            Vector3 step = p - StallSelf, walk = StallDrop - StallSelf, toNode = StallNode - StallSelf;
+            walk.y = 0f; toNode.y = 0f;
+            Vector3 right = new Vector3(walk.normalized.z, 0f, -walk.normalized.x);
+            Assert.That(p.y, Is.EqualTo(StallSelf.y));
+            Assert.That(step.magnitude, Is.EqualTo(1.5f).Within(1e-4f));
+            Assert.That(Vector3.Dot(step, walk.normalized), Is.EqualTo(0f).Within(1e-4f));
+            Assert.That(Mathf.Sign(Vector3.Dot(step, right)), Is.Not.EqualTo(Mathf.Sign(Vector3.Dot(toNode, right))));
+        }
+
+        [Test]
+        public void SidestepPoint_TheWalkOnFromThereClearsTheNodeForTheBotsCapsule()
+        {
+            Vector3 p = ServerMeshAutoClient.SidestepPoint(StallSelf, StallDrop, StallNode, ServerMeshAutoClient.PickupSidestepMetres);
+
+            Vector3 a = new Vector3(p.x, 0f, p.z), b = new Vector3(StallDrop.x, 0f, StallDrop.z), n = new Vector3(StallNode.x, 0f, StallNode.z);
+            float off = Vector3.Cross((b - a).normalized, n - a).magnitude;
+            Assert.That(off, Is.GreaterThan(0.5f + 0.7072f)); // capsule radius + the 1 m box's half-diagonal: no contact at any yaw
+        }
+
+        [Test]
+        public void SidestepPoint_ObstacleOnTheRight_StepsLeft_DeadAhead_StepsRight()
+        {
+            Vector3 self = Vector3.zero, dest = new Vector3(0f, 0f, 40f);
+
+            Assert.That(ServerMeshAutoClient.SidestepPoint(self, dest, new Vector3(0.3f, 0f, 1.4f), 1.5f).x, Is.EqualTo(-1.5f).Within(1e-4f));
+            Assert.That(ServerMeshAutoClient.SidestepPoint(self, dest, new Vector3(0f, 0f, 1.4f), 1.5f).x, Is.EqualTo(1.5f).Within(1e-4f));
+        }
+
+        [Test]
+        public void SidestepPoint_DestOnTop_StepsAlongX_NegativeClearanceIsNone()
+        {
+            Vector3 self = new Vector3(1f, 2f, 3f);
+
+            Assert.That(ServerMeshAutoClient.SidestepPoint(self, self, self + Vector3.left, 1.5f), Is.EqualTo(self + new Vector3(1.5f, 0f, 0f)));
+            Assert.That(ServerMeshAutoClient.SidestepPoint(self, new Vector3(1f, 2f, 9f), self, -2f), Is.EqualTo(self));
         }
     }
 }

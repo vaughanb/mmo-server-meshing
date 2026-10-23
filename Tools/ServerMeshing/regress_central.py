@@ -38,8 +38,6 @@ import rigsplitcrash
 import rigtools
 
 SCENARIOS = ("splitcentral", "splitcentral_merge", "splitcentral_base", "splitcentral_unfreeze", "splitcentral_links")
-TWO_HOST_REASON = ("runs the central and the spawner as build processes on this host and kills and restarts the central; "
-                   "the other machine runs no spawner and its cell could not follow a central restarted here")
 PERSIST_REASON = regress_split.PERSIST_REASON
 ZONE_IDS = {"SW", "S", "SE", "W", "C", "E", "NW", "N", "NE", "C2"}
 EXPECTED_ZONES = {name: ZONE_IDS | {"C.1"} for name in SCENARIOS}

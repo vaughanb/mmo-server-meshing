@@ -17,8 +17,6 @@ module never imports it; the unit tests hand in a fake. The readers are rigfamil
 """
 import collections
 import json
-import os
-import shutil
 import time
 
 import regress_merge
@@ -31,7 +29,6 @@ import rigsplit
 import rigsplitcrash
 
 SCENARIOS = ("mergechildren", "collapsesibling")
-TWO_HOST_REASON = regress_split.TWO_HOST_REASON
 PERSIST_REASON = regress_split.PERSIST_REASON
 EXPECTED_ZONES = {name: {"SW", "S", "SE", "W", "C", "E", "NW", "N", "NE", "C2", rigfamily.FIRST, rigfamily.SECOND}
                   for name in SCENARIOS}
@@ -90,12 +87,11 @@ def run(name, rep, rig, start, day, bots):
     """Runs one family scenario against the rig and records its checks on rep; appends every bot to `bots`. Returns a
     FamilyRun for grade_layout."""
     case = CASES[name]
-    marker = os.path.join(rig.TEMP, rigfamily.marker_name(rigfamily.SECOND))
+    # The marker lives under the Temp of the machine that runs C.2 (rig.set_marker: the other one's when C's family is
+    # served there, DESIGN 0.90).
+    marker = rigfamily.marker_name(rigfamily.SECOND)
     if case.kind == "collapse":
-        os.makedirs(rig.TEMP, exist_ok=True)
-        clear_marker(marker)
-        with open(marker, "w", encoding="utf-8") as f:
-            f.write("armed later by regress_family\n")   # C.2's first process must live: the fault has 'fired'
+        rig.set_marker(rigfamily.SECOND, marker, "file")   # C.2's first process must live: the fault has 'fired'
     try:
         r = regress_split.start_split(name, rep, rig, start, day, bots, spec_name="split", observe_s=case.observe_s,
                                       plan=rigfamily.PLANS[name], load_plan="", enabled=False, env=dict(case.env))
@@ -111,14 +107,7 @@ def run(name, rep, rig, start, day, bots):
         return flow_collapse(rep, rig, fr, marker, start, day)
     finally:
         if case.kind == "collapse":
-            clear_marker(marker)
-
-
-def clear_marker(path):
-    if os.path.isdir(path):
-        shutil.rmtree(path, ignore_errors=True)
-    elif os.path.exists(path):
-        os.remove(path)
+            rig.set_marker(rigfamily.SECOND, marker, "clear")
 
 
 def split_child(rep, rig, fr, start, day):
@@ -251,13 +240,12 @@ def flow_collapse(rep, rig, fr, marker, start, day):
     cell, sibling = rigfamily.SECOND, rigfamily.FIRST
     wait_until(fr.second["done_at"] + KILL_AFTER_DONE_S)
     try:
-        os.remove(marker)
-        os.makedirs(marker)   # every C.2 started from now on dies on its first hello
-    except OSError as ex:
+        rig.set_marker(cell, marker, "dir")   # every C.2 started from now on dies on its first hello
+    except (OSError, RuntimeError) as ex:
         rep.check(False, f"the fault marker could not be armed ({ex})")
         return fr
     try:
-        killed = rigmerge.parse_count(rig.ps(rigsplitcrash.kill_script(rig.EXE, cell)))
+        killed = rigmerge.parse_count(rig.cell_ps(cell, rigsplitcrash.kill_script))
     except (RuntimeError, ValueError) as ex:
         rep.check(False, f"{cell}: the kill failed ({str(ex)[:120]})")
         return fr

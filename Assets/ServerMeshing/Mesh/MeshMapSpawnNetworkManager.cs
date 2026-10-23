@@ -32,7 +32,8 @@ namespace MultiplayerARPG.MMO.Mesh
         public bool sleepCells = false;
         [Tooltip("Cell ids this spawner is responsible for. Empty = every cell of every meshed map, which is right for a single host. " +
                  "With several machines sharing one world, give each host its own list so two of them never serve the same cell " +
-                 "(the cluster keys a map server by cell id and rejects the second). Rig override: MESH_SPAWN_CELLS=C,N.")]
+                 "(the cluster keys a map server by cell id and rejects the second). List base cells only: a Dynamic map's family (children, restarts, " +
+                 "kills) runs on the host whose list names its base, never elsewhere. Rig override: MESH_SPAWN_CELLS=C,N.")]
         public string[] servedCells = new string[0];
 
         public const string ENV_SERVED_CELLS = "MESH_SPAWN_CELLS";
@@ -251,13 +252,16 @@ namespace MultiplayerARPG.MMO.Mesh
                 return;
             }
             SendHostReport();   // Slice 3: at every registration (the central may be new), then every HostReportSeconds
-            // Tell the central which cells this host may start, so a cell wakes on the machine that can serve it.
-            // An empty list means "all of them", which is what a single-host deployment has always meant.
-            if (servedCells != null && servedCells.Length > 0 && ClusterClient != null)
+            // Tell the central which cells this host may start, so a cell wakes on the machine that can serve it and a
+            // Dynamic family stays on its base's host. An empty list means "all of them", which is what a single-host
+            // deployment has always meant; it is sent too (DESIGN 0.90), so the central can tell a spawner that serves
+            // every cell from one whose list has not arrived yet.
+            if (ClusterClient != null)
             {
-                MeshServesMessage serves = new MeshServesMessage { cellIds = servedCells };
+                bool all = servedCells == null || servedCells.Length == 0;
+                MeshServesMessage serves = new MeshServesMessage { cellIds = all ? new string[0] : servedCells };
                 ClusterClient.SendPacket(0, LiteNetLib.DeliveryMethod.ReliableOrdered, MeshClusterMsg.Serves, writer => serves.Serialize(writer));
-                Logging.Log("Mesh", $"Told the central this spawner serves {string.Join(",", servedCells)}");
+                Logging.Log("Mesh", all ? "Told the central this spawner serves every cell no other spawner advertises" : $"Told the central this spawner serves {string.Join(",", servedCells)}");
             }
             if (!_startOnce.TryStart())
             {

@@ -21,6 +21,16 @@ def stamp_of(line):
     return (m.group(1), m.group(2)) if m else None
 
 
+def shift_stamp(line, seconds):
+    """The line with its kit stamp moved by whole `seconds` (another machine's clock put on this one's); unchanged
+    without a stamp or a shift."""
+    m = STAMP.search(line)
+    if not m or not seconds:
+        return line
+    moved = datetime.datetime.fromisoformat(f"{m.group(1)} {m.group(2)}") + datetime.timedelta(seconds=seconds)
+    return line[:m.start()] + moved.strftime("[%Y-%m-%d %H:%M:%S]") + line[m.end():]
+
+
 def stamp_datetime(line):
     """The stamp of a kit log line as a datetime, or None."""
     s = stamp_of(line)

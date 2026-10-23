@@ -64,7 +64,7 @@ def start_central(rig, scenario, env=None):
 
 
 def start_spawner(rig, scenario, env):
-    _popen(rig, rigprocs.spawner_args(rig.EXE, rig.LOGS, scenario), env)
+    _popen(rig, rigprocs.spawner_args(rig.EXE, rig.LOGS, scenario, getattr(rig, "PUBLIC_ADDRESS", rigprocs.ADDRESS)), env)
 
 
 def kill_central(rig):

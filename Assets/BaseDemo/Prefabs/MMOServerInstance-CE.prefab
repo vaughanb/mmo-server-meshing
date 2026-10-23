@@ -316,7 +316,7 @@ MonoBehaviour:
   transportFactory: {fileID: 0}
   clusterServerAddress: 127.0.0.1
   clusterServerPort: 6010
-  publicAddress: 192.168.50.83
+  publicAddress: 10.168.168.83
   spawnExePath: ./kit-ce-project.exe
   notSpawnInBatchMode: 0
   startPort: 8000

@@ -8,6 +8,8 @@ Drives the ten-cell rig (a 3x3 grid plus C2 across a seam) end to end and grades
     python Tools/ServerMeshing/regress.py --list
     python Tools/ServerMeshing/regress.py --remote-cells E [--remote-persist] [--impair loss2] ...
                                                           # E served by the second machine (Docs/ServerMeshing/MULTIHOST.md)
+    python Tools/ServerMeshing/regress.py split merge --remote-cells C
+                                                          # C and its children on the second machine's spawner (8g)
 
 Requirements (all already true on the rig machine):
   * the Unity editor is open on this project with BaseInit-CE (any scene that is not dirty) and the
@@ -46,6 +48,7 @@ import regress_family
 import regress_links
 import regress_policy
 import regress_procs
+import regress_remote
 import rigauto
 import riglinks
 import rigprocs
@@ -149,39 +152,64 @@ def topology_of(name):
     return "split" if name in SPLIT_TOPOLOGY else "editor"
 
 # Two-machine runs (--remote-cells): the named cells are served by the other machine, started and read over SSH by
-# Tools/ServerMeshing/remoteb.py. Their logs live on that machine, so they are copied into Logs/remote before grading.
+# Tools/ServerMeshing/remoteb.py (regress_remote). Their logs live on that machine, so they are copied into Logs/remote
+# (cell mode) or Logs/remote/rig (spawner mode: B's map-spawn server, DESIGN 0.90) before grading.
 REMOTE_CELLS = []
-REMOTE_TOOL = os.path.join(ROOT, "Tools", "ServerMeshing", "remoteb.py")
+REMOTE_TOOL = regress_remote.TOOL
 REMOTE_LOGS = os.path.join(LOGS, "remote")
 REMOTE_PORT = 8001
 REMOTE_PERSIST = False
-_last_fetch = 0.0
+REMOTE_MODE = regress_remote.CELL     # the current scenario's (remote_mode_of)
+REMOTE_FORCE_SPAWNER = False          # --remote-spawner: every scenario in spawner mode
+# The address this machine's build-hosted spawner hands its cells to advertise (split topology): loopback on one
+# machine, this machine's LAN address when the other machine's cells must reach them.
+PUBLIC_ADDRESS = rigprocs.ADDRESS
+# Whole seconds added to the other machine's log stamps so they read on this machine's clock (regress_remote.clock_shift,
+# measured once per run): the graders compare its cells' lines with kill and restart times taken here.
+REMOTE_CLOCK_SHIFT = 0
 
 
 def remote(*argv, timeout=300):
-    """Run remoteb.py for one remote cell and return its output."""
-    r = subprocess.run([sys.executable, REMOTE_TOOL] + list(argv), capture_output=True, text=True, timeout=timeout)
-    return (r.stdout or "") + (r.stderr or "")
+    """Run remoteb.py and return its output."""
+    return regress_remote.run(*argv, timeout=timeout)
 
 
 def fetch_remote(force=False):
-    """Copy the other machine's zone logs here. Throttled: grading calls this through zone_lines many times."""
-    global _last_fetch
-    if not REMOTE_CELLS:
-        return
-    if not force and time.time() - _last_fetch < 5:
-        return
-    _last_fetch = time.time()
-    out = remote("fetch")
-    if "fetched" not in out:
-        raise RuntimeError("could not copy the remote machine's logs, so nothing about its cells can be graded: "
-                           + " ".join(out.split())[:200])
+    """Copy the other machine's zone logs of the current mode here (throttled; regress_remote.fetch)."""
+    regress_remote.fetch(sys.modules[__name__], force)
+
+
+def remote_family(zone):
+    """Whether a cell runs on the other machine: a remote cell, or (spawner mode) a dynamic child of one."""
+    if REMOTE_MODE == regress_remote.SPAWNER:
+        return regress_remote.in_family(zone, REMOTE_CELLS)
+    return zone in REMOTE_CELLS
+
+
+def remote_logs():
+    """The folder the current mode's remote logs are fetched into."""
+    return regress_remote.logs_dir(LOGS, REMOTE_MODE)
+
+
+def cell_ps(cell, script_of):
+    """A process snippet for a cell (script_of(exe, cell)), run on the machine that runs the cell (regress_remote)."""
+    return regress_remote.cell_ps(sys.modules[__name__], cell, script_of)
+
+
+def mirror_temp(name, text):
+    """A Temp file the harness wrote for the cells, written on the other machine too in spawner mode."""
+    regress_remote.mirror_temp(sys.modules[__name__], name, text)
+
+
+def set_marker(cell, name, kind):
+    """A fault marker ('file', 'dir' or 'clear') under the Temp of the machine that runs `cell`."""
+    regress_remote.set_marker(sys.modules[__name__], cell, name, kind)
 
 
 # ------------------------------------------------------------------ rig plumbing
 def zone_log(zone, suffix, day, map_id=MAP):
     name = f"Log_Map({map_id})-Ch({zone})-Alloc(False)-Instance()_{day}.{suffix}.log"
-    return os.path.join(REMOTE_LOGS if zone in REMOTE_CELLS else LOGS, name)
+    return os.path.join(remote_logs() if remote_family(zone) else LOGS, name)
 
 
 def read_status():
@@ -337,7 +365,6 @@ def request_play(mode, walk_x, walk_z, pet=False, mount=False, env=None, enabled
         # tester before its login, start them as soon as Play is up, and let it go when they are serving. The mark
         # is taken now, before Play, so the wait cannot be satisfied by the previous scenario's log lines.
         mark = remote_log_mark()
-        remote("clearmarkers")      # the one-shot fault marker lives in B's own build folder, not in this Temp
         open(HOLD, "w").close()
     with open(REQUEST, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
@@ -368,51 +395,13 @@ def play_still_running():
 
 
 def remote_running():
-    return "process: running" in remote("status")
+    return regress_remote.running()
 
 
 def start_remote_cells(mark, env=None):
-    """Get the other machine's cells serving this scenario, and wait until they are.
-
-    Restarted for each scenario by default, because each Play recreates this machine's cells. With --remote-persist
-    the cell is left running instead and has to recover on its own: the kit reconnects its cluster client after a
-    disconnect, and the add-on's databaseReconnectSeconds re-opens the database connection, which the kit never
-    does. That is the two-machine test of those two paths, so the wait below looks for all of it to come back --
-    registration first, because a cell that has relinked is still not somewhere a player can be sent.
-    """
-    wait_play(60)
-    t0 = time.time()
-    cell = REMOTE_CELLS[0]
-    if REMOTE_PERSIST and remote_running():
-        # Nothing is restarted: the cell must notice the cluster and the database coming back by itself.
-        wanted = [(r"App Registered successfully", "registered with the cluster again"),
-                  (r"Neighbour zone \w+ linked", "relinked to this machine's cells"),
-                  (r"Database connection to \S+ is open", "re-opened its database connection")]
-    else:
-        remote("stop")
-        # The cell inherits this machine's environment through the spawner; the other machine's cannot, so the
-        # scenario's variables are handed to it explicitly. MESH_SPAWN_CELLS is this spawner's business only.
-        forwarded = []
-        for key, value in sorted((env or {}).items()):
-            if value and key != "MESH_SPAWN_CELLS":
-                forwarded += ["--env", f"{key}={value}"]
-        out = remote("start", "--cell", cell, "--port", str(REMOTE_PORT), "--restart", *forwarded)
-        if "is running" not in out:
-            raise RuntimeError("the remote cell did not start: " + " ".join(out.split())[:200])
-        wanted = [(r"Own cell from channel id: " + cell + r"\b", "is serving")]
-    deadline = t0 + 150
-    pending = list(wanted)
-    while time.time() < deadline:
-        time.sleep(3)
-        lines = remote_lines_after(mark)
-        for want in list(pending):
-            if count(lines, want[0]) >= 1:
-                print(f"   remote cell {cell} {want[1]} after {time.time() - t0:.0f}s")
-                pending.remove(want)
-        if not pending:
-            return
-    raise RuntimeError(f"remote cell {cell} never {pending[0][1]}; "
-                       "try: python Tools/ServerMeshing/remoteb.py status")
+    """Get the other machine serving this scenario, and wait until it is (regress_remote.start: the cell restarted, or
+    left to recover with --remote-persist; in spawner mode B's spawner started with the scenario's environment)."""
+    regress_remote.start(sys.modules[__name__], mark, env)
 
 
 def kill_all_kit_processes():
@@ -452,6 +441,9 @@ def stop_play():
     except TimeoutError:
         print("  ! Play did not stop in time")
     kill_bots()
+    if REMOTE_CELLS and REMOTE_MODE == regress_remote.SPAWNER:
+        # DESIGN 0.90: B's spawner would register with the next scenario's cluster and start its cells there.
+        remote("stop")
     if topology_of(_current_scenario) == "split":
         # Slice 5: the central, spawner and cells are build processes that outlive Play by design; the teardown ends
         # them in an order that lets nothing respawn, and whatever is left afterwards is a survivor.
@@ -588,38 +580,14 @@ STAMP = rigtools.STAMP
 
 
 def remote_log_mark():
-    """How many lines the remote cell's logs hold right now, per severity.
-
-    Timestamps were the wrong tool for this: the wait used a window starting five seconds before Play was noticed,
-    which could match the PREVIOUS scenario's tail and declare the cell ready while it was still registering for
-    this one (seen 2026-09-17, seam). A line count taken before Play cannot do that, and does not care whether the
-    two machines' clocks agree.
-    """
-    if not REMOTE_CELLS:
-        return {}
-    fetch_remote(force=True)
-    day = time.strftime("%Y-%m-%d")
-    mark = {}
-    for suffix in ("info", "warn", "error"):
-        path = zone_log(REMOTE_CELLS[0], suffix, day)
-        mark[suffix] = sum(1 for _ in open(path, encoding="utf-8", errors="replace")) if os.path.exists(path) else 0
-    return mark
+    """How many lines the watched remote logs hold right now (regress_remote.log_mark: a line count taken before Play,
+    never a timestamp)."""
+    return regress_remote.log_mark(sys.modules[__name__])
 
 
 def remote_lines_after(mark):
-    """Every line the remote cell has logged since the mark was taken."""
-    fetch_remote(force=True)
-    day = time.strftime("%Y-%m-%d")
-    out = []
-    for suffix in ("info", "warn", "error"):
-        path = zone_log(REMOTE_CELLS[0], suffix, day)
-        if not os.path.exists(path):
-            continue
-        with open(path, encoding="utf-8", errors="replace") as f:
-            for i, line in enumerate(f):
-                if i >= mark.get(suffix, 0):
-                    out.append(line.rstrip("\n"))
-    return out
+    """Every line the watched remote logs have gained since the mark."""
+    return regress_remote.lines_after(sys.modules[__name__], mark)
 
 
 def zone_lines(zone, start, day, map_id=MAP, suffixes=("info", "warn", "error")):
@@ -634,19 +602,24 @@ def zone_lines(zone, start, day, map_id=MAP, suffixes=("info", "warn", "error"))
         # A missing remote log must fail loudly: read as "no lines", it turns every check on that cell into a
         # silent pass, which is worse than no coverage at all.
         if not any(os.path.exists(zone_log(zone, sfx, day, map_id)) for sfx in ("info", "warn", "error")):
-            raise RuntimeError(f"no log for remote cell {zone} in {REMOTE_LOGS}; it may not have started today")
+            raise RuntimeError(f"no log for remote cell {zone} in {remote_logs()}; it may not have started today")
+    elif remote_family(zone):
+        fetch_remote()     # a child on the other machine: an expected one that never logged fails its own check
     since = f"{day} {start}"
     next_day = (datetime.date.fromisoformat(day) + datetime.timedelta(days=1)).isoformat()
+    shift = REMOTE_CLOCK_SHIFT if remote_family(zone) else 0
     out = []
     for d in (day, next_day):
         for suffix in suffixes:
             path = zone_log(zone, suffix, d, map_id)
             if not os.path.exists(path):
                 continue
-            for line in open(path, encoding="utf-8", errors="replace"):
-                stamp = rigtools.stamp_of(line)
-                if stamp and f"{stamp[0]} {stamp[1]}" >= since:
-                    out.append(line.rstrip("\n"))
+            with open(path, encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    line = rigtools.shift_stamp(line, shift)
+                    stamp = rigtools.stamp_of(line)
+                    if stamp and f"{stamp[0]} {stamp[1]}" >= since:
+                        out.append(line.rstrip("\n"))
     return out
 
 
@@ -702,7 +675,12 @@ def graded_zones(day, start=None, expect=None):
     next_day = (datetime.date.fromisoformat(day) + datetime.timedelta(days=1)).isoformat()
     zones = list(ZONES)
     since = None if start is None else f"{day} {start}"
-    for cell, map_id in expected_zones(expect) + rigtools.discover_cells(LOGS, {day, next_day}, since):
+    found = rigtools.discover_cells(LOGS, {day, next_day}, since)
+    if REMOTE_CELLS and REMOTE_MODE == regress_remote.SPAWNER:
+        # The other machine's children (DESIGN 0.90): their logs are fetched, under runtime ids too.
+        fetch_remote()
+        found += [(c, m) for c, m in rigtools.discover_cells(remote_logs(), {day, next_day}, since) if remote_family(c)]
+    for cell, map_id in expected_zones(expect) + found:
         if (cell, map_id) not in zones and cell not in REMOTE_CELLS:
             zones.append((cell, map_id))
     return zones
@@ -833,8 +811,12 @@ def bot_result(log, kind):
 
 # ------------------------------------------------------------------ scenarios
 def run_scenario(name, rep):
-    global _current_scenario
+    global _current_scenario, REMOTE_MODE
     _current_scenario = name
+    REMOTE_MODE = remote_mode_of(name)
+    if REMOTE_CELLS:
+        # The fault markers of the other machine's cells live in its Temp folders (build and spawner), not in this one.
+        remote("clearmarkers")
     day = datetime.date.today().isoformat()
     start = datetime.datetime.now().strftime("%H:%M:%S")
     for marker in os.listdir(TEMP) if os.path.isdir(TEMP) else []:
@@ -1133,6 +1115,8 @@ def run_scenario(name, rep):
               **regress_family.EXPECTED_ZONES, **regress_policy.EXPECTED_ZONES}
     grade_common(rep, start, day, expect=expect.get(name))
     grade_links(rep, name, start, day, expect.get(name))
+    if REMOTE_CELLS and REMOTE_MODE == regress_remote.SPAWNER:
+        regress_remote.grade_family_host(rep, sys.modules[__name__], start, day)
     if name in regress_split.SCENARIOS:
         regress_split.grade_layout(rep, sys.modules[__name__], start, day, split)
     elif name in regress_merge.SCENARIOS:
@@ -1180,26 +1164,31 @@ def wait_for_bot(log, kind, timeout):
 
 
 DEFAULT = ["pet", "party", "crash", "harvest", "build", "seam", "seamcold", "sleep"]
+# Scenarios that cannot run across two machines at all, in either mode.
 TWO_HOST_SKIP = {
-    "sleep": "needs cells started on demand by the central, which asks the spawner that serves the cell; the other "
-             "machine runs no spawner, so nothing can start its cell there",
-    "wake": "needs cells started on demand by the central (as sleep does); the other machine runs no spawner",
-    **{n: regress_split.TWO_HOST_REASON for n in regress_split.SCENARIOS},
-    **{n: regress_merge.TWO_HOST_REASON for n in regress_merge.SCENARIOS},
-    **{n: regress_splitcrash.TWO_HOST_REASON for n in regress_splitcrash.SCENARIOS},
-    **{n: regress_auto.TWO_HOST_REASON for n in regress_auto.SCENARIOS},
-    **{n: regress_building.TWO_HOST_REASON for n in regress_building.SCENARIOS},
-    **{n: regress_central.TWO_HOST_REASON for n in regress_central.SCENARIOS},
     **{n: regress_links.TWO_HOST_REASON for n in regress_links.SCENARIOS},
-    **{n: regress_family.TWO_HOST_REASON for n in regress_family.SCENARIOS},
-    **{n: regress_policy.TWO_HOST_REASON for n in regress_policy.SCENARIOS},
+    **regress_policy.TWO_HOST_SKIP,
 }
+# DESIGN 0.90: the scenarios that run with the other machine's map-spawn server (regress_remote spawner mode): every
+# scenario of a Dynamic map (its families start, restart and die on their base's host) and the cells started on demand.
+SPAWNER_SCENARIOS = ({"sleep", "wake", "dynidle"} | set(regress_split.SCENARIOS) | set(regress_merge.SCENARIOS)
+                     | set(regress_splitcrash.SCENARIOS) | set(regress_auto.SCENARIOS) | set(regress_building.SCENARIOS)
+                     | set(regress_central.SCENARIOS) | set(regress_family.SCENARIOS) | set(regress_policy.SCENARIOS))
+
+
+def remote_mode_of(name):
+    """'spawner' or 'cell': how a two-machine run serves the other machine's cells for a scenario."""
+    return regress_remote.SPAWNER if REMOTE_FORCE_SPAWNER or name in SPAWNER_SCENARIOS else regress_remote.CELL
+
+
 ALL = (DEFAULT + ["pvp", "wake", "dynidle"] + list(regress_split.SCENARIOS) + list(regress_merge.SCENARIOS)
        + list(regress_splitcrash.SCENARIOS) + list(regress_auto.SCENARIOS) + list(regress_building.SCENARIOS)
        + list(regress_central.SCENARIOS) + list(regress_links.SCENARIOS) + list(regress_family.SCENARIOS)
        + list(regress_policy.SCENARIOS))
 # A persisted remote cell outlives the Plays, so no scenario's environment reaches it.
 PERSIST_SKIP = {"dynidle": "runs the test map Dynamic through the environment, which a persisted remote cell never gets",
+                "sleep": "runs the other machine's spawner for the scenario, which a persisted remote cell never is",
+                "wake": "runs the other machine's spawner for the scenario, which a persisted remote cell never is",
                 **{n: regress_split.PERSIST_REASON for n in regress_split.SCENARIOS},
                 **{n: regress_merge.PERSIST_REASON for n in regress_merge.SCENARIOS},
                 **{n: regress_splitcrash.PERSIST_REASON for n in regress_splitcrash.SCENARIOS},
@@ -1225,6 +1214,9 @@ def main():
                     help="degrade the other machine's UDP link to this one for the whole run (remoteb.py impair "
                          "profiles: lag5, loss05, loss2, loss5, jitter, reorder, nasty). Restored at the end, and "
                          "by clumsy exiting if this is interrupted.")
+    ap.add_argument("--remote-spawner", action="store_true",
+                    help="run every scenario with the other machine's map-spawn server serving the remote cells "
+                         "(DESIGN 0.90; the Dynamic and sleeping-cell scenarios always do)")
     ap.add_argument("--remote-persist", action="store_true",
                     help="leave the remote cell running between scenarios instead of restarting it, so it has to "
                          "recover from this machine's Play stopping and starting on its own (cluster reconnect and "
@@ -1244,8 +1236,8 @@ def main():
                          "'split' runs the central (+ login + database manager) and the spawner as build processes with the "
                          "editor as a client only; by default the splitcentral scenarios use 'split', every other 'editor'")
     args = ap.parse_args()
-    if args.topology and args.remote_cells:
-        print("--topology cannot be combined with --remote-cells: the two-machine run assumes the editor's cluster")
+    if args.remote_persist and args.remote_spawner:
+        print("--remote-persist keeps a hand-started remote cell; --remote-spawner starts the other machine's spawner per scenario")
         return 2
     globals()["TOPOLOGY_OVERRIDE"] = args.topology
     for kv in args.env:
@@ -1320,11 +1312,13 @@ def main():
         if unknown:
             print(f"unknown cell(s) {', '.join(unknown)}; known: {', '.join(sorted(known))}")
             return 2
-        if len(REMOTE_CELLS) > 1:
-            print("only one remote cell is supported for now")
+        globals()["REMOTE_FORCE_SPAWNER"] = args.remote_spawner
+        if len(REMOTE_CELLS) > 1 and any(remote_mode_of(n) == regress_remote.CELL for n in names):
+            print("more than one remote cell needs the other machine's spawner: --remote-spawner, or only Dynamic scenarios")
             return 2
         local = [z for z, _ in ZONES if z not in REMOTE_CELLS]
         EXTRA_ENV["MESH_SPAWN_CELLS"] = ",".join(local)
+        globals()["PUBLIC_ADDRESS"] = regress_remote.args().a_ip   # this machine's build-hosted spawner (split topology)
         skipped = [n for n in names if n in TWO_HOST_SKIP]
         for n in skipped:
             print(f"skipping {n}: {TWO_HOST_SKIP[n]}")
@@ -1344,10 +1338,20 @@ def main():
                 return 2
         how = ("left running across scenarios, recovering by itself" if args.remote_persist
                else "started with each scenario while the tester is held")
+        spawned = [n for n in names if remote_mode_of(n) == regress_remote.SPAWNER]
+        if spawned:
+            how += f"; by its own map-spawn server for {', '.join(spawned)}"
         print(f"two-machine run: this machine serves {', '.join(local)}; the other serves {', '.join(REMOTE_CELLS)}, {how}")
         if os.path.exists(HOLD):
             os.remove(HOLD)     # left behind by an interrupted run; it would park every tester for ever
         remote("stop")
+        try:
+            print("   " + regress_remote.ensure_deployed())
+            globals()["REMOTE_CLOCK_SHIFT"] = regress_remote.clock_shift()
+        except (RuntimeError, OSError) as ex:
+            print(f"the other machine cannot run this build: {ex}")
+            return 2
+        print(f"   its log stamps are read {REMOTE_CLOCK_SHIFT:+d} s onto this machine's clock")
         if args.impair:
             out = remote("impair", "--profile", args.impair)
             print("   " + " ".join(out.split())[:170])
@@ -1416,8 +1420,14 @@ def main():
                 rep.check(False, f"not run: the run stopped ({ex})")
                 reports.append(rep)
     if REMOTE_CELLS:
-        fetch_remote(force=True)   # one last copy so the logs left behind match what was graded
-        print("stopping the remote cell:", remote("stop").strip())
+        for mode in (regress_remote.CELL, regress_remote.SPAWNER):
+            globals()["REMOTE_MODE"] = mode
+            if any(remote_mode_of(n) == mode for n in names):
+                try:
+                    fetch_remote(force=True)   # one last copy so the logs left behind match what was graded
+                except RuntimeError as ex:
+                    print(f"the last copy of the remote logs failed: {ex}")
+        print("stopping the remote cells:", remote("stop").strip())
         if args.impair:
             print("restoring the link:", " ".join(remote("impair", "--profile", "off").split())[:80])
     print("\n=== summary" + (f" (link: {args.impair})" if args.impair else ""))

@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from unittest import mock
 
+import regress_remote
 import regress_split
 import rigsplit
 
@@ -90,8 +91,21 @@ class FakeRig:
         self.calls = []
         self.command = None
 
+    EXE = "kit.exe"
+    REMOTE_CELLS, REMOTE_MODE = [], "cell"
+
     def db_reset(self, tester, bot):
         self.calls.append(("db_reset", tester, bot))
+
+    def cell_ps(self, cell, script_of):
+        """regress.cell_ps on one machine: the snippet for this rig's executable."""
+        return self.ps(script_of(self.EXE, cell))
+
+    def mirror_temp(self, name, text):
+        self.calls.append(("mirror_temp", name, text))
+
+    def set_marker(self, cell, name, kind):
+        regress_remote.set_marker(self, cell, name, kind)
 
     def request_play(self, mode, x, z, env=None, enabled=True):
         self._play_env = dict(env or {})

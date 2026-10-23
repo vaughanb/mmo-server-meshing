@@ -138,6 +138,61 @@ namespace MultiplayerARPG.MMO.Mesh
             return string.Format(CultureInfo.InvariantCulture, "Line x={0:0.##}: starting on the {1} side at x={2:0.##}", Finite(lineX), x >= lineX ? "+" : "-", Finite(x));
         }
 
+        /// <summary>How far a stalled pickup walk steps aside: the bot's 0.5 m capsule, a 1 m node's half-diagonal, 0.3 m spare.</summary>
+        public const float PickupSidestepMetres = 1.5f;
+
+        /// <summary>
+        /// SidestepPoint is where a walk from self to dest that is stuck on an obstacle goes first: clearance metres square
+        /// to the walk (in the ground plane), on the side away from the obstacle (right of the walk when it is dead ahead),
+        /// at self's height. The walk to dest from there passes the obstacle about clearance metres off.
+        /// </summary>
+        public static Vector3 SidestepPoint(Vector3 self, Vector3 dest, Vector3 obstacle, float clearance)
+        {
+            Vector3 dir = dest - self; dir.y = 0f;
+            dir = dir.sqrMagnitude > 1e-6f ? dir.normalized : Vector3.forward;
+            Vector3 right = new Vector3(dir.z, 0f, -dir.x);
+            Vector3 toObstacle = obstacle - self; toObstacle.y = 0f;
+            float side = Vector3.Dot(toObstacle, right) > 0f ? -1f : 1f;
+            return self + right * (side * Mathf.Max(0f, clearance));
+        }
+
+        /// <summary>
+        /// What holds a pickup walk: the first collider that is not the bot's own, not ground (a hit facing up) and not a
+        /// trigger, swept 0.6 m along the walk with the bot's capsule; else a harvestable within 2.5 m (the node the
+        /// harvest stood beside).
+        /// </summary>
+        private static bool TryFindPickupBlocker(BasePlayerCharacterEntity self, Vector3 dest, out Vector3 at, out string name, out float dist)
+        {
+            at = Vector3.zero; name = null; dist = -1f;
+            Vector3 here = self.EntityTransform.position;
+            Vector3 dir = dest - here; dir.y = 0f;
+            if (dir.sqrMagnitude < 1e-6f)
+                return false;
+            dir.Normalize();
+            CharacterController cc = self.GetComponent<CharacterController>();
+            float radius = cc != null ? cc.radius : 0.5f, height = cc != null ? cc.height : 1.8f;
+            Vector3 centre = here + (cc != null ? cc.center : Vector3.up * 1.1f);
+            Vector3 top = centre + Vector3.up * Mathf.Max(0f, height * 0.5f - radius), bottom = centre - Vector3.up * Mathf.Max(0f, height * 0.5f - radius - 0.05f);
+            float best = float.MaxValue;
+            foreach (RaycastHit hit in Physics.CapsuleCastAll(top, bottom, radius, dir, 0.6f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+            {
+                if (hit.collider == null || hit.collider.transform.IsChildOf(self.transform) || (hit.distance > 0f && hit.normal.y > 0.7f) || hit.distance >= best)
+                    continue;
+                best = hit.distance;
+                at = hit.collider.bounds.center; at.y = here.y;
+                name = hit.collider.name;
+            }
+            if (name != null) { dist = best; return true; }
+            foreach (HarvestableEntity he in FindObjectsByType<HarvestableEntity>(FindObjectsSortMode.None))
+            {
+                if (he == null || !he.gameObject.activeInHierarchy) continue;
+                Vector3 d = he.EntityTransform.position - here; d.y = 0f;
+                if (d.magnitude < 2.5f && d.magnitude < best) { best = d.magnitude; at = he.EntityTransform.position; name = he.name + " (near)"; }
+            }
+            dist = name != null ? best : -1f;
+            return name != null;
+        }
+
         private void LogInvariant(System.FormattableString text) => Log(System.FormattableString.Invariant(text));
 
         private static float Finite(float value) => float.IsNaN(value) || float.IsInfinity(value) ? 0f : value;
@@ -286,6 +341,8 @@ namespace MultiplayerARPG.MMO.Mesh
             float end = Time.realtimeSinceStartup + 60f, nextLog = 0f, waitGainUntil = -1f;
             int bagBefore = 0;
             Vector3 stallFrom = Vector3.zero; float stallSince = -1f;
+            Vector3 sidestep = Vector3.zero; float sidestepUntil = -1f;
+            bool stallExplained = false;
             while (Time.realtimeSinceStartup < end)
             {
                 PollStandMigrations();
@@ -312,19 +369,42 @@ namespace MultiplayerARPG.MMO.Mesh
                 {
                     if (best > 2.2f)
                     {
-                        // A walk that does not start (no progress for 3 s) is stopped and issued again.
+                        // A walk that does not start (no progress for 3 s) is stopped, its cause logged once, and issued
+                        // again past whatever stands in its way. The kit's walk follows the baked navmesh, which knows
+                        // nothing of the node just harvested: its 1 m box, at a spawn yaw within a few degrees of square
+                        // to the walk, holds the bot's capsule for good (merge 143/144, 2026-10-21 and -22).
                         Vector3 here = self.EntityTransform.position;
+                        Vector3 dest = target.EntityTransform.position;
                         if (stallSince < 0f || (here - stallFrom).sqrMagnitude > 0.25f) { stallFrom = here; stallSince = now; }
                         else if (now - stallSince > 3f)
                         {
                             LogInvariant($"pickup: no progress for 3 s at {here}; walk issued again");
+                            bool blocked = TryFindPickupBlocker(self, dest, out Vector3 blocker, out string blockerName, out float blockerDist);
+                            if (!stallExplained)
+                            {
+                                stallExplained = true;
+                                LogInvariant($"pickup: stall attacking={self.IsAttacking} sinceAttackEnd={Time.unscaledTime - self.LastAttackEndTime:0.##} speed={self.GetMoveSpeed():0.##} canMove={self.CanMove()} movement={(int)self.MovementState} blocker={(blocked ? blockerName : "none")} at {blocker} dist={blockerDist:0.##}");
+                            }
                             self.SetTargetEntity(null);
                             self.StopMove();
                             stallSince = now;
+                            if (blocked)
+                            {
+                                sidestep = SidestepPoint(here, dest, blocker, PickupSidestepMetres);
+                                sidestepUntil = now + 3f;
+                                LogInvariant($"pickup: sidestep to {sidestep} around {blockerName}");
+                            }
                             yield return null;
                             continue;
                         }
-                        self.PointClickMovement(target.EntityTransform.position);
+                        Vector3 flat = sidestep - here; flat.y = 0f;
+                        if (now < sidestepUntil && flat.sqrMagnitude > 0.09f)
+                            self.PointClickMovement(sidestep);
+                        else
+                        {
+                            sidestepUntil = -1f;
+                            self.PointClickMovement(dest);
+                        }
                     }
                     else
                     {

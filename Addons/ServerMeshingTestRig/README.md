@@ -15,7 +15,9 @@ twenty-one of dynamic cells (split, merge, a three-cell family's merge and sibli
 automatic policy with one or two hot cells and a host without headroom, buildings across a cut, and a central restart,
 the last with the central run as a build process of its own so it can be killed alone; two run with links on demand)
 and two of
-on-demand links (a map of more cells than a capped link server takes, and a party share for a far member).
+on-demand links (a map of more cells than a capped link server takes, and a party share for a far member). With
+`--remote-cells` the second machine serves cells too: started by hand for a Static scenario, by its own map spawner
+(children, restarts and kills included) for a Dynamic one.
 
 ## Requirements
 

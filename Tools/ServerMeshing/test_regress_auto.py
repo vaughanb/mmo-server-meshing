@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from unittest import mock
 
+import regress_remote
 import regress_auto
 import regress_merge
 import regress_split
@@ -107,6 +108,16 @@ class FakeRig:
 
     def ps(self, script):
         return "0"
+
+    def cell_ps(self, cell, script_of):
+        """regress.cell_ps on one machine: the snippet for this rig's executable."""
+        return self.ps(script_of(self.EXE, cell))
+
+    def mirror_temp(self, name, text):
+        self.calls.append(("mirror_temp", name, text))
+
+    def set_marker(self, cell, name, kind):
+        regress_remote.set_marker(self, cell, name, kind)
 
     def zone_lines(self, zone, start, day, map_id=MAP, suffixes=("info", "warn", "error")):
         return list(self.lines.get(zone, []))
