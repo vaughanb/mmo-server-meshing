@@ -927,8 +927,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     _handoffRetryAfter[characterId] = Time.unscaledTime + handoffRetrySeconds;
                     return;
                 }
-                if (sw.ElapsedMilliseconds > 500)
-                    Logging.LogWarning("Mesh", $"Handoff save for {entity.CharacterName} took {sw.ElapsedMilliseconds} ms; the saved position may lag the client");
+                if (!await ResaveAfterSlowSave(entity, connectionId, characterId, mapName, savePosition, frameOffset, velocity, sw)) return; // a slow save made again where the player is (MeshMapNetworkManager_HandoffResave)
                 if (entity.TryGetComponent(out PlayerCharacterDataUpdater updater))
                     Destroy(updater);
                 if (!demotePlayerOnHandoff)

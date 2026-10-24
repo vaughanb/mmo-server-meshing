@@ -10,6 +10,8 @@ Drives the ten-cell rig (a 3x3 grid plus C2 across a seam) end to end and grades
                                                           # E served by the second machine (Docs/ServerMeshing/MULTIHOST.md)
     python Tools/ServerMeshing/regress.py split merge --remote-cells C
                                                           # C and its children on the second machine's spawner (8g)
+    python Tools/ServerMeshing/regress.py soak [--soak-minutes 180]
+                                                          # hours of automatic splits and merges (regress_soak, 0.91)
 
 Requirements (all already true on the rig machine):
   * the Unity editor is open on this project with BaseInit-CE (any scene that is not dirty) and the
@@ -49,6 +51,7 @@ import regress_links
 import regress_policy
 import regress_procs
 import regress_remote
+import regress_soak
 import rigauto
 import riglinks
 import rigprocs
@@ -140,7 +143,7 @@ EXTRA_ENV = {}   # --env KEY=VALUE from the command line, applied to every Play 
 # Slice 5: the per-scenario topology. `editor`: the editor hosts central, login, database manager and spawner (every
 # scenario so far); `split`: the central (+ login + database manager) and the spawner are build processes started by
 # regress_procs with cwd = the project root, and the editor's Play is a client only. --topology forces one for the run.
-SPLIT_TOPOLOGY = set(regress_central.SCENARIOS)
+SPLIT_TOPOLOGY = set(regress_central.SCENARIOS) | set(regress_soak.SCENARIOS)   # DESIGN 0.91: the soak restarts the central
 TOPOLOGY_OVERRIDE = None
 _current_scenario = None
 
@@ -1105,6 +1108,9 @@ def run_scenario(name, rep):
     elif name in regress_policy.SCENARIOS:
         split = regress_policy.run(name, rep, sys.modules[__name__], start, day, bots)   # DESIGN 0.88: a PolicyRun
 
+    elif name in regress_soak.SCENARIOS:
+        split = regress_soak.run(name, rep, sys.modules[__name__], start, day, bots)   # DESIGN 0.91: a SoakRun
+
     else:
         raise ValueError(f"unknown scenario {name}")
 
@@ -1112,7 +1118,7 @@ def run_scenario(name, rep):
     # runs them all (autosplit: plus the child the policy makes).
     expect = {"wake": {"C", "E", "C2"}, "autosplit": {z for z, _ in ZONES} | {"C.1"}, **regress_auto.EXPECTED_ZONES,
               **regress_building.EXPECTED_ZONES, **regress_central.EXPECTED_ZONES, **regress_links.EXPECTED_ZONES,
-              **regress_family.EXPECTED_ZONES, **regress_policy.EXPECTED_ZONES}
+              **regress_family.EXPECTED_ZONES, **regress_policy.EXPECTED_ZONES, **regress_soak.EXPECTED_ZONES}
     grade_common(rep, start, day, expect=expect.get(name))
     grade_links(rep, name, start, day, expect.get(name))
     if REMOTE_CELLS and REMOTE_MODE == regress_remote.SPAWNER:
@@ -1133,6 +1139,8 @@ def run_scenario(name, rep):
         regress_family.grade_layout(rep, sys.modules[__name__], start, day, split)
     elif name in regress_policy.SCENARIOS:
         regress_policy.grade_layout(rep, sys.modules[__name__], start, day, split)
+    elif name in regress_soak.SCENARIOS:
+        regress_soak.grade_layout(rep, sys.modules[__name__], start, day, split)
     else:
         grade_layout(rep, start, day, expect.get(name))
     for kind, log in bots:
@@ -1173,7 +1181,8 @@ TWO_HOST_SKIP = {
 # scenario of a Dynamic map (its families start, restart and die on their base's host) and the cells started on demand.
 SPAWNER_SCENARIOS = ({"sleep", "wake", "dynidle"} | set(regress_split.SCENARIOS) | set(regress_merge.SCENARIOS)
                      | set(regress_splitcrash.SCENARIOS) | set(regress_auto.SCENARIOS) | set(regress_building.SCENARIOS)
-                     | set(regress_central.SCENARIOS) | set(regress_family.SCENARIOS) | set(regress_policy.SCENARIOS))
+                     | set(regress_central.SCENARIOS) | set(regress_family.SCENARIOS) | set(regress_policy.SCENARIOS)
+                     | set(regress_soak.SCENARIOS))
 
 
 def remote_mode_of(name):
@@ -1184,7 +1193,7 @@ def remote_mode_of(name):
 ALL = (DEFAULT + ["pvp", "wake", "dynidle"] + list(regress_split.SCENARIOS) + list(regress_merge.SCENARIOS)
        + list(regress_splitcrash.SCENARIOS) + list(regress_auto.SCENARIOS) + list(regress_building.SCENARIOS)
        + list(regress_central.SCENARIOS) + list(regress_links.SCENARIOS) + list(regress_family.SCENARIOS)
-       + list(regress_policy.SCENARIOS))
+       + list(regress_policy.SCENARIOS) + list(regress_soak.SCENARIOS))
 # A persisted remote cell outlives the Plays, so no scenario's environment reaches it.
 PERSIST_SKIP = {"dynidle": "runs the test map Dynamic through the environment, which a persisted remote cell never gets",
                 "sleep": "runs the other machine's spawner for the scenario, which a persisted remote cell never is",
@@ -1197,7 +1206,8 @@ PERSIST_SKIP = {"dynidle": "runs the test map Dynamic through the environment, w
                 **{n: regress_central.PERSIST_REASON for n in regress_central.SCENARIOS},
                 **{n: regress_links.PERSIST_REASON for n in regress_links.SCENARIOS},
                 **{n: regress_family.PERSIST_REASON for n in regress_family.SCENARIOS},
-                **{n: regress_policy.PERSIST_REASON for n in regress_policy.SCENARIOS}}
+                **{n: regress_policy.PERSIST_REASON for n in regress_policy.SCENARIOS},
+                **{n: regress_soak.PERSIST_REASON for n in regress_soak.SCENARIOS}}
 
 
 def main():
@@ -1235,7 +1245,14 @@ def main():
                     help="force the rig topology for every scenario (Slice 5): 'editor' hosts every server in the editor, "
                          "'split' runs the central (+ login + database manager) and the spawner as build processes with the "
                          "editor as a client only; by default the splitcentral scenarios use 'split', every other 'editor'")
+    ap.add_argument("--soak-minutes", type=float, default=regress_soak.SETTINGS["minutes"],
+                    help="the soak scenario's length before its drain (DESIGN 0.91)")
+    ap.add_argument("--soak-kill-every", type=float, default=regress_soak.SETTINGS["kill_every"],
+                    help="minutes between the soak's kills of a random live child")
+    ap.add_argument("--soak-central-every", type=float, default=regress_soak.SETTINGS["central_every"],
+                    help="minutes between the soak's central restarts (none in its last 10 minutes)")
     args = ap.parse_args()
+    regress_soak.SETTINGS.update(minutes=args.soak_minutes, kill_every=args.soak_kill_every, central_every=args.soak_central_every)
     if args.remote_persist and args.remote_spawner:
         print("--remote-persist keeps a hand-started remote cell; --remote-spawner starts the other machine's spawner per scenario")
         return 2

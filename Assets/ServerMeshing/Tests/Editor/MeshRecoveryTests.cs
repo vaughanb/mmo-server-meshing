@@ -349,6 +349,24 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
         }
 
         [Test]
+        public void ARecoveryDoneAtStart_StartsThePolicysFreshCooldownToo()
+        {
+            // DESIGN 0.91 (the soak): a restart that adopts the store at once ran the fresh cooldowns before the policy
+            // existed, so the policy planned the family's split into the coordinator's cooldown ("Layout op refused").
+            FirstCentral();
+            Assert.That(_c.RequestSplit("C", MeshSplitAxis.X, 0f, true, "C.1", out string error), Is.True, error);
+            _c.Stop();
+            NewCentral();
+            _clock.Now += 10f;
+            _clock.UtcTicks += 1000;
+            _c.Start();
+
+            Assert.That(_c.Phase, Is.EqualTo(MeshCoordinatorPhase.Running), "recovered at Start");
+            Assert.That(_log.infos, Has.Some.Contains("Coordinator policy: cooldowns start fresh for C after the restart"));
+            Assert.That(_c.Policy.CooldownLeft("C", _clock.Now), Is.GreaterThan(0f), "the policy holds the family as the coordinator does");
+        }
+
+        [Test]
         public void ASplitStillSpawning_IsAbortedAndItsLateChildRetired()
         {
             FirstCentral();

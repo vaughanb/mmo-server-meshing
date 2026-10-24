@@ -99,6 +99,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 // Answered whether or not cells sleep: a cell asks whenever a neighbour it needs is not registered, and an
                 // unregistered request type makes the kit log an error for every one of them.
                 ClusterServer.RegisterRequestHandler<MeshWakeRequest, MeshWakeResponse>(MeshClusterMsg.Wake, HandleWakeRequest);
+                MapUsersRegister();   // DESIGN 0.91: a dead map server's users told offline (MeshCentralNetworkManager_MapUsers)
             }
             if (sleepCells && world != null && ClusterServer != null)
                 Logging.Log("Mesh", $"Sleeping cells ON: awake rings {awakeRings}, sleep after {sleepAfterSeconds:0} s; cells start on demand");
@@ -126,6 +127,7 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             _coordinator?.Stop();
             _coordinator = null;
+            _mapUsers.Clear();
             base.OnStopServer();
         }
 #endif
@@ -139,6 +141,7 @@ namespace MultiplayerARPG.MMO.Mesh
         protected override void Update()
         {
             base.Update();
+            MapUsersTick();
             if (_coordinator != null && IsServer && Time.unscaledTime >= _nextCoordinatorTick)
             {
                 _nextCoordinatorTick = Time.unscaledTime + 1f;

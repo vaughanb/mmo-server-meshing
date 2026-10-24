@@ -82,8 +82,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 _log.Error($"{saveError}; no operation will run until the store is writable again (hellos are still answered)");
             _storeData = data;
             SupervisionStart(data);
+            PolicyStart();   // before the recovery: one that ends at once (the store adopted) starts the policy's fresh cooldowns
             RecoveryStart(data, storeState);
-            PolicyStart();
         }
 
         /// <summary>Stop forgets every binding and recovery; the registry's own reset owns the applied layout.</summary>

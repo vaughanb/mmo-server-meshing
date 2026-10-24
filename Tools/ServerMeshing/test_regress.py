@@ -121,7 +121,7 @@ class SplitWiringTests(unittest.TestCase):
         for name in ("split", "splitc2", "merge", "mergec2", "splitcrash_prewarm", "splitcrash_drain", "splitcrash_base",
                      "autosplit", "autobenefit", "autorefuse", "splitbuild", "splitcentral", "splitcentral_merge",
                      "splitcentral_base", "splitcentral_unfreeze", "splitcentral_links", "autosplit_links", "mergechildren",
-                     "collapsesibling", "autoqueue", "autodefer"):
+                     "collapsesibling", "autoqueue", "autodefer", "soak"):
             with self.subTest(name):
                 self.assertIn(name, regress.ALL)
                 self.assertNotIn(name, regress.DEFAULT)
@@ -137,7 +137,7 @@ class SplitWiringTests(unittest.TestCase):
             self.assertIn(key, regress.ENV_KEYS)
         self.assertEqual(len(regress.ENV_KEYS), len(set(regress.ENV_KEYS)))
         # Slice 5: the central-restart scenarios run the split-process topology, everything else the editor's.
-        for name in ("splitcentral", "splitcentral_merge", "splitcentral_base", "splitcentral_unfreeze", "splitcentral_links"):
+        for name in ("splitcentral", "splitcentral_merge", "splitcentral_base", "splitcentral_unfreeze", "splitcentral_links", "soak"):
             self.assertEqual(regress.topology_of(name), "split")
         for name in ("split", "merge", "pet", "splitcrash_base", "mergechildren", "autoqueue", "autosplit_links"):
             self.assertEqual(regress.topology_of(name), "editor")

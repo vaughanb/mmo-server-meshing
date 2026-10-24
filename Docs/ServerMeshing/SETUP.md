@@ -170,6 +170,7 @@ All on `MeshMapNetworkManager` (the map-manager prefab). Defaults are the values
 | `handoffHysteresis` | 1 m | A player must be this far past the line before the handoff starts (no thrashing on the line). |
 | `handoffLeadSeconds`, `handoffMaxLeadSpeed` | 0.3 s, 15 m/s | The saved position is led by the velocity so the arrival spawns where the player will be. |
 | `handoffRetrySeconds` | 2 s | Retry after a refused or failed handoff. |
+| `handoffResaveMeters`, `handoffResaveAttempts` | 2 m, 3 | A handoff save slower than 0.5 s (a slow or reconnecting database) is made again at the player's current position when the player moved at least this far meanwhile, so the destination spawns it where it is, not 25 m back (DESIGN 0.91). 0 m turns it off. |
 | `demotePlayerOnHandoff`, `promoteGhostOnArrival`, `fastSpawnOnHandoff` | on | The departing cell keeps a puppet, the arriving cell promotes its puppet in place: no pop on either side. |
 | `handoffAckGuardSeconds`, `handoffRollbackHoldSeconds`, `handoffLinkDownGraceSeconds` | 20 / 20 / 3 s | Timeouts of the notice/ack protocol and its rollback when the destination dies mid-handoff. |
 | `reservedArrivalTimeout` | 15 s | An announced arrival whose client never becomes ready releases its promoted puppet after this. |
@@ -589,9 +590,9 @@ Every field of the registry's `dynamicSettings`, read only when a map is Dynamic
 
 ## 7. Verifying
 
-- **Harness:** `python Tools/ServerMeshing/regress.py` runs 34 scenarios: the eleven of the mesh itself (pet, party,
+- **Harness:** `python Tools/ServerMeshing/regress.py` runs 35 scenarios: the eleven of the mesh itself (pet, party,
   crash, harvest, build, seam, seamcold, sleep, pvp, wake, dynidle; the first eight by default), the twenty-one of
-  dynamic cells below and the two of on-demand links (`linkcap`, `partyfar`), on the rig and grades the logs of every cell that
+  dynamic cells below, the two of on-demand links (`linkcap`, `partyfar`) and the hours-long `soak` (below), on the rig and grades the logs of every cell that
   logged, whatever its id; `--env KEY=VALUE` passes rig toggles, `--remote-cells E` serves a cell from a second machine
   (started by hand for a Static scenario; by the second machine's own map-spawn server, its children too, for every
   Dynamic one and with `--remote-spawner`) and `--impair` degrades the link to it ([MULTIHOST.md](MULTIHOST.md) §8b,
@@ -824,6 +825,29 @@ Every field of the registry's `dynamicSettings`, read only when a map is Dynamic
   then split), and `autosplit_links` and `splitcentral_links` (`autosplit` and `splitcentral` with
   `MESH_LINKS=all:OnDemand`). The headless bots log in again
   after a lost session (`Session lost …; re-login <n>`; RESULT ` relogins=<n>`).
+- **The soak** (DESIGN 0.91): `python Tools/ServerMeshing/regress.py soak [--soak-minutes 180] [--soak-kill-every 10]
+  [--soak-central-every 60]` runs the test map Dynamic for hours on the split-process topology with automatic split and
+  merge on (`autosplit`'s triggers), and grades the whole run rather than one operation. Load: the burn file moves from
+  cell to cell in episodes (one cell hot until the policy splits it, then the family warm for 150 s, then cool until it
+  merges back; a `deep` episode heats the new child too, a `pair` two cells at once), 40 synthetic players wander C's
+  inner 200 m square, four bots stand (two in C, one in E, one in N) and two walk back and forth for the whole run (the
+  rig client's `patrol` mode: `-meshAutoMode patrol -meshWalkX <a> -meshReturnX <b> -meshWalkZ <z>`, legs logged as
+  `Patrol leg <n> to x=<x>: reached|missed`). Faults: a random live child killed every `--soak-kill-every` minutes,
+  half an interval out of step with the central's restart every `--soak-central-every` minutes (none in the last 10);
+  the harness also plays the operator, answering a frozen family or operation with `unfreeze <base>` 30 s later. At the
+  end the burn goes off and the families have 15 minutes to merge back whole. Graded: every operation ended, none over
+  600 s (read from the central's own log: a restarted central logs its recovery's lines before the rig's command
+  watcher attaches); every restart recovered (adopted the stored layout, or the asset cut when nothing was split);
+  nothing frozen left; at every layout pair no rectangle with two owners, and the done operations' pairs owned as
+  `riglayout` derives them; the families whole, no operation stored and the fenced set within 16 per cell at the end;
+  the store's size, retired entries and aborted ids, the OS private memory of every long-lived process (sampled once a
+  minute) and every cell's `Mesh stats` memory flat once warmed up (the peak of the second half within 25 MB or 5 % of
+  the first's); no bot's session lost except within 90 s of a kill, none kicked, no re-login given up, every bot still
+  running; and the usual 0 exceptions and 0 player teleports on every cell. It writes
+  `Logs/regress_soak_events_<stamp>.txt` as it goes and `Logs/regress_soak_report_<stamp>.txt` (every operation, kill,
+  restart, unfreeze, process series and bot) at the end; about 3 h 20 min with the defaults. With `--remote-cells C`
+  it runs C's family on the second machine's spawner (not yet run there; MULTIHOST §6b). First green run 2026-10-23
+  (DESIGN 0.91): 95/95 over 3 h 8 min, 45 splits and 45 merges, 18 kills, 2 central restarts, no process grew.
 - **The play runner and the environment:** every Play request carries an id that the status file echoes as
   `playSeq=` while that Play runs, so the harness never mistakes a Play an earlier, abandoned request started late for
   its own; a stop that arrives while Play is starting is carried out once it has started. The environment variables a
@@ -846,6 +870,14 @@ Every field of the registry's `dynamicSettings`, read only when a map is Dynamic
 - **Warp portals or spawn points exactly on a login position** do what they do in the kit: a character that stands up
   inside a portal trigger is warped. Not a mesh issue, but easy to trip over on a test map.
 - **Dynamic cells** have their own list of limits: §6a.12.
+- **A map server that dies with players on it**: the kit's map servers each mirror every online user and refuse a
+  player that mirror lists ("prevent nested login"), and only a server's own disconnect says its players left. Since
+  DESIGN 0.91 the central tracks which server announced each user and, when one leaves the cluster, tells the others
+  its users are offline (`Map users: <cell> (connection <n>) left the cluster with <n> user(s) still online; told <n>
+  map server(s) they are offline`), so their re-login is accepted by any cell; before, it was refused everywhere but
+  the dead server's own restart, and for ever after a dead child was merged or collapsed away.
+- **A family that flaps** (split again within `flapWindowSeconds` of a merge) waits up to `flapMaxMultiplier` (8) times
+  its dwell and cooldown before the policy acts on it again: minutes, by design (§6a.6).
 - **One shared world frame per registry**: two maps meant to touch must be placed by their world origins; the
   registry does not derive placement from content.
 
