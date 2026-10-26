@@ -161,7 +161,7 @@ def grade_memory(rep, rig, start, day, sr, out):
             graded += 1
             if not flat.ok:
                 bad.append(f"{role} pid {pid} {flat.first_max:.0f}->{flat.second_max:.0f} MB")
-            if role in ("central", "spawner", "cell:C", "cell:E"):
+            if role in ("central", "spawner", "cell:C", "cell:E", "B:spawner", "B:cell:C"):
                 rep.notes.append(f"   {role} pid {pid}: private {flat.first_max:.0f} -> {flat.second_max:.0f} MB peak, {flat.slope_per_h:+.1f} MB/h")
     _flat_check(rep, graded, bad, "OS private memory flat for {} long-lived process(es)")
     graded, bad = 0, []

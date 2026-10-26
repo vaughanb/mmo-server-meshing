@@ -218,6 +218,50 @@ class SoakFlowTests(unittest.TestCase):
         for want in ("every family whole again", "no operation stored at the end", "the policy split and merged"):
             self.assertTrue(any(want in f for f in failed), (want, failed))
 
+class TwoMachineSampleTests(unittest.TestCase):
+    """DESIGN 0.92: in a spawner-mode two-machine run the other machine's processes are sampled too, tagged 'B:'."""
+    class Events:
+        def __init__(self):
+            self.lines = []
+
+        def add(self, t, text):
+            self.lines.append(text)
+
+    B_ROWS = (f"7\t{180 * 1048576}\t1\tkit.exe -channelId C -mapName {MAP}\n"
+              f"8\t{120 * 1048576}\t1\tkit.exe -batchmode -startMapSpawnServer -x")
+
+    def rig(self, cells, mode):
+        rig = FakeSoakRig.__new__(FakeSoakRig)
+        rig.bots, rig.REMOTE_CELLS, rig.REMOTE_MODE = [], cells, mode
+        return rig
+
+    def test_the_other_machines_processes_are_tagged(self):
+        events = self.Events()
+        with mock.patch.object(regress_soak.remotespawner, "run_script", return_value=self.B_ROWS) as run:
+            rows = regress_soak.sample_processes(self.rig(["C"], "spawner"), events, 0.0)
+        run.assert_called_once()
+        roles = {r for _, r, _, _ in rows}
+        self.assertIn("B:cell:C", roles)
+        self.assertIn("B:spawner", roles)
+        self.assertIn("cell:C", roles)      # this machine's own rows are untouched
+        self.assertEqual(events.lines, [])
+
+    def test_one_machine_or_cell_mode_never_asks_the_other(self):
+        for cells, mode in (([], "cell"), (["E"], "cell")):
+            with mock.patch.object(regress_soak.remotespawner, "run_script") as run:
+                rows = regress_soak.sample_processes(self.rig(cells, mode), self.Events(), 0.0)
+            run.assert_not_called()
+            self.assertFalse(any(r.startswith("B:") for _, r, _, _ in rows))
+
+    def test_a_failed_sample_on_the_other_machine_keeps_this_ones(self):
+        events = self.Events()
+        with mock.patch.object(regress_soak.remotespawner, "run_script", side_effect=RuntimeError("B: ssh timed out")):
+            rows = regress_soak.sample_processes(self.rig(["C"], "spawner"), events, 0.0)
+        self.assertTrue(any(r == "central" for _, r, _, _ in rows))
+        self.assertEqual(len(events.lines), 1)
+        self.assertIn("B's process sample failed", events.lines[0])
+
+
 class OperatorTests(unittest.TestCase):
     class Events:
         def __init__(self):

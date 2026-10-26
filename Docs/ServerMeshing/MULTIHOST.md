@@ -539,6 +539,30 @@ B without a word, and a network Windows reclassifies as Public silently disables
 3.1 s behind A's: the harness now measures the offset at the start of a run and reads B's log stamps on A's clock, and
 the hosts should still be resynchronised, since on-demand links allow 2 s (§6b).
 
+## 8h. The three-hour soak across two machines (2026-10-25, DESIGN 0.92)
+
+`python Tools/ServerMeshing/regress.py soak --remote-cells C` runs DESIGN 0.91's soak with C's family on B's spawner:
+the central, login, database manager and A's spawner are build processes on A, the editor a client only, and C, C.1
+and C.2 start, die and restart on B. The harness kills a child of C on B (`rig.cell_ps`, B's spawner's supervisor
+restart), samples B's processes once a minute beside A's (roles tagged `B:`), and fetches B's logs before grading, its
+stamps read +3 s onto A's clock (B ran 3.3 s behind; the 2 s rule of §6b concerns on-demand links, which the soak
+does not use).
+
+| Run | Result |
+|---|---|
+| smoke, 20 min (kill every 5, central every 4) | 87/87: 6 splits, 6 merges, 4 kills (3 of C.1 on B), 2 central restarts adopted |
+| **full, 3 h 5 min** | **95/95** (`Logs/regress_soak_mh_full1.txt`, report `regress_soak_report_20261025_1204.txt`) |
+
+The full run: 30 episodes (29 completed, none cut short), 45 splits and 45 merges by the policy, 0 aborted, no
+collapse; 18 child kills, 8 of them C.1 on B, every one restarted by its host's spawner (18 back, 0 failed); 2 central
+restarts, each adopting the stored layout with B's cells reconnecting; no cell of C's family ever logged on A; 308
+layout pairs applied with no rectangle owned twice, all 307 pairs of the 90 done operations owned as derived; 12
+sessions lost, each within 90 s of a kill, every re-login accepted at once (0 retries); the patrol bots walked 234 and
+263 legs, none missed (46 and 274 migrations, many across the A/B line between C and E); 0 exceptions, 0 player
+teleports. No growth: B's base cell C 404.9 to 404.8 MB private (second half's peak against the first's), B's spawner
+333.5 to 331.7, A's E 418 to 418, the three central lifetimes within 3 MB; every cell's `Mesh stats` memory flat; the
+store at most 6.9 kB and 4 entries, the fenced set at most 7 per cell.
+
 ## 9. What we already know is missing
 
 - **A handoff refusal is acted on** — fixed 2026-09-18 (§8d, *Resolution*): the client honours a refusal per attempt,

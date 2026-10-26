@@ -1,6 +1,7 @@
 """The dynamic-cell soak for regress.py (DESIGN 0.91): hours of automatic splits and merges under kills and restarts.
 
     python Tools/ServerMeshing/regress.py soak [--soak-minutes 180] [--soak-kill-every 10] [--soak-central-every 60]
+    python Tools/ServerMeshing/regress.py soak --remote-cells C     # C's family on machine B (DESIGN 0.92)
 
 On the split-process topology (regress_procs: the central, login and database manager one build process, the spawner
 another, the editor's Play a client only and no tester), the test map runs Dynamic with automatic split and merge on
@@ -21,6 +22,10 @@ fenced set within MeshFencedSet's 16 per cell; the store, its retired entries an
 session except after a kill, and all still running; regress.grade_common's 0 exceptions and 0 player teleports. The
 counts (splits, merges, collapses, restarts, refusals) and trends are written to Logs/regress_soak_report_<stamp>.txt.
 
+Across two machines (--remote-cells, spawner mode, DESIGN 0.90) the remote families start, die and restart on B: the
+kills go to B's processes (rig.cell_ps), B's processes are sampled too (roles tagged 'B:'), and B's logs, shifted by the
+measured clock offset, are fetched before grading.
+
 regress.py hands itself in as `rig`, as for the other scenario modules; the readers are rigsoak's and rigsoakload's.
 """
 import collections
@@ -34,6 +39,7 @@ import provision
 import regress_auto
 import regress_central
 import regress_procs
+import regress_remote
 import regress_soakgrade
 import regress_split
 import rigmerge
@@ -43,6 +49,7 @@ import rigprocs
 import rigsoak
 import rigsoakload
 import rigsplitcrash
+import remotespawner
 
 SCENARIOS = ("soak",)
 PERSIST_REASON = regress_split.PERSIST_REASON
@@ -162,6 +169,32 @@ def read_store(rig):
         return None, 0
 
 
+def remote_spawner(rig):
+    """Whether the other machine's spawner serves families of this run (regress.py --remote-cells, spawner mode)."""
+    return bool(rig.REMOTE_CELLS) and rig.REMOTE_MODE == regress_remote.SPAWNER
+
+
+def tag_rows(rows, host):
+    """parse_process_rows' rows with each role prefixed '<host>:' (the other machine's processes: their pids are its own)."""
+    return [(pid, f"{host}:{role}", private, ws) for pid, role, private, ws in rows]
+
+
+def sample_processes(rig, events, now):
+    """The rig's processes on this machine and, in a two-machine run, the other's (tagged 'B:'); a host whose sample
+    failed is noted in the events and left out of this sample."""
+    rows = []
+    try:
+        rows += rigsoakload.parse_process_rows(rig.ps(SAMPLE_SCRIPT))
+    except RuntimeError as ex:
+        events.add(now, f"process sample failed: {str(ex)[:100]}")
+    if remote_spawner(rig):
+        try:
+            rows += tag_rows(rigsoakload.parse_process_rows(remotespawner.run_script(regress_remote.args(), SAMPLE_SCRIPT)), "B")
+        except RuntimeError as ex:
+            events.add(now, f"B's process sample failed: {str(ex)[:100]}")
+    return rows
+
+
 def launch(rig, name, bots, observe_s):
     logs = {}
     for b in BOTS:
@@ -203,6 +236,10 @@ def run(name, rep, rig, start, day, bots):
     started = wait_started(logs, STAND_TIMEOUT_S)
     rep.check(all(started.values()), f"every bot standing or patrolling within {STAND_TIMEOUT_S:g} s ({started})")
     sr = soak(rig, name, burn, logs, minutes, events)._replace(report=os.path.join(rig.LOGS, f"regress_soak_report_{stamp}.txt"))
+    if remote_spawner(rig):
+        rig.fetch_remote(force=True)   # the other machine's cell and spawner logs as they stand at the end
+        rep.notes.append(f"   two machines: {', '.join(rig.REMOTE_CELLS)} and their families on B, B's stamps shifted "
+                         f"{rig.REMOTE_CLOCK_SHIFT:+d} s")
     regress_soakgrade.grade(rep, rig, start, day, sr)
     return sr
 
@@ -266,10 +303,7 @@ def soak(rig, name, burn, logs, minutes, events):
             next_central += SETTINGS["central_every"] * 60.0
         if now >= next_sample:
             next_sample += SAMPLE_S
-            try:
-                samples.append((now, rigsoakload.parse_process_rows(rig.ps(SAMPLE_SCRIPT))))
-            except RuntimeError as ex:
-                events.add(now, f"process sample failed: {str(ex)[:100]}")
+            samples.append((now, sample_processes(rig, events, now)))
             if store:
                 store_samples.append((now, rigsoak.store_stats(store[0], store[1])))
         if now >= next_progress:
@@ -292,7 +326,7 @@ def soak(rig, name, burn, logs, minutes, events):
     stamped.extend(status.read(now))
     for tail in tails.values():
         tail.read(now)
-    samples.append((now, rigsoakload.parse_process_rows(rig.ps(SAMPLE_SCRIPT))))
+    samples.append((now, sample_processes(rig, events, now)))
     parsed, size = read_store(rig)
     if parsed is not None:
         store_samples.append((now, rigsoak.store_stats(parsed, size)))

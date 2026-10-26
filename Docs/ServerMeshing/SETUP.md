@@ -846,8 +846,10 @@ Every field of the registry's `dynamicSettings`, read only when a map is Dynamic
   running; and the usual 0 exceptions and 0 player teleports on every cell. It writes
   `Logs/regress_soak_events_<stamp>.txt` as it goes and `Logs/regress_soak_report_<stamp>.txt` (every operation, kill,
   restart, unfreeze, process series and bot) at the end; about 3 h 20 min with the defaults. With `--remote-cells C`
-  it runs C's family on the second machine's spawner (not yet run there; MULTIHOST §6b). First green run 2026-10-23
-  (DESIGN 0.91): 95/95 over 3 h 8 min, 45 splits and 45 merges, 18 kills, 2 central restarts, no process grew.
+  it runs C's family on the second machine's spawner, samples that machine's processes too (roles `B:`) and reads its
+  log stamps on this machine's clock (MULTIHOST §8h). First green run 2026-10-23 (DESIGN 0.91): 95/95 over 3 h 8 min,
+  45 splits and 45 merges, 18 kills, 2 central restarts, no process grew; across two machines 2026-10-25 (DESIGN
+  0.92): 95/95 over 3 h 5 min, the same counts, 8 of the kills C.1 on B.
 - **The play runner and the environment:** every Play request carries an id that the status file echoes as
   `playSeq=` while that Play runs, so the harness never mistakes a Play an earlier, abandoned request started late for
   its own; a stop that arrives while Play is starting is carried out once it has started. The environment variables a

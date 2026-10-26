@@ -1,0 +1,129 @@
+From 4f23e475f9faf981c3488a52285771b489549d15 Mon Sep 17 00:00:00 2001
+From: vaughanb <brenden.vaughan@gmail.com>
+Date: Sat, 24 Oct 2026 15:09:27 -0600
+Subject: [PATCH] ClusterServer: forget the online users of a map server that
+ disconnects
+
+Every map server mirrors the online users of the whole cluster
+(MapNetworkManager._socialCharactersByUserId), fed by the cluster
+server's relays of UpdateMapUser, and SetPlayerReadyRoutine kicks a
+player that mirror lists ("prevent nested login"). The Remove that
+takes a user out of the mirrors is only sent by the hosting map
+server's own UnregisterPlayerCharacter, so a map server that crashes or
+is killed leaves its players "online" on every other map server, and
+the cluster server keeps no user list to correct it: their next login
+is refused everywhere except on that map server's own restart.
+
+The cluster server now remembers which map server connection hosts
+each online user: Online (sent only by the host, every second) makes
+the sender the host, Add does so only for a user it does not know yet
+(a registering map server also re-announces the users it mirrors from
+other map servers), and Remove forgets the user only when it comes from
+the host (a user moving to another map may be announced by the new map
+server first). When a connection disconnects, its users are relayed as
+Remove to the remaining map servers, as the map server itself would
+have done. Entries are dropped in that same disconnect event, so a
+reused connection ID never inherits them; OnStopServer clears them.
+---
+ Server/Cluster/ClusterServer.cs | 64 +++++++++++++++++++++++++++++++++
+ 1 file changed, 64 insertions(+)
+
+diff --git a/Server/Cluster/ClusterServer.cs b/Server/Cluster/ClusterServer.cs
+index db4e018f1..985961fcf 100644
+--- a/Server/Cluster/ClusterServer.cs
++++ b/Server/Cluster/ClusterServer.cs
+@@ -51,6 +51,11 @@ namespace MultiplayerARPG.MMO
+         /// Key is `{channelId}_{refId}`
+         /// </summary>
+         public Dictionary<string, RequestProceedResultDelegate<ResponseSpawnMapMessage>> MapSpawnResultActions => _mapSpawnResultActions;
++
++        // Online users by user ID, and the connection ID of the map server which hosts each of them,
++        // entries are removed when that connection disconnects (before its ID can be reused)
++        private Dictionary<string, SocialCharacterData> _mapUsersByUserId = new Dictionary<string, SocialCharacterData>();
++        private Dictionary<string, long> _mapUserConnectionIds = new Dictionary<string, long>();
+ #endif
+ 
+         public ClusterServer(CentralNetworkManager centralNetworkManager) : base(new LiteNetLibTransport("CLUSTER", 16, 16))
+@@ -103,6 +108,8 @@ namespace MultiplayerARPG.MMO
+             _mapServerPeersByKey.Clear();
+             _instanceMapServerPeersByKey.Clear();
+             _allocateMapServerPeersByRefId.Clear();
++            _mapUsersByUserId.Clear();
++            _mapUserConnectionIds.Clear();
+         }
+ #endif
+ 
+@@ -135,6 +142,9 @@ namespace MultiplayerARPG.MMO
+                         _mapServerPeers.Remove(eventData.connectionId);
+                     }
+                     RemoveAllocateMapServer(eventData.connectionId);
++                    // Tell other map servers that users of the disconnected map server are offline,
++                    // it could not tell them by itself if it crashed or was killed
++                    RemoveMapUsers(eventData.connectionId);
+                     break;
+                 case ENetworkEvent.ErrorEvent:
+                     Logging.LogError(LogTag, $"OnPeerNetworkError endPoint: {eventData.endPoint} socketErrorCode {eventData.socketError} errorMessage {eventData.errorMessage}");
+@@ -392,6 +402,60 @@ namespace MultiplayerARPG.MMO
+             long connectionId = messageHandler.ConnectionId;
+             UpdateUserCharacterMessage message = messageHandler.ReadMessage<UpdateUserCharacterMessage>();
+             UpdateMapUser(message.type, message.character, connectionId);
++            TrackMapUser(message.type, message.character, connectionId);
++        }
++#endif
++
++#if NET || NETCOREAPP || ((UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE)
++        private void TrackMapUser(UpdateUserCharacterMessage.UpdateType updateType, SocialCharacterData userData, long connectionId)
++        {
++            if (string.IsNullOrEmpty(userData.userId))
++                return;
++            bool tracked = _mapUserConnectionIds.TryGetValue(userData.userId, out long hostConnectionId);
++            switch (updateType)
++            {
++                case UpdateUserCharacterMessage.UpdateType.Add:
++                    // A registering map server also sends users which it knows from other map servers,
++                    // so `Add` does not replace the known host
++                    if (!tracked)
++                    {
++                        _mapUsersByUserId[userData.userId] = userData;
++                        _mapUserConnectionIds[userData.userId] = connectionId;
++                    }
++                    break;
++                case UpdateUserCharacterMessage.UpdateType.Online:
++                    // Only the hosting map server sends `Online`
++                    _mapUsersByUserId[userData.userId] = userData;
++                    _mapUserConnectionIds[userData.userId] = connectionId;
++                    break;
++                case UpdateUserCharacterMessage.UpdateType.Remove:
++                    // The user may be hosted by another map server already (moved to another map)
++                    if (tracked && hostConnectionId == connectionId)
++                    {
++                        _mapUsersByUserId.Remove(userData.userId);
++                        _mapUserConnectionIds.Remove(userData.userId);
++                    }
++                    break;
++            }
++        }
++#endif
++
++#if NET || NETCOREAPP || ((UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE)
++        private void RemoveMapUsers(long connectionId)
++        {
++            List<string> userIds = new List<string>();
++            foreach (KeyValuePair<string, long> pair in _mapUserConnectionIds)
++            {
++                if (pair.Value == connectionId)
++                    userIds.Add(pair.Key);
++            }
++            foreach (string userId in userIds)
++            {
++                SocialCharacterData userData = _mapUsersByUserId[userId];
++                _mapUsersByUserId.Remove(userId);
++                _mapUserConnectionIds.Remove(userId);
++                UpdateMapUser(UpdateUserCharacterMessage.UpdateType.Remove, userData, connectionId);
++            }
+         }
+ #endif
+ 
+-- 
+2.55.0.windows.3
+

@@ -15,6 +15,7 @@ wording (no add-on markers). The local copy of the kit in `Assets/OpenMMORPG/` c
 | 0006 Send one-shot movement flags to every receiver of a tick (CE-12) | **bug fix** | `IEntityMovementDataHandler.cs`, `BaseGameNetworkManager.cs`, `BuiltInEntityMovementFunctions3D.cs`, `NavMeshEntityMovement.cs` |
 | 0007 Read entity states synchronously and resume at each state's length (CE-13) | **bug fix** | `BaseGameNetworkManager.cs`, the five movement readers (`BuiltInEntityMovementFunctions3D.cs`, `NavMeshEntityMovement.cs`, `RigidBodyEntityMovement2D.cs`, `BuiltInSimpleEntityMovementFunctions3D.cs`, `SimpleNavMeshEntityMovement.cs`) |
 | 0008 MapNetworkManager: let subclasses choose the building persistence channel (CE-10) | extension seam | `MMO/Scripts/MMOGame/Networking/Map/MapNetworkManager.cs`, `MapNetworkManager_DatabaseFunction.cs` |
+| 0009 ClusterServer: forget the online users of a map server that disconnects (DESIGN 0.91) | **bug fix** | `Server/Cluster/ClusterServer.cs` |
 
 0001-0004: 7 files, 30 insertions, 4 deletions, verified against upstream `develop` at `aa8ecf1` (2026-09-15): every
 anchor line is present and unchanged, and the diff contains nothing but these lines (byte-order marks and line
@@ -31,6 +32,19 @@ read at the kit's seven building database sites (the load, the in-scene create, 
 create, the delete); no behaviour change unless overridden. Generated from the kit copy with the `MESH-EDIT: CE-10`
 markers stripped; the doc comment stays. Applies cleanly to `develop` at 3897b326 (2026-10-20).
 
+0009 (2026-10-24) is the kit-side fix for the dead-server user mirror the 0.91 soak found: a map server that dies
+never sends the `UpdateMapUser` Remove for its players, so every other map server's `_socialCharactersByUserId` keeps
+them "online" and `SetPlayerReadyRoutine` kicks their re-login as a nested login. `ClusterServer` now records which
+connection hosts each user (`Online` sets the host; `Add` only for an unknown user, because a re-registering map server
+re-announces its whole mirror; `Remove` only from the host) and, in its `DisconnectEvent` branch, relays `Remove` for
+that connection's users to the remaining map servers. Entries go in that same event, so a reused LiteNetLib connection
+id never inherits them. 64 insertions, no deletions. Written directly against `develop` at d077c5f, not generated from the
+kit copy: `Assets/OpenMMORPG/` does not carry it, since the add-on's own workaround
+(`Mesh/MeshCentralNetworkManager_MapUsers.cs`, a replaced handler and a once-a-second sweep) already covers the gap.
+Compiled against the kit's built `Assembly-CSharp.dll`; not run on the rig. Once merged and pulled into the kit copy,
+the add-on's workaround is redundant and can go in its own step. Until then they do not double up: the workaround
+replaces the kit's `UpdateMapUser` handler, so the kit's table stays empty and its disconnect relay sends nothing.
+
 ## Status
 
 **0001-0004: merged.** Fast-forwarded onto upstream `master` and `develop` on 2026-09-15 (aa8ecf1 → 98a2d18); [PR #1](https://github.com/open-mmorpg/OpenMMORPG/pull/1) records it. The patches stay here as the record of what changed in the kit and why.
@@ -46,6 +60,11 @@ From Phase 0 step 6 the add-on requires 0006 (Mesh/Sync references its interface
 **0008: merged.** Pushed as the upstream branch `building-persistence-channel` off `develop` at 3897b326 on 2026-10-20
 (`git am` applied it unchanged); [PR #8](https://github.com/open-mmorpg/OpenMMORPG/pull/8) merged it into `develop` the
 same day (d077c5f), after both CI checks passed. Every kit change the add-on relies on is now upstream.
+
+**0009: merged.** Committed as 4f23e47 on the upstream branch `forget-dead-map-server-users` off `develop` at d077c5f
+on 2026-10-24; [PR #9](https://github.com/open-mmorpg/OpenMMORPG/pull/9) merged it into `develop` the same day
+(2026-10-24 UTC; f43d0c0) after both CI checks passed. The add-on does not rely on it: its own workaround stays until
+the kit copy has it.
 
 ## Pushing (how it was done; for a re-run)
 
