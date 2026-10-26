@@ -8,12 +8,14 @@ manager and entity prefabs plus one world-registry asset; the package changes no
 changes (`Documentation/DESIGN.md` §17), all of them in OpenMMORPG `develop` at d077c5f (2026-10-20) or later; the
 add-on does not compile on an older kit (`Documentation/SETUP.md` §3).
 
-## Packages
+## Package
 
-| Package | Contents | Needs |
+`ServerMeshing.unitypackage` holds:
+
+| Folder | Contents | Needs |
 |---|---|---|
-| `ServerMeshing.unitypackage` | `Assets/ServerMeshing/Mesh` (runtime + Editor), `Assets/ServerMeshing/Documentation` (the setup guide, the design record and the two-machine guide) | OpenMMORPG `develop` at d077c5f or later (all eight kit changes the add-on relies on) |
-| `ServerMeshingTestRig.unitypackage` | `Assets/ServerMeshing/TestMap`: the two test maps, test items, auto client, launcher, play runner, load generator, and `TestMap/Tools` (the regression and capacity harnesses, Python) | the add-on package and the kit's demo (`BaseDemo`: the enemy prefab, the default weapon item and type are referenced by the test data and scenes) |
+| `Mesh/`, `Documentation/` | the add-on (runtime + Editor) and its docs (the setup guide, the design record and the two-machine guide) | OpenMMORPG `develop` at d077c5f or later (all eight kit changes the add-on relies on) |
+| `TestMap/` | the test rig: the two test maps, test items, auto client, launcher, play runner, load generator, and `TestMap/Tools` (the regression and capacity harnesses, Python) | the kit's demo (`BaseDemo`: the enemy prefab, the default weapon item and type are referenced by the test data and scenes) |
 
 ## Start here
 
@@ -31,12 +33,12 @@ add-on does not compile on an older kit (`Documentation/SETUP.md` §3).
 Mesh/                       the add-on (all runtime code; Editor/ holds the Setup window and the package builder)
 Mesh/Editor/                Server Meshing ▸ Setup, Server Meshing ▸ Build Packages
 Documentation/              SETUP.md, DESIGN.md and MULTIHOST.md (in the package only; the source lives in Docs/ServerMeshing)
-TestMap/                    the test rig (separate package)
+TestMap/                    the test rig (in the same package)
 ```
 
-Build the packages with **Server Meshing ▸ Build Packages**. They land in the repository's `Addons/` tree in the layout
-the Open MMORPG Addon Manager expects — `Addons/<AddOn>/dist/<AddOn>.unitypackage` beside a generated `package.json`,
-with the hand-written `README.md` and `screenshot.png` — and each package carries the empty, extensionless marker file
+Build the package with **Server Meshing ▸ Build Packages**. It lands in the repository's `Addons/` tree in the layout
+the Open MMORPG Addon Manager expects — `Addons/ServerMeshing/dist/ServerMeshing.unitypackage` beside a generated
+`package.json`, with the hand-written `README.md` and `screenshot.png` — and carries the empty, extensionless marker file
 named after the add-on's guid that the Addon Manager uses to spot an installed add-on. In batch mode:
 
 ```

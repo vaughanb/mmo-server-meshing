@@ -516,7 +516,7 @@ def build_player(timeout=1800):
 
 
 def build_packages(timeout=900):
-    """Build both .unitypackages in the open editor (ServerMeshPackageBuilder). Returns the build's result text."""
+    """Build the add-on's .unitypackage in the open editor (ServerMeshPackageBuilder). Returns the build's result text."""
     seq = uuid.uuid4().hex[:8]
     st = request_and_wait(PACKAGE_REQUEST, seq, PACKAGE_STATUS, lambda s: s.get("result") not in (None, "running"), timeout, "the package build")
     return st.get("result", "")
@@ -1234,7 +1234,7 @@ def main():
     ap.add_argument("--refresh", action="store_true",
                     help="make the editor import and compile changed scripts first (it only does so on focus)")
     ap.add_argument("--package", action="store_true",
-                    help="build both .unitypackages (Build/Packages) in the open editor, after any tests and player build")
+                    help="build the add-on's .unitypackage (Addons/ServerMeshing/dist) in the open editor, after any tests and player build")
     ap.add_argument("--build", action="store_true",
                     help="rebuild the player (Build/Server) in the open editor before running")
     ap.add_argument("--unit", action="store_true",

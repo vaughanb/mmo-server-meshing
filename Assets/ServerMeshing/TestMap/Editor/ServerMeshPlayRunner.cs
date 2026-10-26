@@ -16,7 +16,7 @@
 //   Temp/ServerMesh.BuildRequest.txt  -> builds the rig player (ServerMeshRigBuild); the outcome is written to
 //                                     Temp/ServerMesh.BuildStatus.txt as seq= and result=. Outside Play only.
 //   Temp/ServerMesh.TestRequest.txt   -> runs the add-on's EditMode tests (ServerMeshTestRunner). Outside Play only.
-//   Temp/ServerMesh.PackageRequest.txt -> builds both .unitypackages (ServerMeshPackageBuilder); the outcome is written
+//   Temp/ServerMesh.PackageRequest.txt -> builds the .unitypackage (ServerMeshPackageBuilder); the outcome is written
 //                                     to Temp/ServerMesh.PackageStatus.txt as seq= and result=. Outside Play only.
 //   Temp/ServerMesh.PlayStatus.txt    written every second: editor state + auto-client phase/finished/passed.
 //   env.MESH_EDITOR_SERVERS=0 (Slice 5) makes the Play a client only (ServerMeshEditorRole clears the kit's start flags;

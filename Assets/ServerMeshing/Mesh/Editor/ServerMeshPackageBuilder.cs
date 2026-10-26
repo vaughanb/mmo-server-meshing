@@ -1,23 +1,22 @@
 // Server Meshing add-on — package builder (Server Meshing ▸ Build Packages).
 //
-// Emits the two add-ons in the layout the Open MMORPG Addon Manager expects, under Addons/ in the repository root:
+// Emits the add-on in the layout the Open MMORPG Addon Manager expects, under Addons/ in the repository root:
 //
-//   Addons/ServerMeshing/dist/ServerMeshing.unitypackage             the add-on: Assets/ServerMeshing/Mesh (runtime + Editor),
-//   Addons/ServerMeshing/dist/package.json                           the README and a Documentation/ snapshot of SETUP.md,
-//                                                                    DESIGN.md and MULTIHOST.md (the spike notes, the upstream
-//                                                                    patch series and the raw capacity table stay in the repository)
-//   Addons/ServerMeshingTestRig/dist/ServerMeshingTestRig.unitypackage  the test rig: Assets/ServerMeshing/TestMap (scenes, prefabs,
-//   Addons/ServerMeshingTestRig/dist/package.json                       test data, auto client, launcher, play runner, load
-//                                                                       generator) and a snapshot of Tools/ServerMeshing
-//                                                                       (regress.py, loadtest.py) under TestMap/Tools/
+//   Addons/ServerMeshing/dist/ServerMeshing.unitypackage   Assets/ServerMeshing/Mesh (runtime + Editor), the README, a
+//   Addons/ServerMeshing/dist/package.json                 Documentation/ snapshot of SETUP.md, DESIGN.md and MULTIHOST.md
+//                                                          (the spike notes, the upstream patch series and the raw capacity
+//                                                          table stay in the repository), and the test rig:
+//                                                          Assets/ServerMeshing/TestMap (scenes, prefabs, test data, auto
+//                                                          client, launcher, play runner, load generator) with a snapshot of
+//                                                          Tools/ServerMeshing (regress.py, loadtest.py) under TestMap/Tools/
 //
-// Each package carries an empty, extensionless marker file named after the add-on's guid — that is how the Addon Manager
+// The package carries an empty, extensionless marker file named after the add-on's guid — that is how the Addon Manager
 // recognises an installed add-on, so the marker name and the "guid" field in package.json must stay in step. The README.md
-// and screenshot.png beside each dist/ are authored by hand and are left alone here.
+// and screenshot.png beside dist/ are authored by hand and are left alone here.
 //
-// Dependencies are NOT followed (the rig references the kit's demo prefabs; the add-on references the kit): the target
-// project must have the kit installed, and the demo for the rig. The docs and tools snapshots are copied into Assets for
-// the export and removed again, so the canonical copies stay outside Assets.
+// Dependencies are NOT followed (the add-on references the kit; the rig references the kit's demo prefabs): the target
+// project must have the kit installed, demo included. The docs and tools snapshots are copied into Assets for the export
+// and removed again, so the canonical copies stay outside Assets.
 //
 // Batch mode:
 //   Unity.exe -batchmode -quit -projectPath <repo> -executeMethod MultiplayerARPG.MMO.Mesh.Editor.ServerMeshPackageBuilder.BuildAll
@@ -36,12 +35,12 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
     {
         // Release metadata. Version is the add-on version reported by the Addon Manager; UpdateDate drives its recency
         // filter and "New" badge, and is bumped by hand with the version rather than tracking the build clock.
-        public const string Version = "0.91.0";
-        public const string UpdateDate = "2026-10-23";
+        public const string Version = "0.93.0";
+        public const string UpdateDate = "2026-10-26";
 
         // Where the published packages will be fetched from. The Addon Manager downloads "packageUrl" verbatim, so this
         // has to point at wherever dist/ is finally hosted — change it here if these move to another repository.
-        private const string DistBaseUrl = "https://github.com/vaughanb/mmo-server-meshing/raw/refs/heads/master/Addons";
+        private const string DistBaseUrl = "https://github.com/open-mmorpg/open-mmorpg-addons/raw/refs/heads/master";
 
         private const string AddOnRoot = "Assets/ServerMeshing";
         private const string DocsSnapshot = AddOnRoot + "/Documentation";
@@ -75,34 +74,18 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 "Subclasses on the kit's managers and entity prefabs plus one world-registry asset; the package changes no " +
                 "kit file. Needs OpenMMORPG develop at d077c5f (2026-10-20) or later: the add-on does not compile on an " +
                 "older kit (see the README). Includes a Setup window that validates a project, judges " +
-                "every Dynamic map's cut and settings before anything starts, and fixes what it can.",
+                "every Dynamic map's cut and settings before anything starts, and fixes what it can.\n" +
+                "Includes the test rig: two test maps cut into ten cells (a 3x3 grid plus one cell across a seam) with " +
+                "content that exercises every path across a cell edge, an auto client, an editor launcher and play runner, " +
+                "a load generator, and the Python regression and capacity harnesses under TestMap/Tools: 35 scenarios, " +
+                "eleven of the mesh itself, twenty-two of dynamic cells (including a three-hour soak) and two of on-demand " +
+                "links. The rig's test data references the kit's BaseDemo (its enemy prefab and default weapon).",
             // The marker sits inside Mesh/ so it lands with the code wherever the Addon Manager installs the add-on.
             MarkerFolder = AddOnRoot + "/Mesh",
-            ExportPaths = new[] { AddOnRoot + "/Mesh", DocsSnapshot, AddOnRoot + "/README.md" },
+            ExportPaths = new[] { AddOnRoot + "/Mesh", DocsSnapshot, AddOnRoot + "/README.md", AddOnRoot + "/TestMap" },
         };
 
-        private static readonly Addon TestRigAddon = new Addon
-        {
-            Folder = "ServerMeshingTestRig",
-            Name = "Server Meshing Test Rig",
-            Guid = "6a71ac12-0405-44d7-b1c1-003df8ffd085",
-            Category = "Demo",
-            Description =
-                "The test rig for the Server Meshing add-on: two test maps cut into ten cells (a 3x3 grid plus one cell " +
-                "across a seam), test items, skills, quests, mounts, pets, harvestables and buildings that exercise every " +
-                "path across a cell edge.\n" +
-                "Adds an auto client, an editor launcher and play runner, a load generator, and the Python regression and " +
-                "capacity harnesses under TestMap/Tools: 27 scenarios, eleven of the mesh itself, fourteen of dynamic " +
-                "cells (split, merge, crashes, the automatic policy, buildings across a cut, and a central restart with " +
-                "the central run as its own process) and two of on-demand links.\n" +
-                "Needs the Server Meshing add-on and the kit's BaseDemo (the test data references its enemy prefab and " +
-                "default weapon).",
-            Dependencies = new[] { "87f3a860-3714-407a-8bd2-3ae097a78867" },
-            MarkerFolder = AddOnRoot + "/TestMap",
-            ExportPaths = new[] { AddOnRoot + "/TestMap" },
-        };
-
-        private static readonly Addon[] AllAddons = { MeshAddon, TestRigAddon };
+        private static readonly Addon[] AllAddons = { MeshAddon };
 
         [MenuItem("Server Meshing/Build Packages")]
         public static void BuildAllFromMenu()
@@ -130,18 +113,18 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             }
         }
 
-        /// <summary>Build writes both packages and returns their paths (the menu, batch mode and the rig's package request).</summary>
+        /// <summary>Build writes the package and returns its path, as an array (the menu, batch mode and the rig's package request).</summary>
         internal static string[] Build()
         {
             string addOn = BuildAddOn();
-            string rig = BuildTestRig();
-            Debug.Log($"[Mesh] Packages written:\n  {addOn}\n  {rig}");
-            return new[] { addOn, rig };
+            Debug.Log($"[Mesh] Package written:\n  {addOn}");
+            return new[] { addOn };
         }
 
         public static string BuildAddOn()
         {
             CopyFiles(Path.Combine(ProjectRoot(), "Docs", "ServerMeshing"), DocsSnapshot, "SETUP.md", "DESIGN.md", "MULTIHOST.md");
+            CopyTree(Path.Combine(ProjectRoot(), "Tools", "ServerMeshing"), ToolsSnapshot, ".py", ".md");
             try
             {
                 return Export(MeshAddon);
@@ -149,19 +132,6 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             finally
             {
                 RemoveTree(DocsSnapshot);
-                AssetDatabase.Refresh();
-            }
-        }
-
-        public static string BuildTestRig()
-        {
-            CopyTree(Path.Combine(ProjectRoot(), "Tools", "ServerMeshing"), ToolsSnapshot, ".py", ".md");
-            try
-            {
-                return Export(TestRigAddon);
-            }
-            finally
-            {
                 RemoveTree(ToolsSnapshot);
                 AssetDatabase.Refresh();
             }

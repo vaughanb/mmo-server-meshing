@@ -1,6 +1,6 @@
-# Draws the two add-on screenshots for the Open MMORPG Addon Manager listing.
-# Diagrams, not gameplay captures: the cell grid, the ghost bands along shared edges, a handoff in progress,
-# a sleeping cell, and (for the rig) the seam between the two test maps.
+# Draws the add-on's screenshot for the Open MMORPG Addon Manager listing.
+# A diagram, not a gameplay capture: the cell grid, the ghost bands along shared edges, a handoff in progress
+# and a sleeping cell.
 import math
 import pathlib
 from PIL import Image, ImageDraw, ImageFont
@@ -189,68 +189,5 @@ def addon(out):
     print("wrote", out)
 
 
-# ---------------------------------------------------------------- test rig
-def testrig(out):
-    img, d = base()
-    header(d, "Server Meshing Test Rig",
-           "Two test maps cut into ten cells, the content to exercise every path across an edge, and the harnesses")
-
-    ox, oy, size = 72, 182, 140
-    channels = [[101, 102, 103], [104, 105, 106], [107, 108, 109]]
-    for r, row in enumerate(GRID):
-        for c, key in enumerate(row):
-            x0, y0 = ox + c * size, oy + r * size
-            cell(d, (x0 + 2, y0 + 2, x0 + size - 2, y0 + size - 2), key, f"cell {channels[r][c]}", key)
-    img = ghost_bands(img, ox, oy, size, 3, 3)
-    d = ImageDraw.Draw(img)
-
-    bottom = oy + 3 * size
-    text(d, (ox, oy - 30), "ServerMeshTestMap   ·   3 × 3 grid", B(17), INK)
-    text(d, (ox, bottom + 16), "nine cells, nine server processes", R(14), DIM)
-
-    # The seam, then the tenth cell on the second map.
-    sx = ox + 3 * size + 44
-    text(d, (sx, oy - 28), "seam", B(16), (255, 214, 120), anchor="ma")
-    for y in range(oy, bottom, 16):
-        d.line((sx, y, sx, min(y + 9, bottom)), fill=(255, 214, 120), width=3)
-
-    mx, mw = sx + 44, 150
-    cell(d, (mx, oy + 2, mx + mw, bottom - 2), "C", "cell 201", "one cell")
-    text(d, (mx, oy - 30), "ServerMeshTestMap2", B(17), INK)
-    text(d, (mx, bottom + 16), "the tenth cell", R(14), DIM)
-
-    arrow(d, sx - 38, oy + 1.5 * size, sx + 44, oy + 1.5 * size, (255, 255, 255), 3)
-    player(d, sx - 44, oy + 1.5 * size)
-
-    px = mx + mw + 54
-    rows = [
-        ("Ten cells", ["nine on the first map, one across the seam"]),
-        ("Seam crossing", ["a map change and a frame change in one hop"]),
-        ("Content", ["test items, heal and debuff skills, a kill quest, a bow",
-                     "and missile, a mount, a pet, a harvestable and a",
-                     "placeable building"]),
-        ("Auto client", ["walks characters over edges on its own"]),
-        ("Launcher", ["brings up all ten cell processes from the editor"]),
-        ("Load generator", ["drives a cell to its player ceiling"]),
-        ("Harnesses", ["regress.py and loadtest.py, under TestMap/Tools"]),
-    ]
-    text(d, (px, oy - 30), "THE RIG EXERCISES", B(14), FAINT)
-    y = oy
-    for title, body in rows:
-        text(d, (px, y), title, B(17), INK)
-        for i, line in enumerate(body):
-            text(d, (px, y + 24 + i * 21), line, R(15), DIM)
-        y += 24 + len(body) * 21 + 12
-
-    d.line((px, y + 6, W - 64, y + 6), fill=(38, 44, 56), width=2)
-    text(d, (px, y + 26), "Runs on one machine, or across two with a cell served", R(15), DIM)
-    text(d, (px, y + 48), "from the other. Needs the Server Meshing add-on and", R(15), DIM)
-    text(d, (px, y + 70), "the kit's BaseDemo.", R(15), DIM)
-
-    img.save(out)
-    print("wrote", out)
-
-
 root = pathlib.Path(r"D:\Game Development\mmo-server-meshing\Addons")
 addon(root / "ServerMeshing" / "dist" / "screenshot.png")
-testrig(root / "ServerMeshingTestRig" / "dist" / "screenshot.png")
