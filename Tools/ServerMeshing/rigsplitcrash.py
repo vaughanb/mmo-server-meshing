@@ -362,13 +362,15 @@ def windows(lines, start=None, end=None):
 
 
 def monster_pairs(base_windows, child_windows, tolerance_s=5.0):
-    """[(base window end, owned monsters base + child)] pairing each base window with the child's latest window stamped
-    within `tolerance_s` of it; a base window with none is skipped."""
+    """[(base window end, owned monsters base + child)] pairing each base window with the child's window stamped nearest
+    to it (the later on a tie), within `tolerance_s`; a base window with none is skipped. Nearest, not latest: two cells
+    whose windows end on the same second would otherwise pair each base window with the child's next one, 5 s on, and a
+    monster handed across the cut in between counts on both or neither."""
     out = []
     for w in base_windows:
         near = [c for c in child_windows if abs((c["end"] - w["end"]).total_seconds()) <= tolerance_s]
         if near:
-            c = max(near, key=lambda x: x["end"])
+            c = min(near, key=lambda x: (abs((x["end"] - w["end"]).total_seconds()), -x["end"].timestamp()))
             out.append((w["end"], w["owned_monsters"] + c["owned_monsters"]))
     return out
 

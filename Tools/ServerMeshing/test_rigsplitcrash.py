@@ -280,6 +280,10 @@ class BaseCrashTests(unittest.TestCase):
         self.assertEqual(len(rigsplitcrash.monster_sum_problems([5, 6, 5, 6, 5], 5)), 1)       # never 3 at 5
         self.assertEqual(len(rigsplitcrash.monster_sum_problems([5, 5, 5, 6, 6, 6], 5)), 1)    # 3 over
         self.assertEqual(len(rigsplitcrash.monster_sum_problems([], 5)), 1)
+        # Windows ending on the same second pair with each other, not with the child's next window 5 s on.
+        same = rigsplitcrash.windows([window(110 + 5 * i, n) for i, n in enumerate([4, 3, 4])])
+        twin = rigsplitcrash.windows([window(110 + 5 * i, n) for i, n in enumerate([1, 2, 1])])
+        self.assertEqual([s for _, s in rigsplitcrash.monster_pairs(same, twin, 5.0)], [5, 5, 5])
         far = rigsplitcrash.windows([window(130, 3)])
         self.assertEqual(rigsplitcrash.monster_pairs(base[:1], far, 5.0), [])
         lo, hi = T0 + datetime.timedelta(seconds=112), T0 + datetime.timedelta(seconds=120)
