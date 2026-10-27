@@ -24,7 +24,7 @@ The package and its manifest come from **Tools ▸ Open MMORPG ▸ Server Meshin
 Unity.exe -batchmode -quit -projectPath <repo> -executeMethod MultiplayerARPG.MMO.Mesh.Editor.ServerMeshPackageBuilder.BuildAll
 ```
 
-`Assets/ServerMeshing/Mesh/Editor/ServerMeshPackageBuilder.cs` holds the version, the update date, the guid, the
+`Assets/ServerMeshing/Build/Editor/ServerMeshPackageBuilder.cs` (repository only, outside the package) holds the version, the update date, the guid, the
 category and the description. The package carries an empty, extensionless file named after its guid — that is how the
 Addon Manager recognises an installed add-on, so the guid must never change once published, and the marker and the
 manifest's `guid` are written from the same constant so they cannot drift.

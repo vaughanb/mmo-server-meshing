@@ -15,6 +15,10 @@ OpenMMORPG v1.1.4 (`master` at 317d2b8, 2026-10-25) or later; the add-on does no
 `Tools/ServerMeshing/`) stays in the source repository, [vaughanb/mmo-server-meshing](https://github.com/vaughanb/mmo-server-meshing):
 it needs that repository's layout and the kit's `BaseDemo`.
 
+Upgrading from 0.96.0: that package also carried the repository's package builder, which adds a **Tools ▸ Open MMORPG ▸
+Server Meshing ▸ Build Packages** menu. 0.96.1 leaves it out, but an import never deletes files, so delete
+`Mesh/Editor/ServerMeshPackageBuilder.cs` by hand.
+
 | Folder | Contents | Needs |
 |---|---|---|
 | `Mesh/`, `Documentation/` | the add-on (runtime + Editor) and its docs (the setup guide, the design record and the two-machine guide) | OpenMMORPG v1.1.4 or later (all eight kit changes the add-on relies on, and the damage amounts structs) |
@@ -32,13 +36,15 @@ it needs that repository's layout and the kit's `BaseDemo`.
 ## Layout
 
 ```
-Mesh/                       the add-on (all runtime code; Editor/ holds the Setup window and the package builder)
-Mesh/Editor/                Tools ▸ Open MMORPG ▸ Server Meshing ▸ Setup and Tools ▸ Open MMORPG ▸ Server Meshing ▸ Build Packages
+Mesh/                       the add-on (all runtime code; Editor/ holds the Setup window)
+Mesh/Editor/                Tools ▸ Open MMORPG ▸ Server Meshing ▸ Setup
 Documentation/              SETUP.md, DESIGN.md and MULTIHOST.md (in the package only; the source lives in Docs/ServerMeshing)
 TestMap/                    the test rig (in the repository only; not in the package)
+Build/Editor/               the package builder, Tools ▸ Open MMORPG ▸ Server Meshing ▸ Build Packages (in the repository only)
 ```
 
-Build the package with **Tools ▸ Open MMORPG ▸ Server Meshing ▸ Build Packages**. It lands in the repository's `Addons/` tree in the layout
+In the repository, build the package with **Tools ▸ Open MMORPG ▸ Server Meshing ▸ Build Packages** (the menu is not in
+the package, so an installed add-on does not show it). It lands in the repository's `Addons/` tree in the layout
 the Open MMORPG Addon Manager expects — `Addons/ServerMeshing/dist/ServerMeshing.unitypackage` beside a generated
 `package.json`, with the hand-written `README.md` and `screenshot.png` — and carries the empty, extensionless marker file
 named after the add-on's guid that the Addon Manager uses to spot an installed add-on. In batch mode:

@@ -904,7 +904,8 @@ This chapter runs the test rig, which lives in the source repository
 
 ## 10. Packaging
 
-**Tools ▸ Open MMORPG ▸ Server Meshing ▸ Build Packages** writes the add-on into the repository's `Addons/` tree, in the layout the Open
+In the repository, **Tools ▸ Open MMORPG ▸ Server Meshing ▸ Build Packages** writes the add-on into its `Addons/` tree (the
+menu stays in the repository with the builder, so an installed add-on does not show it), in the layout the Open
 MMORPG Addon Manager expects (`Addons/ServerMeshing/dist/ServerMeshing.unitypackage` beside a generated `package.json`,
 with a hand-written `README.md` and `screenshot.png`; `Addons/README.md` has the rebuild and submission notes).
 `ServerMeshing.unitypackage` holds:
@@ -923,7 +924,7 @@ to the play runner, outside Play).
 
 The package carries an empty, extensionless file named after the add-on's guid; the Addon Manager uses it to spot an
 installed add-on, so the guid never changes once published. Version, update date, guid and description live in
-`Mesh/Editor/ServerMeshPackageBuilder.cs`. Batch mode:
+`Build/Editor/ServerMeshPackageBuilder.cs`. Batch mode:
 
 ```
 Unity.exe -batchmode -quit -projectPath <repo> -executeMethod MultiplayerARPG.MMO.Mesh.Editor.ServerMeshPackageBuilder.BuildAll

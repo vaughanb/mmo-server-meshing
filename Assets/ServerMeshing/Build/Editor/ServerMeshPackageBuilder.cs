@@ -1,5 +1,8 @@
 // Server Meshing add-on — package builder (Tools ▸ Open MMORPG ▸ Server Meshing ▸ Build Packages).
 //
+// Repository only: it lives in Build/, outside every export path, so a project that installs the add-on never gets the
+// menu. Keep it out of Mesh/.
+//
 // Emits the add-on in the layout the Open MMORPG Addon Manager expects, under Addons/ in the repository root:
 //
 //   Addons/ServerMeshing/dist/ServerMeshing.unitypackage   Assets/ServerMeshing/Mesh (runtime + Editor), the README and a
@@ -33,7 +36,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
     {
         // Release metadata. Version is the add-on version reported by the Addon Manager; UpdateDate drives its recency
         // filter and "New" badge, and is bumped by hand with the version rather than tracking the build clock.
-        public const string Version = "0.96.0";
+        public const string Version = "0.96.1";
         public const string UpdateDate = "2026-10-27";
 
         // Where the published packages will be fetched from. The Addon Manager downloads "packageUrl" verbatim, so this

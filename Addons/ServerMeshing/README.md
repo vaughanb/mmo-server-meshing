@@ -67,6 +67,10 @@ OpenMMORPG **v1.1.4** (see Requirements).
 every decision and measurement, and `Documentation/MULTIHOST.md` covers running cells across more than one machine.
 `SETUP.md` §6a is the operator's path for Dynamic maps end to end, with their known limits.
 
+**Upgrading from 0.96.0:** that package also carried the source repository's package builder, which adds a
+**Tools ▸ Open MMORPG ▸ Server Meshing ▸ Build Packages** menu. 0.96.1 leaves it out, but an import never deletes files:
+delete `Mesh/Editor/ServerMeshPackageBuilder.cs` from the installed add-on by hand.
+
 ## The test rig
 
 The test rig is not in the package (it was in 0.93.0-0.95.0). It lives in the source repository,
