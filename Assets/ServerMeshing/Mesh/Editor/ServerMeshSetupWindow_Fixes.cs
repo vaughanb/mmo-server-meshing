@@ -14,6 +14,23 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             return System.IO.Path.GetFileNameWithoutExtension(path);
         }
 
+        /// <summary>
+        /// The prefabs the window validates: the game's, the add-on's, and the kit's demo. The rest of the kit is skipped,
+        /// but the demo installs under it (Assets/OpenMMORPG/Demo) and a game built on the demo runs its server instance,
+        /// player and monsters, so skipping the whole kit folder left them unvalidated with no Swap line.
+        /// </summary>
+        private static List<string> GamePrefabPaths()
+        {
+            List<string> paths = new List<string>();
+            foreach (string guid in AssetDatabase.FindAssets("t:Prefab"))
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                if (!path.StartsWith("Assets/") || (path.StartsWith(KitFolder) && !path.StartsWith(KitDemoFolder))) continue;
+                paths.Add(path);
+            }
+            return paths;
+        }
+
         private static MonoScript ScriptOf(Type type)
         {
             if (s_scripts == null)

@@ -17,10 +17,8 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 return;
             List<MeshSetupSpawner> spawners = new List<MeshSetupSpawner>();
             bool linkAllZones = false;
-            foreach (string guid in AssetDatabase.FindAssets("t:Prefab"))
+            foreach (string path in GamePrefabPaths())
             {
-                string path = AssetDatabase.GUIDToAssetPath(guid);
-                if (!path.StartsWith("Assets/") || path.StartsWith(KitFolder)) continue;
                 GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(path);
                 if (prefab == null) continue;
                 foreach (MeshMapSpawnNetworkManager spawner in prefab.GetComponentsInChildren<MeshMapSpawnNetworkManager>(true))

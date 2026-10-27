@@ -1,7 +1,7 @@
 // Server Meshing add-on — Setup window (Tools ▸ Open MMORPG ▸ Server Meshing ▸ Setup): mesh a map in a few clicks and check the wiring.
 //
 // Four panels: the world registry, a map's layout from the open scene's measured bounds and a cell size (with each
-// map's cell mode), a validator (registry errors, every Dynamic map's cut and settings, map infos and scenes registered,
+// map's cell mode and on-demand links, and the server instance's sleeping cells), a validator (registry errors, every Dynamic map's cut and settings, map infos and scenes registered,
 // the add-on's subclasses on the kit's manager and entity prefabs, the registry reference on each, a spawner's served
 // cells, the gameplay rule, the server tick) with Fix buttons, and a one-click cell visualizer for the open scene. Everything it changes is an asset edit you could also do by hand;
 // Docs/ServerMeshing/SETUP.md is the written version of the same steps.
@@ -18,6 +18,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
     {
         private const string DefaultRegistryPath = "Assets/ServerMeshing/ServerMeshWorld.asset";
         private const string KitFolder = "Assets/OpenMMORPG/";           // the kit's own prefabs are not the game's: not validated
+        private const string KitDemoFolder = "Assets/OpenMMORPG/Demo/";  // ...except its demo, which a game built on it runs as its own
         private const string AddOnFolder = "Assets/ServerMeshing/";       // the add-on's own test prefabs: validated like the game's
 
         private MeshWorldRegistry _registry;
@@ -169,14 +170,18 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                     SerializedProperty cellMode = layout.FindPropertyRelative(nameof(MeshMapLayout.cellMode));
                     string mapId = layout.FindPropertyRelative(nameof(MeshMapLayout.mapId)).stringValue;
                     EditorGUILayout.PropertyField(cellMode, new GUIContent(string.IsNullOrEmpty(mapId) ? $"Map {i}" : mapId));
-                    if (cellMode.intValue != (int)MeshCellMode.Dynamic)
-                        continue;
-                    anyDynamic = true;
                     EditorGUI.indentLevel++;
-                    EditorGUILayout.PropertyField(layout.FindPropertyRelative(nameof(MeshMapLayout.minCellSize)));
-                    EditorGUILayout.PropertyField(layout.FindPropertyRelative(nameof(MeshMapLayout.maxCellsPerBase)));
-                    EditorGUILayout.PropertyField(layout.FindPropertyRelative(nameof(MeshMapLayout.autoSplit)));
-                    EditorGUILayout.PropertyField(layout.FindPropertyRelative(nameof(MeshMapLayout.autoMerge)));
+                    // Static or Dynamic alike; past about 64 live cells on a map it is what lifts the link ceiling (SETUP §6a.2).
+                    EditorGUILayout.PropertyField(layout.FindPropertyRelative(nameof(MeshMapLayout.onDemandLinks)),
+                        new GUIContent("On-demand links", "Each cell links only to the cells it needs, instead of to every cell of the map. Needed past about 64 live cells on a map."));
+                    if (cellMode.intValue == (int)MeshCellMode.Dynamic)
+                    {
+                        anyDynamic = true;
+                        EditorGUILayout.PropertyField(layout.FindPropertyRelative(nameof(MeshMapLayout.minCellSize)));
+                        EditorGUILayout.PropertyField(layout.FindPropertyRelative(nameof(MeshMapLayout.maxCellsPerBase)));
+                        EditorGUILayout.PropertyField(layout.FindPropertyRelative(nameof(MeshMapLayout.autoSplit)));
+                        EditorGUILayout.PropertyField(layout.FindPropertyRelative(nameof(MeshMapLayout.autoMerge)));
+                    }
                     EditorGUI.indentLevel--;
                 }
                 if (anyDynamic)
@@ -184,6 +189,81 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             }
             if (_registryObject.ApplyModifiedProperties())
                 AssetDatabase.SaveAssetIfDirty(_registry);
+            DrawSleepingCells();
+        }
+
+        /// <summary>
+        /// Sleeping cells, on each server instance's swapped central and its map spawner together (they must agree). The
+        /// fields only exist on the add-on's subclasses, so before Validate's swap there is nothing to edit.
+        /// </summary>
+        private void DrawSleepingCells()
+        {
+            if (_serverInstances == null)
+                _serverInstances = FindServerInstances();
+            EditorGUILayout.Space(6);
+            EditorGUILayout.LabelField("Sleeping cells", EditorStyles.miniBoldLabel);
+            if (_serverInstances.Count == 0)
+            {
+                EditorGUILayout.HelpBox("No server instance has the add-on's MeshCentralNetworkManager yet: press Validate in panel 3 and swap the server instance's CentralNetworkManager, then set sleeping cells here.", MessageType.None);
+                return;
+            }
+            bool playing = EditorApplication.isPlayingOrWillChangePlaymode;
+            using (new EditorGUI.DisabledScope(playing))
+            {
+                foreach (ServerInstanceRef instance in _serverInstances)
+                {
+                    if (instance.central == null) { _serverInstances = null; GUIUtility.ExitGUI(); }
+                    SerializedObject central = new SerializedObject(instance.central);
+                    SerializedProperty sleep = central.FindProperty(nameof(MeshCentralNetworkManager.sleepCells));
+                    EditorGUILayout.LabelField(ShortPath(instance.path), EditorStyles.label);
+                    EditorGUI.indentLevel++;
+                    EditorGUI.BeginChangeCheck();
+                    EditorGUILayout.PropertyField(sleep, new GUIContent("Sleep cells", "Cells start when a player comes near and exit when nobody needs them. Off: every cell runs from boot."));
+                    using (new EditorGUI.DisabledScope(!sleep.boolValue))
+                    {
+                        EditorGUILayout.PropertyField(central.FindProperty(nameof(MeshCentralNetworkManager.awakeRings)), new GUIContent("Awake rings", "Rings of neighbours kept running around any cell with a player."));
+                        EditorGUILayout.PropertyField(central.FindProperty(nameof(MeshCentralNetworkManager.sleepAfterSeconds)), new GUIContent("Sleep after (s)"));
+                    }
+                    EditorGUI.indentLevel--;
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        central.ApplyModifiedProperties();
+                        // The spawner follows the central: the two must agree (Validate reports a mismatch otherwise).
+                        if (instance.spawner != null)
+                        {
+                            SerializedObject spawner = new SerializedObject(instance.spawner);
+                            spawner.FindProperty(nameof(MeshMapSpawnNetworkManager.sleepCells)).boolValue = sleep.boolValue;
+                            spawner.ApplyModifiedProperties();
+                        }
+                        AssetDatabase.SaveAssets();
+                    }
+                }
+            }
+        }
+
+        private sealed class ServerInstanceRef
+        {
+            public string path;
+            public MeshCentralNetworkManager central;
+            public MeshMapSpawnNetworkManager spawner;
+        }
+
+        // Found once and again after Validate or a window focus, not every repaint (a scan loads every prefab).
+        private List<ServerInstanceRef> _serverInstances;
+
+        private void OnFocus() { _serverInstances = null; }
+
+        private static List<ServerInstanceRef> FindServerInstances()
+        {
+            List<ServerInstanceRef> found = new List<ServerInstanceRef>();
+            foreach (string path in GamePrefabPaths())
+            {
+                GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+                MeshCentralNetworkManager central = prefab != null ? prefab.GetComponentInChildren<MeshCentralNetworkManager>(true) : null;
+                if (central == null || prefab.GetComponentInChildren<MMOClientInstance>(true) != null) continue;
+                found.Add(new ServerInstanceRef { path = path, central = central, spawner = prefab.GetComponentInChildren<MeshMapSpawnNetworkManager>(true) });
+            }
+            return found;
         }
 
         private void MeasureOpenScene()
@@ -269,6 +349,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         private void RunChecks()
         {
             _checks.Clear();
+            _serverInstances = null;   // a swap may have just made one
             if (_registry == null)
             {
                 _checks.Add(new Check { ok = false, text = "No world registry: create one in panel 1." });
@@ -308,10 +389,8 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             }
 
             // Prefab wiring: the add-on's subclasses on the kit's managers and entities, and the registry reference on the managers.
-            foreach (string guid in AssetDatabase.FindAssets("t:Prefab"))
+            foreach (string path in GamePrefabPaths())
             {
-                string path = AssetDatabase.GUIDToAssetPath(guid);
-                if (!path.StartsWith("Assets/") || path.StartsWith(KitFolder)) continue;
                 GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(path);
                 if (prefab == null) continue;
                 // The client instance carries the client halves of the login and central managers: not servers, not swapped.

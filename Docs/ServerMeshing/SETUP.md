@@ -89,7 +89,9 @@ The registry inspector lets you refine a layout afterwards:
 
 Below the layout, panel 2 sets each map's **cell mode**: **Static** (the default: the cut is the cut, exactly as before
 0.72) or **Dynamic** (the cut gives the map's *base cells*, which the central may split while they are busy and merge
-back when they are quiet). Dynamic maps have their own section, §6a.
+back when they are quiet). Dynamic maps have their own section, §6a. Under each map's mode is its **On-demand links**
+toggle (`onDemandLinks`, Static or Dynamic: §6a.2), and below the maps the server instance's **Sleeping cells** (§4.6),
+which appear once Validate has swapped its central (§4.3).
 
 The band is not part of the layout: a cell's server streams the strip inside its own edge.
 
@@ -119,6 +121,9 @@ Panel 3: **Validate**. `!!` is an error and `!` a warning; a line whose fix is s
 | Map info of each layout in the game database; its scene in the build settings | reported; do it in the database asset / build settings |
 | Dynamic maps: base cells that can never split, `minCellSize` under the band, the worst-case band neighbours and links, the spawners' `servedCells`, the settings the central checks at start (§6a.3) | **Raise to band** for `minCellSize`; the rest reported |
 
+Validate reads every prefab under `Assets/` except the kit's own (`Assets/OpenMMORPG/`); the kit's demo
+(`Assets/OpenMMORPG/Demo/`) is read like your own, since a game built on it runs the demo's server instance, player
+and monsters (before 0.96.2 it was skipped too, so the demo got no Swap lines and no sleeping-cells fields).
 `MeshIdentity` needs no wiring: it is added to entities at runtime. The kit's client-instance prefab is skipped (its login and
 central components are the client halves). A LAN-only game instance can ignore the gameplay-rule line.
 
@@ -144,7 +149,9 @@ neighbour count; at runtime the lines are drawn as debug lines and the player's 
 
 ### 4.6 Sleeping cells
 
-On `MeshCentralNetworkManager` (the server-instance prefab):
+On `MeshCentralNetworkManager` (the server-instance prefab). The fields exist only after Validate has swapped the kit's
+`CentralNetworkManager` (§4.3). Panel 2's **Sleeping cells** sets `sleepCells`, `awakeRings` and `sleepAfterSeconds`
+there and turns the map spawner's `sleepCells` with the central's; the rest are on the component itself:
 
 | Field | Meaning | Default |
 |---|---|---|
@@ -340,7 +347,8 @@ the whole operator's path; the design record behind each step is DESIGN 0.72 and
 
 ### 6a.2 Setting up a Dynamic map
 
-In panel 2 set the map's **cell mode** to Dynamic; its four fields and the registry's `dynamicSettings` appear below it.
+In panel 2 set the map's **cell mode** to Dynamic; its four fields and the registry's `dynamicSettings` appear below it
+(`onDemandLinks`, below, shows for every map).
 Size the base cells first: a base cell must be at least twice the minimum cell on one axis (and the minimum on the
 other) to be cut at all. The policy's cuts fall on the load report's bucket (`occupancyBucketSize`, 20 m), a command's
 anywhere, so a base just over twice the minimum may split by command and never by the policy.
