@@ -106,7 +106,11 @@ it.
 
 ### 4.3 Wire the prefabs
 
-Panel 3: **Validate**. `!!` is an error and `!` a warning; a line whose fix is safe has a **Fix** button. The checks:
+Panel 3: **Validate**. `!!` is an error and `!` a warning; a line whose fix is safe has a **Fix** button. When any
+component needs swapping, **Swap all scripts** under Validate swaps every one of them and assigns the registry, in
+one pass over the prefabs (after a confirmation: prefab edits are not undoable). It edits only the components a prefab
+owns; one a variant or a nested prefab inherits is swapped on its source prefab and flows down, so no prefab gets an
+override of a script it does not own. A component whose source lies in the kit outside its demo stays listed. The checks:
 
 | Check | What Fix does |
 |---|---|

@@ -42,6 +42,8 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             public string text;
             public Action fix;
             public string fixLabel;
+            /// <summary>The prefab a Swap script line is about (null on other lines): what Swap all works through.</summary>
+            public string swapPath;
         }
 
         // Kit component type -> the add-on subclass that replaces it (same serialized fields, so a script swap keeps the data).
@@ -330,6 +332,23 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             {
                 if (GUILayout.Button("Validate"))
                     RunChecks();
+                int swaps = 0;
+                HashSet<string> swapPrefabs = new HashSet<string>();
+                foreach (Check check in _checks)
+                {
+                    if (check.swapPath == null) continue;
+                    ++swaps;
+                    swapPrefabs.Add(check.swapPath);
+                }
+                if (swaps > 0 && GUILayout.Button($"Swap all scripts ({swaps} on {swapPrefabs.Count} prefab{(swapPrefabs.Count == 1 ? "" : "s")})")
+                    && EditorUtility.DisplayDialog("Swap all scripts",
+                        $"Swap {swaps} kit component(s) for the add-on's subclasses on {swapPrefabs.Count} prefab(s), and assign the world registry on each? Every serialized field is kept. Prefab edits are not undoable: commit or back up first.",
+                        "Swap all", "Cancel"))
+                {
+                    SwapAll(swapPrefabs);
+                    RunChecks();
+                    GUIUtility.ExitGUI();
+                }
             }
             foreach (Check check in _checks)
             {
@@ -411,6 +430,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                                 text = $"{ShortPath(path)}: {component.GetType().Name} should be {mesh.Name} (the add-on's subclass; the swap keeps every serialized field).",
                                 fixLabel = "Swap script",
                                 fix = () => SwapScript(capturedPath, capturedKit, capturedMesh),
+                                swapPath = path,
                             });
                             continue;
                         }

@@ -66,6 +66,89 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             AssignRegistry(prefabPath, mesh);
         }
 
+        /// <summary>
+        /// Swap all: every listed prefab's kit components for the add-on's subclasses, then the registry on each, one
+        /// prefab load per pass. Only the components a prefab owns are touched: one inherited from a base prefab (a
+        /// variant's, or a nested prefab's) is swapped on its source, which is in the list too, and the change flows down,
+        /// so no prefab gets an override of a script it does not own.
+        /// </summary>
+        private void SwapAll(ICollection<string> prefabPaths)
+        {
+            int done = 0;
+            try
+            {
+                foreach (string path in prefabPaths)
+                {
+                    EditorUtility.DisplayProgressBar("Swap all scripts", ShortPath(path), (float)done++ / prefabPaths.Count);
+                    EditOwned(path, contents =>
+                    {
+                        bool clientInstance = contents.GetComponentInChildren<MMOClientInstance>(true) != null;
+                        bool changed = false;
+                        foreach ((Type kit, Type mesh) in s_swaps)
+                        {
+                            if (clientInstance && typeof(LiteNetLibManager.LiteNetLibManager).IsAssignableFrom(kit))
+                                continue; // the client halves of the login and central managers: not servers
+                            MonoScript script = ScriptOf(mesh);
+                            if (script == null) { Debug.LogError($"[Mesh] No MonoScript for {mesh.Name}"); continue; }
+                            foreach (Component component in OwnedComponents(contents, kit))
+                            {
+                                if (mesh.IsInstanceOfType(component)) continue;
+                                SerializedObject so = new SerializedObject(component);
+                                so.FindProperty("m_Script").objectReferenceValue = script;
+                                so.ApplyModifiedPropertiesWithoutUndo();
+                                changed = true;
+                            }
+                        }
+                        return changed;
+                    });
+                }
+                // A second load per prefab: the swapped components are the subclasses only once the prefab is reloaded.
+                foreach (string path in prefabPaths)
+                {
+                    EditOwned(path, contents =>
+                    {
+                        bool changed = false;
+                        foreach ((Type kit, Type mesh) in s_swaps)
+                        {
+                            foreach (Component component in OwnedComponents(contents, mesh))
+                            {
+                                SerializedObject so = new SerializedObject(component);
+                                SerializedProperty world = so.FindProperty("world");
+                                if (world == null || world.objectReferenceValue != null || _registry == null) continue;
+                                world.objectReferenceValue = _registry;
+                                so.ApplyModifiedPropertiesWithoutUndo();
+                                changed = true;
+                            }
+                        }
+                        return changed;
+                    });
+                }
+            }
+            finally { EditorUtility.ClearProgressBar(); }
+        }
+
+        /// <summary>Loads a prefab's contents, runs an edit, and saves only when the edit changed something.</summary>
+        private static void EditOwned(string prefabPath, Func<GameObject, bool> edit)
+        {
+            GameObject contents = PrefabUtility.LoadPrefabContents(prefabPath);
+            try
+            {
+                if (edit(contents))
+                    PrefabUtility.SaveAsPrefabAsset(contents, prefabPath);
+            }
+            finally { PrefabUtility.UnloadPrefabContents(contents); }
+        }
+
+        /// <summary>The components of a type this prefab owns: neither inherited from a base prefab nor from a nested one.</summary>
+        private static IEnumerable<Component> OwnedComponents(GameObject contents, Type type)
+        {
+            foreach (Component component in contents.GetComponentsInChildren(type, true))
+            {
+                if (component != null && PrefabUtility.GetCorrespondingObjectFromSource(component) == null)
+                    yield return component;
+            }
+        }
+
         private void AssignRegistry(string prefabPath, Type mesh)
         {
             if (_registry == null) return;
