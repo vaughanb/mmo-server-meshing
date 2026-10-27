@@ -1,4 +1,4 @@
-﻿using Cysharp.Text;
+using Cysharp.Text;
 using Cysharp.Threading.Tasks;
 using Insthync.AddressableAssetTools;
 using Insthync.UnityEditorUtils;
@@ -125,6 +125,7 @@ namespace MultiplayerARPG
         }
 
         public readonly List<GameObject> InstantiatedObjects = new List<GameObject>();
+        private int _objectsLoadVersion;
         protected bool _isObjectsInstantiated = false;
         protected bool _isDestroyed = false;
         protected readonly HashSet<string> _looters = new HashSet<string>();
@@ -245,35 +246,57 @@ namespace MultiplayerARPG
 
         private async void InstantiateMonsterCharacterObjects()
         {
-            InstantiatedObjects.DestroyAndNullify();
-            InstantiatedObjects.Clear();
             if (!IsClient)
                 return;
             if (_isObjectsInstantiated)
                 return;
+            int version = ++_objectsLoadVersion;
             _isObjectsInstantiated = true;
-#if !DISABLE_ADDRESSABLES
-            // Instantiates monster objects
-            await CurrentGameInstance.AddressableMonsterCharacterObjects.InstantiateObjectsOrUsePrefabs(CurrentGameInstance.MonsterCharacterObjects, EntityTransform, InstantiatedObjects);
-#else
-            foreach (var prefab in CurrentGameInstance.MonsterCharacterObjects)
+            InstantiatedObjects.DestroyAndNullify();
+            InstantiatedObjects.Clear();
+            using var loadedObjectsLease = UnityEngine.Pool.ListPool<GameObject>.Get(out var loadedObjects);
+            bool completed = false;
+            try
             {
-                if (prefab == null) continue;
-                InstantiatedObjects.Add(Instantiate(prefab, EntityTransform.position, EntityTransform.rotation, EntityTransform));
-            }
+#if !DISABLE_ADDRESSABLES
+                // Instantiates monster objects
+                await CurrentGameInstance.AddressableMonsterCharacterObjects.InstantiateObjectsOrUsePrefabs(CurrentGameInstance.MonsterCharacterObjects, EntityTransform, loadedObjects);
+                if (this == null || version != _objectsLoadVersion) return;
+#else
+                foreach (var prefab in CurrentGameInstance.MonsterCharacterObjects)
+                {
+                    if (prefab == null) continue;
+                    loadedObjects.Add(Instantiate(prefab, EntityTransform.position, EntityTransform.rotation, EntityTransform));
+                }
 #endif
 #if !DISABLE_ADDRESSABLES
-            // Instantiates monster minimap objects
-            await CurrentGameInstance.AddressableMonsterCharacterMiniMapObjects.InstantiateObjectsOrUsePrefabs(CurrentGameInstance.MonsterCharacterMiniMapObjects, EntityTransform, InstantiatedObjects);
+                // Instantiates monster minimap objects
+                await CurrentGameInstance.AddressableMonsterCharacterMiniMapObjects.InstantiateObjectsOrUsePrefabs(CurrentGameInstance.MonsterCharacterMiniMapObjects, EntityTransform, loadedObjects);
+                if (this == null || version != _objectsLoadVersion) return;
 #else
-            foreach (var prefab in CurrentGameInstance.MonsterCharacterMiniMapObjects)
-            {
-                if (prefab == null) continue;
-                InstantiatedObjects.Add(Instantiate(prefab, EntityTransform.position, EntityTransform.rotation, EntityTransform));
-            }
+                foreach (var prefab in CurrentGameInstance.MonsterCharacterMiniMapObjects)
+                {
+                    if (prefab == null) continue;
+                    loadedObjects.Add(Instantiate(prefab, EntityTransform.position, EntityTransform.rotation, EntityTransform));
+                }
 #endif
-            // Instantiates monster character UI
-            InstantiateUI(await CurrentGameInstance.GetLoadedMonsterCharacterUIPrefab());
+                // Instantiates monster character UI
+                var uiPrefab = await CurrentGameInstance.GetLoadedMonsterCharacterUIPrefab();
+                if (this == null || version != _objectsLoadVersion) return;
+                InstantiateUI(uiPrefab);
+                completed = true;
+            }
+            finally
+            {
+                if (completed && this != null && version == _objectsLoadVersion)
+                    InstantiatedObjects.AddRange(loadedObjects);
+                else
+                {
+                    loadedObjects.DestroyAndNullify();
+                    if (version == _objectsLoadVersion)
+                        _isObjectsInstantiated = false;
+                }
+            }
         }
 
         public void SetSpawnArea(GameSpawnArea<BaseMonsterCharacterEntity> spawnArea, BaseMonsterCharacterEntity spawnPrefab, int spawnLevel, Vector3 spawnPosition)
@@ -771,16 +794,13 @@ namespace MultiplayerARPG
             NetworkDestroy();
         }
 
-        protected override void ApplyReceiveDamage(HitBoxPosition position, Vector3 fromPosition, EntityInfo instigator, Dictionary<DamageElement, MinMaxFloat> damageAmounts, CharacterItem weapon, BaseSkill skill, int skillLevel, int randomSeed, out CombatAmountType combatAmountType, out int totalDamage)
+        protected override DamageElementMinMaxFloatAmounts PrepareDamageAmountsForReceive(HitBoxPosition position, DamageElementMinMaxFloatAmounts damageAmounts)
         {
-            if (damageAmounts == null)
-            {
-                Logging.LogWarning($"{name}({nameof(BaseCharacterEntity)}) damage amounts dictionary is null, this should not occurring.");
-                combatAmountType = CombatAmountType.Miss;
-                totalDamage = 0;
-                return;
-            }
+            return damageAmounts;
+        }
 
+        protected override void ApplyReceiveDamage(HitBoxPosition position, Vector3 fromPosition, EntityInfo instigator, DamageElementMinMaxFloatAmounts damageAmounts, CharacterItem weapon, BaseSkill skill, int skillLevel, int randomSeed, out CombatAmountType combatAmountType, out int totalDamage)
+        {
             if (instigator.TryGetEntity(out BaseCharacterEntity attackerCharacter))
             {
                 // Notify enemy spotted when received damage from enemy
@@ -801,10 +821,13 @@ namespace MultiplayerARPG
             // Calculate damages
             combatAmountType = CombatAmountType.NormalDamage;
             float calculatingTotalDamage = 0f;
-            foreach (DamageElement damageElement in damageAmounts.Keys)
+            for (int slot = 0; slot < RuntimeGameDataSlots.DamageElementCount; ++slot)
             {
-                calculatingTotalDamage += damageElement.GetDamageReducedByResistance(CachedData.Resistances, CachedData.Armors,
-                    CurrentGameInstance.GameplayRule.RandomAttackDamage(fromPosition, attackerCharacter, this, damageElement, damageAmounts[damageElement], weapon, skill, skillLevel, randomSeed));
+                if (!damageAmounts.Contains(slot))
+                    continue;
+                DamageElement damageElement = RuntimeGameDataSlots.GetDamageElement(slot);
+                calculatingTotalDamage += damageElement.GetDamageReducedByResistance(CachedData.IndexedResistances, CachedData.IndexedArmors,
+                    CurrentGameInstance.GameplayRule.RandomAttackDamage(fromPosition, attackerCharacter, this, damageElement, damageAmounts[slot], weapon, skill, skillLevel, randomSeed));
             }
 
             if (attackerCharacter != null)

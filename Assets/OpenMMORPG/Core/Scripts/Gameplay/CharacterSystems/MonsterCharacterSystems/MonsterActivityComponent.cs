@@ -144,11 +144,9 @@ namespace MultiplayerARPG
         }
 
         /// <summary>
-        /// Whether anyone is watching this monster; activity is skipped while nobody is.
+        /// Whether anyone is watching this monster; its activity is skipped while nobody is. Override to keep a monster
+        /// active for observers that are not network subscribers of this server.
         /// </summary>
-        // MESH-EDIT: CE-7 — the subscriber gate was inline; a virtual lets a meshed cell keep edge monsters awake for
-        // players that are watching them from a neighbouring cell (ghosts are not network subscribers).
-        // See Docs/ServerMeshing/DESIGN.md §17
         protected virtual bool IsWatched()
         {
             return Entity.Identity.CountSubscribers() > 0;
@@ -156,7 +154,7 @@ namespace MultiplayerARPG
 
         public virtual void ManagedUpdate()
         {
-            if (!Entity.IsServer || !IsWatched() || CharacterDatabase == null) // MESH-EDIT: CE-7
+            if (!Entity.IsServer || !IsWatched() || CharacterDatabase == null)
                 return;
 
             if (Entity.IsDead())

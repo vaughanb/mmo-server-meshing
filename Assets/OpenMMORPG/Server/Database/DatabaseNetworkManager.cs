@@ -101,6 +101,15 @@ namespace MultiplayerARPG.MMO
             Initialize();
             base.Start();
         }
+
+        protected override void OnApplicationQuit()
+        {
+            // Stopping Play in the editor never runs ProceedBeforeQuit, so write the deferred saves here.
+            // SQLite with the local cache finishes synchronously, a remote database is best effort.
+            if (_characterSaveScheduler != null && _characterSaveScheduler.PendingCount > 0)
+                FlushCharacterSavesAsync().Forget();
+            base.OnApplicationQuit();
+        }
 #endif
 
         protected virtual void Initialize()

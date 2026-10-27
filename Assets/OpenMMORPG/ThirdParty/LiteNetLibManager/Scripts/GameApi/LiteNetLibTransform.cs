@@ -39,8 +39,14 @@ namespace LiteNetLibManager
             public Vector3 EulerAngles;
             public Vector3 Scale;
             public byte[] Extra;
+            internal bool OwnsExtraBuffer;
 
             public void Deserialize(NetDataReader reader)
+            {
+                Deserialize(reader, null);
+            }
+
+            internal void Deserialize(NetDataReader reader, List<byte[]> reusableExtras)
             {
                 Tick = reader.GetPackedUInt();
                 SyncData = (SyncTransformState)reader.GetPackedUInt();
@@ -61,19 +67,32 @@ namespace LiteNetLibManager
                     !SyncData.HasFlag(SyncTransformState.ScaleZ) ? 0f : reader.GetFloat());
 
                 Extra = null;
+                OwnsExtraBuffer = false;
                 byte extraLength = reader.GetByte();
                 if (extraLength > 0)
                 {
-                    Extra = new byte[extraLength];
-                    for (byte i = 0; i < extraLength; ++i)
+                    if (reusableExtras != null)
                     {
-                        Extra[i] = reader.GetByte();
+                        for (int i = reusableExtras.Count - 1; i >= 0; --i)
+                        {
+                            if (reusableExtras[i].Length != extraLength)
+                                continue;
+                            Extra = reusableExtras[i];
+                            reusableExtras.RemoveAt(i);
+                            break;
+                        }
                     }
+                    if (Extra == null)
+                        Extra = new byte[extraLength];
+                    reader.GetBytes(Extra, extraLength);
                 }
             }
 
             public void Serialize(NetDataWriter writer)
             {
+                if (Extra != null && Extra.Length > byte.MaxValue)
+                    throw new System.ArgumentOutOfRangeException(nameof(Extra), "Transform extra data cannot exceed 255 bytes.");
+
                 writer.PutPackedUInt(Tick);
                 writer.PutPackedUInt((uint)SyncData);
 
@@ -141,13 +160,13 @@ namespace LiteNetLibManager
 
         public class SyncTransforms : SortedList<uint, TransformData>, INetSerializable
         {
+            private readonly List<byte[]> _reusableExtraBuffers = new List<byte[]>(4);
+
             public void Serialize(NetDataWriter writer)
             {
                 writer.Put(Count);
-                foreach (var entry in this)
-                {
-                    entry.Value.Serialize(writer);
-                }
+                for (int i = 0; i < Count; ++i)
+                    Values[i].Serialize(writer);
             }
 
             public void Deserialize(NetDataReader reader)
@@ -160,10 +179,31 @@ namespace LiteNetLibManager
                     Add(entry.Tick, entry);
                 }
             }
+
+            internal void DeserializeReusable(NetDataReader reader)
+            {
+                for (int i = 0; i < Count; ++i)
+                {
+                    TransformData entry = Values[i];
+                    if (entry.Extra != null && !entry.OwnsExtraBuffer &&
+                        _reusableExtraBuffers.Count < 4)
+                        _reusableExtraBuffers.Add(entry.Extra);
+                }
+                Clear();
+                int count = reader.GetInt();
+                for (int i = 0; i < count; ++i)
+                {
+                    TransformData entry = default;
+                    entry.Deserialize(reader, _reusableExtraBuffers);
+                    Add(entry.Tick, entry);
+                }
+            }
         }
 
         public class SyncTransformsField : LiteNetLibSyncField<SyncTransforms>
         {
+            private readonly SyncTransforms _ignoredValue = new SyncTransforms();
+
             public SyncTransformsField()
             {
                 _value = new SyncTransforms();
@@ -176,12 +216,35 @@ namespace LiteNetLibManager
 
             internal override void DeserializeValue(NetDataReader reader)
             {
-                _value.Deserialize(reader);
+                _value.DeserializeReusable(reader);
+            }
+
+            internal override void DeserializeIgnoredValue(NetDataReader reader)
+            {
+                _ignoredValue.DeserializeReusable(reader);
             }
 
             protected override bool IsValueChanged(SyncTransforms oldValue, SyncTransforms newValue)
             {
                 return true;
+            }
+        }
+
+        private sealed class TransformSyncRpc : LiteNetLibRPC<SyncTransforms>
+        {
+            private readonly SyncTransforms _received = new SyncTransforms();
+
+            public TransformSyncRpc(RPCDelegate<SyncTransforms> callback) : base(callback) { }
+
+            public override void DeserializeParameters(NetDataReader reader)
+            {
+                _received.DeserializeReusable(reader);
+                Parameters[0] = _received;
+            }
+
+            public override void SerializeParameters(NetDataWriter writer)
+            {
+                ((SyncTransforms)Parameters[0]).Serialize(writer);
             }
         }
 
@@ -217,6 +280,8 @@ namespace LiteNetLibManager
         private float _endInterpTime;
 
         private readonly SyncTransforms _clientSyncBuffers = new SyncTransforms();
+        private readonly object[] _ownerSyncRpcParameters = new object[1];
+        private readonly List<byte[]> _freeExtraBuffers = new List<byte[]>(4);
         private readonly SyncTransformsField _syncBuffers = new SyncTransformsField()
         {
             syncMode = LiteNetLibSyncFieldMode.ServerToClients,
@@ -224,6 +289,7 @@ namespace LiteNetLibManager
         private SortedList<uint, TransformData> _interpBuffers = new SortedList<uint, TransformData>();
 
         private LogicUpdater _logicUpdater = null;
+        private LiteNetLibRPC _ownerSyncRpc;
         private uint _interpTick;
         public uint InitialInterpTick { get; private set; }
         public uint RenderTick => _interpTick - interpolationTicks;
@@ -233,6 +299,11 @@ namespace LiteNetLibManager
             _syncBuffers.onChange += OnSyncBuffersChanged;
         }
 
+        public override void OnSetup()
+        {
+            RegisterServerRpc(nameof(OwnerSyncTransform), new TransformSyncRpc(OwnerSyncTransform));
+        }
+
         private void OnDestroy()
         {
             _syncBuffers.onChange -= OnSyncBuffersChanged;
@@ -240,6 +311,8 @@ namespace LiteNetLibManager
 
         public override void OnIdentityInitialize()
         {
+            _ownerSyncRpc = GetServerRpc(nameof(OwnerSyncTransform));
+            _ownerSyncRpcParameters[0] = _clientSyncBuffers;
             if (_logicUpdater == null)
             {
                 _logicUpdater = Manager.LogicUpdater;
@@ -267,6 +340,8 @@ namespace LiteNetLibManager
 
         private void ResetBuffersAndStates()
         {
+            ReleaseExtraBuffers(_clientSyncBuffers);
+            ReleaseExtraBuffers(_syncBuffers.Value);
             _clientSyncBuffers.Clear();
             _syncBuffers.Value.Clear();
             _interpBuffers.Clear();
@@ -295,7 +370,7 @@ namespace LiteNetLibManager
             TransformData transformData = _prevSyncData;
             bool changed =
                 Vector3.Distance(transform.position, transformData.Position) > positionThreshold ||
-                Vector3.Angle(transform.forward, Quaternion.Euler(transformData.EulerAngles) * Vector3.forward) > eulerAnglesThreshold ||
+                HasRotationChanged(transform.eulerAngles, transformData.EulerAngles) ||
                 Vector3.Distance(transform.localScale, transformData.Scale) > scaleThreshold;
 
             if (!changed)
@@ -325,8 +400,19 @@ namespace LiteNetLibManager
             else if (syncByOwnerClient && IsOwnerClient)
             {
                 StoreSyncBuffer(_clientSyncBuffers, transformData);
-                RPC(OwnerSyncTransform, 0, LiteNetLib.DeliveryMethod.Unreliable, _clientSyncBuffers);
+                _ownerSyncRpc?.Call(0, LiteNetLib.DeliveryMethod.Unreliable,
+                    RPCReceivers.Server, _ownerSyncRpcParameters);
             }
+        }
+
+        private bool HasRotationChanged(Vector3 currentEulerAngles, Vector3 previousEulerAngles)
+        {
+            return (syncData & SyncTransformState.EulerAnglesX) != 0 &&
+                    Mathf.Abs(Mathf.DeltaAngle(previousEulerAngles.x, currentEulerAngles.x)) > eulerAnglesThreshold ||
+                (syncData & SyncTransformState.EulerAnglesY) != 0 &&
+                    Mathf.Abs(Mathf.DeltaAngle(previousEulerAngles.y, currentEulerAngles.y)) > eulerAnglesThreshold ||
+                (syncData & SyncTransformState.EulerAnglesZ) != 0 &&
+                    Mathf.Abs(Mathf.DeltaAngle(previousEulerAngles.z, currentEulerAngles.z)) > eulerAnglesThreshold;
         }
 
         private void Update()
@@ -343,18 +429,38 @@ namespace LiteNetLibManager
 
         private void InterpolateTransform()
         {
-            if (_interpBuffers.Count < 2)
+            if (_interpBuffers.Count == 0)
             {
                 _prevInterpFromTick = 0;
                 return;
             }
 
+            if (_interpTick < interpolationTicks)
+                return;
+
             float currentTime = Time.time;
             uint renderTick = RenderTick;
 
+            TransformData latestData = _interpBuffers.Values[_interpBuffers.Count - 1];
+            if (renderTick >= latestData.Tick)
+            {
+                _prevInterpFromTick = 0;
+                TransformData currentData = new TransformData()
+                {
+                    Tick = latestData.Tick,
+                    Position = latestData.GetPosition(transform.position),
+                    EulerAngles = latestData.GetEulerAngles(transform.eulerAngles),
+                    Scale = latestData.GetScale(transform.localScale),
+                };
+                ApplyInterpolatedTransform(currentData, currentData, currentData, 1f);
+                return;
+            }
+
+            if (_interpBuffers.Count < 2)
+                return;
+
             // Find two ticks around renderTick
-            uint interpFromTick = 0;
-            uint interpToTick = 0;
+            bool foundInterval = false;
 
             for (int i = _interpBuffers.Count - 1; i >= 1; --i)
             {
@@ -365,8 +471,7 @@ namespace LiteNetLibManager
 
                 if (tick1 <= renderTick && renderTick <= tick2)
                 {
-                    interpFromTick = tick1;
-                    interpToTick = tick2;
+                    foundInterval = true;
                     _interpFromData = new TransformData()
                     {
                         Tick = data1.Tick,
@@ -381,15 +486,18 @@ namespace LiteNetLibManager
                         EulerAngles = data2.GetEulerAngles(transform.eulerAngles),
                         Scale = data2.GetScale(transform.localScale),
                     };
-                    if (_prevInterpFromTick != interpFromTick)
+                    if (_prevInterpFromTick != tick1)
                     {
                         _startInterpTime = currentTime;
                         _endInterpTime = currentTime + (_logicUpdater.DeltaTimeF * (tick2 - tick1));
-                        _prevInterpFromTick = interpFromTick;
+                        _prevInterpFromTick = tick1;
                     }
                     break;
                 }
             }
+
+            if (!foundInterval)
+                return;
 
             float t = Mathf.InverseLerp(_startInterpTime, _endInterpTime, currentTime);
             Quaternion fromRot = Quaternion.Euler(_interpFromData.EulerAngles);
@@ -401,18 +509,23 @@ namespace LiteNetLibManager
                 EulerAngles = currentRot.eulerAngles,
                 Scale = Vector3.Lerp(_interpFromData.Scale, _interpToData.Scale, t),
             };
-            if (onValidateInterpolation != null && !onValidateInterpolation.Invoke(_interpFromData, _interpToData, currentInterp, t))
+            ApplyInterpolatedTransform(_interpFromData, _interpToData, currentInterp, t);
+        }
+
+        private void ApplyInterpolatedTransform(TransformData fromData, TransformData toData,
+            TransformData currentData, float interpolationTime)
+        {
+            if (onValidateInterpolation != null && !onValidateInterpolation.Invoke(fromData, toData, currentData, interpolationTime))
             {
                 // Not pass the validation
                 return;
             }
-            transform.position = currentInterp.Position;
-            transform.eulerAngles = currentInterp.EulerAngles;
-            transform.localScale = currentInterp.Scale;
-            onInterpolate?.Invoke(_interpFromData, _interpToData, t);
+            transform.position = currentData.Position;
+            transform.eulerAngles = currentData.EulerAngles;
+            transform.localScale = currentData.Scale;
+            onInterpolate?.Invoke(fromData, toData, interpolationTime);
         }
 
-        [ServerRpc]
         private void OwnerSyncTransform(SyncTransforms data)
         {
             if (!syncByOwnerClient && IsServer)
@@ -429,9 +542,9 @@ namespace LiteNetLibManager
                     _interpTick = InitialInterpTick = interpTick;
             }
             // Sync to other clients immediately
-            foreach (var entry in data)
+            for (int i = 0; i < data.Count; ++i)
             {
-                StoreSyncBuffer(_syncBuffers.Value, entry.Value);
+                StoreSyncBuffer(_syncBuffers.Value, data.Values[i]);
             }
             _syncBuffers.MarkAsChanged();
         }
@@ -456,16 +569,21 @@ namespace LiteNetLibManager
 
         private void StoreInterpolateBuffers(SyncTransforms data, int maxBuffers = 3)
         {
-            foreach (var entry in data)
+            for (int i = 0; i < data.Count; ++i)
             {
-                if (_interpBuffers.ContainsKey(entry.Key))
+                uint tick = data.Keys[i];
+                if (_interpBuffers.ContainsKey(tick))
                     continue;
-                if (entry.Value.Extra != null)
+                TransformData buffered = data.Values[i];
+                if (buffered.Extra != null)
                 {
-                    s_ExtraReader.SetSource(entry.Value.Extra);
-                    onReadInterpBuffer?.Invoke(s_ExtraReader, entry.Key);
+                    s_ExtraReader.SetSource(buffered.Extra);
+                    onReadInterpBuffer?.Invoke(s_ExtraReader, tick);
                 }
-                _interpBuffers.Add(entry.Key, entry.Value);
+                // Extra is consumed by the callback and may belong to a reused outgoing buffer.
+                buffered.Extra = null;
+                buffered.OwnsExtraBuffer = false;
+                _interpBuffers.Add(tick, buffered);
             }
             // Prune old ticks (keep last N)
             while (_interpBuffers.Count > maxBuffers)
@@ -481,14 +599,55 @@ namespace LiteNetLibManager
                 s_ExtraWriter.Reset();
                 onWriteSyncBuffer?.Invoke(s_ExtraWriter, entry.Tick);
                 if (s_ExtraWriter.Length > 0)
-                    entry.Extra = s_ExtraWriter.CopyData();
+                {
+                    if (s_ExtraWriter.Length > byte.MaxValue)
+                        throw new System.ArgumentOutOfRangeException(nameof(entry.Extra), "Transform extra data cannot exceed 255 bytes.");
+                    byte[] extra = RentExtraBuffer(s_ExtraWriter.Length);
+                    System.Buffer.BlockCopy(s_ExtraWriter.Data, 0, extra, 0, extra.Length);
+                    entry.Extra = extra;
+                    entry.OwnsExtraBuffer = true;
+                }
+                else if (entry.Extra != null)
+                {
+                    // Incoming RPC buffers are reused, so outgoing history needs its own copy.
+                    byte[] extra = RentExtraBuffer(entry.Extra.Length);
+                    System.Buffer.BlockCopy(entry.Extra, 0, extra, 0, extra.Length);
+                    entry.Extra = extra;
+                    entry.OwnsExtraBuffer = true;
+                }
                 buffers.Add(entry.Tick, entry);
             }
             // Prune old ticks (keep last N)
             while (buffers.Count > maxBuffers)
             {
+                ReleaseExtraBuffer(buffers.Values[0]);
                 buffers.RemoveAt(0);
             }
+        }
+
+        private byte[] RentExtraBuffer(int length)
+        {
+            for (int i = _freeExtraBuffers.Count - 1; i >= 0; --i)
+            {
+                if (_freeExtraBuffers[i].Length != length)
+                    continue;
+                byte[] result = _freeExtraBuffers[i];
+                _freeExtraBuffers.RemoveAt(i);
+                return result;
+            }
+            return new byte[length];
+        }
+
+        private void ReleaseExtraBuffers(SortedList<uint, TransformData> buffers)
+        {
+            for (int i = 0; i < buffers.Count; ++i)
+                ReleaseExtraBuffer(buffers.Values[i]);
+        }
+
+        private void ReleaseExtraBuffer(TransformData data)
+        {
+            if (data.OwnsExtraBuffer && data.Extra != null && _freeExtraBuffers.Count < 4)
+                _freeExtraBuffers.Add(data.Extra);
         }
     }
 }

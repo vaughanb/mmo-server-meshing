@@ -1,4 +1,4 @@
-﻿using Insthync.UnityEditorUtils;
+using Insthync.UnityEditorUtils;
 using System.Collections.Generic;
 using UnityEngine;
 #if UNITY_EDITOR
@@ -396,7 +396,7 @@ namespace MultiplayerARPG
 
         public static string GetUnknowTitle()
         {
-            return GetText(UITextKeys.UI_UNKNOW_GAME_DATA_TITLE.ToString(), "Unknow");
+            return GetText(UITextKeys.UI_UNKNOW_GAME_DATA_TITLE.ToString(), "Unknown");
         }
 
         public static string GetUnknowDescription()

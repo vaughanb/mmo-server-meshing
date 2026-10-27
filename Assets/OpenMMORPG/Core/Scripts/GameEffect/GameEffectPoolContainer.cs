@@ -36,6 +36,8 @@ namespace MultiplayerARPG
 #endif
             if (loadedPrefab != null)
                 PoolSystem.GetInstance(loadedPrefab, container.position, container.rotation).FollowingTarget = container;
+#else
+            await UniTask.CompletedTask;
 #endif
         }
 

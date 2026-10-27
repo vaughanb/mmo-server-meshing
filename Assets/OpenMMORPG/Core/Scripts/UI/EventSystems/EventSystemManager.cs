@@ -13,8 +13,17 @@ namespace MultiplayerARPG
         public static EventSystem CurrentEventSystem;
         public static event System.Action onEventSystemReady;
 
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+        private static void AutoInit()
+        {
+            SceneManager.sceneLoaded -= SceneManager_sceneLoaded;
+            SceneManager.sceneLoaded += SceneManager_sceneLoaded;
+            SceneManager_sceneLoaded(SceneManager.GetActiveScene(), LoadSceneMode.Single);
+        }
+
         private void OnEnable()
         {
+            SceneManager.sceneLoaded -= SceneManager_sceneLoaded;
             SceneManager.sceneLoaded += SceneManager_sceneLoaded;
         }
 
@@ -40,13 +49,20 @@ namespace MultiplayerARPG
                 CurrentEventSystem.gameObject.GetOrAddComponent<StandaloneInputModule>();
 #endif
             }
-
+            else
+            {
 #if ENABLE_INPUT_SYSTEM
-            StandaloneInputModule oldInputModule = CurrentEventSystem.GetComponent<StandaloneInputModule>();
-            if (oldInputModule != null)
-                DestroyImmediate(oldInputModule);
-            CurrentEventSystem.gameObject.GetOrAddComponent<InputSystemUIInputModule>();
+                StandaloneInputModule oldInputModule = CurrentEventSystem.GetComponent<StandaloneInputModule>();
+                if (oldInputModule != null)
+                    DestroyImmediate(oldInputModule);
+                CurrentEventSystem.gameObject.GetOrAddComponent<InputSystemUIInputModule>();
+#else
+                BaseInputModule oldInputModule = CurrentEventSystem.GetComponent("InputSystemUIInputModule") as BaseInputModule;
+                if (oldInputModule != null)
+                    DestroyImmediate(oldInputModule);
+                CurrentEventSystem.gameObject.GetOrAddComponent<StandaloneInputModule>();
 #endif
+            }
             CurrentEventSystem.sendNavigationEvents = false;
 
             if (onEventSystemReady != null)

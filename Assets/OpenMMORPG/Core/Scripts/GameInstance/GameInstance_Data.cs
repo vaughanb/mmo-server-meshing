@@ -1020,6 +1020,12 @@ namespace MultiplayerARPG
             if (!dict.TryGetValue(data.DataId, out T tempData) || (tempData as Object) == null)
             {
                 data.Validate();
+                if (data is Attribute attribute)
+                    RuntimeGameDataSlots.Register(attribute);
+                else if (data is DamageElement damageElement)
+                    RuntimeGameDataSlots.Register(damageElement);
+                else if (data is Currency currency)
+                    RuntimeGameDataSlots.Register(currency);
                 dict[data.DataId] = data;
                 data.PrepareRelatesData();
             }
@@ -1072,33 +1078,31 @@ namespace MultiplayerARPG
             where TBehaviour : AssetReferenceLiteNetLibBehaviour<TType>
             where TType : BaseGameEntity
         {
-            if (!data.IsDataValid())
+            if (data == null || !data.IsDataValid())
                 return false;
             if (!dict.ContainsKey(data.HashAssetId))
             {
-                bool isError = true;
                 object runtimeKey = data.RuntimeKey;
-                AsyncOperationHandle<GameObject> loadOp = Addressables.LoadAssetAsync<GameObject>(runtimeKey);
+                AsyncOperationHandle<GameObject> loadOp = default;
                 try
                 {
+                    loadOp = Addressables.LoadAssetAsync<GameObject>(runtimeKey);
                     GameObject loadedObject = await loadOp.Task;
-                    if (loadedObject.TryGetComponent(out TType loadedData))
-                        loadedData.PrepareRelatesData();
+                    if (loadedObject == null || !loadedObject.TryGetComponent(out TType loadedData))
+                        return false;
+                    loadedData.PrepareRelatesData();
+                    dict[data.HashAssetId] = data;
                 }
                 catch (System.Exception ex)
                 {
-                    isError = true;
                     Debug.LogException(ex);
+                    return false;
                 }
                 finally
                 {
-                    Addressables.Release(loadOp);
+                    if (loadOp.IsValid())
+                        Addressables.Release(loadOp);
                 }
-                System.GC.Collect();
-                if (isError)
-                    return false;
-                else
-                    dict[data.HashAssetId] = data;
             }
             return true;
         }

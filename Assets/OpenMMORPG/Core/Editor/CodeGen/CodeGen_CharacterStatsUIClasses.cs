@@ -13,7 +13,7 @@ namespace MultiplayerARPG
     {
         private const string LocaleKeyPrefix = "UI_FORMAT_";
 
-        [MenuItem("Open MMORPG/Code Generation/Generate Character Stats UI Classes")]
+        [MenuItem("Tools/Open MMORPG/Code Generation/Generate Character Stats UI Classes")]
         public static void Generate()
         {
             CharacterStatFieldData[] fields = GetStatFields();

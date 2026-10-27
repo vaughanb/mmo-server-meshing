@@ -61,7 +61,7 @@ namespace OpenMMORPG.AddonManager
 		private List<PackageInfo> packages = new List<PackageInfo>();
 		private PackageInfo selectedPackage = null;
 
-		[MenuItem("Open MMORPG/Develop/Addon Manager", false, -1000)]
+		[MenuItem("Tools/Open MMORPG/Develop/Addon Manager", false, -1000)]
 		public static void ShowWindow()
 		{
 			GetWindow<AddonManagerWindow>("Addon Manager");

@@ -581,7 +581,7 @@ namespace MultiplayerARPG
 
         public void ReadServerStateAtClient(long peerTimestamp, NetDataReader reader)
         {
-            // MESH-EDIT: CE-13 (space team kit patch #10): read synchronously, so a read error reaches the kit's catch;
+            // Read synchronously, so a read error reaches the kit's catch;
             // the teleport's await moved to OnTeleportAndForget, which logs its own exceptions (this reader was
             // async void, whose exceptions never reached that catch)
             MovementTeleportState movementTeleportState = (MovementTeleportState)reader.GetByte();
@@ -594,7 +594,7 @@ namespace MultiplayerARPG
                 float rotation = Mathf.HalfToFloat(reader.GetPackedUShort());
                 bool stillMoveAfterTeleport = movementTeleportState.Has(MovementTeleportState.StillMoveAfterTeleport);
                 if (!IsServer)
-                    OnTeleportAndForget(position, Quaternion.Euler(0f, rotation, 0f), stillMoveAfterTeleport); // MESH-EDIT: CE-13 (space team kit patch #10)
+                    OnTeleportAndForget(position, Quaternion.Euler(0f, rotation, 0f), stillMoveAfterTeleport);
                 return;
             }
         }

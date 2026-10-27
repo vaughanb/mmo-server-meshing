@@ -1,0 +1,1398 @@
+{
+  "schema": 1,
+  "kitVersion": "dev",
+  "builtFrom": "06b180a58d63+",
+  "prefix": "Assets/OpenMMORPG",
+  "pipelines": [
+    {
+      "id": "urp",
+      "package": "OpenMMORPG_URP.unitypackage",
+      "name": "Universal Render Pipeline (URP)",
+      "assetType": "UniversalRenderPipelineAsset",
+      "unityPackage": "com.unity.render-pipelines.universal",
+      "testedWith": "17.3.0",
+      "files": [
+        {
+          "path": "Demo/Art/Characters/Materials/MI_Body_Female_Dark.mat",
+          "hash": "4d2e510d172289dd9f49f35f4983560bf5e54d30"
+        },
+        {
+          "path": "Demo/Art/Characters/Materials/MI_Body_Female_Light.mat",
+          "hash": "a4fb75be059483e6af8f30e074cf0c26650a4cf2"
+        },
+        {
+          "path": "Demo/Art/Characters/Materials/MI_Body_Male_Dark.mat",
+          "hash": "5ec4927f5e3b58894bde24b0d47a5c951dc956f3"
+        },
+        {
+          "path": "Demo/Art/Characters/Materials/MI_Body_Male_Light.mat",
+          "hash": "75edf3794fbd9968bad1077997b2f573207c762a"
+        },
+        {
+          "path": "Demo/Art/Characters/Materials/MI_Eye.mat",
+          "hash": "77cab9f9eacb5b1d49977eda1cad6088ccf58416"
+        },
+        {
+          "path": "Demo/Art/Characters/Materials/MI_Hair_1.mat",
+          "hash": "c3c21fea8204d231806c0424e37ada9572dd2a52"
+        },
+        {
+          "path": "Demo/Art/Characters/Materials/MI_Hair_2.mat",
+          "hash": "1f7b3dbb86701b57785c75a3ead2bb80490a780b"
+        },
+        {
+          "path": "Demo/Art/Characters/Materials/MI_Knight.mat",
+          "hash": "7fdb8e809afaa84bf5d8ca0f6822cd7be6d8e2fc"
+        },
+        {
+          "path": "Demo/Art/Characters/Materials/MI_Noble.mat",
+          "hash": "3be6d318ed7593c8f13389915dba0a3c8c596957"
+        },
+        {
+          "path": "Demo/Art/Characters/Materials/MI_Peasant.mat",
+          "hash": "5aa0417db02c63f1864fa892b39f3945dd25b45b"
+        },
+        {
+          "path": "Demo/Art/Characters/Materials/MI_Ranger.mat",
+          "hash": "08f11ef2291ccbd5a08a0bcfd05e8d09d721011e"
+        },
+        {
+          "path": "Demo/Art/Characters/Materials/MI_Ranger_Bandit.mat",
+          "hash": "60bb1e0103f211c3262f330635535e4d09a12a61"
+        },
+        {
+          "path": "Demo/Art/Characters/Materials/MI_Skin_Female.mat",
+          "hash": "1fa4eed79bd14ed25a37ccad553fec6a5eed6033"
+        },
+        {
+          "path": "Demo/Art/Characters/Materials/MI_Skin_Male.mat",
+          "hash": "2a627e27368bdb70b0e28f25de5750e413b025eb"
+        },
+        {
+          "path": "Demo/Art/Characters/Materials/MI_Wizard.mat",
+          "hash": "44b7614fe34cebf90fbe4cd7288c947829eead48"
+        },
+        {
+          "path": "Demo/Art/Nature/Materials/Bark_DeadTree.mat",
+          "hash": "ee69b0c1bcb58ba45463fb90cae2e5219c203294"
+        },
+        {
+          "path": "Demo/Art/Nature/Materials/Bark_NormalTree.mat",
+          "hash": "c492efdc88a50e7cf1faab4cf88003567a30823c"
+        },
+        {
+          "path": "Demo/Art/Nature/Materials/Bark_TwistedTree.mat",
+          "hash": "ee2ce48e5793f61addba4932db15b7e26d3fd6c6"
+        },
+        {
+          "path": "Demo/Art/Nature/Materials/Flowers.mat",
+          "hash": "8ae2ef14607e6a754ba66f7950288edea3c6f906"
+        },
+        {
+          "path": "Demo/Art/Nature/Materials/Flowers_Small.mat",
+          "hash": "9fb3020e385b2e832e141c4eb613611f30d60be9"
+        },
+        {
+          "path": "Demo/Art/Nature/Materials/Grass.mat",
+          "hash": "cb8a61fdf56d638f8824be82ee53495f4059a672"
+        },
+        {
+          "path": "Demo/Art/Nature/Materials/Grass_Small.mat",
+          "hash": "e4980cad424fb867e43da337809f5059c0d1a5e1"
+        },
+        {
+          "path": "Demo/Art/Nature/Materials/Leaves.mat",
+          "hash": "0f5b61629fae3303f0cd2d85a257fedaaed3df5e"
+        },
+        {
+          "path": "Demo/Art/Nature/Materials/Leaves_NormalTree.mat",
+          "hash": "b2c9eeff4102a24edce8e45e1e87cb1eb9144522"
+        },
+        {
+          "path": "Demo/Art/Nature/Materials/Leaves_NormalTree_Small.mat",
+          "hash": "655325fa330d2659d67215de6e0598fe6f9c149b"
+        },
+        {
+          "path": "Demo/Art/Nature/Materials/Leaves_Pine.mat",
+          "hash": "e5e670577d20900ece678581b9b47400cd0ca6fc"
+        },
+        {
+          "path": "Demo/Art/Nature/Materials/Leaves_Small.mat",
+          "hash": "5d73ab5816e1f776efd20f45e78f22b2532b1035"
+        },
+        {
+          "path": "Demo/Art/Nature/Materials/Leaves_TwistedTree.mat",
+          "hash": "8cc5e289c5ac4a9259996b0cedc766344882a5dd"
+        },
+        {
+          "path": "Demo/Art/Nature/Materials/Mushrooms.mat",
+          "hash": "23a62b3340c9940fa287738c9a8b9bc259f9b11e"
+        },
+        {
+          "path": "Demo/Art/Nature/Materials/PathRocks.mat",
+          "hash": "8146f259d720605b92930f0c4ba5b520f931cd5d"
+        },
+        {
+          "path": "Demo/Art/Nature/Materials/Rocks.mat",
+          "hash": "98234fda4afc9e0e6e88a332832789448c5d6f73"
+        },
+        {
+          "path": "Demo/Art/Props/Materials/T_Gold.mat",
+          "hash": "649fbcfc4ad76df23f90f44f361f08cef66aabcb"
+        },
+        {
+          "path": "Demo/Art/Props/Materials/T_Page_1.mat",
+          "hash": "e95b0fc3f050cda65f2daebeae6d07d8d02349bb"
+        },
+        {
+          "path": "Demo/Art/Props/Materials/T_Page_2.mat",
+          "hash": "eed0bdec50dd2e43e4076555c7d0ead9fbac7dae"
+        },
+        {
+          "path": "Demo/Art/Props/Materials/T_Runes.mat",
+          "hash": "f6fbd9049993773af859156dba3f75027629871f"
+        },
+        {
+          "path": "Demo/Art/Props/Materials/T_Trim_Cloth.mat",
+          "hash": "d11b42dbcda0ea8e7ad86e68e8bae1ec322bdafe"
+        },
+        {
+          "path": "Demo/Art/Props/Materials/T_Trim_Furniture.mat",
+          "hash": "71eca0a9aba61ca46c8b562ce0e5f34346a42dc1"
+        },
+        {
+          "path": "Demo/Art/Props/Materials/T_Trim_Metal.mat",
+          "hash": "7eb4b313f5ef9920601a69fd4bc614274a9c2893"
+        },
+        {
+          "path": "Demo/Art/Props/Materials/T_Trim_Metal_Vertex_Soft.mat",
+          "hash": "19ec1e6d0788f820f615a5a3574b74f7066a7882"
+        },
+        {
+          "path": "Demo/Art/Props/Materials/T_Trim_Props.mat",
+          "hash": "51864f8b5b261bfc65c2e1b3fd9cfe4e35044cb3"
+        },
+        {
+          "path": "Demo/Art/Props/Materials/T_Trim_Props_Vertex.mat",
+          "hash": "bd425fc73db408a684f10f87eb461980c26756c2"
+        },
+        {
+          "path": "Demo/Art/Props/Materials/T_WoodenSign.mat",
+          "hash": "84c5a4476e3fc0e72e85ab880e1fb9fb7d374724"
+        },
+        {
+          "path": "Demo/Art/Saddle/Materials/Saddle.mat",
+          "hash": "26403887b177c7d385220abbab9751d76caddcdb"
+        },
+        {
+          "path": "Demo/Art/Shrine/Materials/T_Shrine.mat",
+          "hash": "f879e4427dbd09dd8826da936fe347a75e913055"
+        },
+        {
+          "path": "Demo/Art/Village/Materials/MI_Brick.mat",
+          "hash": "eb2523b89dd264568ca6710a5013f7953ae5d9a2"
+        },
+        {
+          "path": "Demo/Art/Village/Materials/MI_MetalOrnaments.mat",
+          "hash": "59fcf86072831dfae473cf1cb04565cd1be7e7af"
+        },
+        {
+          "path": "Demo/Art/Village/Materials/MI_Plaster.mat",
+          "hash": "4c61a018e82a0feb4d9a2c6015f42d140b7b7449"
+        },
+        {
+          "path": "Demo/Art/Village/Materials/MI_RockTrim.mat",
+          "hash": "4560aacc1e862e06cf6ebfa97394bad958a568ec"
+        },
+        {
+          "path": "Demo/Art/Village/Materials/MI_RoundTiles.mat",
+          "hash": "1dd0a4c228ff33498a5e5caee5a33803fc8d60fc"
+        },
+        {
+          "path": "Demo/Art/Village/Materials/MI_UnevenBrick.mat",
+          "hash": "62c814327bd1dca045e275bc008d5c484e781b49"
+        },
+        {
+          "path": "Demo/Art/Village/Materials/MI_WindowGlass.mat",
+          "hash": "dda0a73846d252c8cd9402f81556b35446e06dca"
+        },
+        {
+          "path": "Demo/Art/Village/Materials/MI_WoodTrim.mat",
+          "hash": "9a4926b8a961495aef65c5803eb925e4018b4340"
+        },
+        {
+          "path": "Demo/Art/Village/Materials/MI_WoodTrim_Wear.mat",
+          "hash": "1760c1f6447dcd43a495e4adb6344fb3cc4b5a92"
+        },
+        {
+          "path": "Demo/Art/Weapons/Materials/Arrow.mat",
+          "hash": "9cede2d6e96118ca53a1dfe999534e787db46484"
+        },
+        {
+          "path": "Demo/Art/Weapons/Materials/Bow.mat",
+          "hash": "91204d317dc5ecf6fb6595774c3017f8d432e283"
+        },
+        {
+          "path": "Demo/Art/Weapons/Materials/MageStaff.mat",
+          "hash": "342362f1c1524bb867168aec75767e304eed03c5"
+        },
+        {
+          "path": "Demo/Art/Weapons/Materials/Quiver.mat",
+          "hash": "6d5ea433ffe7d89ef02868347cbedd13c72fb284"
+        },
+        {
+          "path": "Demo/Art/Weapons/Materials/ShortSword.mat",
+          "hash": "84624ccb23fa60442dc43c7c7de5c4281357e600"
+        },
+        {
+          "path": "Demo/Art/Weapons/VikingShield.mat",
+          "hash": "fdfbafbb49d07eba06e858dcac5ee7af1b49e39c"
+        },
+        {
+          "path": "Demo/Editor/TerrainShaderRepair.cs",
+          "hash": "bf13845abd12753f3ae6298c084cfca506ab2cf7"
+        },
+        {
+          "path": "Demo/Materials/BaseColor.mat",
+          "hash": "904e38cd014485b6327cdcb2f9b407cb8a5a624a"
+        },
+        {
+          "path": "Demo/Materials/BuildGhost_CanBuild.mat",
+          "hash": "a656fa54c64519cea8577ab735aea9bf9804497e"
+        },
+        {
+          "path": "Demo/Materials/BuildGhost_CannotBuild.mat",
+          "hash": "7c5deaed04771dcc1510fc5299cd0eaff6b839ac"
+        },
+        {
+          "path": "Demo/Materials/Collie.mat",
+          "hash": "30d5c7f279b71d67831813c7658d4fe368884bff"
+        },
+        {
+          "path": "Demo/Materials/Crimson.mat",
+          "hash": "68cfdb90b5d53e9ed1b1445d11e7ce2ce3ef42a9"
+        },
+        {
+          "path": "Demo/Materials/CryptSky.mat",
+          "hash": "c75b1bc6b13c3e907cc23ab9ce42a899529ca8b2"
+        },
+        {
+          "path": "Demo/Materials/DarkSeaGreen.mat",
+          "hash": "1feb76277ce328a9e8ed6e2f25a4085537950d50"
+        },
+        {
+          "path": "Demo/Materials/Darkness.mat",
+          "hash": "f36e6128e9d3ebf2fb3ac61b944a243c66b0fdab"
+        },
+        {
+          "path": "Demo/Materials/DeepSkyBlue.mat",
+          "hash": "6440f0876205e662cff58e7f78f1f0b1291fdfb6"
+        },
+        {
+          "path": "Demo/Materials/Deer.mat",
+          "hash": "4ab20e2c97003e350e534a893a8a5dc227e8e4e5"
+        },
+        {
+          "path": "Demo/Materials/FlameAdditive.mat",
+          "hash": "b78cfe32d268d7625f43d24991143e465dab0121"
+        },
+        {
+          "path": "Demo/Materials/FlameSmoke.mat",
+          "hash": "cb0d38a32f4af364a99b9bd2f10592406d78e2ff"
+        },
+        {
+          "path": "Demo/Materials/Horse.mat",
+          "hash": "c2bd27f7c6f8739547bbd4c50b1a279691585699"
+        },
+        {
+          "path": "Demo/Materials/IronVein_Ore.mat",
+          "hash": "6b336b2fae80ba9057ab2897d063a88e1dd7c087"
+        },
+        {
+          "path": "Demo/Materials/IronVein_Rock.mat",
+          "hash": "586600495ac397ef270df4461b10840664d825b9"
+        },
+        {
+          "path": "Demo/Materials/IronVein_Rust.mat",
+          "hash": "e7a360d97529e6a0f11601d39024ba7d4f06f2e4"
+        },
+        {
+          "path": "Demo/Materials/Island_Sea.mat",
+          "hash": "d270d07c2006e9a7900b709e3ca41ecdb1c587ba"
+        },
+        {
+          "path": "Demo/Materials/MI_FootPrint.mat",
+          "hash": "b878cf53aa2ae52a6fc28dcc757d743aa824fec4"
+        },
+        {
+          "path": "Demo/Materials/MI_FrostPatch.mat",
+          "hash": "29a4af281c625a90d5aafe72bc57811df0cfc5a2"
+        },
+        {
+          "path": "Demo/Materials/MI_Hair_1_Tinted.mat",
+          "hash": "bcc57a5f9a5b433724ada0ee054f963f693e8831"
+        },
+        {
+          "path": "Demo/Materials/MI_Hair_2_Tinted.mat",
+          "hash": "2a3c305e312ced1d5d2e6a4637814e95b6e48386"
+        },
+        {
+          "path": "Demo/Materials/MI_HarvestChips.mat",
+          "hash": "1da102835e768b87cf486fb2e484a62b9aac7ecf"
+        },
+        {
+          "path": "Demo/Materials/MI_Ice.mat",
+          "hash": "e1bd2cf6a8d7ddbda45ea04e6f5b8ccf9cb600c1"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillAim_Meteor.mat",
+          "hash": "60684a96b886bb18bddd47b1a43a0c9b2986e0b9"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillAim_Volley.mat",
+          "hash": "3a960a01e3457de5c2f4ad8ac7951ab942997891"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillArea_FrostNova.mat",
+          "hash": "c3ed592497e5ce358559ea96ace4d4f8a3fee774"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillArea_Meteor.mat",
+          "hash": "ed365dd0c19fab2da1e3a22ca465df0126d2767e"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillArea_UnholyNova.mat",
+          "hash": "ac24f8b9f41c301bedf3e11aa56ac78780db950f"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillArea_Volley.mat",
+          "hash": "b16bea0fbec12e8520af98e44e5700f07909d744"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillBlood.mat",
+          "hash": "f68b726a38250d32bf70df833cb6d3ef32345b9c"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillDebris.mat",
+          "hash": "0afe0cbffff528430971236b719b53c0dfda80dc"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillDirt.mat",
+          "hash": "a18e06ca1187ff127ea84b2405b887ff001e038c"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillDust.mat",
+          "hash": "638c87a8e606a5a190ef95132123c0ef4f2bb79d"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillEffect.mat",
+          "hash": "9bc064514550b90c059443c72af6c66f6a726e48"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillFire.mat",
+          "hash": "25263b581ef092f753f21d0c2c83cc1453b854de"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillMist.mat",
+          "hash": "3824f5d49f45846fcf068c2d336422c890c34dc0"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillReticleSolid.mat",
+          "hash": "91d6be594a591040d8eb350407379c4337100d9c"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillRibbon.mat",
+          "hash": "31bd01194e5dd9321f8e28419fe184694d7d3402"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillShockwave.mat",
+          "hash": "2ae2e4161cd5ae85827c357dc83d1126b38df255"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillSmoke.mat",
+          "hash": "8a01678a8e1e4f7249ea8cc8d252713d1cafd8a5"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillVines.mat",
+          "hash": "cbee47577be2944a4f16e86ce2eb26bf8a74b7b6"
+        },
+        {
+          "path": "Demo/Materials/MI_SpellBolt.mat",
+          "hash": "1ba125eb131e818d8b862adc49147ba3f43d6e3e"
+        },
+        {
+          "path": "Demo/Materials/MI_WaterDrop.mat",
+          "hash": "1d337b343c0e13eba5cf8f28ec69047453d8435a"
+        },
+        {
+          "path": "Demo/Materials/MI_WaterRing.mat",
+          "hash": "375ba75fe6d928199975a0f2cf3f1a6c0d9956d3"
+        },
+        {
+          "path": "Demo/Materials/MI_WeaponTrail.mat",
+          "hash": "ab9f1a4c8c1017bfae4fc09cd123a4ceff838ddc"
+        },
+        {
+          "path": "Demo/Materials/MenuBackdrop.mat",
+          "hash": "e401dc668da73e606737b2be61a81c9c476ea265"
+        },
+        {
+          "path": "Demo/Materials/MenuGround.mat",
+          "hash": "cf47ab9964418d718283b141a6b4dac2a7aaa7ba"
+        },
+        {
+          "path": "Demo/Materials/MinimapGround.mat",
+          "hash": "9f787a9b53438e911d08d963680aab0935f8410f"
+        },
+        {
+          "path": "Demo/Materials/RainSplash.mat",
+          "hash": "aabd48de7a6e8ac73ab343f2355543af491502b0"
+        },
+        {
+          "path": "Demo/Materials/RainStreak.mat",
+          "hash": "a07abd309d1fe739ff7e1f0facb5042be660fd52"
+        },
+        {
+          "path": "Demo/Materials/T_WoodenSign_Bank.mat",
+          "hash": "63daeb91020daa75ef6e925b4eff4b4bbf88f531"
+        },
+        {
+          "path": "Demo/Materials/Underwater.mat",
+          "hash": "8e1de5b771d2b3d78906b6046f3ed54e7007e497"
+        },
+        {
+          "path": "Demo/Materials/Wolf.mat",
+          "hash": "d67c86dad705a3d23c915bbefbeb5eb33957cc94"
+        },
+        {
+          "path": "Demo/Prefabs/Effects/CampfireFlame.prefab",
+          "hash": "7081bcc837b18f50275e27aa3f017c56f753c576"
+        },
+        {
+          "path": "Demo/Prefabs/Effects/Skills/FX_ArrowFlashLight.prefab",
+          "hash": "127b7a4e46c09bac023a89bf516da5c2067796c5"
+        },
+        {
+          "path": "Demo/Prefabs/Effects/Skills/FX_FrostFlashLight.prefab",
+          "hash": "cbaf23f6f2ae4a517bfc9cdce96affd8deb666c2"
+        },
+        {
+          "path": "Demo/Prefabs/Effects/Skills/FX_MeteorFlashLight.prefab",
+          "hash": "76ffeea6d6658e1832b4b5730f79170b4b8792b8"
+        },
+        {
+          "path": "Demo/Prefabs/Effects/TorchFlame.prefab",
+          "hash": "a0efb54935f953b7ff6128791a11b7fb9dbb2750"
+        },
+        {
+          "path": "Demo/Prefabs/GamePlay/GameplayCamera.prefab",
+          "hash": "afce4d29f63cb6dd5f59dd3abbe329ca5b17d75c"
+        },
+        {
+          "path": "Demo/Prefabs/GamePlay/MinimapCamera.prefab",
+          "hash": "a21068e6214436c73c1c57059f4974c270724cc1"
+        },
+        {
+          "path": "Demo/Prefabs/GamePlay/ServerCharacter.prefab",
+          "hash": "e487a062fe420f386ce14e6464f272c53eb2392f"
+        },
+        {
+          "path": "Demo/Prefabs/GamePlay/Shrines/DemoShrine.prefab",
+          "hash": "9b9958d53edbb434404d84135a218ecb21c4c9e3"
+        },
+        {
+          "path": "Demo/Prefabs/GamePlay/SkillAreas/MeteorArea.prefab",
+          "hash": "42afafd719ed6d94e13ddd68dd9950efb1f3953d"
+        },
+        {
+          "path": "Demo/Scenes/00Init.unity",
+          "hash": "0d1402154c5caed6efb8ca1b2a6be92e7c52b08a"
+        },
+        {
+          "path": "Demo/Scenes/01Home.unity",
+          "hash": "10362816ff5489fe6e2c2e8238c1cea45aa81156"
+        },
+        {
+          "path": "Demo/Scenes/DemoDungeon.unity",
+          "hash": "b8e7c4bd0688b0165b734b75400604da7bba7ebb"
+        },
+        {
+          "path": "Demo/Scenes/DemoMap.unity",
+          "hash": "796e0a3edd7041a79ba70dec9d9ba4df2e4a475e"
+        },
+        {
+          "path": "Demo/Scripts/DayNightSkyCycle.cs",
+          "hash": "50de26c9494f88439b27f6c3a46fe0559038b9c7"
+        },
+        {
+          "path": "Demo/Scripts/DemoMeteorStrike.cs",
+          "hash": "319b21e46bdb061580b21265c3dafdae5e61fcd9"
+        },
+        {
+          "path": "Demo/Scripts/StylizedWaterSurface.cs",
+          "hash": "88fefe8ce409a7ed077a508b1060e905b2500234"
+        },
+        {
+          "path": "Demo/Scripts/TimeOfDayLight.cs",
+          "hash": "53be3673cf76dbf525d8e080da67399ecd302268"
+        },
+        {
+          "path": "Demo/Scripts/UICharacterPaperDoll.cs",
+          "hash": "5b2fe4acc4918f239eaf040d2a8fc7500e399a43"
+        },
+        {
+          "path": "Demo/Scripts/UnderwaterCameraEffect.cs",
+          "hash": "249b6be8207a7856d4c42ff53b71c5379f81b0e3"
+        },
+        {
+          "path": "Demo/Settings/DemoURP.asset",
+          "hash": "b7d52d0649a578e0701ac823e2653d9ff96c5abb"
+        },
+        {
+          "path": "Demo/Settings/DemoURP_Low.asset",
+          "hash": "17e247aced992bac3f8f3feb0e9716bf3ea81bc2"
+        },
+        {
+          "path": "Demo/Settings/DemoURP_Low_Renderer.asset",
+          "hash": "366c1fd83c66ddf9f72eb7fc444d80dc15d3fe0d"
+        },
+        {
+          "path": "Demo/Settings/DemoURP_Renderer.asset",
+          "hash": "466252d9a668b6131c6c99757cf0c0b79f3e7fea"
+        },
+        {
+          "path": "Demo/Settings/DemoVolumeProfile.asset",
+          "hash": "42a0852e457a647369ac543ed13fa27e0d462a53"
+        },
+        {
+          "path": "Demo/Shaders/DemoDayNightSkybox.shader",
+          "hash": "b07a329e575e1afd63fc43f57fa07f9072678557"
+        },
+        {
+          "path": "Demo/Shaders/DemoStylizedWater.shader",
+          "hash": "7a9c47210a3a767f0411fe368f432543d647567e"
+        },
+        {
+          "path": "Demo/Shaders/DemoUnderwater.shader",
+          "hash": "fefa940b73cc4425b6042784293e188ea16186ab"
+        },
+        {
+          "path": "Demo/Shaders/DemoWindFoliage.hlsl",
+          "hash": "f7465fa84d98b6488f3290d8b5c0a28b6d9f9e7b"
+        },
+        {
+          "path": "Demo/Shaders/DemoWindFoliage.shader",
+          "hash": "cf323ddb09b922c5d4975a8793161ce483282635"
+        },
+        {
+          "path": "Demo/Shaders/DemoWindTerrainDetail.shader",
+          "hash": "44c90f660977fd052a76cf5e3e27f95ca8770a32"
+        },
+        {
+          "path": "Demo/Shaders/ProjectorAdditiveTint.shader",
+          "hash": "eef11281ca0b2ce539e3e9c4e74cf2d1ed4102f5"
+        },
+        {
+          "path": "Demo/Shaders/PropSignEmblem.shader",
+          "hash": "1f24f32ecd864dd777189de30bbbd0546d1b0120"
+        },
+        {
+          "path": "Demo/Shaders/PropTrimVertexColor.shader",
+          "hash": "f890c698450144cf4a90324a12d99015be5d09f4"
+        },
+        {
+          "path": "Demo/Terrain/IslandTerrain.asset",
+          "hash": "6ae6b26f874ee35708a814895a0ab3a95d286e40"
+        },
+        {
+          "path": "Demo/Terrain/IslandTerrain.mat",
+          "hash": "73a9bb9a45545ce3c9501f762a5fbb67c8858f67"
+        },
+        {
+          "path": "ThirdParty/GraphicSettings/Scripts/BaseUrpSetting.cs",
+          "hash": "eec5cade1d64c2b5274af5ea585f3dd9878e2388"
+        },
+        {
+          "path": "ThirdParty/GraphicSettings/Scripts/UrpAntiAliasingSetting.cs",
+          "hash": "85d25a0b7ef4d2a958201f630a8c07339529dba0"
+        },
+        {
+          "path": "ThirdParty/GraphicSettings/Scripts/UrpPostProcessSetting.cs",
+          "hash": "b9b9d3ded32a81ea9a800cc39070559b1e7dd09b"
+        },
+        {
+          "path": "ThirdParty/GraphicSettings/Scripts/UrpResolutionScalingSetting.cs",
+          "hash": "9c58b2e8f8c7487ae4a73c30d2845ff33291fb00"
+        },
+        {
+          "path": "ThirdParty/GraphicSettings/Scripts/UrpShadowCascadeSetting.cs",
+          "hash": "8828a5422619db5bbd43041652c678e983881006"
+        },
+        {
+          "path": "ThirdParty/GraphicSettings/Scripts/UrpShadowDistanceSetting.cs",
+          "hash": "1192cb65873d28d735d9bd2acefcf3654217935c"
+        },
+        {
+          "path": "ThirdParty/GraphicSettings/Scripts/UrpShadowResolutionSetting.cs",
+          "hash": "1ad3ef04c0c9ab3e20238ed355c9e9e4e495b89d"
+        },
+        {
+          "path": "ThirdParty/GraphicSettings/Scripts/UrpSoftShadowSetting.cs",
+          "hash": "9a6550729f728ad02d8f75ef484ec26629a7a183"
+        }
+      ],
+      "remove": [
+        "Demo/Art/Props/Textures/T_Trim_Metal_Mask_MaskMap.png",
+        "Demo/Art/Saddle/Saddle_Mask_MaskMap.png",
+        "Demo/Art/Shrine/Textures/T_Shrine_Mask_MaskMap.png",
+        "Demo/Art/Weapons/Arrow_Mask_MaskMap.png",
+        "Demo/Art/Weapons/Bow_Mask_MaskMap.png",
+        "Demo/Art/Weapons/MageStaff_Mask_MaskMap.png",
+        "Demo/Art/Weapons/Quiver_Mask_MaskMap.png",
+        "Demo/Art/Weapons/ShortSword_Mask_MaskMap.png",
+        "Demo/Art/Weapons/VikingShield_Mask_MaskMap.png",
+        "Demo/Scripts/DayNightSky.cs",
+        "Demo/Scripts/DemoLights.cs",
+        "Demo/Settings/DemoDungeonVolumeProfile.asset",
+        "Demo/Settings/DemoHomeVolumeProfile.asset",
+        "Demo/Settings/DemoInteriorVolumeProfile.asset",
+        "Demo/Settings/DemoPostProcessVolumeProfile.asset",
+        "Demo/Settings/DemoSkyVolumeProfile.asset",
+        "Demo/Shaders/DemoStylizedWater.hlsl",
+        "Demo/Shaders/HDRPLitVariantData.hlsl",
+        "Demo/Shaders/HDRPLitVariantHooks.hlsl",
+        "Demo/Shaders/HDRPLitVariantProperties.hlsl",
+        "Demo/Shaders/HDRPUnlitVariantData.hlsl",
+        "Demo/Shaders/HDRPUnlitVariantHooks.hlsl",
+        "Demo/Shaders/HDRPUnlitVariantProperties.hlsl",
+        "Demo/Shaders/ParticleLit.shader",
+        "Demo/Shaders/ParticleUnlit.shader",
+        "ThirdParty/GraphicSettings/Scripts/HdrpGraphicRuntime.cs"
+      ]
+    },
+    {
+      "id": "hdrp",
+      "package": "OpenMMORPG_HDRP.unitypackage",
+      "name": "High Definition Render Pipeline (HDRP)",
+      "assetType": "HDRenderPipelineAsset",
+      "unityPackage": "com.unity.render-pipelines.high-definition",
+      "testedWith": "17.3.0",
+      "packagesNoLongerNeeded": [
+        "com.unity.render-pipelines.universal",
+        "com.unity.render-pipelines.universal-config"
+      ],
+      "files": [
+        {
+          "path": "Demo/Art/Characters/Materials/MI_Body_Female_Dark.mat",
+          "hash": "70fdc9d57a65ed7da41720a7ff5b972825a8d00b"
+        },
+        {
+          "path": "Demo/Art/Characters/Materials/MI_Body_Female_Light.mat",
+          "hash": "3a4d1ae3447b535912199ff1bc9f80ed235068c1"
+        },
+        {
+          "path": "Demo/Art/Characters/Materials/MI_Body_Male_Dark.mat",
+          "hash": "e4c602559fdf72ea15a36ddfb27a4e365e5a0e4a"
+        },
+        {
+          "path": "Demo/Art/Characters/Materials/MI_Body_Male_Light.mat",
+          "hash": "eeb0f54fc8dd79276d9ed1443ce66f80509dc3f0"
+        },
+        {
+          "path": "Demo/Art/Characters/Materials/MI_Eye.mat",
+          "hash": "d8bde23fab25b736609dbec5c6cc835d1e8abc49"
+        },
+        {
+          "path": "Demo/Art/Characters/Materials/MI_Hair_1.mat",
+          "hash": "4a7b448417efbda4617c6f7b599f7708502c0cf6"
+        },
+        {
+          "path": "Demo/Art/Characters/Materials/MI_Hair_2.mat",
+          "hash": "44c0ab7e260d9fec197ea6e413836c7e2749da9f"
+        },
+        {
+          "path": "Demo/Art/Characters/Materials/MI_Knight.mat",
+          "hash": "54367e8a153164567a9e011d71e60af0e9204002"
+        },
+        {
+          "path": "Demo/Art/Characters/Materials/MI_Noble.mat",
+          "hash": "538fc63b030011f1c1562a27fab8d0f3e1822d4b"
+        },
+        {
+          "path": "Demo/Art/Characters/Materials/MI_Peasant.mat",
+          "hash": "ab8144fcd1db0bc6e4c94117c2d832698d225525"
+        },
+        {
+          "path": "Demo/Art/Characters/Materials/MI_Ranger.mat",
+          "hash": "ab8df4d9a8bec6238a9377632218e84b799b1a64"
+        },
+        {
+          "path": "Demo/Art/Characters/Materials/MI_Ranger_Bandit.mat",
+          "hash": "4ddada475c54b314f8c8684021dbe162dba593b6"
+        },
+        {
+          "path": "Demo/Art/Characters/Materials/MI_Skin_Female.mat",
+          "hash": "fbfb9f741a671153efa45c67ac648239ce0778a0"
+        },
+        {
+          "path": "Demo/Art/Characters/Materials/MI_Skin_Male.mat",
+          "hash": "2b98a14550b4624e035cc69f60108558aa086a0d"
+        },
+        {
+          "path": "Demo/Art/Characters/Materials/MI_Wizard.mat",
+          "hash": "20e9aca07bf3177528424c126ea46741c693547c"
+        },
+        {
+          "path": "Demo/Art/Nature/Materials/Bark_DeadTree.mat",
+          "hash": "b2f0eaf9879862731e9d137a7250a46a037047a1"
+        },
+        {
+          "path": "Demo/Art/Nature/Materials/Bark_NormalTree.mat",
+          "hash": "99f883a1973d7a44d5395f1330071ebf4efefc87"
+        },
+        {
+          "path": "Demo/Art/Nature/Materials/Bark_TwistedTree.mat",
+          "hash": "80c737eb9b228a9b57843177afbe86082461d071"
+        },
+        {
+          "path": "Demo/Art/Nature/Materials/Flowers.mat",
+          "hash": "9c3777732a44e4c549af19a7ec304c1b15126b55"
+        },
+        {
+          "path": "Demo/Art/Nature/Materials/Flowers_Small.mat",
+          "hash": "b20047200268c9fac094df4b7bdd67afbcaf676c"
+        },
+        {
+          "path": "Demo/Art/Nature/Materials/Grass.mat",
+          "hash": "389e42ac0b6b8d366cff08ae1c26ef49928212df"
+        },
+        {
+          "path": "Demo/Art/Nature/Materials/Grass_Small.mat",
+          "hash": "3a775c31f68e76e31b050682e6200784c7610feb"
+        },
+        {
+          "path": "Demo/Art/Nature/Materials/Leaves.mat",
+          "hash": "09da97a5258e739ea40c772d4fd98bf79904e0e3"
+        },
+        {
+          "path": "Demo/Art/Nature/Materials/Leaves_NormalTree.mat",
+          "hash": "c843188748f2d788bdd21cc50ffc42db0b906936"
+        },
+        {
+          "path": "Demo/Art/Nature/Materials/Leaves_NormalTree_Small.mat",
+          "hash": "c6ba0dd410b2d34bac2043da214c590ff2950aad"
+        },
+        {
+          "path": "Demo/Art/Nature/Materials/Leaves_Pine.mat",
+          "hash": "2a6dd34e3acc1ed2f4da87eff43a2e732a74039b"
+        },
+        {
+          "path": "Demo/Art/Nature/Materials/Leaves_Small.mat",
+          "hash": "7e4ffc694187d58bbd8ae51759d236c3d844a7fe"
+        },
+        {
+          "path": "Demo/Art/Nature/Materials/Leaves_TwistedTree.mat",
+          "hash": "990c2417f680244667b3fca3881233921244481b"
+        },
+        {
+          "path": "Demo/Art/Nature/Materials/Mushrooms.mat",
+          "hash": "6707a8c185f5ef943b2e9402832a835e97bc4206"
+        },
+        {
+          "path": "Demo/Art/Nature/Materials/PathRocks.mat",
+          "hash": "cd86e1e8467b12a0cd4a0bcefb8f72184bb0a86d"
+        },
+        {
+          "path": "Demo/Art/Nature/Materials/Rocks.mat",
+          "hash": "9ce7d0e477a10eaa3a1a77ece280a43a53994a34"
+        },
+        {
+          "path": "Demo/Art/Props/Materials/T_Gold.mat",
+          "hash": "56a098e0ffa302e9a42bde9e0935b221fd5b514b"
+        },
+        {
+          "path": "Demo/Art/Props/Materials/T_Page_1.mat",
+          "hash": "09991cfb70fa47737c67854309bfd4119fc731b3"
+        },
+        {
+          "path": "Demo/Art/Props/Materials/T_Page_2.mat",
+          "hash": "4401c448fbbeceedef0303ac3eac3bca8a7f4b0f"
+        },
+        {
+          "path": "Demo/Art/Props/Materials/T_Runes.mat",
+          "hash": "e98625d1a4fb22653368427fcd1f94950a87e07a"
+        },
+        {
+          "path": "Demo/Art/Props/Materials/T_Trim_Cloth.mat",
+          "hash": "c7a4fff70b71d5648f80c01483f4c2236d912e57"
+        },
+        {
+          "path": "Demo/Art/Props/Materials/T_Trim_Furniture.mat",
+          "hash": "06d76e33499840ba07dec3276445d25234f2522e"
+        },
+        {
+          "path": "Demo/Art/Props/Materials/T_Trim_Metal.mat",
+          "hash": "45ec47466cbf55b158ed707f8e040a6651dc8e13"
+        },
+        {
+          "path": "Demo/Art/Props/Materials/T_Trim_Metal_Vertex_Soft.mat",
+          "hash": "bac99299e3e74afe08bf1e2783857abcbe8e4572"
+        },
+        {
+          "path": "Demo/Art/Props/Materials/T_Trim_Props.mat",
+          "hash": "71098b257f463434f0000f12f6576b088e29a528"
+        },
+        {
+          "path": "Demo/Art/Props/Materials/T_Trim_Props_Vertex.mat",
+          "hash": "e6f19385624fcaa3fdc425ae3e93642512067c6c"
+        },
+        {
+          "path": "Demo/Art/Props/Materials/T_WoodenSign.mat",
+          "hash": "b02cfce2594f4d0742db0043fb639b5f5e187857"
+        },
+        {
+          "path": "Demo/Art/Props/Textures/T_Trim_Metal_Mask_MaskMap.png",
+          "hash": "736a897630c1bf0bbe3e7bc239f2040915f291d6"
+        },
+        {
+          "path": "Demo/Art/Saddle/Materials/Saddle.mat",
+          "hash": "3b93d1a39ca655573933fe905b8667e2a33ee25c"
+        },
+        {
+          "path": "Demo/Art/Saddle/Saddle_Mask_MaskMap.png",
+          "hash": "05c11dfe94d15f0b0268eb832e64aff6f2fbd42b"
+        },
+        {
+          "path": "Demo/Art/Shrine/Materials/T_Shrine.mat",
+          "hash": "e2bbb083bc86a32327186f68f1e0bc48aecc6efe"
+        },
+        {
+          "path": "Demo/Art/Shrine/Textures/T_Shrine_Mask_MaskMap.png",
+          "hash": "344099305e494908dd62728e8c5b2ffd80d0ea3f"
+        },
+        {
+          "path": "Demo/Art/Village/Materials/MI_Brick.mat",
+          "hash": "5a81db9920a4f58b34944aeddfa0c41cd1f2c318"
+        },
+        {
+          "path": "Demo/Art/Village/Materials/MI_MetalOrnaments.mat",
+          "hash": "94f709e548ebe40bc95eeda428556902d1891c71"
+        },
+        {
+          "path": "Demo/Art/Village/Materials/MI_Plaster.mat",
+          "hash": "36234cf12342bffedc47309b1c4de2868f757b24"
+        },
+        {
+          "path": "Demo/Art/Village/Materials/MI_RockTrim.mat",
+          "hash": "49f544ce66a6805d3768242fec8e656ecd59f942"
+        },
+        {
+          "path": "Demo/Art/Village/Materials/MI_RoundTiles.mat",
+          "hash": "74612c458c686b0fe2a2b098d26d57aa122686bc"
+        },
+        {
+          "path": "Demo/Art/Village/Materials/MI_UnevenBrick.mat",
+          "hash": "89883738434f66da522b05c7cfbc1508f0204213"
+        },
+        {
+          "path": "Demo/Art/Village/Materials/MI_WindowGlass.mat",
+          "hash": "78e2a97cd06f566d205fd643dd2149265b80637c"
+        },
+        {
+          "path": "Demo/Art/Village/Materials/MI_WoodTrim.mat",
+          "hash": "5135d31ddc116fcdfed93641c71643d5c332f8d5"
+        },
+        {
+          "path": "Demo/Art/Village/Materials/MI_WoodTrim_Wear.mat",
+          "hash": "dc1767d6f5e214e434d30799d92ec39157420e63"
+        },
+        {
+          "path": "Demo/Art/Weapons/Arrow_Mask_MaskMap.png",
+          "hash": "3163963941f7561d9aa59568760673ab0b845e84"
+        },
+        {
+          "path": "Demo/Art/Weapons/Bow_Mask_MaskMap.png",
+          "hash": "00e435b1bee41aa210679d6867c7e7d47fefb0c6"
+        },
+        {
+          "path": "Demo/Art/Weapons/MageStaff_Mask_MaskMap.png",
+          "hash": "f47794400ed50201ae1913c42b741d24694a1fcb"
+        },
+        {
+          "path": "Demo/Art/Weapons/Materials/Arrow.mat",
+          "hash": "6c57aa67fde0e6eb3de0c90a4a94c2b3fe3a3498"
+        },
+        {
+          "path": "Demo/Art/Weapons/Materials/Bow.mat",
+          "hash": "feacc8896254eef0497456e420f5b5874f4bc384"
+        },
+        {
+          "path": "Demo/Art/Weapons/Materials/MageStaff.mat",
+          "hash": "41c4982dd8c77905ea9669201a390f5edda7aa9b"
+        },
+        {
+          "path": "Demo/Art/Weapons/Materials/Quiver.mat",
+          "hash": "dd99fe9a547aaa9510c020ef2f93a56114cbe5e8"
+        },
+        {
+          "path": "Demo/Art/Weapons/Materials/ShortSword.mat",
+          "hash": "8ef25c366b76ed8082911c3fc83aa6c9730258a8"
+        },
+        {
+          "path": "Demo/Art/Weapons/Quiver_Mask_MaskMap.png",
+          "hash": "3a8a69f9d2844817a24e2daf052792cc74be7be5"
+        },
+        {
+          "path": "Demo/Art/Weapons/ShortSword_Mask_MaskMap.png",
+          "hash": "9ce3cf241227fc7c2b5bd012a1f9bb65b0bd7217"
+        },
+        {
+          "path": "Demo/Art/Weapons/VikingShield.mat",
+          "hash": "42674bd1d1310b807af28e721838e25aeb5c8400"
+        },
+        {
+          "path": "Demo/Art/Weapons/VikingShield_Mask_MaskMap.png",
+          "hash": "0062cae0419ace17b864f4476cfd20fc275aa66b"
+        },
+        {
+          "path": "Demo/Editor/TerrainShaderRepair.cs",
+          "hash": "3ac3d7c3f162fa3fd47f08ce230c88e2469620b8"
+        },
+        {
+          "path": "Demo/Materials/BaseColor.mat",
+          "hash": "a98ffa03d5f1a6364dcf96aaa66a61275f6d0465"
+        },
+        {
+          "path": "Demo/Materials/BuildGhost_CanBuild.mat",
+          "hash": "518806342eb75af76d14a5cbd826575259b35d1e"
+        },
+        {
+          "path": "Demo/Materials/BuildGhost_CannotBuild.mat",
+          "hash": "c513c9af3643866a27adfdc95b5f82a4ad0d100b"
+        },
+        {
+          "path": "Demo/Materials/Collie.mat",
+          "hash": "08cc37e067d5c92e35887d2c3a48863a021ca7e7"
+        },
+        {
+          "path": "Demo/Materials/Crimson.mat",
+          "hash": "c35ebc4a733f848e02a307f84c77b29f8ff89d1e"
+        },
+        {
+          "path": "Demo/Materials/DarkSeaGreen.mat",
+          "hash": "5c1ad35ae59edfbe98a2aef3b5dd04451c719c65"
+        },
+        {
+          "path": "Demo/Materials/Darkness.mat",
+          "hash": "7c7109a1b76edd55f54f85b969096dbba3077f32"
+        },
+        {
+          "path": "Demo/Materials/DeepSkyBlue.mat",
+          "hash": "2ffe71e3cd179b1e2db8bc7ff81f4866521deb41"
+        },
+        {
+          "path": "Demo/Materials/Deer.mat",
+          "hash": "7c1e2440e46df34a9d47c32a1c75659e3bd6d435"
+        },
+        {
+          "path": "Demo/Materials/FlameAdditive.mat",
+          "hash": "c6ae2819937324d9503e8f4284d9ac489a12fd26"
+        },
+        {
+          "path": "Demo/Materials/FlameSmoke.mat",
+          "hash": "8e6a938ca4b5d0b18d7040fe77b095426f96bce4"
+        },
+        {
+          "path": "Demo/Materials/Horse.mat",
+          "hash": "4fe768cfc25da9d0103373413d845fd886dddfc5"
+        },
+        {
+          "path": "Demo/Materials/IronVein_Ore.mat",
+          "hash": "b180c5a7e6cd7792cb313db909227a5d55dfa373"
+        },
+        {
+          "path": "Demo/Materials/IronVein_Rock.mat",
+          "hash": "0fb2e4deb8da1d10c10447169c648c6e793c64a2"
+        },
+        {
+          "path": "Demo/Materials/IronVein_Rust.mat",
+          "hash": "8726dd02b23116ec9aecc540ba32325f1192aef5"
+        },
+        {
+          "path": "Demo/Materials/Island_Sea.mat",
+          "hash": "5811064154bbd9fe50deab3848921f717040f378"
+        },
+        {
+          "path": "Demo/Materials/MI_FootPrint.mat",
+          "hash": "227dc8d5309652edfed1a64e9193bf027fbcebbc"
+        },
+        {
+          "path": "Demo/Materials/MI_FrostPatch.mat",
+          "hash": "52808a6f5cf314a29b8be5897eb939c3b526793b"
+        },
+        {
+          "path": "Demo/Materials/MI_Hair_1_Tinted.mat",
+          "hash": "205c19f73225f49560eb2dce7e50925eb4a975a8"
+        },
+        {
+          "path": "Demo/Materials/MI_Hair_2_Tinted.mat",
+          "hash": "ae440eb2ad99505d639982e24fccee6b145c2a3a"
+        },
+        {
+          "path": "Demo/Materials/MI_HarvestChips.mat",
+          "hash": "1bd979a1d03e70a0937ca220f2d6914fc2d41a85"
+        },
+        {
+          "path": "Demo/Materials/MI_Ice.mat",
+          "hash": "610434c1cc12b5afea765be558111a4e9b521594"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillAim_Meteor.mat",
+          "hash": "3dface696b26377475b018238e67ed3fb3175ad9"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillAim_Volley.mat",
+          "hash": "13a9e7407df0d0eb13af59e9b9d9f8da50badf8d"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillArea_FrostNova.mat",
+          "hash": "7a4ba594839e4a3c89a415ffa7974ae68400bd01"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillArea_Meteor.mat",
+          "hash": "89e9f582d9e95da947aa4cba9a26a7a2760ec531"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillArea_UnholyNova.mat",
+          "hash": "4d55ee13f1386849842282036ca5e8d4fc2c38d1"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillArea_Volley.mat",
+          "hash": "f95697585cc1bbe86a0f8d735dc4c6e1b76f62e6"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillBlood.mat",
+          "hash": "48542c99e828d07426b074b37efc85086df815c4"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillDebris.mat",
+          "hash": "bac7f476d9d848cff369ef77f51bbf18f1e719b6"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillDirt.mat",
+          "hash": "640c282bb3db7bd1505db25014774ecacc8910b4"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillDust.mat",
+          "hash": "6ba1d6b4156cc69c9b561a2976062c35bf8ac68f"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillEffect.mat",
+          "hash": "07535e59c7c79d851906e282affd3f86bda57d3a"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillFire.mat",
+          "hash": "47a99d6a9eea3fbae1275024e25704e8eadd0d9e"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillMist.mat",
+          "hash": "7f0ea9dbf21a5f87385cfb3163cfc48f29af9148"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillReticleSolid.mat",
+          "hash": "c75a67a161a039466c148d729c761b774e6b60f9"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillRibbon.mat",
+          "hash": "4255a7da61cd6b131ca5c77bfd9045a663d7d033"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillShockwave.mat",
+          "hash": "caf6960e961ddbfa2c9c850c4977e73c82ee3d26"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillSmoke.mat",
+          "hash": "cb9506e9183037c73a82f5bd1cc0dfa769191a57"
+        },
+        {
+          "path": "Demo/Materials/MI_SkillVines.mat",
+          "hash": "403abe484dced2ed66a01b6e223db63f5df7b226"
+        },
+        {
+          "path": "Demo/Materials/MI_SpellBolt.mat",
+          "hash": "10afd5fda08bd88f4db09ef1be441857f4333288"
+        },
+        {
+          "path": "Demo/Materials/MI_WaterDrop.mat",
+          "hash": "0dc385119db2fba6188ad08a1b3a0df7341a21ce"
+        },
+        {
+          "path": "Demo/Materials/MI_WaterRing.mat",
+          "hash": "81283289a6db15143c8a7d16793a9d302b2e47d4"
+        },
+        {
+          "path": "Demo/Materials/MI_WeaponTrail.mat",
+          "hash": "11079eae6598ea5799ac326ad1a89d669c1f59cc"
+        },
+        {
+          "path": "Demo/Materials/MenuBackdrop.mat",
+          "hash": "532da19ca0344498d6968e315559d91385bfe853"
+        },
+        {
+          "path": "Demo/Materials/MenuGround.mat",
+          "hash": "98f50622fd8af8aa62217afe104fc48a317ef520"
+        },
+        {
+          "path": "Demo/Materials/MinimapGround.mat",
+          "hash": "97d83ffa66a8ed23b647ca34506e6c62189e069b"
+        },
+        {
+          "path": "Demo/Materials/RainSplash.mat",
+          "hash": "cdb9dfd2523dd2cfd92b0fe3cea8074907527974"
+        },
+        {
+          "path": "Demo/Materials/RainStreak.mat",
+          "hash": "835af75a2e7314ff1e865b9a9ff78b53ac496bd2"
+        },
+        {
+          "path": "Demo/Materials/T_WoodenSign_Bank.mat",
+          "hash": "430534aa00680dd102d9dd33a2b00fa4afb3ba5d"
+        },
+        {
+          "path": "Demo/Materials/Underwater.mat",
+          "hash": "582619f329981e4e661d7b132dba65a76ab71ac3"
+        },
+        {
+          "path": "Demo/Materials/Wolf.mat",
+          "hash": "5b800ed5bc3e877d0d49c9df8ab3f1d6ea4112af"
+        },
+        {
+          "path": "Demo/Prefabs/Effects/CampfireFlame.prefab",
+          "hash": "3192a73936871cd89f291379e9efcfe0e2a47392"
+        },
+        {
+          "path": "Demo/Prefabs/Effects/Skills/FX_ArrowFlashLight.prefab",
+          "hash": "4b7baad0b69310020e6fe14dc84ecf345c3b2b51"
+        },
+        {
+          "path": "Demo/Prefabs/Effects/Skills/FX_FrostFlashLight.prefab",
+          "hash": "ca92bf3390fa28ba26df61c0a686d827c598c30a"
+        },
+        {
+          "path": "Demo/Prefabs/Effects/Skills/FX_MeteorFlashLight.prefab",
+          "hash": "ce425efe8d119825ef48866144c4118a75f74391"
+        },
+        {
+          "path": "Demo/Prefabs/Effects/TorchFlame.prefab",
+          "hash": "328af535e35b66828bda2ad367f42e7c722aa42c"
+        },
+        {
+          "path": "Demo/Prefabs/GamePlay/GameplayCamera.prefab",
+          "hash": "e174c0c5b3aceff2b9ecb1834a2c731e185dccd5"
+        },
+        {
+          "path": "Demo/Prefabs/GamePlay/MinimapCamera.prefab",
+          "hash": "2569ebaa65170c2e49139bddc442e30f242e9d45"
+        },
+        {
+          "path": "Demo/Prefabs/GamePlay/ServerCharacter.prefab",
+          "hash": "f099fbf6102d19719e25af11975d7db707e5b651"
+        },
+        {
+          "path": "Demo/Prefabs/GamePlay/Shrines/DemoShrine.prefab",
+          "hash": "a5bc6cd4d563433f6df830366cd3f4bdeeb7d18d"
+        },
+        {
+          "path": "Demo/Prefabs/GamePlay/SkillAreas/MeteorArea.prefab",
+          "hash": "fd206ea22045468a1a4810eb55701a9fb236bb65"
+        },
+        {
+          "path": "Demo/Scenes/00Init.unity",
+          "hash": "d3b83fa1942b8d6eceaa9e933c740aedeb9520fd"
+        },
+        {
+          "path": "Demo/Scenes/01Home.unity",
+          "hash": "d2aaec45d62826358f9a1bd7cbc002c29aa023d4"
+        },
+        {
+          "path": "Demo/Scenes/DemoDungeon.unity",
+          "hash": "59b1d804fef726af70cde354d2f860363de19b7c"
+        },
+        {
+          "path": "Demo/Scenes/DemoMap.unity",
+          "hash": "b834e6fdff882966601a91c19b537f55f228a2a1"
+        },
+        {
+          "path": "Demo/Scripts/DayNightSky.cs",
+          "hash": "a2869559c38f40849e088bd52b0f9097ebcedeb7"
+        },
+        {
+          "path": "Demo/Scripts/DayNightSkyCycle.cs",
+          "hash": "7a712cdfb2e62154e09546dc2fdf146d34ed32d0"
+        },
+        {
+          "path": "Demo/Scripts/DemoLights.cs",
+          "hash": "00bd4aeef884947a9ac958f5054a495cabf504b0"
+        },
+        {
+          "path": "Demo/Scripts/DemoMeteorStrike.cs",
+          "hash": "0f603e01b30a8d40a17df1dbf8a71cd64645365f"
+        },
+        {
+          "path": "Demo/Scripts/StylizedWaterSurface.cs",
+          "hash": "8625b1393f14fb89155923821745a7fb485e6546"
+        },
+        {
+          "path": "Demo/Scripts/TimeOfDayLight.cs",
+          "hash": "43d4a3ddbad53e7f6dc5faa28ac8086de5afdd5b"
+        },
+        {
+          "path": "Demo/Scripts/UICharacterPaperDoll.cs",
+          "hash": "f4ee5693581750555d292432d3bdfb15fecce081"
+        },
+        {
+          "path": "Demo/Scripts/UnderwaterCameraEffect.cs",
+          "hash": "4d148949e0ec0e7c84f5294f665f6534f5f968b7"
+        },
+        {
+          "path": "Demo/Settings/DemoDungeonVolumeProfile.asset",
+          "hash": "6461ccfc20f3758e9e4f7a80e0116e9ed788a9a8"
+        },
+        {
+          "path": "Demo/Settings/DemoHomeVolumeProfile.asset",
+          "hash": "366698f3f3a123736fa5c1c98d0384f4b420a97b"
+        },
+        {
+          "path": "Demo/Settings/DemoInteriorVolumeProfile.asset",
+          "hash": "c24196c4371e68e8dc9e9cb3be0d9e5ecaacd12a"
+        },
+        {
+          "path": "Demo/Settings/DemoPostProcessVolumeProfile.asset",
+          "hash": "4354583a3af383ae82d1d0255c623468e15f096f"
+        },
+        {
+          "path": "Demo/Settings/DemoSkyVolumeProfile.asset",
+          "hash": "c122b9883ffb9bdd830db3443164cdc6eb7d5665"
+        },
+        {
+          "path": "Demo/Shaders/DemoDayNightSkybox.shader",
+          "hash": "722997195e0f27fd3a2756536c0560a96d7a8788"
+        },
+        {
+          "path": "Demo/Shaders/DemoStylizedWater.hlsl",
+          "hash": "c6205afd96bb2b2dbb8b6c73f2a6d0c68e58afd4"
+        },
+        {
+          "path": "Demo/Shaders/DemoStylizedWater.shader",
+          "hash": "f78af1dff6d699f55e3355f314df9cee9d908dff"
+        },
+        {
+          "path": "Demo/Shaders/DemoUnderwater.shader",
+          "hash": "30d0bfa7d04a5e36190e1af87cea0ccc7b85001b"
+        },
+        {
+          "path": "Demo/Shaders/DemoWindFoliage.hlsl",
+          "hash": "460db4aa98bb6370fc2fad1b0ac3e060a4701827"
+        },
+        {
+          "path": "Demo/Shaders/DemoWindFoliage.shader",
+          "hash": "69d62cd4c38202d8409d977c9f9138897ada018a"
+        },
+        {
+          "path": "Demo/Shaders/HDRPLitVariantData.hlsl",
+          "hash": "1a57f558eaacf249b354984480a9e6df8073bef3"
+        },
+        {
+          "path": "Demo/Shaders/HDRPLitVariantHooks.hlsl",
+          "hash": "be1bb1ef71925fe5391d2815b42d2915baf97be8"
+        },
+        {
+          "path": "Demo/Shaders/HDRPLitVariantProperties.hlsl",
+          "hash": "92ade4bb1251b25b6f25063686d28bfa2c08b9f3"
+        },
+        {
+          "path": "Demo/Shaders/HDRPUnlitVariantData.hlsl",
+          "hash": "008190c85f47997875b07b211622a3487e84f454"
+        },
+        {
+          "path": "Demo/Shaders/HDRPUnlitVariantHooks.hlsl",
+          "hash": "90c4b7fe04d1040021116f2792fe17167aed03a1"
+        },
+        {
+          "path": "Demo/Shaders/HDRPUnlitVariantProperties.hlsl",
+          "hash": "60d221a1b5c99f2dbbb314e8a96cec1efbd5dd63"
+        },
+        {
+          "path": "Demo/Shaders/ParticleLit.shader",
+          "hash": "d2f1ef8830f1f488043b2797dd8429c7d51103eb"
+        },
+        {
+          "path": "Demo/Shaders/ParticleUnlit.shader",
+          "hash": "ea3ac9bae8b798669fc73bfe3745ca3eed70a600"
+        },
+        {
+          "path": "Demo/Shaders/PropSignEmblem.shader",
+          "hash": "95b0ef29b6f6750ea88d15305ebad4b00cfbebaa"
+        },
+        {
+          "path": "Demo/Shaders/PropTrimVertexColor.shader",
+          "hash": "c577e38f12cc74ca96adc859a26e66a0329eca1e"
+        },
+        {
+          "path": "Demo/Terrain/IslandTerrain.asset",
+          "hash": "b6b8023dfbe38718bb98bdf475dd2f02bc40bee7"
+        },
+        {
+          "path": "Demo/Terrain/IslandTerrain.mat",
+          "hash": "1b6e5766b54aafa18ec67ee3de0908f513fa6feb"
+        },
+        {
+          "path": "ThirdParty/GraphicSettings/Scripts/BaseUrpSetting.cs",
+          "hash": "0155e70fc662fc7d730f8afd99e68a2babfc8c4c"
+        },
+        {
+          "path": "ThirdParty/GraphicSettings/Scripts/HdrpGraphicRuntime.cs",
+          "hash": "99406cb14104c123d429118c37e16a98c8fb09a8"
+        },
+        {
+          "path": "ThirdParty/GraphicSettings/Scripts/UrpAntiAliasingSetting.cs",
+          "hash": "31cd76152e6fce307ebb2c9879b464c961159839"
+        },
+        {
+          "path": "ThirdParty/GraphicSettings/Scripts/UrpPostProcessSetting.cs",
+          "hash": "aa7605901e1c081e978eece74f603fd86c7bbacb"
+        },
+        {
+          "path": "ThirdParty/GraphicSettings/Scripts/UrpResolutionScalingSetting.cs",
+          "hash": "9bdcc9a7a32a272c97f81d3b5f041b716ed92f90"
+        },
+        {
+          "path": "ThirdParty/GraphicSettings/Scripts/UrpShadowCascadeSetting.cs",
+          "hash": "fe3a8f150bfcd040c42987f76c5297ac8066f891"
+        },
+        {
+          "path": "ThirdParty/GraphicSettings/Scripts/UrpShadowDistanceSetting.cs",
+          "hash": "6d8029cba65df94146e5f98115de8c547aa71b45"
+        },
+        {
+          "path": "ThirdParty/GraphicSettings/Scripts/UrpShadowResolutionSetting.cs",
+          "hash": "72eb06d0bfa50cb8b6734433dcc145404e50b732"
+        },
+        {
+          "path": "ThirdParty/GraphicSettings/Scripts/UrpSoftShadowSetting.cs",
+          "hash": "a01829e127974256c38ab3aa43ec12ccd26b5911"
+        }
+      ],
+      "remove": [
+        "Demo/Materials/CryptSky.mat",
+        "Demo/Settings/DemoURP.asset",
+        "Demo/Settings/DemoURP_Low.asset",
+        "Demo/Settings/DemoURP_Low_Renderer.asset",
+        "Demo/Settings/DemoURP_Renderer.asset",
+        "Demo/Settings/DemoVolumeProfile.asset",
+        "Demo/Shaders/DemoWindTerrainDetail.shader",
+        "Demo/Shaders/ProjectorAdditiveTint.shader"
+      ]
+    }
+  ]
+}

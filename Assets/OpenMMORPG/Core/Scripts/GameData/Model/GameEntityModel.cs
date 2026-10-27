@@ -1,4 +1,4 @@
-﻿using Cysharp.Threading.Tasks;
+using Cysharp.Threading.Tasks;
 using Insthync.AddressableAssetTools;
 using Insthync.DevExtension;
 using Insthync.UnityEditorUtils;
@@ -168,7 +168,17 @@ namespace MultiplayerARPG
                 genericAudioSource = gameObject.GetOrAddComponent<AudioSource>((obj) =>
                 {
                     obj.spatialBlend = 1f;
+                    obj.minDistance = 4f;
+                    obj.maxDistance = 35f;
+                    obj.rolloffMode = AudioRolloffMode.Linear;
                 });
+            }
+            if (genericAudioSource != null)
+            {
+                genericAudioSource.spatialBlend = 1f;
+                genericAudioSource.minDistance = 4f;
+                genericAudioSource.maxDistance = 35f;
+                genericAudioSource.rolloffMode = AudioRolloffMode.Linear;
             }
             // Prepare effect containers
             _cacheEffectContainers = new Dictionary<string, EffectContainer>();
@@ -279,7 +289,7 @@ namespace MultiplayerARPG
                 tempGameEffect = PoolSystem.GetInstance(effect, tempContainer.transform.position, tempContainer.transform.rotation);
                 tempGameEffect.FollowingTarget = tempContainer.transform;
                 if (SetEffectLayerFollowEntity)
-                    tempGameEffect.gameObject.GetOrAddComponent<SetLayerFollowGameObject>((comp) => comp.source = Entity.gameObject);
+                    tempGameEffect.gameObject.GetOrAddComponent<SetLayerFollowGameObject>((comp) => comp.source = Entity != null ? Entity.gameObject : gameObject);
                 else
                     tempGameEffect.gameObject.SetLayerRecursively(EffectLayer, true);
                 AddingNewEffect(tempGameEffect);

@@ -1,4 +1,4 @@
-﻿using Cysharp.Text;
+using Cysharp.Text;
 using Cysharp.Threading.Tasks;
 using Insthync.AddressableAssetTools;
 using Insthync.DevExtension;
@@ -206,7 +206,7 @@ namespace MultiplayerARPG
                 byte id = Manager.InitTpsModel(this);
                 unchecked
                 {
-                    Id = Entity.Identity.HashAssetId + id;
+                    Id = (Entity != null && Entity.Identity != null ? Entity.Identity.HashAssetId : 0) + id;
                 }
             }
         }
@@ -240,7 +240,7 @@ namespace MultiplayerARPG
                 foreach (EquipmentContainer equipmentContainer in equipmentContainers)
                 {
                     if (SetEquipmentLayerFollowEntity)
-                        equipmentContainer.defaultModel?.GetOrAddComponent<SetLayerFollowGameObject>((comp) => comp.source = Entity.gameObject);
+                        equipmentContainer.defaultModel?.GetOrAddComponent<SetLayerFollowGameObject>((comp) => comp.source = Entity != null ? Entity.gameObject : gameObject);
                     else
                         equipmentContainer.defaultModel?.SetLayerRecursively(EquipmentLayer, true);
 
@@ -652,7 +652,7 @@ namespace MultiplayerARPG
                             tempEquipmentObject.transform.localScale = tempEquipmentModel.localScale.Equals(Vector3.zero) ? Vector3.one : tempEquipmentModel.localScale;
                         tempEquipmentObject.gameObject.SetActive(true);
                         if (SetEquipmentLayerFollowEntity)
-                            tempEquipmentObject.gameObject.GetOrAddComponent<SetLayerFollowGameObject>((comp) => comp.source = Entity?.gameObject ?? null);
+                            tempEquipmentObject.gameObject.GetOrAddComponent<SetLayerFollowGameObject>((comp) => comp.source = Entity != null ? Entity.gameObject : gameObject);
                         else
                             tempEquipmentObject.gameObject.SetLayerRecursively(EquipmentLayer, true);
                         tempEquipmentObject.RemoveComponentsInChildren<Collider>(false);

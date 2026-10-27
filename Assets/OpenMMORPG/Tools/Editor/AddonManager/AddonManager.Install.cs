@@ -48,17 +48,8 @@ namespace OpenMMORPG.AddonManager
 
 			//is addon already installed?
 			string[] guids = AssetDatabase.FindAssets(selectedPackage.guid);
-			string action = "install";
 			if (guids.Length > 0)
-			{
-				action = "reinstall";
 				DeleteExistingAddonFolder();
-			}
-
-			AddonAnalytics.LogEvent(selectedPackage.guid, 
-				("Action", action),
-				("App version", selectedPackage.latestVersion)
-			);
 
 			uiDetailMessage = "Downloading addon...";
 			string TempPath = $"Temp/{selectedPackage.name}.unitypackage";

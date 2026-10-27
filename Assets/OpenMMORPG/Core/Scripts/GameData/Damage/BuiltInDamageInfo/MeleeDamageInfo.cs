@@ -47,7 +47,7 @@ namespace MultiplayerARPG
             return true;
         }
 
-        public override UniTask LaunchDamageEntity(BaseCharacterEntity attacker, bool isLeftHand, CharacterItem weapon, int simulateSeed, byte triggerIndex, byte spreadIndex, Vector3 fireSpreadRange, List<Dictionary<DamageElement, MinMaxFloat>> damageAmounts, BaseSkill skill, int skillLevel, AimPosition aimPosition)
+        public override UniTask LaunchDamageEntity(BaseCharacterEntity attacker, bool isLeftHand, CharacterItem weapon, int simulateSeed, byte triggerIndex, byte spreadIndex, Vector3 fireSpreadRange, List<DamageElementMinMaxFloatAmounts> damageAmounts, BaseSkill skill, int skillLevel, AimPosition aimPosition)
         {
             bool isClient = attacker.IsClient;
             bool isServer = attacker.IsServer;
@@ -100,12 +100,12 @@ namespace MultiplayerARPG
             HashSet<uint> hitObjects = new HashSet<uint>();
 #if !UNITY_SERVER
             bool isPlayImpactEffects = isClient && impactEffects != null;
+            string tempTag;
 #endif
             DamageableHitBox tempDamageableHitBox;
             GameObject tempGameObject;
             Object tempCollider;
             bool tempIsTrigger;
-            string tempTag;
             DamageableHitBox tempDamageTakenTarget = null;
             DamageableEntity tempSelectedTarget = null;
             bool hasSelectedTarget = hitOnlySelectedTarget && attacker.TryGetTargetEntity(out tempSelectedTarget);

@@ -46,22 +46,17 @@ All entity movement data processing converted from monothreaded per-entity updat
 
 - Improved scalability: Combined with vector quantization and packed serialization, network payloads shrink dramatically, improving both server tick rate and bandwidth usage.
 
-## Quick Start / Installation Wizard
+## Quick Start
 
-Open MMORPG targets **Unity 6000.3** or newer and renders with the **Universal Render Pipeline**. The installer adds URP for you, so a Built-in Render Pipeline project works too, but the kit's graphic settings are URP specific.
+Open MMORPG targets **Unity 6000.3** or newer and runs on the **Universal Render Pipeline (URP)** or the **High Definition Render Pipeline (HDRP)**. The kit's code is the same for both; the demo's materials, shaders, scenes, lights and cameras are not, so the kit carries both versions and installs the one that matches your project (see **Choose your render pipeline** below). Importing the kit adds URP and the other Unity packages it needs so that it compiles before anything is chosen.
 
-1. **Install the package from a git URL**
+1. **Import the kit**
 
-Open Window → **Package Manager** and click **Add package from git URL**
-```
-https://github.com/open-mmorpg/open-mmorpg-installer.git
-```
+Get Open MMORPG from the Unity Asset Store and import it from Window → **Package Manager** → My Assets, or download `OpenMMORPG.unitypackage` from the [latest release](https://github.com/open-mmorpg/OpenMMORPG/releases/latest) and import it via Assets → Import Package → **Custom Package**. Either way the kit lands in `Assets/OpenMMORPG`.
 
-2. **Run the Wizard to import Settings and the Latest Release**
+2. **Import the project settings**
 
-A setup wizard will appear after the package is installed. If the Wizard does not appear or is inadvertently closed, you can reopen it at Open MMORPG → Install → **Show Setup Wizard**
-
-Click **Import Settings** to install base project settings. The following settings will be overwritten by this process:
+Run Tools → Open MMORPG → Install → **Import Project Settings**. It lists exactly which files it replaces before doing anything:
 
  - ProjectSettings/DynamicsManager.asset
  - ProjectSettings/InputManager.asset
@@ -70,19 +65,34 @@ Click **Import Settings** to install base project settings. The following settin
  - ProjectSettings/TagManager.asset
  - ProjectSettings/TimeManager.asset
 
-Click **Import Open MMORPG** to install the latest release into `Assets/OpenMMORPG`.
+3. **Choose your render pipeline**
 
-After installation, browse available addons via the Addon Manager window (Open MMORPG → Develop → **Addon Manager**). Have fun building!
+The kit's demo content ships as URP. If the project renders with URP there is nothing to do. If it renders with HDRP, a **Render Pipeline Content** window opens by itself after the import; press **Install HDRP content**. It replaces the demo's pipeline-specific files (shaders, materials, scenes, prefabs with lights or cameras, and a few scripts) with their HDRP versions and removes the URP-only ones, after copying any of those files you had edited to `OpenMMORPG_PipelineBackups` beside `Assets`. Afterwards it offers to remove the URP packages the import added, which HDRP does not need. Tools → Open MMORPG → Install → **Render Pipeline Content** brings the window back, to check what is installed or to switch pipelines later. If your project does not use the demo, press **Don't ask again** and the window stops opening by itself in that project; **Not now**, or closing it, only puts it off until Unity next starts.
 
-If you imported the kit on its own, without the installer package, apply the same base settings from Open MMORPG → Install → **Import Project Settings**. It lists exactly which files it replaces before doing anything.
+After installation, browse available addons via the Addon Manager window (Tools → Open MMORPG → Develop → **Addon Manager**). Have fun building!
 
-## Yo! Where's the demo?
+## Running the demo
 
-A demo is not bundled with this release yet. For a developer-focused demo with content, check the Addon Manager for TinyEpicDemo.
+The kit ships with a demo in `Assets/OpenMMORPG/Demo`: a small island with a village, three enemy families, a rideable horse and a dungeon, running on the kit's MMO servers. A **Welcome** window walks through these steps the first time the project opens, and Tools → Open MMORPG → Demo → **Welcome** brings it back.
+
+1. **Import the project settings**, as in Quick Start.
+2. **Use the demo's render settings.**
+   - **URP.** The demo is lit for its own URP asset, `Demo/Settings/DemoURP`, and the sea needs the depth and opaque textures it turns on. Press **Use Demo Render Pipeline** in the Welcome window: it sets that as the default and gives the lower half of your Quality levels the lighter `DemoURP_Low` (no ambient occlusion, two shadow cascades, hard shadows), so the Quality setting does something on a slower machine. Or set `DemoURP` yourself under Project Settings → Graphics → Default Render Pipeline.
+   - **HDRP.** Install the HDRP content first (Quick Start, step 3). The demo needs nothing special of your HDRP asset, which is left alone: the sky, fog, exposure and sun shadows are Volumes in the scenes, and the lights are in physical units. The Welcome window offers to turn on dynamic resolution, which the Resolution Scaling graphics setting uses.
+3. **Build the map server.** In the MMO flow each map is hosted by a separate process that the map spawner launches, and that process is a build of this project. Until it exists, Play gets as far as character select and stops there, with nowhere to enter.
+   - Install **Windows Dedicated Server Build Support** for your editor from the Unity Hub (Installs → Add modules).
+   - Open File → **Build Profiles**, select **Demo Map Server** (under `Demo/Build Profiles`), press **Switch Profile**, then **Build**, and save it as `builds/OpenMMORPG.exe` in the project folder, beside `Assets`.
+   - Switch back to **Demo Client** afterwards. While the server profile is active the editor compiles as a server, and Play does not work.
+   - Rebuild it whenever you change a scene, an entity or any game data the server uses. A client that disagrees with a stale server is turned away when it tries to enter the map.
+4. **Play.** Open `Demo/Scenes/00Init` and press Play. The editor runs the login, central, database (SQLite) and map spawn servers and shows the server list; register an account, create a character and start.
+
+The map server build is Windows only, because the spawner launches `OpenMMORPG.exe`. On other platforms, change the spawn path on `MMOServerInstance` in `00Init` to your own server build.
+
+`Demo/README.md` describes how the demo is put together, and `Demo/CREDITS.md` lists where every asset comes from.
 
 ## Updating Open MMORPG
 
-To update, update the package in the Package Manager and re-run the Wizard.
+To update, import the newer version the same way you installed it, from the Asset Store or a GitHub release. Re-run **Import Project Settings** only if the release notes say the settings changed.
 
 ## Developing Open MMORPG
 
@@ -96,8 +106,13 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the branch model and how the kit is a
 
 ## License
 
-Open MMORPG is released under the [MIT License](LICENSE). Third-party components under `ThirdParty` carry their own licenses in their respective folders.
+Open MMORPG is released under the [MIT License](LICENSE). Third-party components under `ThirdParty` carry their own licenses in their respective folders. The demo's art, animation, sound and music are dedicated to the public domain under CC0 1.0; see [Demo/CREDITS.md](Demo/CREDITS.md). [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) lists everything bundled.
+
+## Community & Support
+
+Join our [Discord community](https://discord.gg/Czgrg4YGgq) for support, questions, and discussion with other developers and contributors.
 
 ## Thanks
 
 Huge thanks to Ittipon Teerapruettikulchai for open sourcing the original kit, and to the MmoKitCE team at [Denarii Games](https://github.com/denariigames) for preserving and hardening it, and for blessing this continuation. Special thanks to the entire community of former customers and new developers who continue to keep this ecosystem alive.
+

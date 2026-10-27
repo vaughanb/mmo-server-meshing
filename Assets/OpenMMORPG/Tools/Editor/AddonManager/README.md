@@ -24,9 +24,6 @@ It functions as a private, curated "addon marketplace" directly inside the Unity
 - **Clean Project Structure**
   - Addons saved to OpenMMORPG_addons folder, organized by category
 
-- **Opt-In Analytics**
-  - OpenMMORPG Addon Manager collects completely anonymous usage statistics (addon downloads) to highlight the most popular addons in the community. No personal or project data is ever collected or transmitted.
-
 - **Dependency Management (WIP)**
   - Initial support for indicating if addon requires core patch or has other addon dependencies.
 

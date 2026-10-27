@@ -1,4 +1,4 @@
-﻿using Insthync.AudioManager;
+using Insthync.AudioManager;
 using Insthync.UnityEditorUtils;
 using System.Collections;
 using System.Collections.Generic;
@@ -86,7 +86,8 @@ namespace MultiplayerARPG.GameData.Model.Playables
                 Graph.Play();
                 Graph.Evaluate(Time.deltaTime);
             }
-            Entity.onIsUpdateEntityComponentsChanged += CacheEntity_onUpdateEntityComponentsChanged;
+            if (Entity != null)
+                Entity.onIsUpdateEntityComponentsChanged += CacheEntity_onUpdateEntityComponentsChanged;
         }
 
         private void CacheEntity_onUpdateEntityComponentsChanged(BaseGameEntity target, bool isUpdate)
@@ -112,7 +113,7 @@ namespace MultiplayerARPG.GameData.Model.Playables
 
         public override void UpdateAnimation(float deltaTime)
         {
-            if (DisableAnimationLOD)
+            if (DisableAnimationLOD || Entity == null)
             {
                 if (!Graph.IsValid())
                 {
@@ -123,7 +124,7 @@ namespace MultiplayerARPG.GameData.Model.Playables
             }
             animationLodUpdater.Graph = Graph;
             animationLodUpdater.Transform = Entity.GetTransform();
-            animationLodUpdater.WatcherTransform = GameInstance.PlayingCharacterEntity.GetTransform();
+            animationLodUpdater.WatcherTransform = GameInstance.PlayingCharacterEntity != null ? GameInstance.PlayingCharacterEntity.GetTransform() : null;
             animationLodUpdater.Update(deltaTime);
         }
 
@@ -164,7 +165,8 @@ namespace MultiplayerARPG.GameData.Model.Playables
 
         private void OnDestroy()
         {
-            Entity.onIsUpdateEntityComponentsChanged -= CacheEntity_onUpdateEntityComponentsChanged;
+            if (Entity != null)
+                Entity.onIsUpdateEntityComponentsChanged -= CacheEntity_onUpdateEntityComponentsChanged;
             Template?.Desetup(this);
             DestroyGraph();
         }
@@ -444,6 +446,7 @@ namespace MultiplayerARPG.GameData.Model.Playables
                 yield return WaitForSecondsRealtime(_equipWeaponsAwaiter, animationDelay - triggeredDelay);
             }
 
+            _actionCoroutine = null;
             _isDoingAction = false;
         }
 
@@ -605,6 +608,7 @@ namespace MultiplayerARPG.GameData.Model.Playables
             _isDoingAction = true;
             // Waits by skill cast duration
             yield return WaitForSecondsRealtime(_playSkillCastClipAwaiter, Behaviour.PlayAction(castState, 1f, 0f, loop: true));
+            _actionCoroutine = null;
             _isDoingAction = false;
         }
 
@@ -632,6 +636,7 @@ namespace MultiplayerARPG.GameData.Model.Playables
             yield return WaitForSecondsRealtime(_playActionAnimationAwaiter, Behaviour.PlayAction(actionAnimation.state, playSpeedMultiplier, changeClipLength, overrideClipLength));
             // Waits by current transition + extra duration before end playing animation state
             yield return WaitForSecondsRealtime(_playActionAnimationAwaiter, actionAnimation.GetExtendDuration() / playSpeedMultiplier);
+            _actionCoroutine = null;
             _isDoingAction = false;
         }
 

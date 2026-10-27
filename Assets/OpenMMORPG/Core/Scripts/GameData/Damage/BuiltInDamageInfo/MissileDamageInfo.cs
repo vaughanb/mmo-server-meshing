@@ -2,6 +2,10 @@ using Cysharp.Threading.Tasks;
 using Insthync.AddressableAssetTools;
 using System.Collections.Generic;
 using UnityEngine;
+#if !DISABLE_ADDRESSABLES
+using UnityEngine.AddressableAssets;
+using UnityEngine.ResourceManagement.AsyncOperations;
+#endif
 
 namespace MultiplayerARPG
 {
@@ -43,18 +47,32 @@ namespace MultiplayerARPG
 
         public override async void PrepareRelatesData()
         {
-            MissileDamageEntity loadedDamageEntity;
+            MissileDamageEntity loadedDamageEntity = MissileDamageEntity;
 #if !DISABLE_ADDRESSABLES
-            loadedDamageEntity = await AddressableMissileDamageEntity
-                .GetOrLoadAssetAsyncOrUsePrefab(MissileDamageEntity);
-#else
-            loadedDamageEntity = MissileDamageEntity;
+            if (loadedDamageEntity == null && AddressableMissileDamageEntity.IsDataValid())
+            {
+                AsyncOperationHandle<GameObject> handle = default;
+                try
+                {
+                    // Metadata owns a temporary reference, independent of the projectile cache.
+                    handle = Addressables.LoadAssetAsync<GameObject>(AddressableMissileDamageEntity.RuntimeKey);
+                    GameObject prefab = await handle.Task;
+                    if (this != null && prefab != null)
+                        PrepareHitValidationData(prefab.GetComponent<MissileDamageEntity>());
+                }
+                catch (System.Exception ex)
+                {
+                    Debug.LogException(ex);
+                }
+                finally
+                {
+                    if (handle.IsValid())
+                        Addressables.Release(handle);
+                }
+                return;
+            }
 #endif
             PrepareHitValidationData(loadedDamageEntity);
-#if !DISABLE_ADDRESSABLES
-            if (AddressableMissileDamageEntity.IsDataValid())
-                AddressableAssetsManager.Release(AddressableMissileDamageEntity.RuntimeKey);
-#endif
             await UniTask.Yield();
         }
 
@@ -169,7 +187,7 @@ namespace MultiplayerARPG
             return true;
         }
 
-        public override async UniTask LaunchDamageEntity(BaseCharacterEntity attacker, bool isLeftHand, CharacterItem weapon, int simulateSeed, byte triggerIndex, byte spreadIndex, Vector3 fireSpreadRange, List<Dictionary<DamageElement, MinMaxFloat>> damageAmounts, BaseSkill skill, int skillLevel, AimPosition aimPosition)
+        public override async UniTask LaunchDamageEntity(BaseCharacterEntity attacker, bool isLeftHand, CharacterItem weapon, int simulateSeed, byte triggerIndex, byte spreadIndex, Vector3 fireSpreadRange, List<DamageElementMinMaxFloatAmounts> damageAmounts, BaseSkill skill, int skillLevel, AimPosition aimPosition)
         {
             MissileDamageEntity loadedDamageEntity;
 #if !DISABLE_ADDRESSABLES

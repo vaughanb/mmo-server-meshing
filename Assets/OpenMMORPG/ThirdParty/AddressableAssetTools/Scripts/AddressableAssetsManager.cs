@@ -14,7 +14,12 @@ namespace Insthync.AddressableAssetTools
 {
     public static class AddressableAssetsManager
     {
-        private static readonly HashSet<object> s_loadingAssets = new HashSet<object>();
+        private sealed class PendingLoad
+        {
+            public bool ReleaseRequested;
+        }
+
+        private static readonly Dictionary<object, PendingLoad> s_loadingAssets = new Dictionary<object, PendingLoad>();
         private static readonly Dictionary<object, AsyncOperationHandle> s_loadedAssets = new Dictionary<object, AsyncOperationHandle>();
         private static readonly List<AsyncOperationHandle<SceneInstance>> s_addressableSceneHandles = new List<AsyncOperationHandle<SceneInstance>>();
         private static readonly Dictionary<object, IList<IResourceLocation>> s_resourceLocations = new Dictionary<object, IList<IResourceLocation>>();
@@ -62,6 +67,13 @@ namespace Insthync.AddressableAssetTools
             {
                 if (!s_addressableSceneHandles[i].IsValid())
                     continue;
+                while (!s_addressableSceneHandles[i].IsDone)
+                    await UniTask.Yield();
+                if (s_addressableSceneHandles[i].Status != AsyncOperationStatus.Succeeded)
+                {
+                    Addressables.Release(s_addressableSceneHandles[i]);
+                    continue;
+                }
                 AsyncOperationHandle<SceneInstance> addressableAsyncOp = Addressables.UnloadSceneAsync(s_addressableSceneHandles[i], UnloadSceneOptions.UnloadAllEmbeddedSceneObjects, true);
                 while (!addressableAsyncOp.IsDone)
                 {
@@ -108,6 +120,11 @@ namespace Insthync.AddressableAssetTools
             return null;
         }
 
+        public static void ClearResourceLocationCache()
+        {
+            s_resourceLocations.Clear();
+        }
+
         public static IResourceLocation GetFirstResourceLocation(this AssetReference asset)
         {
             return GetFirstResourceLocationByRuntimeKey(asset.RuntimeKey);
@@ -127,7 +144,11 @@ namespace Insthync.AddressableAssetTools
             object runtimeKey = assetRef.RuntimeKey;
             AsyncOperationHandle loadedHandle;
             if (s_loadedAssets.TryGetValue(runtimeKey, out loadedHandle))
-                return loadedHandle.Result as TType;
+            {
+                if (loadedHandle.IsValid())
+                    return loadedHandle.Result as TType;
+                s_loadedAssets.Remove(runtimeKey);
+            }
 
             // Check if the asset is actually marked as Addressable
             if (!assetRef.IsDataValid())
@@ -138,36 +159,41 @@ namespace Insthync.AddressableAssetTools
                 return null;
             }
 
-            while (s_loadingAssets.Contains(runtimeKey))
+            if (s_loadingAssets.TryGetValue(runtimeKey, out PendingLoad existingLoad))
             {
-                await UniTask.Yield();
+                while (s_loadingAssets.TryGetValue(runtimeKey, out PendingLoad currentLoad) &&
+                    ReferenceEquals(currentLoad, existingLoad))
+                    await UniTask.Yield();
+                if (existingLoad.ReleaseRequested)
+                    return null;
             }
             if (s_loadedAssets.TryGetValue(runtimeKey, out loadedHandle))
             {
-                return loadedHandle.Result as TType;
+                if (loadedHandle.IsValid())
+                    return loadedHandle.Result as TType;
+                s_loadedAssets.Remove(runtimeKey);
             }
-            s_loadingAssets.Add(runtimeKey);
+            PendingLoad pendingLoad = new PendingLoad();
+            s_loadingAssets[runtimeKey] = pendingLoad;
 
-            // Check if the Addressable asset exists before loading
-            AsyncOperationHandle<IList<IResourceLocation>> loadResourceLocationsHandle = Addressables.LoadResourceLocationsAsync(runtimeKey);
-            IList<IResourceLocation> locations = await loadResourceLocationsHandle.ToUniTask();
-            loadResourceLocationsHandle.Release();
-            if (locations == null || locations.Count == 0)
-            {
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-                Debug.LogWarning($"Addressable asset not found: {runtimeKey}. Ignoring load.");
-#endif
-                s_loadingAssets.Remove(runtimeKey);
-                return null;
-            }
-
-            AsyncOperationHandle<TType> handler = Addressables.LoadAssetAsync<TType>(runtimeKey);
+            AsyncOperationHandle<TType> handler = default;
             try
             {
                 handler = Addressables.LoadAssetAsync<TType>(runtimeKey);
                 TType result = await handler.ToUniTask();
-                s_loadedAssets[assetRef.RuntimeKey] = handler;
-                s_loadingAssets.Remove(runtimeKey);
+                if (pendingLoad.ReleaseRequested)
+                {
+                    Addressables.Release(handler);
+                    handler = default;
+                    return null;
+                }
+                if (s_loadedAssets.TryGetValue(runtimeKey, out loadedHandle) && loadedHandle.IsValid())
+                {
+                    Addressables.Release(handler);
+                    handler = default;
+                    return loadedHandle.Result as TType;
+                }
+                s_loadedAssets[runtimeKey] = handler;
                 return result;
             }
             catch (System.Exception ex)
@@ -177,8 +203,11 @@ namespace Insthync.AddressableAssetTools
 #endif
                 if (handler.IsValid())
                     Addressables.Release(handler);
-                s_loadingAssets.Remove(runtimeKey);
                 return null;
+            }
+            finally
+            {
+                s_loadingAssets.Remove(runtimeKey);
             }
         }
 
@@ -187,7 +216,11 @@ namespace Insthync.AddressableAssetTools
         {
             object runtimeKey = assetRef.RuntimeKey;
             if (s_loadedAssets.TryGetValue(runtimeKey, out AsyncOperationHandle loadedHandle))
-                return loadedHandle.Result as TType;
+            {
+                if (loadedHandle.IsValid())
+                    return loadedHandle.Result as TType;
+                s_loadedAssets.Remove(runtimeKey);
+            }
 
             // Check if the asset is actually marked as Addressable
             if (!assetRef.IsDataValid())
@@ -195,28 +228,16 @@ namespace Insthync.AddressableAssetTools
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogWarning($"Asset is not marked as Addressable: {runtimeKey}. Ignoring load.");
 #endif
-                s_loadingAssets.Remove(runtimeKey);
                 return null;
             }
-
-            // Check if the Addressable asset exists before loading
-            AsyncOperationHandle<IList<IResourceLocation>> loadResourceLocationsHandle = Addressables.LoadResourceLocationsAsync(runtimeKey);
-            IList<IResourceLocation> locations = loadResourceLocationsHandle.WaitForCompletion();
-            loadResourceLocationsHandle.Release();
-            if (locations == null || locations.Count == 0)
-            {
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-                Debug.LogWarning($"Addressable asset not found: {runtimeKey}. Ignoring load.");
-#endif
-                return null;
-            }
-
+            AsyncOperationHandle<TType> handler = default;
             try
             {
-                AsyncOperationHandle<TType> handler = Addressables.LoadAssetAsync<TType>(runtimeKey);
+                handler = Addressables.LoadAssetAsync<TType>(runtimeKey);
                 TType result = handler.WaitForCompletion();
-                s_loadedAssets[assetRef.RuntimeKey] = handler;
-                s_loadingAssets.Remove(runtimeKey);
+                if (handler.Status != AsyncOperationStatus.Succeeded)
+                    throw handler.OperationException ?? new System.Exception($"Failed to load addressable asset: {runtimeKey}");
+                s_loadedAssets[runtimeKey] = handler;
                 return result;
             }
             catch (System.Exception ex)
@@ -224,7 +245,8 @@ namespace Insthync.AddressableAssetTools
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
                 Debug.LogError($"Failed to load addressable asset: {runtimeKey}, {ex.Message}\n{ex.StackTrace}");
 #endif
-                s_loadingAssets.Remove(runtimeKey);
+                if (handler.IsValid())
+                    Addressables.Release(handler);
                 return null;
             }
         }
@@ -544,9 +566,12 @@ namespace Insthync.AddressableAssetTools
 
         public static void Release(object runtimeKey)
         {
+            if (s_loadingAssets.TryGetValue(runtimeKey, out PendingLoad pendingLoad))
+                pendingLoad.ReleaseRequested = true;
             if (s_loadedAssets.TryGetValue(runtimeKey, out AsyncOperationHandle handle))
             {
-                Addressables.Release(handle);
+                if (handle.IsValid())
+                    Addressables.Release(handle);
             }
             s_loadedAssets.Remove(runtimeKey);
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
@@ -556,11 +581,14 @@ namespace Insthync.AddressableAssetTools
 
         public static void ReleaseAll()
         {
+            foreach (PendingLoad pendingLoad in s_loadingAssets.Values)
+                pendingLoad.ReleaseRequested = true;
             List<object> keys = new List<object>(s_loadedAssets.Keys);
             for (int i = 0; i < keys.Count; ++i)
             {
                 Release(keys[i]);
             }
+            ClearResourceLocationCache();
         }
     }
 }

@@ -30,8 +30,8 @@ namespace MultiplayerARPG
             Texts.Add(UIFormatKeys.UI_FORMAT_CURRENT_WATER.ToString(), "Water: {0}/{1}");
             Texts.Add(UIFormatKeys.UI_FORMAT_CURRENT_WEIGHT.ToString(), "Weight: {0}/{1}");
             Texts.Add(UIFormatKeys.UI_FORMAT_CURRENT_SLOT.ToString(), "Slot: {0}/{1}");
-            Texts.Add(UITextKeys.UI_LABEL_UNLIMIT_WEIGHT.ToString(), "Unlimit Weight");
-            Texts.Add(UITextKeys.UI_LABEL_UNLIMIT_SLOT.ToString(), "Unlimit Slot");
+            Texts.Add(UITextKeys.UI_LABEL_UNLIMIT_WEIGHT.ToString(), "Unlimited Weight");
+            Texts.Add(UITextKeys.UI_LABEL_UNLIMIT_SLOT.ToString(), "Unlimited Slots");
             Texts.Add(UIFormatKeys.UI_FORMAT_HP.ToString(), "Hp: {0}");
             Texts.Add(UIFormatKeys.UI_FORMAT_MP.ToString(), "Mp: {0}");
             Texts.Add(UIFormatKeys.UI_FORMAT_STAMINA.ToString(), "Stamina: {0}");
@@ -50,17 +50,17 @@ namespace MultiplayerARPG
             Texts.Add(UIFormatKeys.UI_FORMAT_GOLD.ToString(), "Gold: {0}");
             Texts.Add(UIFormatKeys.UI_FORMAT_CASH.ToString(), "Cash: {0}");
             Texts.Add(UIFormatKeys.UI_FORMAT_SELL_PRICE.ToString(), "Sell Price: {0}");
-            Texts.Add(UIFormatKeys.UI_FORMAT_REQUIRE_LEVEL.ToString(), "Require Level: {0}");
-            Texts.Add(UIFormatKeys.UI_FORMAT_REQUIRE_LEVEL_NOT_ENOUGH.ToString(), "Require Level: <color=red>{0}/{1}</color>");
-            Texts.Add(UIFormatKeys.UI_FORMAT_REQUIRE_CLASS.ToString(), "Require Class: {0}");
-            Texts.Add(UIFormatKeys.UI_FORMAT_INVALID_REQUIRE_CLASS.ToString(), "Require Class: <color=red>{0}</color>");
-            Texts.Add(UIFormatKeys.UI_FORMAT_AVAILABLE_WEAPONS.ToString(), "Have to equip: {0}");
-            Texts.Add(UIFormatKeys.UI_FORMAT_AVAILABLE_ARMORS.ToString(), "Have to equip: {0}");
-            Texts.Add(UIFormatKeys.UI_FORMAT_AVAILABLE_VEHICLES.ToString(), "Have to drive: {0}");
-            Texts.Add(UIFormatKeys.UI_FORMAT_CONSUME_HP.ToString(), "Consume Hp: {0}");
-            Texts.Add(UIFormatKeys.UI_FORMAT_CONSUME_MP.ToString(), "Consume Mp: {0}");
-            Texts.Add(UIFormatKeys.UI_FORMAT_CONSUME_STAMINA.ToString(), "Consume Stamina: {0}");
-            Texts.Add(UIFormatKeys.UI_FORMAT_LEVEL_UP.ToString(), "Level is up to {0}!");
+            Texts.Add(UIFormatKeys.UI_FORMAT_REQUIRE_LEVEL.ToString(), "Required Level: {0}");
+            Texts.Add(UIFormatKeys.UI_FORMAT_REQUIRE_LEVEL_NOT_ENOUGH.ToString(), "Required Level: <color=red>{0}/{1}</color>");
+            Texts.Add(UIFormatKeys.UI_FORMAT_REQUIRE_CLASS.ToString(), "Required Class: {0}");
+            Texts.Add(UIFormatKeys.UI_FORMAT_INVALID_REQUIRE_CLASS.ToString(), "Required Class: <color=red>{0}</color>");
+            Texts.Add(UIFormatKeys.UI_FORMAT_AVAILABLE_WEAPONS.ToString(), "Requires weapon: {0}");
+            Texts.Add(UIFormatKeys.UI_FORMAT_AVAILABLE_ARMORS.ToString(), "Requires armor: {0}");
+            Texts.Add(UIFormatKeys.UI_FORMAT_AVAILABLE_VEHICLES.ToString(), "Requires vehicle: {0}");
+            Texts.Add(UIFormatKeys.UI_FORMAT_CONSUME_HP.ToString(), "HP Cost: {0}");
+            Texts.Add(UIFormatKeys.UI_FORMAT_CONSUME_MP.ToString(), "MP Cost: {0}");
+            Texts.Add(UIFormatKeys.UI_FORMAT_CONSUME_STAMINA.ToString(), "Stamina Cost: {0}");
+            Texts.Add(UIFormatKeys.UI_FORMAT_LEVEL_UP.ToString(), "Reached Level {0}!");
             // Format - Skill
             Texts.Add(UIFormatKeys.UI_FORMAT_SKILL_COOLDOWN_DURATION.ToString(), "Cooldown: {0}");
             Texts.Add(UIFormatKeys.UI_FORMAT_SKILL_TYPE.ToString(), "Skill Type: {0}");
@@ -93,8 +93,8 @@ namespace MultiplayerARPG
             Texts.Add(UIFormatKeys.UI_FORMAT_ITEM_DURABILITY.ToString(), "Durability: {0}/{1}");
             // Format - Social
             Texts.Add(UIFormatKeys.UI_FORMAT_SOCIAL_LEADER.ToString(), "Leader: {0}");
-            Texts.Add(UIFormatKeys.UI_FORMAT_SOCIAL_MEMBER_AMOUNT.ToString(), "Member: {0}/{1}");
-            Texts.Add(UIFormatKeys.UI_FORMAT_SOCIAL_MEMBER_AMOUNT_NO_LIMIT.ToString(), "Member: {0}");
+            Texts.Add(UIFormatKeys.UI_FORMAT_SOCIAL_MEMBER_AMOUNT.ToString(), "Members: {0}/{1}");
+            Texts.Add(UIFormatKeys.UI_FORMAT_SOCIAL_MEMBER_AMOUNT_NO_LIMIT.ToString(), "Members: {0}");
             Texts.Add(UIFormatKeys.UI_FORMAT_SHARE_EXP_PERCENTAGE.ToString(), "Share Exp: {0}%");
             Texts.Add(UIFormatKeys.UI_FORMAT_REWARD_EXP.ToString(), "Reward Exp: {0}");
             Texts.Add(UIFormatKeys.UI_FORMAT_REWARD_GOLD.ToString(), "Reward Gold: {0}");
@@ -137,21 +137,21 @@ namespace MultiplayerARPG
             Texts.Add(UIFormatKeys.UI_FORMAT_REFINE_SUCCESS_RATE.ToString(), "Success Rate: {0}%");
             Texts.Add(UIFormatKeys.UI_FORMAT_REFINING_LEVEL.ToString(), "Refining Level: +{0}");
             // Format - Guild Bonus
-            Texts.Add(UIFormatKeys.UI_FORMAT_INCREASE_MAX_MEMBER.ToString(), "Max Member +{0}");
+            Texts.Add(UIFormatKeys.UI_FORMAT_INCREASE_MAX_MEMBER.ToString(), "Max Members +{0}");
             Texts.Add(UIFormatKeys.UI_FORMAT_INCREASE_EXP_GAIN_PERCENTAGE.ToString(), "Exp Gain +{0}%");
             Texts.Add(UIFormatKeys.UI_FORMAT_INCREASE_GOLD_GAIN_PERCENTAGE.ToString(), "Gold Gain +{0}%");
             Texts.Add(UIFormatKeys.UI_FORMAT_INCREASE_SHARE_EXP_GAIN_PERCENTAGE.ToString(), "Party Share Exp +{0}%");
             Texts.Add(UIFormatKeys.UI_FORMAT_INCREASE_SHARE_GOLD_GAIN_PERCENTAGE.ToString(), "Party Share Gold +{0}%");
             Texts.Add(UIFormatKeys.UI_FORMAT_DECREASE_EXP_PENALTY_PERCENTAGE.ToString(), "Exp Penalty -{0}%");
             // Format - UI Character Quest
-            Texts.Add(UIFormatKeys.UI_FORMAT_QUEST_TITLE_ON_GOING.ToString(), "{0} (Ongoing)");
-            Texts.Add(UIFormatKeys.UI_FORMAT_QUEST_TITLE_TASKS_COMPLETE.ToString(), "{0} (Task Completed)");
+            Texts.Add(UIFormatKeys.UI_FORMAT_QUEST_TITLE_ON_GOING.ToString(), "{0} (In Progress)");
+            Texts.Add(UIFormatKeys.UI_FORMAT_QUEST_TITLE_TASKS_COMPLETE.ToString(), "{0} (Tasks Complete)");
             Texts.Add(UIFormatKeys.UI_FORMAT_QUEST_TITLE_COMPLETE.ToString(), "{0} (Completed)");
             // Format - UI Quest Task
-            Texts.Add(UIFormatKeys.UI_FORMAT_QUEST_TASK_KILL_MONSTER.ToString(), "Kills {0}: {1}/{2}");
-            Texts.Add(UIFormatKeys.UI_FORMAT_QUEST_TASK_COLLECT_ITEM.ToString(), "Collects {0}: {1}/{2}");
-            Texts.Add(UIFormatKeys.UI_FORMAT_QUEST_TASK_KILL_MONSTER_COMPLETE.ToString(), "Kills {0}: Complete");
-            Texts.Add(UIFormatKeys.UI_FORMAT_QUEST_TASK_COLLECT_ITEM_COMPLETE.ToString(), "Collects {0}: Complete");
+            Texts.Add(UIFormatKeys.UI_FORMAT_QUEST_TASK_KILL_MONSTER.ToString(), "Kill {0}: {1}/{2}");
+            Texts.Add(UIFormatKeys.UI_FORMAT_QUEST_TASK_COLLECT_ITEM.ToString(), "Collect {0}: {1}/{2}");
+            Texts.Add(UIFormatKeys.UI_FORMAT_QUEST_TASK_KILL_MONSTER_COMPLETE.ToString(), "Kill {0}: Complete");
+            Texts.Add(UIFormatKeys.UI_FORMAT_QUEST_TASK_COLLECT_ITEM_COMPLETE.ToString(), "Collect {0}: Complete");
             // Format - UI Chat Message
             Texts.Add(UIFormatKeys.UI_FORMAT_CHAT_LOCAL.ToString(), "<color=white>(LOCAL) {0}: {1}</color>");
             Texts.Add(UIFormatKeys.UI_FORMAT_CHAT_GLOBAL.ToString(), "<color=white>(GLOBAL) {0}: {1}</color>");
@@ -191,12 +191,12 @@ namespace MultiplayerARPG
             Texts.Add(UITextKeys.UI_ERROR_NOT_ENOUGH_ITEMS.ToString(), "Not enough items");
             Texts.Add(UITextKeys.UI_ERROR_NOT_ENOUGH_STAT_POINT.ToString(), "Not enough stat points");
             Texts.Add(UITextKeys.UI_ERROR_NOT_ENOUGH_SKILL_POINT.ToString(), "Not enough skill points");
-            Texts.Add(UITextKeys.UI_ERROR_DISALLOW_SKILL_LEVEL_UP.ToString(), "Disallow to level up");
+            Texts.Add(UITextKeys.UI_ERROR_DISALLOW_SKILL_LEVEL_UP.ToString(), "Skill cannot be leveled up");
             Texts.Add(UITextKeys.UI_ERROR_NOT_LOGGED_IN.ToString(), "Not logged in");
             Texts.Add(UITextKeys.UI_ERROR_USERNAME_IS_EMPTY.ToString(), "Username is empty");
             Texts.Add(UITextKeys.UI_ERROR_PASSWORD_IS_EMPTY.ToString(), "Password is empty");
-            Texts.Add(UITextKeys.UI_ERROR_WILL_OVERWHELMING.ToString(), "Cannot carry all items");
-            Texts.Add(UITextKeys.UI_ERROR_NOT_ABLE_TO_LOOT.ToString(), "Not allowed to loot");
+            Texts.Add(UITextKeys.UI_ERROR_WILL_OVERWHELMING.ToString(), "Cannot carry any more items");
+            Texts.Add(UITextKeys.UI_ERROR_NOT_ABLE_TO_LOOT.ToString(), "Cannot loot this item");
             Texts.Add(UITextKeys.UI_ERROR_TOO_FAST_ACTION.ToString(), "Please wait a bit before trying that again");
             Texts.Add(UITextKeys.UI_ERROR_SERVER_CLOSE.ToString(), "Server is temporarily closed for maintenance");
             // Error - Game Data
@@ -206,7 +206,7 @@ namespace MultiplayerARPG
             Texts.Add(UITextKeys.UI_ERROR_INVALID_ITEM_DATA.ToString(), "Invalid item data");
             Texts.Add(UITextKeys.UI_ERROR_INVALID_ITEM_INDEX.ToString(), "Invalid item index");
             Texts.Add(UITextKeys.UI_ERROR_INVALID_ENHANCER_ITEM_INDEX.ToString(), "Invalid enhancer item index");
-            Texts.Add(UITextKeys.UI_ERROR_ITEM_NOT_EQUIPMENT.ToString(), "Item is not a equipment item");
+            Texts.Add(UITextKeys.UI_ERROR_ITEM_NOT_EQUIPMENT.ToString(), "Item cannot be equipped");
             Texts.Add(UITextKeys.UI_ERROR_INVALID_ATTRIBUTE_DATA.ToString(), "Invalid attribute data");
             Texts.Add(UITextKeys.UI_ERROR_INVALID_CURRENCY_DATA.ToString(), "Invalid currency data");
             Texts.Add(UITextKeys.UI_ERROR_INVALID_SKILL_DATA.ToString(), "Invalid skill data");
@@ -222,7 +222,7 @@ namespace MultiplayerARPG
             Texts.Add(UITextKeys.UI_ERROR_INVALID_USERNAME_OR_PASSWORD.ToString(), "Invalid username or password");
             Texts.Add(UITextKeys.UI_ERROR_INVALID_USER_TOKEN.ToString(), "Invalid user token");
             Texts.Add(UITextKeys.UI_ERROR_ALREADY_LOGGED_IN.ToString(), "User already logged in");
-            Texts.Add(UITextKeys.UI_ERROR_ACCOUNT_LOGGED_IN_BY_OTHER.ToString(), "Your account was logged in by other");
+            Texts.Add(UITextKeys.UI_ERROR_ACCOUNT_LOGGED_IN_BY_OTHER.ToString(), "Your account was logged in from another location");
             Texts.Add(UITextKeys.UI_ERROR_USER_BANNED.ToString(), "Your account was banned");
             Texts.Add(UITextKeys.UI_ERROR_EMAIL_NOT_VERIFIED.ToString(), "Email is not verified");
             // Error - UI Register
@@ -232,24 +232,24 @@ namespace MultiplayerARPG
             Texts.Add(UITextKeys.UI_ERROR_PASSWORD_TOO_SHORT.ToString(), "Password is too short");
             Texts.Add(UITextKeys.UI_ERROR_INVALID_EMAIL.ToString(), "Invalid email format");
             Texts.Add(UITextKeys.UI_ERROR_EMAIL_ALREADY_IN_USE.ToString(), "Email is already in use");
-            Texts.Add(UITextKeys.UI_ERROR_USERNAME_EXISTED.ToString(), "Username is already existed");
-            Texts.Add(UITextKeys.UI_ERROR_INVALID_USERNAME.ToString(), "Username is invalid, allow only a-z, A-Z, 0-9 and _ for username.");
+            Texts.Add(UITextKeys.UI_ERROR_USERNAME_EXISTED.ToString(), "Username already exists");
+            Texts.Add(UITextKeys.UI_ERROR_INVALID_USERNAME.ToString(), "Username is invalid. Only letters, numbers, and underscores are allowed.");
             // Error - UI Lobby
             Texts.Add(UITextKeys.UI_ERROR_ALREADY_CONNECTED_TO_LOBBY.ToString(), "Already connected to lobby server");
             Texts.Add(UITextKeys.UI_ERROR_ALREADY_CONNECTED_TO_GAME.ToString(), "Already connected to game server");
-            Texts.Add(UITextKeys.UI_ERROR_NO_SELECTED_REALM.ToString(), "Please select realm");
+            Texts.Add(UITextKeys.UI_ERROR_NO_SELECTED_REALM.ToString(), "Please select a realm");
             Texts.Add(UITextKeys.UI_ERROR_NO_AVAILABLE_REALM.ToString(), "No available realm");
             Texts.Add(UITextKeys.UI_ERROR_NO_AVAILABLE_LOBBY.ToString(), "No available lobby");
             // Error - UI Character List
-            Texts.Add(UITextKeys.UI_ERROR_NO_CHOSEN_CHARACTER_TO_START.ToString(), "Please choose character to start game");
-            Texts.Add(UITextKeys.UI_ERROR_NO_CHOSEN_CHARACTER_TO_DELETE.ToString(), "Please choose character to delete");
-            Texts.Add(UITextKeys.UI_ERROR_ALREADY_SELECT_CHARACTER.ToString(), "Already select character");
+            Texts.Add(UITextKeys.UI_ERROR_NO_CHOSEN_CHARACTER_TO_START.ToString(), "Please choose a character to start the game");
+            Texts.Add(UITextKeys.UI_ERROR_NO_CHOSEN_CHARACTER_TO_DELETE.ToString(), "Please choose a character to delete");
+            Texts.Add(UITextKeys.UI_ERROR_ALREADY_SELECT_CHARACTER.ToString(), "Character already selected");
             Texts.Add(UITextKeys.UI_ERROR_MAP_SERVER_NOT_READY.ToString(), "Map server is not ready");
             // Error - UI Character Create
             Texts.Add(UITextKeys.UI_ERROR_CHARACTER_NAME_TOO_SHORT.ToString(), "Character name is too short");
             Texts.Add(UITextKeys.UI_ERROR_CHARACTER_NAME_TOO_LONG.ToString(), "Character name is too long");
-            Texts.Add(UITextKeys.UI_ERROR_CHARACTER_NAME_EXISTED.ToString(), "Character name is already existed");
-            Texts.Add(UITextKeys.UI_ERROR_INVALID_CHARACTER_NAME.ToString(), "Character name is invalid, allow only a-z, A-Z, 0-9 and _ for character name.");
+            Texts.Add(UITextKeys.UI_ERROR_CHARACTER_NAME_EXISTED.ToString(), "Character name already exists");
+            Texts.Add(UITextKeys.UI_ERROR_INVALID_CHARACTER_NAME.ToString(), "Character name is invalid. Only letters, numbers, and underscores are allowed.");
             // Error - UI Cash Packages
             Texts.Add(UITextKeys.UI_ERROR_INVALID_IAP_RECEIPT.ToString(), "Invalid IAP receipt");
             Texts.Add(UITextKeys.UI_ERROR_CANNOT_GET_CASH_PACKAGE_INFO.ToString(), "Cannot retrieve cash package info");
@@ -258,12 +258,12 @@ namespace MultiplayerARPG
             // Error - UI Guild Name
             Texts.Add(UITextKeys.UI_ERROR_GUILD_NAME_TOO_SHORT.ToString(), "Guild name is too short");
             Texts.Add(UITextKeys.UI_ERROR_GUILD_NAME_TOO_LONG.ToString(), "Guild name is too long");
-            Texts.Add(UITextKeys.UI_ERROR_GUILD_NAME_EXISTED.ToString(), "Guild name is already existed");
-            Texts.Add(UITextKeys.UI_ERROR_INVALID_GUILD_NAME.ToString(), "Guild name is invalid, allow only a-z, A-Z, 0-9 and _ for guild name.");
+            Texts.Add(UITextKeys.UI_ERROR_GUILD_NAME_EXISTED.ToString(), "Guild name already exists");
+            Texts.Add(UITextKeys.UI_ERROR_INVALID_GUILD_NAME.ToString(), "Guild name is invalid. Only letters, numbers, and underscores are allowed.");
             // Error - UI Guild Role Setting
             Texts.Add(UITextKeys.UI_ERROR_GUILD_ROLE_NAME_TOO_SHORT.ToString(), "Guild role name is too short");
             Texts.Add(UITextKeys.UI_ERROR_GUILD_ROLE_NAME_TOO_LONG.ToString(), "Guild role name is too long");
-            Texts.Add(UITextKeys.UI_ERROR_GUILD_ROLE_SHARE_EXP_NOT_NUMBER.ToString(), "Share exp percentage must be number");
+            Texts.Add(UITextKeys.UI_ERROR_GUILD_ROLE_SHARE_EXP_NOT_NUMBER.ToString(), "Share EXP percentage must be a number");
             // Error - UI Guild Member Role Setting
             Texts.Add(UITextKeys.UI_ERROR_INVALID_GUILD_ROLE.ToString(), "Invalid role");
             // Error - UI Guild Message Setting
@@ -277,17 +277,17 @@ namespace MultiplayerARPG
             // Error - Refine
             Texts.Add(UITextKeys.UI_ERROR_CANNOT_REFINE.ToString(), "Cannot refine the item");
             Texts.Add(UITextKeys.UI_ERROR_REFINE_ITEM_REACHED_MAX_LEVEL.ToString(), "Item reached max level");
-            Texts.Add(UITextKeys.UI_REFINE_SUCCESS.ToString(), "Refine success");
-            Texts.Add(UITextKeys.UI_REFINE_FAIL.ToString(), "Refine fail");
+            Texts.Add(UITextKeys.UI_REFINE_SUCCESS.ToString(), "Refinement succeeded");
+            Texts.Add(UITextKeys.UI_REFINE_FAIL.ToString(), "Refinement failed");
             Texts.Add(UITextKeys.UI_ERROR_CANNOT_ENHANCE_SOCKET.ToString(), "Cannot enhance the item");
-            Texts.Add(UITextKeys.UI_ERROR_NOT_ENOUGH_SOCKET_ENCHANER.ToString(), "Have not enough items");
+            Texts.Add(UITextKeys.UI_ERROR_NOT_ENOUGH_SOCKET_ENCHANER.ToString(), "Not enough enhancer items");
             Texts.Add(UITextKeys.UI_ERROR_NO_EMPTY_SOCKET.ToString(), "No empty socket");
             Texts.Add(UITextKeys.UI_ERROR_SOCKET_NOT_EMPTY.ToString(), "Socket is not empty");
             Texts.Add(UITextKeys.UI_ERROR_CANNOT_REMOVE_ENHANCER.ToString(), "Cannot remove enhancer item from socket");
             Texts.Add(UITextKeys.UI_ERROR_NO_ENHANCER.ToString(), "No enhancer item");
             // Error - Repair
             Texts.Add(UITextKeys.UI_ERROR_CANNOT_REPAIR.ToString(), "Cannot repair the item");
-            Texts.Add(UITextKeys.UI_REPAIR_SUCCESS.ToString(), "Repair success");
+            Texts.Add(UITextKeys.UI_REPAIR_SUCCESS.ToString(), "Repair successful");
             // Error - Dealing
             Texts.Add(UITextKeys.UI_ERROR_CHARACTER_IS_DEALING.ToString(), "Character is in another deal");
             Texts.Add(UITextKeys.UI_ERROR_CHARACTER_IS_TOO_FAR.ToString(), "Character is too far");
@@ -295,11 +295,11 @@ namespace MultiplayerARPG
             Texts.Add(UITextKeys.UI_ERROR_DEALING_REQUEST_DECLINED.ToString(), "Dealing request declined");
             Texts.Add(UITextKeys.UI_ERROR_INVALID_DEALING_STATE.ToString(), "Invalid dealing state");
             Texts.Add(UITextKeys.UI_ERROR_DEALING_CANCELED.ToString(), "Dealing canceled");
-            Texts.Add(UITextKeys.UI_ERROR_ANOTHER_CHARACTER_WILL_OVERWHELMING.ToString(), "Another character cannot carry all items");
+            Texts.Add(UITextKeys.UI_ERROR_ANOTHER_CHARACTER_WILL_OVERWHELMING.ToString(), "The other player cannot carry any more items");
             // Error - Restriction
-            Texts.Add(UITextKeys.UI_ERROR_ITEM_DEALING_RESTRICTED.ToString(), "Cannot deal this item, item dealing restricted");
-            Texts.Add(UITextKeys.UI_ERROR_ITEM_DROPPING_RESTRICTED.ToString(), "Cannot drop this item, item dropping restricted");
-            Texts.Add(UITextKeys.UI_ERROR_ITEM_SELLING_RESTRICTED.ToString(), "Cannot sell this item, item selling restricted");
+            Texts.Add(UITextKeys.UI_ERROR_ITEM_DEALING_RESTRICTED.ToString(), "Cannot trade this item, trading restricted");
+            Texts.Add(UITextKeys.UI_ERROR_ITEM_DROPPING_RESTRICTED.ToString(), "Cannot drop this item, dropping restricted");
+            Texts.Add(UITextKeys.UI_ERROR_ITEM_SELLING_RESTRICTED.ToString(), "Cannot sell this item, selling restricted");
             // Error - Party
             Texts.Add(UITextKeys.UI_ERROR_PARTY_NOT_FOUND.ToString(), "Party not found");
             Texts.Add(UITextKeys.UI_ERROR_PARTY_INVITATION_NOT_FOUND.ToString(), "Party invitation not found");
@@ -307,16 +307,16 @@ namespace MultiplayerARPG
             Texts.Add(UITextKeys.UI_PARTY_INVITATION_DECLINED.ToString(), "Party invitation declined");
             Texts.Add(UITextKeys.UI_ERROR_CANNOT_SEND_PARTY_INVITATION.ToString(), "Cannot send party invitation");
             Texts.Add(UITextKeys.UI_ERROR_CANNOT_KICK_PARTY_MEMBER.ToString(), "Cannot kick party member");
-            Texts.Add(UITextKeys.UI_ERROR_CANNOT_KICK_YOURSELF_FROM_PARTY.ToString(), "Cannot kick yourself from party");
+            Texts.Add(UITextKeys.UI_ERROR_CANNOT_KICK_YOURSELF_FROM_PARTY.ToString(), "Cannot kick yourself from the party");
             Texts.Add(UITextKeys.UI_ERROR_CANNOT_KICK_PARTY_LEADER.ToString(), "Cannot kick party leader");
             Texts.Add(UITextKeys.UI_ERROR_JOINED_ANOTHER_PARTY.ToString(), "Already joined another party");
-            Texts.Add(UITextKeys.UI_ERROR_NOT_JOINED_PARTY.ToString(), "Not joined the party");
-            Texts.Add(UITextKeys.UI_ERROR_NOT_PARTY_LEADER.ToString(), "Not a party leader");
+            Texts.Add(UITextKeys.UI_ERROR_NOT_JOINED_PARTY.ToString(), "You are not in a party");
+            Texts.Add(UITextKeys.UI_ERROR_NOT_PARTY_LEADER.ToString(), "You are not the party leader");
             Texts.Add(UITextKeys.UI_ERROR_ALREADY_IS_PARTY_LEADER.ToString(), "You are already a leader");
             Texts.Add(UITextKeys.UI_ERROR_CHARACTER_JOINED_ANOTHER_PARTY.ToString(), "Character already joined another party");
-            Texts.Add(UITextKeys.UI_ERROR_CHARACTER_NOT_JOINED_PARTY.ToString(), "Character not joined the party");
-            Texts.Add(UITextKeys.UI_ERROR_PARTY_MEMBER_REACHED_LIMIT.ToString(), "Party member reached limit");
-            Texts.Add(UITextKeys.UI_ERROR_PARTY_MEMBER_CANNOT_ENTER_INSTANCE.ToString(), "Only party leader can enter instance");
+            Texts.Add(UITextKeys.UI_ERROR_CHARACTER_NOT_JOINED_PARTY.ToString(), "Character is not in a party");
+            Texts.Add(UITextKeys.UI_ERROR_PARTY_MEMBER_REACHED_LIMIT.ToString(), "Party has reached maximum members");
+            Texts.Add(UITextKeys.UI_ERROR_PARTY_MEMBER_CANNOT_ENTER_INSTANCE.ToString(), "Only the party leader can enter the instance");
             // Error - Guild
             Texts.Add(UITextKeys.UI_ERROR_GUILD_NOT_FOUND.ToString(), "Guild not found");
             Texts.Add(UITextKeys.UI_ERROR_GUILD_INVITATION_NOT_FOUND.ToString(), "Guild invitation not found");
@@ -324,24 +324,24 @@ namespace MultiplayerARPG
             Texts.Add(UITextKeys.UI_GUILD_INVITATION_DECLINED.ToString(), "Guild invitation declined");
             Texts.Add(UITextKeys.UI_ERROR_CANNOT_SEND_GUILD_INVITATION.ToString(), "Cannot send guild invitation");
             Texts.Add(UITextKeys.UI_ERROR_CANNOT_KICK_GUILD_MEMBER.ToString(), "Cannot kick guild member");
-            Texts.Add(UITextKeys.UI_ERROR_CANNOT_KICK_YOURSELF_FROM_GUILD.ToString(), "Cannot kick yourself from guild");
-            Texts.Add(UITextKeys.UI_ERROR_CANNOT_KICK_GUILD_LEADER.ToString(), "Cannot kick guild leader");
-            Texts.Add(UITextKeys.UI_ERROR_CANNOT_KICK_HIGHER_GUILD_MEMBER.ToString(), "Cannot kick higher guild member");
+            Texts.Add(UITextKeys.UI_ERROR_CANNOT_KICK_YOURSELF_FROM_GUILD.ToString(), "Cannot kick yourself from the guild");
+            Texts.Add(UITextKeys.UI_ERROR_CANNOT_KICK_GUILD_LEADER.ToString(), "Cannot kick the guild leader");
+            Texts.Add(UITextKeys.UI_ERROR_CANNOT_KICK_HIGHER_GUILD_MEMBER.ToString(), "Cannot kick a higher-ranking guild member");
             Texts.Add(UITextKeys.UI_ERROR_JOINED_ANOTHER_GUILD.ToString(), "Already joined another guild");
-            Texts.Add(UITextKeys.UI_ERROR_NOT_JOINED_GUILD.ToString(), "Not joined the guild");
-            Texts.Add(UITextKeys.UI_ERROR_NOT_GUILD_LEADER.ToString(), "Not a guild leader");
+            Texts.Add(UITextKeys.UI_ERROR_NOT_JOINED_GUILD.ToString(), "You are not in a guild");
+            Texts.Add(UITextKeys.UI_ERROR_NOT_GUILD_LEADER.ToString(), "You are not the guild leader");
             Texts.Add(UITextKeys.UI_ERROR_ALREADY_IS_GUILD_LEADER.ToString(), "You are already a leader");
             Texts.Add(UITextKeys.UI_ERROR_CANNOT_CHANGE_GUILD_LEADER_ROLE.ToString(), "Cannot change guild leader's role");
             Texts.Add(UITextKeys.UI_ERROR_CHARACTER_JOINED_ANOTHER_GUILD.ToString(), "Character already joined another guild");
-            Texts.Add(UITextKeys.UI_ERROR_CHARACTER_NOT_JOINED_GUILD.ToString(), "Character not joined the guild");
-            Texts.Add(UITextKeys.UI_ERROR_GUILD_MEMBER_REACHED_LIMIT.ToString(), "Guild member reached limit");
+            Texts.Add(UITextKeys.UI_ERROR_CHARACTER_NOT_JOINED_GUILD.ToString(), "Character is not in a guild");
+            Texts.Add(UITextKeys.UI_ERROR_GUILD_MEMBER_REACHED_LIMIT.ToString(), "Guild has reached maximum members");
             Texts.Add(UITextKeys.UI_ERROR_GUILD_ROLE_NOT_AVAILABLE.ToString(), "Guild role is not available");
-            Texts.Add(UITextKeys.UI_ERROR_GUILD_SKILL_REACHED_MAX_LEVEL.ToString(), "Guild skill is reached max level");
-            Texts.Add(UITextKeys.UI_ERROR_NOT_ENOUGH_GUILD_SKILL_POINT.ToString(), "Not enough guild skill point");
-            Texts.Add(UITextKeys.UI_ERROR_CANNOT_ACCEPT_GUILD_REQUEST.ToString(), "You're not allowed to accept guild request");
-            Texts.Add(UITextKeys.UI_ERROR_CANNOT_DECLINE_GUILD_REQUEST.ToString(), "You're not allowed to decline guild request");
+            Texts.Add(UITextKeys.UI_ERROR_GUILD_SKILL_REACHED_MAX_LEVEL.ToString(), "Guild skill has reached maximum level");
+            Texts.Add(UITextKeys.UI_ERROR_NOT_ENOUGH_GUILD_SKILL_POINT.ToString(), "Not enough guild skill points");
+            Texts.Add(UITextKeys.UI_ERROR_CANNOT_ACCEPT_GUILD_REQUEST.ToString(), "You are not allowed to accept guild requests");
+            Texts.Add(UITextKeys.UI_ERROR_CANNOT_DECLINE_GUILD_REQUEST.ToString(), "You are not allowed to decline guild requests");
             // Error - Game Data
-            Texts.Add(UITextKeys.UI_UNKNOW_GAME_DATA_TITLE.ToString(), "Unknow");
+            Texts.Add(UITextKeys.UI_UNKNOW_GAME_DATA_TITLE.ToString(), "Unknown");
             Texts.Add(UITextKeys.UI_UNKNOW_GAME_DATA_DESCRIPTION.ToString(), "N/A");
             // Error - Bank
             Texts.Add(UITextKeys.UI_ERROR_NOT_ENOUGH_GOLD_TO_DEPOSIT.ToString(), "Not enough gold to deposit");
@@ -360,9 +360,9 @@ namespace MultiplayerARPG
             // Error - Skill
             Texts.Add(UITextKeys.UI_ERROR_SKILL_LEVEL_IS_ZERO.ToString(), "Skill not trained yet");
             Texts.Add(UITextKeys.UI_ERROR_CANNOT_USE_SKILL_WITHOUT_SHIELD.ToString(), "Cannot use skill without shield");
-            Texts.Add(UITextKeys.UI_ERROR_CANNOT_USE_SKILL_BY_CURRENT_WEAPON.ToString(), "Cannot use skill by current weapons");
-            Texts.Add(UITextKeys.UI_ERROR_CANNOT_USE_SKILL_BY_CURRENT_ARMOR.ToString(), "Cannot use skill by current armors");
-            Texts.Add(UITextKeys.UI_ERROR_CANNOT_USE_SKILL_BY_CURRENT_VEHICLE.ToString(), "Cannot use skill by current vehicle");
+            Texts.Add(UITextKeys.UI_ERROR_CANNOT_USE_SKILL_BY_CURRENT_WEAPON.ToString(), "Cannot use this skill with current weapon");
+            Texts.Add(UITextKeys.UI_ERROR_CANNOT_USE_SKILL_BY_CURRENT_ARMOR.ToString(), "Cannot use this skill with current armor");
+            Texts.Add(UITextKeys.UI_ERROR_CANNOT_USE_SKILL_BY_CURRENT_VEHICLE.ToString(), "Cannot use this skill with current vehicle");
             Texts.Add(UITextKeys.UI_ERROR_SKILL_IS_COOLING_DOWN.ToString(), "Skill is cooling down");
             Texts.Add(UITextKeys.UI_ERROR_SKILL_IS_NOT_LEARNED.ToString(), "Skill is not learned");
             Texts.Add(UITextKeys.UI_ERROR_NO_SKILL_TARGET.ToString(), "No target");
@@ -370,9 +370,9 @@ namespace MultiplayerARPG
             Texts.Add(UITextKeys.UI_ERROR_ITEM_IS_COOLING_DOWN.ToString(), "Item is cooling down");
             Texts.Add(UITextKeys.UI_ERROR_ITEM_IS_LOCKED.ToString(), "Item is locked");
             // Error - Requirement
-            Texts.Add(UITextKeys.UI_ERROR_NOT_ENOUGH_LEVEL.ToString(), "Not enough level");
-            Texts.Add(UITextKeys.UI_ERROR_NOT_MATCH_CHARACTER_CLASS.ToString(), "Not match character class");
-            Texts.Add(UITextKeys.UI_ERROR_NOT_MATCH_CHARACTER_FACTION.ToString(), "Not match character faction");
+            Texts.Add(UITextKeys.UI_ERROR_NOT_ENOUGH_LEVEL.ToString(), "Level requirement not met");
+            Texts.Add(UITextKeys.UI_ERROR_NOT_MATCH_CHARACTER_CLASS.ToString(), "Does not match required character class");
+            Texts.Add(UITextKeys.UI_ERROR_NOT_MATCH_CHARACTER_FACTION.ToString(), "Does not match required character faction");
             Texts.Add(UITextKeys.UI_ERROR_NOT_ENOUGH_ATTRIBUTE_AMOUNTS.ToString(), "Not enough attribute amounts");
             Texts.Add(UITextKeys.UI_ERROR_NOT_ENOUGH_SKILL_LEVELS.ToString(), "Not enough skill levels");
             Texts.Add(UITextKeys.UI_ERROR_NOT_ENOUGH_CURRENCY_AMOUNTS.ToString(), "Not enough currency amounts");
@@ -386,7 +386,7 @@ namespace MultiplayerARPG
             Texts.Add(UITextKeys.UI_DROP_ITEM.ToString(), "Drop Item");
             Texts.Add(UITextKeys.UI_DROP_ITEM_DESCRIPTION.ToString(), "Enter amount of item");
             Texts.Add(UITextKeys.UI_DESTROY_ITEM.ToString(), "Destroy Item");
-            Texts.Add(UITextKeys.UI_DESTROY_ITEM_DESCRIPTION.ToString(), "Do you want to destroy an items?");
+            Texts.Add(UITextKeys.UI_DESTROY_ITEM_DESCRIPTION.ToString(), "Are you sure you want to destroy this item?");
             Texts.Add(UITextKeys.UI_SELL_ITEM.ToString(), "Sell Item");
             Texts.Add(UITextKeys.UI_SELL_ITEM_DESCRIPTION.ToString(), "Enter amount of item");
             Texts.Add(UITextKeys.UI_DISMANTLE_ITEM.ToString(), "Dismantle Item");
@@ -403,7 +403,7 @@ namespace MultiplayerARPG
             Texts.Add(UITextKeys.UI_MOVE_ITEM_FROM_STORAGE_DESCRIPTION.ToString(), "Enter amount of item");
             Texts.Add(UITextKeys.UI_MOVE_ITEM_FROM_ITEMS_CONTAINER.ToString(), "Move From Container");
             Texts.Add(UITextKeys.UI_MOVE_ITEM_FROM_ITEMS_CONTAINER_DESCRIPTION.ToString(), "Enter amount of item");
-            Texts.Add(UITextKeys.UI_ERROR_STORAGE_WILL_OVERWHELMING.ToString(), "Storage will overwhelming");
+            Texts.Add(UITextKeys.UI_ERROR_STORAGE_WILL_OVERWHELMING.ToString(), "Storage is full");
             // UI Bank
             Texts.Add(UITextKeys.UI_BANK_DEPOSIT.ToString(), "Deposit");
             Texts.Add(UITextKeys.UI_BANK_DEPOSIT_DESCRIPTION.ToString(), "Enter amount of gold");
@@ -417,20 +417,20 @@ namespace MultiplayerARPG
             Texts.Add(UITextKeys.UI_BUY_ITEM_DESCRIPTION.ToString(), "Enter amount of item");
             // UI Party
             Texts.Add(UITextKeys.UI_PARTY_CHANGE_LEADER.ToString(), "Change Leader");
-            Texts.Add(UITextKeys.UI_PARTY_CHANGE_LEADER_DESCRIPTION.ToString(), "You sure you want to promote {0} to party leader?");
+            Texts.Add(UITextKeys.UI_PARTY_CHANGE_LEADER_DESCRIPTION.ToString(), "Are you sure you want to promote {0} to party leader?");
             Texts.Add(UITextKeys.UI_PARTY_KICK_MEMBER.ToString(), "Kick Member");
-            Texts.Add(UITextKeys.UI_PARTY_KICK_MEMBER_DESCRIPTION.ToString(), "You sure you want to kick {0} from party?");
+            Texts.Add(UITextKeys.UI_PARTY_KICK_MEMBER_DESCRIPTION.ToString(), "Are you sure you want to kick {0} from the party?");
             Texts.Add(UITextKeys.UI_PARTY_LEAVE.ToString(), "Leave Party");
-            Texts.Add(UITextKeys.UI_PARTY_LEAVE_DESCRIPTION.ToString(), "You sure you want to leave party?");
+            Texts.Add(UITextKeys.UI_PARTY_LEAVE_DESCRIPTION.ToString(), "Are you sure you want to leave the party?");
             // UI Guild
             Texts.Add(UITextKeys.UI_GUILD_CHANGE_LEADER.ToString(), "Change Leader");
-            Texts.Add(UITextKeys.UI_GUILD_CHANGE_LEADER_DESCRIPTION.ToString(), "You sure you want to promote {0} to guild leader?");
+            Texts.Add(UITextKeys.UI_GUILD_CHANGE_LEADER_DESCRIPTION.ToString(), "Are you sure you want to promote {0} to guild leader?");
             Texts.Add(UITextKeys.UI_GUILD_KICK_MEMBER.ToString(), "Kick Member");
-            Texts.Add(UITextKeys.UI_GUILD_KICK_MEMBER_DESCRIPTION.ToString(), "You sure you want to kick {0} from guild?");
+            Texts.Add(UITextKeys.UI_GUILD_KICK_MEMBER_DESCRIPTION.ToString(), "Are you sure you want to kick {0} from the guild?");
             Texts.Add(UITextKeys.UI_GUILD_LEAVE.ToString(), "Leave Guild");
-            Texts.Add(UITextKeys.UI_GUILD_LEAVE_DESCRIPTION.ToString(), "You sure you want to leave guild?");
+            Texts.Add(UITextKeys.UI_GUILD_LEAVE_DESCRIPTION.ToString(), "Are you sure you want to leave the guild?");
             Texts.Add(UITextKeys.UI_GUILD_REQUEST.ToString(), "Guild Application");
-            Texts.Add(UITextKeys.UI_GUILD_REQUEST_DESCRIPTION.ToString(), "You want to request to join guild {0}?");
+            Texts.Add(UITextKeys.UI_GUILD_REQUEST_DESCRIPTION.ToString(), "Do you want to apply to join guild {0}?");
             Texts.Add(UITextKeys.UI_GUILD_REQUESTED.ToString(), "Guild request was sent to the guild");
             Texts.Add(UITextKeys.UI_GUILD_REQUEST_ACCEPTED.ToString(), "Guild request accepted");
             Texts.Add(UITextKeys.UI_GUILD_REQUEST_DECLINED.ToString(), "Guild request declined");
@@ -443,11 +443,11 @@ namespace MultiplayerARPG
             Texts.Add(UITextKeys.UI_GUILD_ROLE_CANNOT_USE_STORAGE.ToString(), "Cannot use storage");
             // UI Friend
             Texts.Add(UITextKeys.UI_FRIEND_ADD.ToString(), "Add Friend");
-            Texts.Add(UITextKeys.UI_FRIEND_ADD_DESCRIPTION.ToString(), "You want to add {0} to friend list?");
+            Texts.Add(UITextKeys.UI_FRIEND_ADD_DESCRIPTION.ToString(), "Do you want to add {0} to your friends list?");
             Texts.Add(UITextKeys.UI_FRIEND_REMOVE.ToString(), "Remove Friend");
-            Texts.Add(UITextKeys.UI_FRIEND_REMOVE_DESCRIPTION.ToString(), "You want to remove {0} from friend list?");
+            Texts.Add(UITextKeys.UI_FRIEND_REMOVE_DESCRIPTION.ToString(), "Do you want to remove {0} from your friends list?");
             Texts.Add(UITextKeys.UI_FRIEND_REQUEST.ToString(), "Friend Request");
-            Texts.Add(UITextKeys.UI_FRIEND_REQUEST_DESCRIPTION.ToString(), "You want to request {0} to be friend?");
+            Texts.Add(UITextKeys.UI_FRIEND_REQUEST_DESCRIPTION.ToString(), "Do you want to send a friend request to {0}?");
             Texts.Add(UITextKeys.UI_FRIEND_ADDED.ToString(), "The character was added to the friend list");
             Texts.Add(UITextKeys.UI_FRIEND_REMOVED.ToString(), "The character was removed from the friend list");
             Texts.Add(UITextKeys.UI_FRIEND_REQUESTED.ToString(), "Friend request was sent to the character");
@@ -455,28 +455,28 @@ namespace MultiplayerARPG
             Texts.Add(UITextKeys.UI_FRIEND_REQUEST_DECLINED.ToString(), "Friend request declined");
             // UI Password Dialogs
             Texts.Add(UITextKeys.UI_ENTER_BUILDING_PASSWORD.ToString(), "Enter password");
-            Texts.Add(UITextKeys.UI_ENTER_BUILDING_PASSWORD_DESCRIPTION.ToString(), "Enter 6 digits number");
+            Texts.Add(UITextKeys.UI_ENTER_BUILDING_PASSWORD_DESCRIPTION.ToString(), "Enter a 6-digit number");
             Texts.Add(UITextKeys.UI_SET_BUILDING_PASSWORD.ToString(), "Set password");
-            Texts.Add(UITextKeys.UI_SET_BUILDING_PASSWORD_DESCRIPTION.ToString(), "Enter 6 digits number");
+            Texts.Add(UITextKeys.UI_SET_BUILDING_PASSWORD_DESCRIPTION.ToString(), "Enter a 6-digit number");
             Texts.Add(UITextKeys.UI_ERROR_WRONG_BUILDING_PASSWORD.ToString(), "Wrong password");
             Texts.Add(UITextKeys.UI_ERROR_REACHED_BUILD_LIMIT.ToString(), "Cannot build this kind of building anymore");
             // UI Mail
             Texts.Add(UITextKeys.UI_ERROR_MAIL_SEND_NOT_ALLOWED.ToString(), "You're not allowed to send mail");
-            Texts.Add(UITextKeys.UI_ERROR_MAIL_SEND_NO_RECEIVER.ToString(), "No receiver, you may entered wrong name");
+            Texts.Add(UITextKeys.UI_ERROR_MAIL_SEND_NO_RECEIVER.ToString(), "Recipient not found. You may have entered an incorrect name.");
             Texts.Add(UITextKeys.UI_MAIL_SENT.ToString(), "Mail sent");
             Texts.Add(UITextKeys.UI_ERROR_MAIL_READ_NOT_ALLOWED.ToString(), "You're not allowed to read the mail");
             Texts.Add(UITextKeys.UI_ERROR_MAIL_CLAIM_NOT_ALLOWED.ToString(), "You're not allowed to claim attached items");
-            Texts.Add(UITextKeys.UI_ERROR_MAIL_CLAIM_ALREADY_CLAIMED.ToString(), "Cannot claim items, it was already claimed");
-            Texts.Add(UITextKeys.UI_ERROR_MAIL_CLAIM_WILL_OVERWHELMING.ToString(), "Cannot carry all items");
-            Texts.Add(UITextKeys.UI_MAIL_CLAIMED.ToString(), "Claimed an items");
+            Texts.Add(UITextKeys.UI_ERROR_MAIL_CLAIM_ALREADY_CLAIMED.ToString(), "Items have already been claimed");
+            Texts.Add(UITextKeys.UI_ERROR_MAIL_CLAIM_WILL_OVERWHELMING.ToString(), "Cannot carry any more items");
+            Texts.Add(UITextKeys.UI_MAIL_CLAIMED.ToString(), "Claimed items");
             Texts.Add(UITextKeys.UI_ERROR_MAIL_DELETE_NOT_ALLOWED.ToString(), "You're not allowed to delete the mail");
             Texts.Add(UITextKeys.UI_MAIL_DELETED.ToString(), "Mail deleted");
             // Vending
             Texts.Add(UITextKeys.UI_START_VENDING.ToString(), "Confirmation");
-            Texts.Add(UITextKeys.UI_START_VENDING_DESCRIPTION.ToString(), "Do you want to open your shop? please double check the prices before doing it.");
+            Texts.Add(UITextKeys.UI_START_VENDING_DESCRIPTION.ToString(), "Are you sure you want to open your shop? Please double-check your prices before opening.");
             Texts.Add(UITextKeys.UI_STOP_VENDING.ToString(), "Confirmation");
             Texts.Add(UITextKeys.UI_STOP_VENDING_DESCRIPTION.ToString(), "Do you want to close your shop?");
-            Texts.Add(UITextKeys.UI_ERROR_NO_START_VENDING_ITEMS.ToString(), "No selling items");
+            Texts.Add(UITextKeys.UI_ERROR_NO_START_VENDING_ITEMS.ToString(), "No items for sale");
             Texts.Add(UITextKeys.UI_ERROR_REACHED_VENDING_ITEMS_LIMIT.ToString(), "Cannot add more items to sell");
             // Enter Amount
             Texts.Add(UITextKeys.UI_ENTER_ITEM_AMOUNT.ToString(), "Enter Amount");
@@ -490,7 +490,7 @@ namespace MultiplayerARPG
             Texts.Add(UITextKeys.UI_ERROR_IAP_USER_CANCELLED.ToString(), "Purchase was cancelled");
             Texts.Add(UITextKeys.UI_ERROR_IAP_PAYMENT_DECLINED.ToString(), "Payment was declined");
             Texts.Add(UITextKeys.UI_ERROR_IAP_DUPLICATE_TRANSACTION.ToString(), "Duplicate transaction");
-            Texts.Add(UITextKeys.UI_ERROR_IAP_UNKNOW.ToString(), "Unknow");
+            Texts.Add(UITextKeys.UI_ERROR_IAP_UNKNOW.ToString(), "Unknown");
             // Format - Character Stats Rate
             Texts.Add(UIFormatKeys.UI_FORMAT_HP_RATE.ToString(), "Hp: {0}%");
             Texts.Add(UIFormatKeys.UI_FORMAT_MP_RATE.ToString(), "Mp: {0}%");
@@ -525,10 +525,10 @@ namespace MultiplayerARPG
             Texts.Add(UIFormatKeys.UI_FORMAT_SKIP_TITLE.ToString(), "{1}");
             Texts.Add(UIFormatKeys.UI_FORMAT_SKIP_TITLE_PERCENTAGE.ToString(), "{1}%");
             // Format - Notify Rewards
-            Texts.Add(UIFormatKeys.UI_FORMAT_NOTIFY_REWARD_EXP.ToString(), "Obtain {0} Exp");
-            Texts.Add(UIFormatKeys.UI_FORMAT_NOTIFY_REWARD_GOLD.ToString(), "Obtain {0} Gold");
-            Texts.Add(UIFormatKeys.UI_FORMAT_NOTIFY_REWARD_ITEM.ToString(), "Obtain {0} x {1} ea");
-            Texts.Add(UIFormatKeys.UI_FORMAT_NOTIFY_REWARD_CURRENCY.ToString(), "Obtain {1} {0}");
+            Texts.Add(UIFormatKeys.UI_FORMAT_NOTIFY_REWARD_EXP.ToString(), "Obtained {0} EXP");
+            Texts.Add(UIFormatKeys.UI_FORMAT_NOTIFY_REWARD_GOLD.ToString(), "Obtained {0} Gold");
+            Texts.Add(UIFormatKeys.UI_FORMAT_NOTIFY_REWARD_ITEM.ToString(), "Obtained {0} x{1}");
+            Texts.Add(UIFormatKeys.UI_FORMAT_NOTIFY_REWARD_CURRENCY.ToString(), "Obtained {1} {0}");
             // Format - 1.61 - Talk to NPC quest task
             Texts.Add(UIFormatKeys.UI_FORMAT_QUEST_TASK_TALK_TO_NPC.ToString(), "Talk to {0}");
             Texts.Add(UIFormatKeys.UI_FORMAT_QUEST_TASK_TALK_TO_NPC_COMPLETE.ToString(), "Talk to {0}: Complete");
@@ -564,8 +564,8 @@ namespace MultiplayerARPG
             // Format - 1.71c - Corpse items container
             Texts.Add(UIFormatKeys.UI_FORMAT_CORPSE_TITLE.ToString(), "{0}'s corpse");
             // 1.74 New Formats
-            Texts.Add(UIFormatKeys.UI_FORMAT_REQUIRE_SKILL_POINT.ToString(), "Require Skill Points: {0}");
-            Texts.Add(UIFormatKeys.UI_FORMAT_REQUIRE_SKILL_POINT_NOT_ENOUGH.ToString(), "Require Skill Points: <color=red>{0}/{1}</color>");
+            Texts.Add(UIFormatKeys.UI_FORMAT_REQUIRE_SKILL_POINT.ToString(), "Required Skill Points: {0}");
+            Texts.Add(UIFormatKeys.UI_FORMAT_REQUIRE_SKILL_POINT_NOT_ENOUGH.ToString(), "Required Skill Points: <color=red>{0}/{1}</color>");
             // 1.78 UI Chat Message With Guild Name
             Texts.Add(UIFormatKeys.UI_FORMAT_CHAT_LOCAL_WITH_GUILD_NAME.ToString(), "<color=white>(LOCAL) {0}[{2}]: {1}</color>");
             Texts.Add(UIFormatKeys.UI_FORMAT_CHAT_GLOBAL_WITH_GUILD_NAME.ToString(), "<color=white>(GLOBAL) {0}[{2}]: {1}</color>");
@@ -584,20 +584,20 @@ namespace MultiplayerARPG
             // 1.83g New Formats
             Texts.Add(UIFormatKeys.UI_FORMAT_JUMP_HEIGHT.ToString(), "Jump Height: {0}");
             Texts.Add(UIFormatKeys.UI_FORMAT_JUMP_HEIGHT_RATE.ToString(), "% of Jump Height: {0}%");
-            Texts.Add(UIFormatKeys.UI_FORMAT_HEAD_DAMAGE_ABSORBS.ToString(), "Head Damage Absorbs: {0}%");
-            Texts.Add(UIFormatKeys.UI_FORMAT_HEAD_DAMAGE_ABSORBS_RATE.ToString(), "% of Head Damage Absorbs: {0}%");
-            Texts.Add(UIFormatKeys.UI_FORMAT_BODY_DAMAGE_ABSORBS.ToString(), "Body Damage Absorbs: {0}%");
-            Texts.Add(UIFormatKeys.UI_FORMAT_BODY_DAMAGE_ABSORBS_RATE.ToString(), "% of Body Damage Absorbs: {0}%");
-            Texts.Add(UIFormatKeys.UI_FORMAT_REQUIRE_FACTION.ToString(), "Require Faction: {0}");
-            Texts.Add(UIFormatKeys.UI_FORMAT_INVALID_REQUIRE_FACTION.ToString(), "Require Faction: <color=red>{0}</color>");
+            Texts.Add(UIFormatKeys.UI_FORMAT_HEAD_DAMAGE_ABSORBS.ToString(), "Head Damage Absorption: {0}%");
+            Texts.Add(UIFormatKeys.UI_FORMAT_HEAD_DAMAGE_ABSORBS_RATE.ToString(), "% of Head Damage Absorption: {0}%");
+            Texts.Add(UIFormatKeys.UI_FORMAT_BODY_DAMAGE_ABSORBS.ToString(), "Body Damage Absorption: {0}%");
+            Texts.Add(UIFormatKeys.UI_FORMAT_BODY_DAMAGE_ABSORBS_RATE.ToString(), "% of Body Damage Absorption: {0}%");
+            Texts.Add(UIFormatKeys.UI_FORMAT_REQUIRE_FACTION.ToString(), "Required Faction: {0}");
+            Texts.Add(UIFormatKeys.UI_FORMAT_INVALID_REQUIRE_FACTION.ToString(), "Required Faction: <color=red>{0}</color>");
             // 1.83g2 New Formats
-            Texts.Add(UIFormatKeys.UI_FORMAT_FALL_DAMAGE_ABSORBS.ToString(), "Fall Damage Absorbs: {0}%");
-            Texts.Add(UIFormatKeys.UI_FORMAT_FALL_DAMAGE_ABSORBS_RATE.ToString(), "% of Fall Damage Absorbs: {0}%");
+            Texts.Add(UIFormatKeys.UI_FORMAT_FALL_DAMAGE_ABSORBS.ToString(), "Fall Damage Absorption: {0}%");
+            Texts.Add(UIFormatKeys.UI_FORMAT_FALL_DAMAGE_ABSORBS_RATE.ToString(), "% of Fall Damage Absorption: {0}%");
             Texts.Add(UIFormatKeys.UI_FORMAT_GRAVITY_RATE.ToString(), "Gravity Rate: {0}%");
             Texts.Add(UIFormatKeys.UI_FORMAT_GRAVITY_RATE_RATE.ToString(), "% of Gravity Rate: {0}%");
             // PK
             Texts.Add(UIFormatKeys.UI_FORMAT_PK_CAN_TURN_PK_AFTER_HOURS.ToString(), "You can turn PK off after {0} hours");
-            Texts.Add(UIFormatKeys.UI_FORMAT_PK_TURN_ON_WARNING.ToString(), "Do you want to turn PK on? if you do that then you will be able to turn it off after {0} hours");
+            Texts.Add(UIFormatKeys.UI_FORMAT_PK_TURN_ON_WARNING.ToString(), "Do you want to turn PK on? If enabled, you cannot turn it off for {0} hours.");
             // Error - Dueling
             Texts.Add(UITextKeys.UI_ERROR_CHARACTER_IS_DUELING.ToString(), "Character is in another duel");
             Texts.Add(UITextKeys.UI_ERROR_CANNOT_ACCEPT_DUELING_REQUEST.ToString(), "Cannot accept dueling request");
@@ -621,35 +621,35 @@ namespace MultiplayerARPG
             Texts.Add(UIFormatKeys.UI_FORMAT_STATUS_EFFECT_APPLYING_TARGET_ENEMY_WHEN_ATTACKED.ToString(), "Applies {0}, Lv. {1} to enemy when attacked");
             // 1.86 Buff formats
             Texts.Add(UIFormatKeys.UI_FORMAT_BUFF_MAX_STACK.ToString(), "Max stack: {0}");
-            Texts.Add(UIFormatKeys.UI_FORMAT_BUFF_REMOVE_BUFF_WHEN_ATTACK_CHANCE.ToString(), "This buff have chance {0}% to be removed when attack");
-            Texts.Add(UIFormatKeys.UI_FORMAT_BUFF_REMOVE_BUFF_WHEN_ATTACKED_CHANCE.ToString(), "This buff have chance {0}% to be removed when attacked");
-            Texts.Add(UIFormatKeys.UI_FORMAT_BUFF_REMOVE_BUFF_USE_SKILL_CHANCE.ToString(), "This buff have chance {0}% to be removed when use skill");
-            Texts.Add(UIFormatKeys.UI_FORMAT_BUFF_REMOVE_BUFF_USE_ITEM_CHANCE.ToString(), "This buff have chance {0}% to be removed when use item");
-            Texts.Add(UIFormatKeys.UI_FORMAT_BUFF_REMOVE_BUFF_PICKUP_ITEM_CHANCE.ToString(), "This buff have chance {0}% to be removed when pick up item");
+            Texts.Add(UIFormatKeys.UI_FORMAT_BUFF_REMOVE_BUFF_WHEN_ATTACK_CHANCE.ToString(), "This buff has a {0}% chance to be removed when attacking");
+            Texts.Add(UIFormatKeys.UI_FORMAT_BUFF_REMOVE_BUFF_WHEN_ATTACKED_CHANCE.ToString(), "This buff has a {0}% chance to be removed when attacked");
+            Texts.Add(UIFormatKeys.UI_FORMAT_BUFF_REMOVE_BUFF_USE_SKILL_CHANCE.ToString(), "This buff has a {0}% chance to be removed when using a skill");
+            Texts.Add(UIFormatKeys.UI_FORMAT_BUFF_REMOVE_BUFF_USE_ITEM_CHANCE.ToString(), "This buff has a {0}% chance to be removed when using an item");
+            Texts.Add(UIFormatKeys.UI_FORMAT_BUFF_REMOVE_BUFF_PICKUP_ITEM_CHANCE.ToString(), "This buff has a {0}% chance to be removed when picking up an item");
             // 1.86 Buff labels
-            Texts.Add(UITextKeys.UI_LABEL_BUFF_DISALLOW_MOVE.ToString(), "Disallow to move while this buff is activated");
-            Texts.Add(UITextKeys.UI_LABEL_BUFF_DISALLOW_SPRINT.ToString(), "Disallow to sprint while this buff is activated");
-            Texts.Add(UITextKeys.UI_LABEL_BUFF_DISALLOW_WALK.ToString(), "Disallow to walk while this buff is activated");
-            Texts.Add(UITextKeys.UI_LABEL_BUFF_DISALLOW_JUMP.ToString(), "Disallow to jump while this buff is activated");
-            Texts.Add(UITextKeys.UI_LABEL_BUFF_DISALLOW_CROUCH.ToString(), "Disallow to crouch while this buff is activated");
-            Texts.Add(UITextKeys.UI_LABEL_BUFF_DISALLOW_CRAWL.ToString(), "Disallow to crawl while this buff is activated");
-            Texts.Add(UITextKeys.UI_LABEL_BUFF_DISALLOW_ATTACK.ToString(), "Disallow to attack while this buff is activated");
-            Texts.Add(UITextKeys.UI_LABEL_BUFF_DISALLOW_USE_SKILL.ToString(), "Disallow to use skill while this buff is activated");
-            Texts.Add(UITextKeys.UI_LABEL_BUFF_DISALLOW_USE_ITEM.ToString(), "Disallow to use item while this buff is activated");
-            Texts.Add(UITextKeys.UI_LABEL_BUFF_FREEZE_ANIMATION.ToString(), "Character will be freezed while this buff is activated");
-            Texts.Add(UITextKeys.UI_LABEL_BUFF_IS_HIDE.ToString(), "Character will be hidden from other characters");
-            Texts.Add(UITextKeys.UI_LABEL_BUFF_IS_REVEALS_HIDE.ToString(), "Character will be able to see hidden characters");
-            Texts.Add(UITextKeys.UI_LABEL_BUFF_IS_BLIND.ToString(), "Character will not be able to see other characters");
-            Texts.Add(UITextKeys.UI_LABEL_BUFF_MUTE_FOOTSTEP_SOUND.ToString(), "Mute footstep sound while this buff is activated");
-            Texts.Add(UITextKeys.UI_LABEL_BUFF_DO_NOT_REMOVE_ON_DEAD.ToString(), "This buff will not be removed when character dead");
-            Texts.Add(UITextKeys.UI_LABEL_BUFF_IS_EXTEND_DURATION.ToString(), "Buff duration can be extended by activate this buff again");
+            Texts.Add(UITextKeys.UI_LABEL_BUFF_DISALLOW_MOVE.ToString(), "Cannot move while this buff is active");
+            Texts.Add(UITextKeys.UI_LABEL_BUFF_DISALLOW_SPRINT.ToString(), "Cannot sprint while this buff is active");
+            Texts.Add(UITextKeys.UI_LABEL_BUFF_DISALLOW_WALK.ToString(), "Cannot walk while this buff is active");
+            Texts.Add(UITextKeys.UI_LABEL_BUFF_DISALLOW_JUMP.ToString(), "Cannot jump while this buff is active");
+            Texts.Add(UITextKeys.UI_LABEL_BUFF_DISALLOW_CROUCH.ToString(), "Cannot crouch while this buff is active");
+            Texts.Add(UITextKeys.UI_LABEL_BUFF_DISALLOW_CRAWL.ToString(), "Cannot crawl while this buff is active");
+            Texts.Add(UITextKeys.UI_LABEL_BUFF_DISALLOW_ATTACK.ToString(), "Cannot attack while this buff is active");
+            Texts.Add(UITextKeys.UI_LABEL_BUFF_DISALLOW_USE_SKILL.ToString(), "Cannot use skills while this buff is active");
+            Texts.Add(UITextKeys.UI_LABEL_BUFF_DISALLOW_USE_ITEM.ToString(), "Cannot use items while this buff is active");
+            Texts.Add(UITextKeys.UI_LABEL_BUFF_FREEZE_ANIMATION.ToString(), "Character is frozen while this buff is active");
+            Texts.Add(UITextKeys.UI_LABEL_BUFF_IS_HIDE.ToString(), "Character is hidden from other players");
+            Texts.Add(UITextKeys.UI_LABEL_BUFF_IS_REVEALS_HIDE.ToString(), "Can detect hidden players");
+            Texts.Add(UITextKeys.UI_LABEL_BUFF_IS_BLIND.ToString(), "Character is blinded");
+            Texts.Add(UITextKeys.UI_LABEL_BUFF_MUTE_FOOTSTEP_SOUND.ToString(), "Footstep sounds are muted while this buff is active");
+            Texts.Add(UITextKeys.UI_LABEL_BUFF_DO_NOT_REMOVE_ON_DEAD.ToString(), "This buff persists through death");
+            Texts.Add(UITextKeys.UI_LABEL_BUFF_IS_EXTEND_DURATION.ToString(), "Buff duration can be extended by reactivating this buff");
             // 1.86 Status Effect Resistance
             Texts.Add(UIFormatKeys.UI_FORMAT_STATUS_EFFECT_RESISTANCE_ENTRY.ToString(), "Lv.{0} {1}%");
             Texts.Add(UIFormatKeys.UI_FORMAT_STATUS_EFFECT_RESISTANCE_ENTRIES.ToString(), "{0} resistance: {1}");
             // 1.86 Buff Removal
             Texts.Add(UIFormatKeys.UI_FORMAT_BUFF_REMOVAL_ENTRY.ToString(), "Lv.{0} {1}%");
             Texts.Add(UIFormatKeys.UI_FORMAT_BUFF_REMOVAL_ENTRIES.ToString(), "Chance to remove {0}: {1}");
-            Texts.Add(UIFormatKeys.UI_FORMAT_BUFF_REMOVAL_NO_ENTRIES.ToString(), "Have chance to remove {0}");
+            Texts.Add(UIFormatKeys.UI_FORMAT_BUFF_REMOVAL_NO_ENTRIES.ToString(), "Has a chance to remove {0}");
             // 1.86d Items Limit Error
             Texts.Add(UITextKeys.UI_ERROR_REACHED_DEALING_ITEMS_LIMIT.ToString(), "Cannot add more items to offer");
             Texts.Add(UITextKeys.UI_ERROR_REACHED_REFINE_ENHANCER_ITEMS_LIMIT.ToString(), "Cannot add more items to enhance");
@@ -662,13 +662,13 @@ namespace MultiplayerARPG
             Texts.Add(UIFormatKeys.UI_FORMAT_CHARACTER_HEIGHT.ToString(), "Height: <color=#d44849ff>{0} cm.</color>");
             Texts.Add(UIFormatKeys.UI_FORMAT_CHARACTER_WEIGHT.ToString(), "Weight: <color=#d44849ff>{0} kg.</color>");
             // 1.87
-            Texts.Add(UITextKeys.UI_LABEL_BUFF_DISALLOW_DASH.ToString(), "Disallow Dash");
-            Texts.Add(UIFormatKeys.UI_FORMAT_SKILL_ATTACK_WEAPON_DAMAGE_MULTIPLICATOR.ToString(), "Attack Weapon Damage Multiplicator: {0}");
+            Texts.Add(UITextKeys.UI_LABEL_BUFF_DISALLOW_DASH.ToString(), "Cannot Dash");
+            Texts.Add(UIFormatKeys.UI_FORMAT_SKILL_ATTACK_WEAPON_DAMAGE_MULTIPLICATOR.ToString(), "Weapon Damage Multiplier: {0}");
             // 1.89
             Texts.Add(UITextKeys.UI_ERROR_CONTENT_IS_LOCKED.ToString(), "Content is not unlocked yet");
             Texts.Add(UITextKeys.UI_ERROR_CONTENT_IS_UNLOCKED.ToString(), "Content is already unlocked");
             Texts.Add(UITextKeys.UI_ERROR_NOT_ENOUGH_UNLOCK_PROGRESSION.ToString(), "Not enough unlock progression");
-            Texts.Add(UITextKeys.UI_ERROR_CONTENT_IS_NOT_LOCKED.ToString(), "Content is not locked, don't have to unlock");
+            Texts.Add(UITextKeys.UI_ERROR_CONTENT_IS_NOT_LOCKED.ToString(), "Content is already unlocked");
             // 1.91 New Stats
             Texts.Add(UIFormatKeys.UI_FORMAT_PROTECTED_SLOT_LIMIT.ToString(), "Protected Inventory Slots: {0}");
             Texts.Add(UIFormatKeys.UI_FORMAT_PROTECTED_SLOT_LIMIT_RATE.ToString(), "Protected Inventory Slots Rate: {0}%");
@@ -684,9 +684,9 @@ namespace MultiplayerARPG
             Texts.Add(UIFormatKeys.UI_FORMAT_FIRE_SPREAD_RANGE_RATE_RATE.ToString(), "% of Fire Spread Range Rate: {0}%");
             Texts.Add(UIFormatKeys.UI_FORMAT_FIRE_SPREAD_MODIFIER.ToString(), "Fire Spread Modifier: {0}");
             Texts.Add(UIFormatKeys.UI_FORMAT_FIRE_SPREAD_MODIFIER_RATE.ToString(), "% of Fire Spread Modifier: {0}%");
-            Texts.Add(UIFormatKeys.UI_FORMAT_DECREASE_FOOD_DECREATION.ToString(), "Food Decreation: {0}");
-            Texts.Add(UIFormatKeys.UI_FORMAT_DECREASE_WATER_DECREATION.ToString(), "Water Decreation: {0}");
-            Texts.Add(UIFormatKeys.UI_FORMAT_DECREASE_STAMINA_DECREATION.ToString(), "Stamina Decreation: {0}");
+            Texts.Add(UIFormatKeys.UI_FORMAT_DECREASE_FOOD_DECREATION.ToString(), "Food Drain Reduction: {0}");
+            Texts.Add(UIFormatKeys.UI_FORMAT_DECREASE_WATER_DECREATION.ToString(), "Water Drain Reduction: {0}");
+            Texts.Add(UIFormatKeys.UI_FORMAT_DECREASE_STAMINA_DECREATION.ToString(), "Stamina Drain Reduction: {0}");
             Texts.Add(UIFormatKeys.UI_FORMAT_BUY_ITEM_PRICE_RATE.ToString(), "Buy Item Price Rate: {0}%");
             Texts.Add(UIFormatKeys.UI_FORMAT_BUY_ITEM_PRICE_RATE_RATE.ToString(), "% of Buy Item Price Rate: {0}%");
             Texts.Add(UIFormatKeys.UI_FORMAT_SELL_ITEM_PRICE_RATE.ToString(), "Sell Item Price Rate: {0}%");
@@ -704,8 +704,8 @@ namespace MultiplayerARPG
             Texts.Add(UITextKeys.UI_CHARACTER_ID_COPIED.ToString(), "Character's ID is copied");
             // Character Name Changing
             Texts.Add(UITextKeys.UI_CHARACTER_NAME_CHANGE.ToString(), "Character Name Changing");
-            Texts.Add(UITextKeys.UI_CHARACTER_NAME_CHANGE_DESCRIPTION.ToString(), "Which name do you want to make changes?");
-            Texts.Add(UITextKeys.UI_CHARACTER_NAME_CHANGE_SUCCESS.ToString(), "Character name change success");
+            Texts.Add(UITextKeys.UI_CHARACTER_NAME_CHANGE_DESCRIPTION.ToString(), "Enter a new character name:");
+            Texts.Add(UITextKeys.UI_CHARACTER_NAME_CHANGE_SUCCESS.ToString(), "Character name changed successfully");
             // 1.94
             Texts.Add(UIFormatKeys.UI_FORMAT_RECOIL_MODIFIER.ToString(), "Recoil: {0}%");
             Texts.Add(UIFormatKeys.UI_FORMAT_RECOIL_MODIFIER_RATE.ToString(), "% of Recoil: {0}%");
@@ -719,7 +719,7 @@ namespace MultiplayerARPG
             Texts.Add(UITextKeys.UI_ERROR_UNABLE_TO_CRAWL.ToString(), "Unable To Crawl");
             Texts.Add(UITextKeys.UI_ERROR_UNABLE_TO_STAND.ToString(), "Unable To Stand");
             // 1.96
-            Texts.Add(UIFormatKeys.UI_FORMAT_NOTIFY_UNLOCKABLE_CONTENT_UPDATED.ToString(), "Obtain {0} x {1} ea");
+            Texts.Add(UIFormatKeys.UI_FORMAT_NOTIFY_UNLOCKABLE_CONTENT_UPDATED.ToString(), "Unlocked {0} x{1}");
             Texts.Add(UIFormatKeys.UI_FORMAT_NOTIFY_UNLOCKABLE_CONTENT_UNLOCKED.ToString(), "{0} is unlocked");
             // Enter game error
             Texts.Add(UITextKeys.UI_ERROR_INVALID_PACKET_VERSION.ToString(), "Invalid packet version");

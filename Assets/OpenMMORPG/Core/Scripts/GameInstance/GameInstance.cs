@@ -1670,6 +1670,9 @@ namespace MultiplayerARPG
 
         public static void ClearData()
         {
+            RuntimeGameDataSlots.Clear();
+            if (Singleton != null)
+                RuntimeGameDataSlots.RegisterDefaultDamageElement(Singleton.DefaultDamageElement);
             Attributes.Clear();
             Currencies.Clear();
             CurrencyDropRepresentItems.Clear();
@@ -1759,6 +1762,7 @@ namespace MultiplayerARPG
         public void LoadedGameData()
         {
             this.InvokeInstanceDevExtMethods("LoadedGameData");
+            RuntimeGameDataSlots.RegisterDefaultDamageElement(DefaultDamageElement);
             // Add ammo items to dictionary
             foreach (BaseItem item in Items.Values)
             {

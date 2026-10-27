@@ -339,7 +339,7 @@ namespace MultiplayerARPG.MMO
             var updateResult = await DatabaseClient.UpdateBuildingAsync(new UpdateBuildingReq()
             {
                 State = state,
-                ChannelId = BuildingPersistenceChannelId, // MESH-EDIT: CE-10
+                ChannelId = BuildingPersistenceChannelId,
                 MapName = CurrentMapInfo.Id,
                 BuildingData = savingBuildingData,
             });
@@ -364,7 +364,7 @@ namespace MultiplayerARPG.MMO
             var updateResult = await DatabaseClient.UpdateBuildingAsync(new UpdateBuildingReq()
             {
                 State = state,
-                ChannelId = BuildingPersistenceChannelId, // MESH-EDIT: CE-10
+                ChannelId = BuildingPersistenceChannelId,
                 MapName = CurrentMapInfo.Id,
                 BuildingData = savingBuildingData,
             });
@@ -442,7 +442,7 @@ namespace MultiplayerARPG.MMO
             {
                 await DatabaseClient.CreateBuildingAsync(new CreateBuildingReq()
                 {
-                    ChannelId = BuildingPersistenceChannelId, // MESH-EDIT: CE-10
+                    ChannelId = BuildingPersistenceChannelId,
                     MapName = CurrentMapInfo.Id,
                     BuildingData = saveData,
                 });
@@ -467,7 +467,7 @@ namespace MultiplayerARPG.MMO
         {
             await DatabaseClient.DeleteBuildingAsync(new DeleteBuildingReq()
             {
-                ChannelId = BuildingPersistenceChannelId, // MESH-EDIT: CE-10
+                ChannelId = BuildingPersistenceChannelId,
                 MapName = CurrentMapInfo.Id,
                 BuildingId = id
             });

@@ -10,7 +10,7 @@ using UnityEngine.AI;
 namespace MultiplayerARPG
 {
     [RequireComponent(typeof(NavMeshAgent))]
-    public class NavMeshEntityMovement : BaseNetworkedGameEntityComponent<BaseGameEntity>, IEntityMovementComponent, IEntityMovementDataHandler, IEntityMovementServerStateFlags, IManagedUpdate // MESH-EDIT: CE-12 (space team kit patch #9)
+    public class NavMeshEntityMovement : BaseNetworkedGameEntityComponent<BaseGameEntity>, IEntityMovementComponent, IEntityMovementDataHandler, IEntityMovementServerStateFlags, IManagedUpdate
     {
         protected const float MIN_MAGNITUDE_TO_DETERMINE_MOVING = 0.01f;
         protected const float MIN_DISTANCE_TO_SIMULATE_MOVEMENT = 0.01f;
@@ -84,8 +84,8 @@ namespace MultiplayerARPG
         private float _accumulateDiffMoveDist = 0f;
         protected bool _isServerWaitingTeleportConfirm;
 
-        // MESH-EDIT: CE-9 — a re-owned entity must not keep applying the PREVIOUS owner's last accepted position
-        // (same fix as BuiltInEntityMovementFunctions3D). See Docs/ServerMeshing/DESIGN.md §17
+        // A re-owned entity must not keep applying the previous owner's last accepted position (same fix as
+        // BuiltInEntityMovementFunctions3D).
         public override void OnSetOwnerClient(bool isOwnerClient)
         {
             base.OnSetOwnerClient(isOwnerClient);
@@ -592,7 +592,7 @@ namespace MultiplayerARPG
             movementData.shouldSendReliably = shouldSendReliably;
             forceAppliers = _movementForceAppliers;
 
-            // MESH-EDIT: CE-12 (space team kit patch #9): called once per receiver, so the one-shot flags stay
+            // Called once per receiver, so the one-shot flags stay
             // set for every receiver of this tick; the send loop consumes them once (ConsumeServerStateFlags)
 
             return movementData;
@@ -626,14 +626,14 @@ namespace MultiplayerARPG
             }
             // Sync transform from server to all clients (include owner client)
             this.ServerWriteSyncTransform3D(_movementForceAppliers, writer);
-            // MESH-EDIT: CE-12 (space team kit patch #9): called once per receiver, so the one-shot flags stay
+            // Called once per receiver, so the one-shot flags stay
             // set for every receiver of this tick; the send loop consumes them once (ConsumeServerStateFlags)
             return true;
         }
 
-        // MESH-EDIT: CE-12 (space team kit patch #9): IEntityMovementServerStateFlags. Clears the one-shot flags the
-        // server writes send, including the dash flag the stock kit never cleared on a server (KIT_AUDIT B11: after
-        // one dash every state carried IsDash). At the server-meshing work's request; both kit copies carry it.
+        // IEntityMovementServerStateFlags. Clears the one-shot flags the server writes send, including the dash
+        // flag, which a server never cleared before (after one dash, every state carried IsDash and went
+        // reliable).
         public void ConsumeServerStateFlags()
         {
             _sendingDash = false;
@@ -656,7 +656,7 @@ namespace MultiplayerARPG
 
         public void ReadServerStateAtClient(long peerTimestamp, NetDataReader reader)
         {
-            // MESH-EDIT: CE-13 (space team kit patch #10): every byte is read here, synchronously, so a read error reaches
+            // Every byte is read here, synchronously, so a read error reaches
             // the kit's catch (BaseGameNetworkManager.ReadServerEntityState). The apply may await the teleport
             // preparer, so it runs apart and logs its own exceptions: this reader was async void, whose exceptions
             // never reached that catch.

@@ -17,7 +17,7 @@ namespace MultiplayerARPG
         bool WriteServerState(long writeTimestamp, NetDataWriter writer,out bool shouldSendReliably);
     }
 
-    // MESH-EDIT: CE-12 (space team kit patch #9): the one-shot jump, dash, teleport and still-move flags.
+    // The one-shot jump, dash, teleport and still-move flags.
     // The server send loops write each entity once per receiver, and the kit cleared these flags inside
     // that write, so only the first player written in a tick got them. A data handler with such flags
     // implements this: its writes only read them, and the loop consumes them once per tick.
@@ -31,7 +31,7 @@ namespace MultiplayerARPG
     }
 
     /// <summary>
-    /// MESH-EDIT: CE-12 (space team kit patch #9): the handlers one server send pass wrote. Begin, Record
+    /// The handlers one server send pass wrote. Begin, Record
     /// after every successful write (a handler written to many players is kept once), ConsumeAll after
     /// the last player. A handler written to no one keeps its flags for a later tick, so an owner still
     /// gets its teleport, and so does a flag raised after the pass.

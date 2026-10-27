@@ -62,27 +62,27 @@ namespace LiteNetLibManager
 
         protected void ReadPacket(long connectionId, NetDataReader reader)
         {
-            ushort messageType = reader.GetPackedUShort();
-            if (RequestResponseEnabled && RequestMessageType == messageType)
-            {
-                ProceedRequest(connectionId, reader);
-                return;
-            }
-            if (RequestResponseEnabled && ResponseMessageType == messageType)
-            {
-                ProceedResponse(connectionId, reader);
-                return;
-            }
-            if (!_messageHandlers.ContainsKey(messageType))
-                return;
+            ushort messageType = 0;
             try
             {
-                _messageHandlers[messageType].Invoke(new MessageHandlerData(messageType, this, connectionId, reader));
+                messageType = reader.GetPackedUShort();
+                if (RequestResponseEnabled && RequestMessageType == messageType)
+                {
+                    ProceedRequest(connectionId, reader);
+                    return;
+                }
+                if (RequestResponseEnabled && ResponseMessageType == messageType)
+                {
+                    ProceedResponse(connectionId, reader);
+                    return;
+                }
+                if (_messageHandlers.TryGetValue(messageType, out MessageHandlerDelegate handler))
+                    handler.Invoke(new MessageHandlerData(messageType, this, connectionId, reader));
             }
             catch (System.Exception ex)
             {
-                // A malformed packet or a handler error must not kill the receive loop, drop this message only
-                Logging.LogError(LogTag, $"Error occuring while proceed message {messageType} from connection {connectionId}");
+                // Drop malformed packets and handler failures without interrupting the receive loop.
+                Logging.LogError(LogTag, $"Error while processing message {messageType} from connection {connectionId}");
                 Logging.LogException(LogTag, ex);
             }
         }
@@ -162,13 +162,13 @@ namespace LiteNetLibManager
         {
             if (!_responseHandlers.ContainsKey(requestType))
             {
-                responseDelegate.Invoke(new ResponseHandlerData(_nextRequestId++, this, -1, null), AckResponseCode.Unimplemented, EmptyMessage.Value);
+                responseDelegate?.Invoke(new ResponseHandlerData(_nextRequestId++, this, -1, null), AckResponseCode.Unimplemented, EmptyMessage.Value);
                 Logging.LogError(LogTag, $"Cannot create request. Request type: {requestType} not registered.");
                 return false;
             }
             if (!_responseHandlers[requestType].IsRequestTypeValid(typeof(TRequest)))
             {
-                responseDelegate.Invoke(new ResponseHandlerData(_nextRequestId++, this, -1, null), AckResponseCode.Unimplemented, EmptyMessage.Value);
+                responseDelegate?.Invoke(new ResponseHandlerData(_nextRequestId++, this, -1, null), AckResponseCode.Unimplemented, EmptyMessage.Value);
                 Logging.LogError(LogTag, $"Cannot create request. Request type: {requestType}, {typeof(TRequest)} is not valid message type.");
                 return false;
             }

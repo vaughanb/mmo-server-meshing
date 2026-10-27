@@ -1,5 +1,6 @@
 ﻿using LiteNetLib.Utils;
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace LiteNetLibManager
@@ -27,42 +28,74 @@ namespace LiteNetLibManager
 
         public abstract Type GetFieldType();
 
-        protected bool CanSync(bool isServer, bool isOwnerClient)
+        protected bool CanSync()
         {
             switch (syncMode)
             {
                 case LiteNetLibSyncFieldMode.ServerToClients:
-                    return isServer;
+                    return IsServer;
                 case LiteNetLibSyncFieldMode.ServerToOwnerClient:
-                    return isServer;
+                    return IsServer;
                 case LiteNetLibSyncFieldMode.ClientMulticast:
-                    return isOwnerClient || isServer;
+                    return IsOwnerClient || IsServer;
             }
             return false;
         }
 
-        protected bool CanSync()
-        {
-            return CanSync(IsServer, IsOwnerClient);
-        }
-
         internal override sealed bool CanSyncFromServer(LiteNetLibPlayer player, bool isBaseLine)
         {
+            if (!CanSendQueuedToClient(player))
+                return false;
             bool isOwner = ConnectionId == player.ConnectionId;
+            bool canSync = false;
+            switch (syncMode)
+            {
+                case LiteNetLibSyncFieldMode.ServerToClients:
+                    canSync = IsServer;
+                    break;
+                case LiteNetLibSyncFieldMode.ServerToOwnerClient:
+                    canSync = isOwner && IsServer;
+                    break;
+                case LiteNetLibSyncFieldMode.ClientMulticast:
+                    canSync = isOwner || IsServer;
+                    break;
+            }
+            if (!canSync)
+            {
+                // Can not sync to the client
+                return false;
+            }
             if (_latestChangeSyncedFromOwner && isOwner)
             {
                 // If value was synced from owner client, then don't sync back to the client
                 return false;
             }
-            return (isBaseLine || _currentRedundancy > 0) && CanSync(IsServer, isOwner) && base.CanSyncFromServer(player, isBaseLine);
+            return (isBaseLine || _currentRedundancy > 0) && base.CanSyncFromServer(player, isBaseLine);
         }
 
         internal override sealed bool CanSyncFromOwnerClient()
         {
+            if (doNotSync)
+                return false;
             switch (syncMode)
             {
                 case LiteNetLibSyncFieldMode.ClientMulticast:
                     return IsOwnerClient || IsServer;
+            }
+            return false;
+        }
+
+        internal override bool CanSendQueuedToClient(LiteNetLibPlayer player)
+        {
+            if (doNotSync)
+                return false;
+            switch (syncMode)
+            {
+                case LiteNetLibSyncFieldMode.ServerToClients:
+                case LiteNetLibSyncFieldMode.ClientMulticast:
+                    return true;
+                case LiteNetLibSyncFieldMode.ServerToOwnerClient:
+                    return ConnectionId == player.ConnectionId;
             }
             return false;
         }
@@ -200,7 +233,7 @@ namespace LiteNetLibManager
                 // For array type, we always consider it is changed, because we don't want to compare each element of the array which may cause performance issue
                 return true;
             }
-            return oldValue == null || !oldValue.Equals(newValue);
+            return !EqualityComparer<TType>.Default.Equals(oldValue, newValue);
         }
 
         public override sealed Type GetFieldType()
@@ -228,14 +261,13 @@ namespace LiteNetLibManager
 
         internal override void ReadSyncData(uint tick, bool initial, NetDataReader reader)
         {
-            TType oldValue = Value;
-            DeserializeValue(reader);
             if (!initial && tick <= _latestReceiveTick)
             {
-                // Don't accept this, revert changes
-                _value = oldValue;
+                DeserializeIgnoredValue(reader);
                 return;
             }
+            TType oldValue = Value;
+            DeserializeValue(reader);
             _latestReceiveTick = tick;
             if (isDebug)
                 Logging.Log(LogTag, $"Read sync data, syncMode {syncMode.ToString()}, connectionId {ConnectionId}, isOwnerClient {IsOwnerClient}, objectId {ObjectId}, tick {tick}, initial {initial}, oldValue {oldValue}, newValue {Value}");
@@ -251,7 +283,14 @@ namespace LiteNetLibManager
             if (type.IsArray)
                 _value = (TType)reader.GetArrayObject(type.GetElementType());
             else
-                _value = (TType)reader.GetValue(type);
+                _value = reader.GetValue<TType>();
+        }
+
+        internal virtual void DeserializeIgnoredValue(NetDataReader reader)
+        {
+            TType currentValue = _value;
+            DeserializeValue(reader);
+            _value = currentValue;
         }
 
         internal virtual void SerializeValue(NetDataWriter writer)
@@ -260,7 +299,7 @@ namespace LiteNetLibManager
             if (type.IsArray)
                 writer.PutArrayObject(type.GetElementType(), Value);
             else
-                writer.PutValue(type, Value);
+                writer.PutValue(Value);
         }
 
         public override string ToString()

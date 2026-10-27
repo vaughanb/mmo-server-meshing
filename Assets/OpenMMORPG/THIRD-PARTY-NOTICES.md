@@ -48,6 +48,41 @@ project's own repository, or from the copyright recorded in the binary itself.
 | Mono.Data.Sqlite | `MMO/Plugins/Mono.Data.Sqlite.dll` | Public domain | Declares "Public Domain"; originates from System.Data.SQLite and ships with Mono, whose class libraries are MIT | [licence](https://github.com/mono/mono/blob/main/LICENSE) |
 | Mono I18N | `MMO/Plugins/I18N.dll, MMO/Plugins/I18N.West.dll` | MIT | Mono class libraries, MIT per the Mono licence | [licence](https://github.com/mono/mono/blob/main/LICENSE) |
 
+## Demo content (`Demo/`)
+
+Every piece of art, animation, sound and music in the demo is either dedicated to the public
+domain under [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) by its authors or was
+made for this project and dedicated to the public domain the same way. None carries an
+attribution, share-alike or non-commercial requirement. Full credits are in
+[`Demo/CREDITS.md`](Demo/CREDITS.md).
+
+### Third-party
+
+| Component | Path | Licence | Author | Source |
+| --- | --- | --- | --- | --- |
+| Universal Base Characters, Modular Character Outfits - Fantasy, Universal Animation Library, Universal Animation Library 2, Stylized Nature MegaKit, Medieval Village MegaKit, Fantasy Props MegaKit, and the animal rigs from Ultimate Animated Animals | `Demo/Art`, `Demo/Animations` | CC0 1.0 | Quaternius | [quaternius.com](https://quaternius.com) |
+| Blue Sky Skybox Pack | `Demo/Art/Sky` | CC0 1.0 | Jettelly | [jettelly.com](https://jettelly.com) |
+| "FX bow&arrow" (#511490), edited as `AimedShot1` | `Demo/Audio` | CC0 1.0 | Lydmakeren | [freesound.org/s/511490](https://freesound.org/s/511490/) |
+| "FX_bow&arrow2.wav" (#511489), edited as `ArrowFire1` | `Demo/Audio` | CC0 1.0 | Lydmakeren | [freesound.org/s/511489](https://freesound.org/s/511489/) |
+| "arrow_.hits_target.wav" (#521242), edited as `ArrowImpact1`-`ArrowImpact3` | `Demo/Audio` | CC0 1.0 | cyoung510 | [freesound.org/s/521242](https://freesound.org/s/521242/) |
+| "Splashing Water.wav" (#241846), edited as `WaterSplash1`-`WaterSplash3` | `Demo/Audio` | CC0 1.0 | rafael45 | [freesound.org/s/241846](https://freesound.org/s/241846/) |
+
+### Made for this project with AI tools
+
+Not third-party components; listed so their origin is on record. Each is dedicated to the
+public domain under CC0 1.0, and the store listing's AI disclosure names the same tools.
+
+| Content | Path | Made with |
+| --- | --- | --- |
+| Sound effects other than the Freesound edits above | `Demo/Audio` | AI audio models |
+| Music: `Theme du Chevalier`, `Ruined Temple`, `Cavernous Droning`, `The Unresolved Path` | `Demo/Audio` | Suno, Pro plan |
+| Horse, deer, border collie and wolf | `Demo/Meshes`, `Demo/Textures` | Tripo, Pro plan |
+| Bow, staff, arrow, quiver, short sword and Viking shield | `Demo/Art/Weapons` | Ludo AI, paid plan |
+| Wayside Shrine | `Demo/Art/Shrine` | Ludo AI, paid plan |
+| Horse saddle | `Demo/Art/Saddle` | Ludo AI, paid plan |
+| Item, skill, attribute and badge icons | `Demo/Textures/Icons` | Ludo AI, paid plan |
+| Menu background, loading screen and title | `Demo/Textures` | Google Gemini |
+
 ## Notes for review
 
 `SerializeRegistrySourceGenerator.dll` ships as a compiled library with no source

@@ -317,6 +317,8 @@ namespace MultiplayerARPG
                     Identity.OnServerSubscribingRemoved();
                 }
             }
+#else
+            await UniTask.CompletedTask;
 #endif
         }
 

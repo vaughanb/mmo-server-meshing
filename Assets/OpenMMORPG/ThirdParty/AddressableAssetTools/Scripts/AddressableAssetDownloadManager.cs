@@ -46,6 +46,19 @@ namespace Insthync.AddressableAssetTools
 
         private async void Start()
         {
+            try
+            {
+                await StartAsync();
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogException(ex);
+                onDepsDownloadError?.Invoke(ex);
+            }
+        }
+
+        private async UniTask StartAsync()
+        {
             await UniTask.Yield();
             onStart?.Invoke();
 
@@ -121,8 +134,15 @@ namespace Insthync.AddressableAssetTools
 
             Debug.Log("Initializing addressable.");
             AsyncOperationHandle<IResourceLocator> initialResourceLocatorHandle = Addressables.InitializeAsync(false);
-            IResourceLocator initialResourceLocator = await initialResourceLocatorHandle.Task;
-            Addressables.Release(initialResourceLocatorHandle);
+            try
+            {
+                await initialResourceLocatorHandle.Task;
+            }
+            finally
+            {
+                if (initialResourceLocatorHandle.IsValid())
+                    Addressables.Release(initialResourceLocatorHandle);
+            }
 
             if (_remoteConfig != null && _remoteConfig.catalogUrls != null)
             {
@@ -135,8 +155,15 @@ namespace Insthync.AddressableAssetTools
                     else
                         url = $"{catalogUrl}&time={System.DateTime.Now.Ticks / System.TimeSpan.TicksPerMillisecond}";
                     AsyncOperationHandle<IResourceLocator> handle = Addressables.LoadContentCatalogAsync(url, false);
-                    IResourceLocator resourceLocator = await handle.Task;
-                    Addressables.Release(handle);
+                    try
+                    {
+                        await handle.Task;
+                    }
+                    finally
+                    {
+                        if (handle.IsValid())
+                            Addressables.Release(handle);
+                    }
                 }
             }
 
@@ -156,7 +183,8 @@ namespace Insthync.AddressableAssetTools
                 Debug.LogError($"Unable to check for catalog updates {ex.Message}\n{ex.StackTrace}");
                 onUnableToCheckForCatalogUpdates.Invoke(checkForCatalogUpdatesHandle.Status, ex);
             }
-            Addressables.Release(checkForCatalogUpdatesHandle);
+            if (checkForCatalogUpdatesHandle.IsValid())
+                Addressables.Release(checkForCatalogUpdatesHandle);
 
             if (catalogToUpdates != null && catalogToUpdates.Count > 0)
             {
@@ -172,8 +200,10 @@ namespace Insthync.AddressableAssetTools
                     Debug.LogError($"Unable to check for catalog updates {ex.Message}\n{ex.StackTrace}");
                     onUnableToUpdateCatalogs.Invoke(catalogToUpdates, updateHandle.Status, ex);
                 }
-                Addressables.Release(updateHandle);
+                if (updateHandle.IsValid())
+                    Addressables.Release(updateHandle);
             }
+            AddressableAssetsManager.ClearResourceLocationCache();
 
             HashSet<object> keys = new HashSet<object>();
             foreach (IResourceLocator resourceLocator in Addressables.ResourceLocators)
@@ -187,13 +217,25 @@ namespace Insthync.AddressableAssetTools
             // Downloads
             Debug.Log("Start assets downloading...");
             TotalCount = 1;
-            await DownloadMany(keys,
-                OnFileSizeRetrieving,
-                OnFileSizeRetrieved,
-                OnDepsDownloading,
-                OnDepsFileDownloading,
-                OnDepsDownloaded,
-                OnDepsDownloadError);
+            try
+            {
+                await DownloadMany(keys,
+                    OnFileSizeRetrieving,
+                    OnFileSizeRetrieved,
+                    OnDepsDownloading,
+                    OnDepsFileDownloading,
+                    OnDepsDownloaded,
+                    OnDepsDownloadError);
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogException(ex);
+                return;
+            }
+            finally
+            {
+                keys.Clear();
+            }
             LoadedCount++;
 
             await UniTask.Yield();
@@ -222,70 +264,83 @@ namespace Insthync.AddressableAssetTools
                 Addressables.Release(loadSettingsHandle);
                 return;
             }
-            Addressables.Release(loadSettingsHandle);
-
-            // Instantiates
-            for (int i = 0; i < settings.InitialObjects.Count; ++i)
+            try
             {
-                AssetReference assetRef = settings.InitialObjects[i];
-                if (assetRef == null)
+                // Instantiates
+                for (int i = 0; i < settings.InitialObjects.Count; ++i)
                 {
-                    Debug.LogWarning($"Null initial object {i}, skipping...");
-                    continue;
-                }
-                object runtimeKey = assetRef.RuntimeKey;
-                Debug.Log($"Initializing {runtimeKey}");
-                AsyncOperationHandle<GameObject> instantiateOp = Addressables.InstantiateAsync(runtimeKey);
-                try
-                {
-                    await instantiateOp.Task;
-                    if (instantiateOp.Status != AsyncOperationStatus.Succeeded)
+                    AssetReference assetRef = settings.InitialObjects[i];
+                    if (assetRef == null)
                     {
-                        onUnableToInitialObject.Invoke(runtimeKey, instantiateOp.Status, instantiateOp.OperationException);
-                        Addressables.Release(assetRef);
+                        Debug.LogWarning($"Null initial object {i}, skipping...");
                         continue;
                     }
-                    Debug.Log($"Initialized {instantiateOp.Result.name}");
-                }
-                catch (System.Exception ex)
-                {
-                    Debug.LogError($"Unable to initialize {runtimeKey} {ex.Message}\n{ex.StackTrace}");
-                    onUnableToInitialObject.Invoke(runtimeKey, instantiateOp.Status, ex);
-                    Addressables.Release(assetRef);
-                }
-            }
-
-            // Warmup shader variant collections
-            for (int i = 0; i < settings.ShaderVariantCollections.Count; ++i)
-            {
-                AssetReferenceShaderVariantCollection svcRef = settings.ShaderVariantCollections[i];
-                if (svcRef == null)
-                {
-                    Debug.LogWarning($"Null shader variant collection {i}, skipping...");
-                    continue;
-                }
-                object runtimeKey = svcRef.RuntimeKey;
-                Debug.Log($"Warming up shader variant collection {runtimeKey}");
-                AsyncOperationHandle<ShaderVariantCollection> loadSvcOp = svcRef.LoadAssetAsync<ShaderVariantCollection>();
-                try
-                {
-                    ShaderVariantCollection svc = await loadSvcOp.Task;
-                    if (loadSvcOp.Status != AsyncOperationStatus.Succeeded)
+                    object runtimeKey = assetRef.RuntimeKey;
+                    Debug.Log($"Initializing {runtimeKey}");
+                    AsyncOperationHandle<GameObject> instantiateOp = Addressables.InstantiateAsync(runtimeKey);
+                    try
                     {
-                        Debug.LogError($"Unable to load shader variant collection {runtimeKey} {loadSvcOp.OperationException.Message}\n{loadSvcOp.OperationException.StackTrace}");
-                        Addressables.Release(svcRef);
+                        await instantiateOp.Task;
+                        if (instantiateOp.Status != AsyncOperationStatus.Succeeded)
+                        {
+                            onUnableToInitialObject.Invoke(runtimeKey, instantiateOp.Status, instantiateOp.OperationException);
+                            if (instantiateOp.IsValid())
+                                Addressables.Release(instantiateOp);
+                            continue;
+                        }
+                        GameObject instance = instantiateOp.Result;
+                        if (instance.GetComponent<AssetReferenceReleaser>() == null)
+                            instance.AddComponent<AssetReferenceReleaser>();
+                        Debug.Log($"Initialized {instance.name}");
+                    }
+                    catch (System.Exception ex)
+                    {
+                        Debug.LogError($"Unable to initialize {runtimeKey} {ex.Message}\n{ex.StackTrace}");
+                        onUnableToInitialObject.Invoke(runtimeKey, instantiateOp.Status, ex);
+                        if (instantiateOp.IsValid())
+                            Addressables.Release(instantiateOp);
+                    }
+                }
+
+                // Warmup shader variant collections
+                for (int i = 0; i < settings.ShaderVariantCollections.Count; ++i)
+                {
+                    AssetReferenceShaderVariantCollection svcRef = settings.ShaderVariantCollections[i];
+                    if (svcRef == null)
+                    {
+                        Debug.LogWarning($"Null shader variant collection {i}, skipping...");
                         continue;
                     }
-                    svc.WarmUp();
-                    Debug.Log($"Warmed up shader variant collection {svc.name}");
-                }
-                catch (System.Exception ex)
-                {
-                    Debug.LogError($"Unable to load shader variant collection {runtimeKey} {ex.Message}\n{ex.StackTrace}");
-                    Addressables.Release(svcRef);
+                    object runtimeKey = svcRef.RuntimeKey;
+                    Debug.Log($"Warming up shader variant collection {runtimeKey}");
+                    AsyncOperationHandle<ShaderVariantCollection> loadSvcOp = svcRef.LoadAssetAsync<ShaderVariantCollection>();
+                    try
+                    {
+                        ShaderVariantCollection svc = await loadSvcOp.Task;
+                        if (loadSvcOp.Status != AsyncOperationStatus.Succeeded)
+                        {
+                            Debug.LogError($"Unable to load shader variant collection {runtimeKey} {loadSvcOp.OperationException}");
+                            continue;
+                        }
+                        svc.WarmUp();
+                        Debug.Log($"Warmed up shader variant collection {svc.name}");
+                    }
+                    catch (System.Exception ex)
+                    {
+                        Debug.LogError($"Unable to load shader variant collection {runtimeKey} {ex.Message}\n{ex.StackTrace}");
+                    }
+                    finally
+                    {
+                        if (loadSvcOp.IsValid())
+                            Addressables.Release(loadSvcOp);
+                    }
                 }
             }
-
+            finally
+            {
+                if (loadSettingsHandle.IsValid())
+                    Addressables.Release(loadSettingsHandle);
+            }
             onEnd?.Invoke();
         }
 
@@ -305,6 +360,7 @@ namespace Insthync.AddressableAssetTools
             onDepsFileDownloading = null;
             onDepsDownloaded?.RemoveAllListeners();
             onDepsDownloaded = null;
+            onDepsDownloadError = null;
             onDownloadedAll?.RemoveAllListeners();
             onDownloadedAll = null;
         }
@@ -353,11 +409,20 @@ namespace Insthync.AddressableAssetTools
         {
             await Download(runtimeKey, onFileSizeRetrieving, onFileSizeRetrieved, onDepsDownloading, onDepsFileDownloading, onDepsDownloaded, onError);
             AsyncOperationHandle<SceneInstance> loadSceneOp = Addressables.LoadSceneAsync(runtimeKey, loadSceneParameters);
-            while (!loadSceneOp.IsDone)
+            try
             {
-                await UniTask.Yield();
+                while (!loadSceneOp.IsDone)
+                    await UniTask.Yield();
+                if (loadSceneOp.Status != AsyncOperationStatus.Succeeded)
+                    throw loadSceneOp.OperationException ?? new System.Exception($"Unable to load addressable scene: {runtimeKey}");
+                return loadSceneOp.Result;
             }
-            return loadSceneOp.Result;
+            catch
+            {
+                if (loadSceneOp.IsValid())
+                    Addressables.Release(loadSceneOp);
+                throw;
+            }
         }
 
         public static async Task<GameObject> DownloadAndInstantiate(
@@ -371,11 +436,20 @@ namespace Insthync.AddressableAssetTools
         {
             await Download(runtimeKey, onFileSizeRetrieving, onFileSizeRetrieved, onDepsDownloading, onDepsFileDownloading, onDepsDownloaded, onError);
             AsyncOperationHandle<GameObject> instantiateOp = Addressables.InstantiateAsync(runtimeKey);
-            while (!instantiateOp.IsDone)
+            try
             {
-                await UniTask.Yield();
+                while (!instantiateOp.IsDone)
+                    await UniTask.Yield();
+                if (instantiateOp.Status != AsyncOperationStatus.Succeeded)
+                    throw instantiateOp.OperationException ?? new System.Exception($"Unable to instantiate addressable asset: {runtimeKey}");
+                return instantiateOp.Result;
             }
-            return instantiateOp.Result;
+            catch
+            {
+                if (instantiateOp.IsValid())
+                    Addressables.Release(instantiateOp);
+                throw;
+            }
         }
 
         public static async Task Download(
@@ -387,58 +461,11 @@ namespace Insthync.AddressableAssetTools
             System.Action onDepsDownloaded,
             System.Action<System.Exception> onError)
         {
-            // Get download size
-            AsyncOperationHandle<long> getSizeOp;
-            try
-            {
-                getSizeOp = Addressables.GetDownloadSizeAsync(runtimeKey);
-                onFileSizeRetrieving?.Invoke();
-                while (!getSizeOp.IsDone)
-                {
-                    await UniTask.Yield();
-                }
-            }
-            catch (System.Exception ex)
-            {
-                Debug.LogException(ex);
-                onError?.Invoke(ex);
-                return;
-            }
-            await UniTask.Yield();
-            long fileSize = getSizeOp.Result;
-            onFileSizeRetrieved.Invoke(fileSize);
-            // Download dependencies
-            if (fileSize > 0)
-            {
-                AsyncOperationHandle downloadOp;
-                try
-                {
-                    downloadOp = Addressables.DownloadDependenciesAsync(runtimeKey);
-                    await UniTask.Yield();
-                    onDepsDownloading?.Invoke();
-                    while (!downloadOp.IsDone)
-                    {
-                        await UniTask.Yield();
-                        float percentageComplete = downloadOp.GetDownloadStatus().Percent;
-                        onDepsFileDownloading?.Invoke((long)(percentageComplete * fileSize), fileSize, percentageComplete);
-                    }
-                }
-                catch (System.Exception ex)
-                {
-                    Debug.LogException(ex);
-                    onError?.Invoke(ex);
-                    return;
-                }
-                await UniTask.Yield();
-                onDepsDownloaded?.Invoke();
-                Addressables.ReleaseInstance(downloadOp);
-            }
-            else
-            {
-                onDepsDownloading?.Invoke();
-                onDepsFileDownloading?.Invoke(0, 0, 1);
-                onDepsDownloaded?.Invoke();
-            }
+            await DownloadInternal(
+                () => Addressables.GetDownloadSizeAsync(runtimeKey),
+                () => Addressables.DownloadDependenciesAsync(runtimeKey),
+                onFileSizeRetrieving, onFileSizeRetrieved, onDepsDownloading,
+                onDepsFileDownloading, onDepsDownloaded, onError);
         }
 
         public static async Task DownloadMany(
@@ -450,57 +477,77 @@ namespace Insthync.AddressableAssetTools
             System.Action onDepsDownloaded,
             System.Action<System.Exception> onError)
         {
-            // Get download size
-            AsyncOperationHandle<long> getSizeOp;
+            await DownloadInternal(
+                () => Addressables.GetDownloadSizeAsync(runtimeKeys),
+                () => Addressables.DownloadDependenciesAsync(runtimeKeys, Addressables.MergeMode.Union),
+                onFileSizeRetrieving, onFileSizeRetrieved, onDepsDownloading,
+                onDepsFileDownloading, onDepsDownloaded, onError);
+        }
+
+        private static async Task DownloadInternal(
+            System.Func<AsyncOperationHandle<long>> getSize,
+            System.Func<AsyncOperationHandle> download,
+            System.Action onFileSizeRetrieving,
+            AddressableAssetFileSizeDelegate onFileSizeRetrieved,
+            System.Action onDepsDownloading,
+            AddressableAssetDownloadProgressDelegate onDepsFileDownloading,
+            System.Action onDepsDownloaded,
+            System.Action<System.Exception> onError)
+        {
             try
             {
-                getSizeOp = Addressables.GetDownloadSizeAsync(runtimeKeys);
                 onFileSizeRetrieving?.Invoke();
-                while (!getSizeOp.IsDone)
+                long fileSize;
+                AsyncOperationHandle<long> getSizeOp = default;
+                try
                 {
-                    await UniTask.Yield();
+                    getSizeOp = getSize();
+                    while (!getSizeOp.IsDone)
+                        await UniTask.Yield();
+                    if (getSizeOp.Status != AsyncOperationStatus.Succeeded)
+                        throw getSizeOp.OperationException ?? new System.Exception("Unable to get addressable download size.");
+                    fileSize = getSizeOp.Result;
                 }
+                finally
+                {
+                    if (getSizeOp.IsValid())
+                        Addressables.Release(getSizeOp);
+                }
+
+                onFileSizeRetrieved?.Invoke(fileSize);
+                onDepsDownloading?.Invoke();
+                if (fileSize > 0)
+                {
+                    AsyncOperationHandle downloadOp = default;
+                    try
+                    {
+                        downloadOp = download();
+                        while (!downloadOp.IsDone)
+                        {
+                            await UniTask.Yield();
+                            if (!downloadOp.IsDone)
+                            {
+                                float percent = Mathf.Clamp01(downloadOp.GetDownloadStatus().Percent);
+                                onDepsFileDownloading?.Invoke((long)(percent * fileSize), fileSize, percent);
+                            }
+                        }
+                        if (downloadOp.Status != AsyncOperationStatus.Succeeded)
+                            throw downloadOp.OperationException ?? new System.Exception("Unable to download addressable dependencies.");
+                    }
+                    finally
+                    {
+                        if (downloadOp.IsValid())
+                            Addressables.Release(downloadOp);
+                    }
+                }
+
+                onDepsFileDownloading?.Invoke(fileSize, fileSize, 1f);
+                onDepsDownloaded?.Invoke();
             }
             catch (System.Exception ex)
             {
-                Debug.LogException(ex);
                 onError?.Invoke(ex);
-                return;
-            }
-            await UniTask.Yield();
-            long fileSize = getSizeOp.Result;
-            onFileSizeRetrieved.Invoke(fileSize);
-            // Download dependencies
-            if (fileSize > 0)
-            {
-                AsyncOperationHandle downloadOp;
-                try
-                {
-                    downloadOp = Addressables.DownloadDependenciesAsync(runtimeKeys, Addressables.MergeMode.Union);
-                    await UniTask.Yield();
-                    onDepsDownloading?.Invoke();
-                    while (!downloadOp.IsDone)
-                    {
-                        await UniTask.Yield();
-                        float percentageComplete = downloadOp.GetDownloadStatus().Percent;
-                        onDepsFileDownloading?.Invoke((long)(percentageComplete * fileSize), fileSize, percentageComplete);
-                    }
-                }
-                catch (System.Exception ex)
-                {
-                    Debug.LogException(ex);
-                    onError?.Invoke(ex);
-                    return;
-                }
-                await UniTask.Yield();
-                onDepsDownloaded?.Invoke();
-                Addressables.ReleaseInstance(downloadOp);
-            }
-            else
-            {
-                onDepsDownloading?.Invoke();
-                onDepsFileDownloading?.Invoke(0, 0, 1);
-                onDepsDownloaded?.Invoke();
+                throw;
             }
         }
     }

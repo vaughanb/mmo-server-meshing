@@ -183,7 +183,7 @@ namespace MultiplayerARPG
 
             // Prepare required data and get damages data
             IWeaponItem weaponItem = weapon.GetWeaponItem();
-            Dictionary<DamageElement, MinMaxFloat> baseDamageAmounts = skill.GetAttackDamages(Entity, skillLevel, isLeftHand);
+            DamageElementMinMaxFloatAmounts baseDamageAmounts = skill.GetAttackDamages(Entity, skillLevel, isLeftHand);
 
             // Calculate move speed rate while doing action at clients and server
             MoveSpeedRateWhileUsingSkill = skill.moveSpeedRateWhileUsingSkill;
@@ -214,7 +214,7 @@ namespace MultiplayerARPG
                 bool fpsModelAvailable = IsClient && fpsModel != null && fpsModel.gameObject.activeSelf;
 
                 // Prepare damage amounts
-                List<Dictionary<DamageElement, MinMaxFloat>> damageAmounts = skill.PrepareDamageAmounts(Entity, isLeftHand, baseDamageAmounts, triggerDurations.Length);
+                List<DamageElementMinMaxFloatAmounts> damageAmounts = skill.PrepareDamageAmounts(Entity, isLeftHand, baseDamageAmounts, triggerDurations.Length);
 
                 // Prepare hit register validation, it will be used later when receive attack start/end events from clients
                 if ((IsServer && !IsOwnerClient) || !IsOwnedByServer)
@@ -461,7 +461,7 @@ namespace MultiplayerARPG
             ApplySkillUsing(validateData.Skill, validateData.SkillLevel, validateData.WeaponHandlingState, validateData.Weapon, data.simulateSeed, data.triggerIndex, validateData.DamageAmounts, data.targetObjectId, data.aimPosition);
         }
 
-        protected virtual void ApplySkillUsing(BaseSkill skill, int skillLevel, WeaponHandlingState weaponHandlingState, CharacterItem weapon, int simulateSeed, byte triggerIndex, List<Dictionary<DamageElement, MinMaxFloat>> damageAmounts, uint targetObjectId, AimPosition aimPosition)
+        protected virtual void ApplySkillUsing(BaseSkill skill, int skillLevel, WeaponHandlingState weaponHandlingState, CharacterItem weapon, int simulateSeed, byte triggerIndex, List<DamageElementMinMaxFloatAmounts> damageAmounts, uint targetObjectId, AimPosition aimPosition)
         {
             if (triggerIndex >= damageAmounts.Count)
             {

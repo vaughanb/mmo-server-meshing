@@ -145,19 +145,18 @@ namespace LiteNetLibManager
             bool done = false;
             AsyncResponseData<TResponse> responseData = default;
             // Create request
-            CreateAndWriteRequest(s_Writer, requestType, request, (requestHandler, responseCode, response) =>
+            if (!CreateAndWriteRequest(s_Writer, requestType, request, (requestHandler, responseCode, response) =>
             {
                 if (!(response is TResponse))
                     response = default(TResponse);
                 responseData = new AsyncResponseData<TResponse>(requestHandler, responseCode, (TResponse)response);
                 done = true;
-            }, millisecondsTimeout, extraSerializer);
+            }, millisecondsTimeout, extraSerializer))
+                return responseData;
             // Send request to server, so connection id will not being used
             SendMessage(0, DeliveryMethod.ReliableUnordered, s_Writer);
             // Wait for response
-            // MESH-EDIT: CE-6 — was `do { await UniTask.Delay(100); } while (!done);` which put a hard 100 ms floor
-            // under EVERY request/response (DB, cluster). Frame-granular wait instead. See Docs/ServerMeshing/DESIGN.md §17
-            await UniTask.WaitUntil(() => done);
+            await UniTask.WaitUntil(() => done); // frame-granular: the 100 ms poll put a floor under every awaited request
             // Return response data
             return responseData;
         }

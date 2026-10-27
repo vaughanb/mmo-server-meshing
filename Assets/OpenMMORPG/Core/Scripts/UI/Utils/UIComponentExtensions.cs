@@ -1,4 +1,5 @@
-﻿using UnityEngine;
+﻿using Cysharp.Threading.Tasks;
+using UnityEngine;
 using UnityEngine.UI;
 
 namespace MultiplayerARPG
@@ -19,6 +20,8 @@ namespace MultiplayerARPG
             if (!image)
                 return;
             image.SetImageSprite(sprite, deactivateIfNoContent, placeHolders);
+#else
+            await UniTask.CompletedTask;
 #endif
         }
 
@@ -39,6 +42,8 @@ namespace MultiplayerARPG
                 return;
             rawImage.gameObject.SetActive(!deactivateIfNoContent || texture != null);
             rawImage.texture = texture;
+#else
+            await UniTask.CompletedTask;
 #endif
         }
 
@@ -56,6 +61,8 @@ namespace MultiplayerARPG
             if (!image)
                 return;
             image.SetImageSprite(sprite, deactivateIfNoContent, placeHolders);
+#else
+            await UniTask.CompletedTask;
 #endif
         }
 
@@ -89,6 +96,8 @@ namespace MultiplayerARPG
             source.clip = clip;
             if (clip != null && uiRoot && uiRoot.enabled)
                 source.Play();
+#else
+            await UniTask.CompletedTask;
 #endif
         }
     }

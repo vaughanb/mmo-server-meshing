@@ -9,17 +9,26 @@ namespace LiteNetLib.Utils
     {
         public static TType GetValue<TType>(this NetDataReader reader)
         {
+            if (BuiltInValueCodec<TType>.Reader != null &&
+                ReaderRegistry.TryGetReader(typeof(TType), out Func<NetDataReader, object> registeredReader) &&
+                registeredReader == BuiltInValueCodec<TType>.BoxedReader)
+                return BuiltInValueCodec<TType>.Reader(reader);
             return (TType)GetValue(reader, typeof(TType));
         }
 
         public static object GetValue(this NetDataReader reader, Type type)
         {
+            Type enumType = null;
             if (type.IsEnum)
+            {
+                enumType = type;
                 type = type.GetEnumUnderlyingType();
+            }
 
             if (ReaderRegistry.TryGetReader(type, out Func<NetDataReader, object> readerFunc))
             {
-                return readerFunc(reader);
+                object value = readerFunc(reader);
+                return enumType == null ? value : Enum.ToObject(enumType, value);
             }
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
@@ -132,7 +141,7 @@ namespace LiteNetLib.Utils
 
         public static TValue[] GetArrayExtension<TValue>(this NetDataReader reader)
         {
-            int count = reader.GetInt();
+            int count = NetDataCollectionLimits.ReadCount(reader);
             TValue[] result = new TValue[count];
             for (int i = 0; i < count; ++i)
             {
@@ -143,7 +152,7 @@ namespace LiteNetLib.Utils
 
         public static object GetArrayObject(this NetDataReader reader, Type type)
         {
-            int count = reader.GetInt();
+            int count = NetDataCollectionLimits.ReadCount(reader);
             Array array = Array.CreateInstance(type, count);
             for (int i = 0; i < count; ++i)
             {
@@ -154,7 +163,7 @@ namespace LiteNetLib.Utils
 
         public static List<TValue> GetList<TValue>(this NetDataReader reader)
         {
-            int count = reader.GetInt();
+            int count = NetDataCollectionLimits.ReadCount(reader);
             List<TValue> result = new List<TValue>();
             for (int i = 0; i < count; ++i)
             {
@@ -165,7 +174,7 @@ namespace LiteNetLib.Utils
 
         public static Dictionary<TKey, TValue> GetDictionary<TKey, TValue>(this NetDataReader reader)
         {
-            int count = reader.GetInt();
+            int count = NetDataCollectionLimits.ReadCount(reader);
             Dictionary<TKey, TValue> result = new Dictionary<TKey, TValue>();
             for (int i = 0; i < count; ++i)
             {

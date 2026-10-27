@@ -7,9 +7,8 @@ namespace OpenMMORPG.Setup
     /// Imports the project settings the kit expects: input, physics, tags and layers,
     /// quality and time.
     ///
-    /// These settings ship inside the kit rather than only in the installer package, so
-    /// that anyone who imports the kit on its own, for example from the Asset Store,
-    /// still gets the option instead of a project running on Unity's defaults.
+    /// These settings ship inside the kit so that a project importing it, for example
+    /// from the Asset Store, is not left running on Unity's defaults.
     /// </summary>
     public static class ProjectSettingsInstaller
     {
@@ -27,7 +26,7 @@ namespace OpenMMORPG.Setup
             "ProjectSettings/TimeManager.asset",
         };
 
-        [MenuItem("Open MMORPG/Install/Import Project Settings", false, -1000)]
+        [MenuItem("Tools/Open MMORPG/Install/Import Project Settings", false, -1000)]
         private static void ImportProjectSettings()
         {
             string path = FindArchive();

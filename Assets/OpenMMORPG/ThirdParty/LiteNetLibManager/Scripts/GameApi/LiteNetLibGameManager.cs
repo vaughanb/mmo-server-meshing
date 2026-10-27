@@ -28,6 +28,8 @@ namespace LiteNetLibManager
         {
             public LiteNetLibElementInfo info;
             public NetDataReader reader;
+            internal int payloadLength;
+            internal double expiresAt;
         }
 
         [Header("Game manager configs")]
@@ -123,6 +125,7 @@ namespace LiteNetLibManager
 
         protected override void OnClientUpdate(LogicUpdater updater)
         {
+            PruneExpiredPendingRpcs(Time.realtimeSinceStartupAsDouble);
             if (!IsServer)
                 ProceedClientGameStateSync(updater.LocalTick);
             // Send ping from client
@@ -226,6 +229,7 @@ namespace LiteNetLibManager
 
             if (isOnline)
             {
+                ClearPendingRpcs();
                 foreach (LiteNetLibPlayer player in Players.Values)
                 {
                     player.IsReady = false;
@@ -246,14 +250,24 @@ namespace LiteNetLibManager
             if (serverSceneInfo.isAddressable)
             {
                 // Download the scene
-                await AddressableAssetDownloadManager.Download(
-                    serverSceneInfo.addressableKey,
-                    Assets.onSceneFileSizeRetrieving.Invoke,
-                    Assets.onSceneFileSizeRetrieved.Invoke,
-                    Assets.onSceneDepsDownloading.Invoke,
-                    Assets.onSceneDepsFileDownloading.Invoke,
-                    Assets.onSceneDepsDownloaded.Invoke,
-                    null);
+                try
+                {
+                    await AddressableAssetDownloadManager.Download(
+                        serverSceneInfo.addressableKey,
+                        Assets.onSceneFileSizeRetrieving.Invoke,
+                        Assets.onSceneFileSizeRetrieved.Invoke,
+                        Assets.onSceneDepsDownloading.Invoke,
+                        Assets.onSceneDepsFileDownloading.Invoke,
+                        Assets.onSceneDepsDownloaded.Invoke,
+                        null);
+                }
+                catch (Exception ex)
+                {
+                    Logging.LogError($"Unable to download addressable scene `{serverSceneInfo.addressableKey}`: {ex}");
+                    LoadingServerScenes.RemoveAt(0);
+                    Assets.onLoadSceneFail.Invoke();
+                    return;
+                }
                 await AddressableAssetsManager.UnloadAddressableScenes();
                 AsyncOperationHandle<SceneInstance> addressableAsyncOp = Addressables.LoadSceneAsync(
                     serverSceneInfo.addressableKey,
@@ -270,6 +284,10 @@ namespace LiteNetLibManager
                 {
                     await addressableAsyncOp.Result.ActivateAsync();
                     sceneLoaded = true;
+                }
+                else if (addressableAsyncOp.IsValid())
+                {
+                    Addressables.Release(addressableAsyncOp);
                 }
             }
             else
@@ -341,7 +359,16 @@ namespace LiteNetLibManager
                     Assets.onLoadAdditiveSceneStart.Invoke(LoadedAdditiveScenesCount, TotalAdditiveScensCount);
                     for (int j = 0; j < listOfLoaders.Count; ++j)
                     {
-                        await listOfLoaders[j].LoadAll(this, serverSceneInfo.isAddressable ? serverSceneInfo.addressableKey : serverSceneInfo.sceneName, isOnline);
+                        try
+                        {
+                            await listOfLoaders[j].LoadAll(this, serverSceneInfo.isAddressable ? serverSceneInfo.addressableKey : serverSceneInfo.sceneName, isOnline);
+                        }
+                        catch (Exception ex)
+                        {
+                            Logging.LogError($"Unable to load additive scene: {ex}");
+                            Assets.onLoadSceneFail.Invoke();
+                            return;
+                        }
                     }
                     Assets.onLoadAdditiveSceneFinish.Invoke(LoadedAdditiveScenesCount, TotalAdditiveScensCount);
                 }
@@ -460,7 +487,7 @@ namespace LiteNetLibManager
             RttCalculator.Reset();
             _updatingClientSyncElements.Clear();
             _updatingServerSyncElements.Clear();
-            _pendingRpcs.Clear();
+            ClearPendingRpcs();
 
             if (!doNotEnterGameOnConnect)
                 SendClientEnterGame();
@@ -476,7 +503,7 @@ namespace LiteNetLibManager
             RttCalculator.Reset();
             _updatingClientSyncElements.Clear();
             _updatingServerSyncElements.Clear();
-            _pendingRpcs.Clear();
+            ClearPendingRpcs();
 
             string activeSceneName = SceneManager.GetActiveScene().name;
 #if !DISABLE_ADDRESSABLES
@@ -506,6 +533,7 @@ namespace LiteNetLibManager
         public override void OnStopServer()
         {
             base.OnStopServer();
+            ClearPendingRpcs();
             ServerSceneInfo = null;
             Players.Clear();
             Assets.Clear();
@@ -515,6 +543,7 @@ namespace LiteNetLibManager
         public override void OnStopClient()
         {
             base.OnStopClient();
+            ClearPendingRpcs();
             if (!IsServer)
             {
                 Players.Clear();
@@ -854,13 +883,7 @@ namespace LiteNetLibManager
             else
             {
                 // No spawned entity yet, store to pending collection, then processs later when it was spawned
-                byte[] pendingRpcData = new byte[messageHandler.Reader.AvailableBytes];
-                Buffer.BlockCopy(messageHandler.Reader.RawData, messageHandler.Reader.Position, pendingRpcData, 0, messageHandler.Reader.AvailableBytes);
-                _pendingRpcs.Add(new PendingRpcData()
-                {
-                    info = info,
-                    reader = new NetDataReader(pendingRpcData),
-                });
+                QueuePendingRpc(info, messageHandler.Reader, Time.realtimeSinceStartupAsDouble);
             }
         }
 

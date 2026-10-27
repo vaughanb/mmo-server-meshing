@@ -107,7 +107,7 @@ namespace MultiplayerARPG
         protected readonly ConcurrentDictionary<uint, UITextKeys> _clientReadyRequestResponseMessages = new ConcurrentDictionary<uint, UITextKeys>();
         protected readonly ConcurrentDictionary<uint, IEntityMovementDataHandler> _entityMovementDataHandlers = new ConcurrentDictionary<uint, IEntityMovementDataHandler>();
         public ConcurrentDictionary<uint, IEntityMovementDataHandler> EntityMovementDataHandlers => _entityMovementDataHandlers;
-        // MESH-EDIT: CE-12 (space team kit patch #9): the handlers this tick's send pass wrote; their one-shot flags are consumed after its last player
+        // The handlers this tick's send pass wrote; their one-shot flags are consumed after its last player
         protected readonly EntityMovementServerStateFlagsPass _serverStateFlagsPass = new EntityMovementServerStateFlagsPass();
 
         protected override void Awake()
@@ -598,7 +598,7 @@ namespace MultiplayerARPG
                 uint objectId = reader.GetPackedUInt();
                 int dataLength = reader.GetInt();
                 int positionBeforeRead = reader.Position;
-                // MESH-EDIT: CE-13 (space team kit patch #10): every state resumes at its length (ReadServerEntityState),
+                // Every state resumes at its length (ReadServerEntityState),
                 // so a length the packet can't hold leaves nothing after it to trust (a negative one would seek back
                 // on every state)
                 if (dataLength < 0 || dataLength > reader.AvailableBytes)
@@ -614,7 +614,7 @@ namespace MultiplayerARPG
                     continue;
                 }
 
-                // MESH-EDIT: CE-13 (space team kit patch #10): resumes at the state's end after every read, not only after a throw
+                // Resumes at the state's end after every read, not only after a throw
                 if (!ReadServerEntityState(dataHandler, peerTimestamp, reader, dataLength))
                 {
                     if (LogWarn) Logging.LogWarning(LogTag, $"Unable to read entity movement state properly, error occurs while reading: {objectId}.");
@@ -623,11 +623,10 @@ namespace MultiplayerARPG
         }
 
         /// <summary>
-        /// MESH-EDIT: CE-13 (space team kit patch #10): large-systems 0F item 10 (KIT_AUDIT B9); the same patch is in
-        /// the server-meshing add-on's kit copy. Reads one server state through its handler and always leaves the
-        /// reader <paramref name="dataLength"/> bytes after where the state starts, whether the handler read fewer
-        /// bytes, more, or threw. Stock code re-seeked only after a throw, so a handler that misread its state
-        /// misread every state after it. False when the handler threw.
+        /// Reads one server state through its handler and always leaves the reader <paramref name="dataLength"/>
+        /// bytes after where the state starts, whether the handler read fewer bytes, more, or threw. The reader
+        /// used to be re-seeked only after a throw, so a handler that misread its state misread every state
+        /// after it. False when the handler threw.
         /// </summary>
         public static bool ReadServerEntityState(IEntityMovementDataHandler dataHandler, long peerTimestamp, NetDataReader reader, int dataLength)
         {
@@ -701,7 +700,7 @@ namespace MultiplayerARPG
 
             int tempLastPosition;
 
-            // MESH-EDIT: CE-12 (space team kit patch #9): one-shot flags reach every player, then are consumed once
+            // One-shot flags reach every player, then are consumed once
             _serverStateFlagsPass.Begin();
             foreach (KeyValuePair<long, LiteNetLibPlayer> playerKvp in Players)
             {
@@ -734,7 +733,7 @@ namespace MultiplayerARPG
 
                     if (!dataHandler.WriteServerState(writeTimestamp, EntityMovementDataBuffers.StateDataWriter, out bool shouldSendReliably))
                         continue;
-                    _serverStateFlagsPass.Record(dataHandler); // MESH-EDIT: CE-12 (space team kit patch #9)
+                    _serverStateFlagsPass.Record(dataHandler);
                     // Increase data writing counter
                     if (shouldSendReliably)
                     {
@@ -796,7 +795,7 @@ namespace MultiplayerARPG
                     }
                 }
             }
-            _serverStateFlagsPass.ConsumeAll(); // MESH-EDIT: CE-12 (space team kit patch #9)
+            _serverStateFlagsPass.ConsumeAll();
         }
         internal void SendServerEntityMovementStateJob(long writeTimestamp)
         {
@@ -817,7 +816,7 @@ namespace MultiplayerARPG
             NativeList<MovementResult> movementEnttitiesDataResults;
             NativeHashMap<uint, byte> ModesResults;
 
-            // MESH-EDIT: CE-12 (space team kit patch #9): one-shot flags reach every player, then are consumed once
+            // One-shot flags reach every player, then are consumed once
             _serverStateFlagsPass.Begin();
             foreach (LiteNetLibPlayer player in Players.Values)
             {
@@ -865,7 +864,7 @@ namespace MultiplayerARPG
                         continue;
 
                     MovementData movementData = dataHandler.CreateMovementData(out List<EntityMovementForceApplier> forceAppliers);
-                    _serverStateFlagsPass.Record(dataHandler); // MESH-EDIT: CE-12 (space team kit patch #9)
+                    _serverStateFlagsPass.Record(dataHandler);
                     movementDatas[objectId] = movementData;
                     forceApplyers[objectId] = forceAppliers;
                 }
@@ -979,7 +978,7 @@ namespace MultiplayerARPG
 #endif
                 }
             }
-            _serverStateFlagsPass.ConsumeAll(); // MESH-EDIT: CE-12 (space team kit patch #9)
+            _serverStateFlagsPass.ConsumeAll();
         }
 
         public virtual void InitPrefabs()

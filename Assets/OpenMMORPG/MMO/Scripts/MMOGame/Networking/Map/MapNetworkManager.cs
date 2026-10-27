@@ -68,7 +68,7 @@ namespace MultiplayerARPG.MMO
         /// channel and map; a subclass that serves one channel's map from several processes (server meshing) returns
         /// the channel the rows belong to. Used at every building database site; nothing else reads it.
         /// </summary>
-        protected virtual string BuildingPersistenceChannelId => ChannelId; // MESH-EDIT: CE-10 — the add-on persists a split family's buildings under its base cell's channel. See Docs/ServerMeshing/DESIGN.md §17
+        protected virtual string BuildingPersistenceChannelId => ChannelId;
         public string ClusterServerAddress { get { return clusterServerAddress; } }
         public int ClusterServerPort { get { return clusterServerPort; } }
         public string AppAddress { get { return publicAddress; } }
@@ -104,8 +104,6 @@ namespace MultiplayerARPG.MMO
         private readonly ConcurrentDictionary<string, CentralServerPeerInfo> _mapServerConnectionIdsBySceneName = new ConcurrentDictionary<string, CentralServerPeerInfo>();
         private readonly ConcurrentDictionary<string, CentralServerPeerInfo> _instanceMapServerConnectionIdsByInstanceId = new ConcurrentDictionary<string, CentralServerPeerInfo>();
         private readonly ConcurrentDictionary<string, SocialCharacterData> _socialCharactersByUserId = new ConcurrentDictionary<string, SocialCharacterData>();
-        // MESH-EDIT: CE-8 — was private; a meshed cell swaps the pending spawn data for an already-standing ghost entity
-        // so the kit's own "already spawned entity" ready path promotes it in place. See Docs/ServerMeshing/DESIGN.md §17
         protected readonly ConcurrentDictionary<string, IPlayerCharacterData> _pendingSpawnPlayerCharactersByUserId = new ConcurrentDictionary<string, IPlayerCharacterData>();
         // Database operations
         private readonly ConcurrentHashSet<StorageId> _loadingStorageIds = new ConcurrentHashSet<StorageId>();
@@ -266,7 +264,7 @@ namespace MultiplayerARPG.MMO
                 if (buildingEntity == null) continue;
                 await DatabaseClient.UpdateBuildingAsync(new UpdateBuildingReq()
                 {
-                    ChannelId = BuildingPersistenceChannelId, // MESH-EDIT: CE-10
+                    ChannelId = BuildingPersistenceChannelId,
                     MapName = CurrentMapInfo.Id,
                     BuildingData = buildingEntity.CloneTo(new BuildingSaveData())
                 });
@@ -369,7 +367,7 @@ namespace MultiplayerARPG.MMO
                     {
                         buildingsResp = await DatabaseClient.GetBuildingsAsync(new GetBuildingsReq()
                         {
-                            ChannelId = BuildingPersistenceChannelId, // MESH-EDIT: CE-10
+                            ChannelId = BuildingPersistenceChannelId,
                             MapName = CurrentMapInfo.Id,
                         });
                     } while (!buildingsResp.IsSuccess);
@@ -416,7 +414,7 @@ namespace MultiplayerARPG.MMO
                         continue;
                     initialBuildingTasks.Add(DatabaseClient.CreateBuildingAsync(new CreateBuildingReq()
                     {
-                        ChannelId = BuildingPersistenceChannelId, // MESH-EDIT: CE-10
+                        ChannelId = BuildingPersistenceChannelId,
                         MapName = CurrentMapInfo.Id,
                         BuildingData = initializingBuilding.CloneTo(new BuildingSaveData()),
                     }));

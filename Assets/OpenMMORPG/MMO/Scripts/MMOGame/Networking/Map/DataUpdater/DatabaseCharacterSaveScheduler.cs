@@ -103,6 +103,9 @@ namespace MultiplayerARPG.MMO
                     _pending.Add(characterId, pending);
                 }
 
+                // A waiting save must keep its flags, or tables only it marked are never written
+                if (pending.Request.CharacterData != null)
+                    request = MergeRequests(pending.Request, request);
                 pending.Request = request;
                 pending.Version++;
 
@@ -226,6 +229,8 @@ namespace MultiplayerARPG.MMO
                 pending.IsQueued = false;
                 request = pending.Request;
                 version = pending.Version;
+                // Requests arriving during the save collect only the flags changed after it
+                pending.Request = default;
             }
 
             bool success = await _owner.InternalPersistCharacterUpdate(request);
@@ -239,6 +244,10 @@ namespace MultiplayerARPG.MMO
 
                 if (!success)
                 {
+                    // Put the unsaved flags back so the retry still writes them
+                    pending.Request = pending.Request.CharacterData != null
+                        ? MergeRequests(request, pending.Request)
+                        : request;
                     pending.NextEligibleSaveAt = GetUtcSeconds() + _retryDelaySeconds;
                     if (!pending.IsQueued)
                     {
@@ -269,6 +278,17 @@ namespace MultiplayerARPG.MMO
             }
 
             return true;
+        }
+
+        private static UpdateCharacterReq MergeRequests(UpdateCharacterReq older, UpdateCharacterReq newer)
+        {
+            // The newer snapshot has the latest data for every table, it only needs the older flags
+            if (older.State.Has(TransactionUpdateCharacterState.Summons) &&
+                !newer.State.Has(TransactionUpdateCharacterState.Summons))
+                newer.SummonBuffs = older.SummonBuffs;
+            newer.State |= older.State;
+            newer.DeleteStorageReservation |= older.DeleteStorageReservation;
+            return newer;
         }
 
         private int GetLaneIndex(string characterId)

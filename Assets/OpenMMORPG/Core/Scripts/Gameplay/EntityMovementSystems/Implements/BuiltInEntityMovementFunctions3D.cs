@@ -7,7 +7,7 @@ using UnityEngine.AI;
 
 namespace MultiplayerARPG
 {
-    public partial class BuiltInEntityMovementFunctions3D : IEntityMovementDataHandler, IEntityMovementServerStateFlags // MESH-EDIT: CE-12 (space team kit patch #9)
+    public partial class BuiltInEntityMovementFunctions3D : IEntityMovementDataHandler, IEntityMovementServerStateFlags
     {
         private const int FORCE_GROUNDED_FRAMES_AFTER_TELEPORT = 3;
         private const float MIN_DISTANCE_TO_SIMULATE_MOVEMENT = 0.01f;
@@ -234,9 +234,8 @@ namespace MultiplayerARPG
         {
             NavPaths = null;
             _simulatingKeyMovement = false;
-            // MESH-EDIT: CE-9 — a re-owned entity must not keep applying the PREVIOUS owner's last accepted position
-            // (it snapped a promoted character back to where its old client left it, and rejected the new client's
-            // first syncs as "invalid timestamp"). See Docs/ServerMeshing/DESIGN.md §17
+            // A re-owned entity must not keep applying the previous owner's last accepted position: it snapped the
+            // entity back to where the old client left it and rejected the new client's first syncs as an invalid timestamp.
             _acceptedPositionTimestamp = 0;
             _isServerWaitingTeleportConfirm = false;
         }
@@ -1326,7 +1325,7 @@ namespace MultiplayerARPG
             movementData.shouldSendReliably = shouldSendReliably;
             forceAppliers = _movementForceAppliers;
 
-            // MESH-EDIT: CE-12 (space team kit patch #9): called once per receiver, so the one-shot flags stay
+            // Called once per receiver, so the one-shot flags stay
             // set for every receiver of this tick; the send loop consumes them once (ConsumeServerStateFlags)
 
             return movementData;
@@ -1370,12 +1369,12 @@ namespace MultiplayerARPG
             }
 
             Entity.ServerWriteSyncTransform3D(_movementForceAppliers, writer);
-            // MESH-EDIT: CE-12 (space team kit patch #9): called once per receiver, so the one-shot flags stay
+            // Called once per receiver, so the one-shot flags stay
             // set for every receiver of this tick; the send loop consumes them once (ConsumeServerStateFlags)
             return true;
         }
 
-        // MESH-EDIT: CE-12 (space team kit patch #9): IEntityMovementServerStateFlags. The owner's teleport
+        // IEntityMovementServerStateFlags. The owner's teleport
         // confirm (_isServerWaitingTeleportConfirm, _isClientConfirmingTeleport) is not a one-shot flag.
         public void ConsumeServerStateFlags()
         {
@@ -1400,7 +1399,7 @@ namespace MultiplayerARPG
 
         public void ReadServerStateAtClient(long peerTimestamp, NetDataReader reader)
         {
-            // MESH-EDIT: CE-13 (space team kit patch #10): every byte is read here, synchronously, so a read error reaches
+            // Every byte is read here, synchronously, so a read error reaches
             // the kit's catch (BaseGameNetworkManager.ReadServerEntityState). The apply may await the teleport
             // preparer, so it runs apart and logs its own exceptions: this reader was async void, whose exceptions
             // never reached that catch.
@@ -1688,7 +1687,7 @@ namespace MultiplayerARPG
                 _isClientConfirmingTeleport = true;
             _lastTeleportFrame = Time.frameCount;
             _previousPosition = EntityTransform.position;
-            // MESH-EDIT: CE-12 (space team kit patch #9; their KIT_AUDIT B10): restart interpolation at the destination, as the
+            // Restart interpolation at the destination, as the
             // snap in ReadServerStateAtClient does. Otherwise UpdateInterpolate drags a remote copy back to its last
             // pre-teleport state, and the server checks (and, while dead, clamps) the owner's confirmation against it.
             _startInterpPosition = position;

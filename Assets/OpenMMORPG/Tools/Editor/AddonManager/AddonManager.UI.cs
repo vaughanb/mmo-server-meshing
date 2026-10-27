@@ -23,12 +23,6 @@ namespace OpenMMORPG.AddonManager
         private Vector2 detailScrollPosition;
 		private void OnGUI()
 		{
-			if (AddonAnalytics.ShowWelcome)
-			{
-				WelcomeDialog();
-				return;
-			}
-
 			if (uiManifestError != null)
 			{
 				DrawCenteredBox(() =>
@@ -375,61 +369,6 @@ namespace OpenMMORPG.AddonManager
 			GUILayout.Space(8);
 			EditorGUILayout.EndScrollView();
 			EditorGUILayout.EndVertical();
-		}
-
-		/// <summary>
-		/// Draws welcome dialog to collect analytics consent
-		/// </summary>
-	    private bool analyticsToggle;
-		private void WelcomeDialog()
-		{
-			DrawCenteredBox(() =>
-			{
-				EditorGUILayout.BeginVertical();
-				if (logoIcon != null)
-				{
-					EditorGUILayout.BeginHorizontal();
-					GUILayout.FlexibleSpace();
-					GUILayout.Label(logoIcon, GUILayout.Width(64), GUILayout.Height(64));
-					GUILayout.FlexibleSpace();
-					EditorGUILayout.EndHorizontal();
-				}
-				GUILayout.Label("Welcome to Addon Manager", HeaderStyle);
-
-				string welcomeMessage = 
-					"OpenMMORPG Addon Manager collects completely anonymous usage statistics (addon downloads) to highlight the most popular addons in the community.\n\n" +
-					"No personal or project data is ever collected or transmitted.\n\n" +
-					"Help the community discover the best addons!";
-				welcomeMessage.Replace("\\n\\n", "\n\n");
-				GUILayout.Label(welcomeMessage, ParagraphStyle);
-
-				GUILayout.Space(10);
-
-				EditorGUILayout.BeginHorizontal();
-				bool newToggle = EditorGUILayout.Toggle(analyticsToggle, GUILayout.Width(20));
-				EditorGUILayout.LabelField(
-					"Help improve OpenMMORPG Addon Manager by sending anonymous usage data",
-					EditorStyles.wordWrappedLabel,
-					GUILayout.ExpandWidth(true)
-				);
-				EditorGUILayout.EndHorizontal();
-
-				if (newToggle != analyticsToggle)
-				{
-					analyticsToggle = newToggle;
-					AddonAnalytics.SetConsent(newToggle);
-				}
-
-				GUILayout.Space(20);
-
-				if (GUILayout.Button("Continue", GUILayout.Height(30)))
-				{
-					EditorPrefs.SetBool(AddonAnalytics.WelcomeScreen, true);
-					Repaint();
-				}
-
-				EditorGUILayout.EndVertical();
-			}, 350f, 350f);
 		}
 
 		/// <summary>

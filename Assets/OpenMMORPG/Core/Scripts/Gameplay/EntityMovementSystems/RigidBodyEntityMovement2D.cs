@@ -125,8 +125,8 @@ namespace MultiplayerARPG
         public override void OnSetOwnerClient(bool isOwnerClient)
         {
             NavPaths = null;
-            // MESH-EDIT: CE-9 — a re-owned entity must not keep applying the PREVIOUS owner's last accepted position
-            // (same fix as BuiltInEntityMovementFunctions3D). See Docs/ServerMeshing/DESIGN.md §17
+            // A re-owned entity must not keep applying the previous owner's last accepted position (same fix as
+            // BuiltInEntityMovementFunctions3D).
             _acceptedPositionTimestamp = 0;
             _isServerWaitingTeleportConfirm = false;
         }
@@ -604,7 +604,7 @@ namespace MultiplayerARPG
 
         public void ReadServerStateAtClient(long peerTimestamp, NetDataReader reader)
         {
-            // MESH-EDIT: CE-13 (space team kit patch #10): every byte is read here, synchronously, so a read error reaches
+            // Every byte is read here, synchronously, so a read error reaches
             // the kit's catch (BaseGameNetworkManager.ReadServerEntityState). The apply may await the teleport
             // preparer, so it runs apart and logs its own exceptions: this reader was async void, whose exceptions
             // never reached that catch.

@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using UnityEngine;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
@@ -75,6 +75,7 @@ namespace Insthync.CameraAndInput
             if (s_validButtons.TryGetValue(name, out bool valid))
                 return valid;
 
+#if ENABLE_LEGACY_INPUT_MANAGER
             try
             {
                 Input.GetButton(name);
@@ -86,6 +87,10 @@ namespace Insthync.CameraAndInput
                 s_validButtons[name] = false;
                 return false;
             }
+#else
+            s_validButtons[name] = false;
+            return false;
+#endif
         }
 
         public static bool IsValidAxis(string name)
@@ -93,6 +98,7 @@ namespace Insthync.CameraAndInput
             if (s_validAxes.TryGetValue(name, out bool valid))
                 return valid;
 
+#if ENABLE_LEGACY_INPUT_MANAGER
             try
             {
                 Input.GetAxis(name);
@@ -104,6 +110,10 @@ namespace Insthync.CameraAndInput
                 s_validAxes[name] = false;
                 return false;
             }
+#else
+            s_validAxes[name] = false;
+            return false;
+#endif
         }
 
         public static void UpdateMobileInputDragging()
@@ -187,7 +197,26 @@ namespace Insthync.CameraAndInput
 #if ENABLE_INPUT_SYSTEM
                 if (TryGetInputAction(name, out InputAction inputAction))
                 {
-                    float axis = inputAction.ReadValue<float>();
+                    float axis = 0f;
+                    if (inputAction.expectedControlType == "Vector2")
+                    {
+                        Vector2 v = inputAction.ReadValue<Vector2>();
+                        if (name == "Horizontal" || name == "Mouse X")
+                            axis = v.x;
+                        else if (name == "Vertical" || name == "Mouse Y")
+                            axis = v.y;
+                    }
+                    else
+                    {
+                        axis = inputAction.ReadValue<float>();
+                    }
+
+                    // Guard against raw unscaled mouse scroll wheel in New Input System (which delivers 120 per notch)
+                    if (name == "Mouse ScrollWheel" && Mathf.Abs(axis) >= 10.0f)
+                    {
+                        axis *= 0.02f;
+                    }
+
                     if (raw)
                     {
                         if (axis > 0f)
@@ -197,6 +226,70 @@ namespace Insthync.CameraAndInput
                     }
                     if (Mathf.Abs(axis) > 0.00001f)
                         return axis;
+                }
+                else
+                {
+                    // Fallback to Move or Look composite Vector2 actions if individual axis action is not present
+                    if ((name == "Horizontal" || name == "Vertical") && TryGetInputAction("Move", out InputAction moveAction))
+                    {
+                        Vector2 v = moveAction.ReadValue<Vector2>();
+                        float axis = name == "Horizontal" ? v.x : v.y;
+                        if (raw)
+                        {
+                            if (axis > 0f) axis = 1f;
+                            if (axis < 0f) axis = -1f;
+                        }
+                        if (Mathf.Abs(axis) > 0.00001f)
+                            return axis;
+                    }
+                    else if ((name == "Mouse X" || name == "Mouse Y") && TryGetInputAction("Look", out InputAction lookAction))
+                    {
+                        Vector2 v = lookAction.ReadValue<Vector2>();
+                        float axis = name == "Mouse X" ? v.x : v.y;
+                        if (raw)
+                        {
+                            if (axis > 0f) axis = 1f;
+                            if (axis < 0f) axis = -1f;
+                        }
+                        if (Mathf.Abs(axis) > 0.00001f)
+                            return axis;
+                    }
+
+                    // Direct hardware device fallback if no InputAction is bound
+                    if (name == "Horizontal")
+                    {
+                        float axis = 0f;
+                        if (GetKey(KeyCode.D) || GetKey(KeyCode.RightArrow)) axis += 1f;
+                        if (GetKey(KeyCode.A) || GetKey(KeyCode.LeftArrow)) axis -= 1f;
+                        if (Mathf.Abs(axis) > 0.00001f)
+                            return axis;
+                    }
+                    else if (name == "Vertical")
+                    {
+                        float axis = 0f;
+                        if (GetKey(KeyCode.W) || GetKey(KeyCode.UpArrow)) axis += 1f;
+                        if (GetKey(KeyCode.S) || GetKey(KeyCode.DownArrow)) axis -= 1f;
+                        if (Mathf.Abs(axis) > 0.00001f)
+                            return axis;
+                    }
+                    else if (name == "Mouse X" && Mouse.current != null)
+                    {
+                        float delta = Mouse.current.delta.x.ReadValue() * 0.1f;
+                        if (Mathf.Abs(delta) > 0.00001f)
+                            return delta;
+                    }
+                    else if (name == "Mouse Y" && Mouse.current != null)
+                    {
+                        float delta = Mouse.current.delta.y.ReadValue() * 0.1f;
+                        if (Mathf.Abs(delta) > 0.00001f)
+                            return delta;
+                    }
+                    else if (name == "Mouse ScrollWheel" && Mouse.current != null)
+                    {
+                        float scroll = Mouse.current.scroll.ReadValue().y * 0.02f;
+                        if (Mathf.Abs(scroll) > 0.00001f)
+                            return scroll;
+                    }
                 }
 #endif
 
@@ -367,9 +460,9 @@ namespace Insthync.CameraAndInput
                     if (Input.GetButton(name))
                         return true;
                 }
+#endif
                 if (IsKeyFromSettingActivated(name, ButtonEvent.Pressed))
                     return true;
-#endif
             }
 
             if (IsUseMobileInput())
@@ -421,9 +514,9 @@ namespace Insthync.CameraAndInput
                     if (Input.GetButtonDown(name))
                         return true;
                 }
+#endif
                 if (IsKeyFromSettingActivated(name, ButtonEvent.Down))
                     return true;
-#endif
             }
 
             if (IsUseMobileInput())
@@ -476,9 +569,9 @@ namespace Insthync.CameraAndInput
                     if (Input.GetButtonUp(name))
                         return true;
                 }
+#endif
                 if (IsKeyFromSettingActivated(name, ButtonEvent.Up))
                     return true;
-#endif
             }
 
             if (IsUseMobileInput())
@@ -571,8 +664,8 @@ namespace Insthync.CameraAndInput
         {
 #if ENABLE_INPUT_SYSTEM
             if (Application.isMobilePlatform)
-                return Touchscreen.current.primaryTouch.position.value;
-            return Mouse.current.position.value;
+                return Touchscreen.current != null ? (Vector3)Touchscreen.current.primaryTouch.position.value : Vector3.zero;
+            return Mouse.current != null ? (Vector3)Mouse.current.position.value : Vector3.zero;
 #else
             return Input.mousePosition;
 #endif
@@ -582,7 +675,9 @@ namespace Insthync.CameraAndInput
         {
 #if ENABLE_INPUT_SYSTEM
             if (Application.isMobilePlatform)
-                return Touchscreen.current.primaryTouch.press.wasPressedThisFrame;
+                return Touchscreen.current != null && Touchscreen.current.primaryTouch.press.wasPressedThisFrame;
+            if (Mouse.current == null)
+                return false;
             switch (button)
             {
                 case 0:
@@ -602,7 +697,9 @@ namespace Insthync.CameraAndInput
         {
 #if ENABLE_INPUT_SYSTEM
             if (Application.isMobilePlatform)
-                return Touchscreen.current.primaryTouch.press.wasReleasedThisFrame;
+                return Touchscreen.current != null && Touchscreen.current.primaryTouch.press.wasReleasedThisFrame;
+            if (Mouse.current == null)
+                return false;
             switch (button)
             {
                 case 0:
@@ -622,7 +719,9 @@ namespace Insthync.CameraAndInput
         {
 #if ENABLE_INPUT_SYSTEM
             if (Application.isMobilePlatform)
-                return Touchscreen.current.primaryTouch.press.isPressed;
+                return Touchscreen.current != null && Touchscreen.current.primaryTouch.press.isPressed;
+            if (Mouse.current == null)
+                return false;
             switch (button)
             {
                 case 0:

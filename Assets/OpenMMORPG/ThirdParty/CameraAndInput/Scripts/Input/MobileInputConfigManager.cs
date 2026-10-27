@@ -13,8 +13,37 @@ namespace Insthync.CameraAndInput
         public Slider alphaSlider;
         public bool turnOnEditModeOnEnable;
 
+        [Header("Other")]
+        public string InitializeKey = "CONFIG_INITIALIZE_KEY";
+
+        public void Initialize()
+        {
+            if (PlayerPrefs.GetInt(InitializeKey, 0) == 0)
+            {
+                var inputs = FindObjectsByType<MobileInputConfig>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+                foreach (var input in inputs)
+                {
+                    input.isEditMode = true;
+                    input.ResetPosition();
+                    input.ResetScale();
+                    input.ResetAlpha();
+
+                    input.SavePosition();
+                    input.SaveScale();
+                    input.SaveAlpha();
+
+                    input.LoadPosition();
+                    input.LoadScale();
+                    input.LoadAlpha();
+                    input.isEditMode = false;
+                }
+                PlayerPrefs.SetInt(InitializeKey, 1);
+            }
+        }
+
         private void OnEnable()
         {
+            Initialize();
             if (uiRoot)
             {
                 uiRoot.SetActive(false);
@@ -52,7 +81,7 @@ namespace Insthync.CameraAndInput
 
         public void LoadConfig()
         {
-            var comps = FindObjectsByType<MobileInputConfig>(FindObjectsSortMode.None);
+            var comps = FindObjectsByType<MobileInputConfig>(FindObjectsInactive.Include, FindObjectsSortMode.None);
             foreach (var comp in comps)
             {
                 comp.LoadPosition();

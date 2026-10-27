@@ -19,7 +19,7 @@ namespace LiteNetLibManager
         private WebSocketClient _client;
 #if !UNITY_WEBGL || UNITY_EDITOR
         private WebSocketServer _server;
-        private readonly ConcurrentQueue<TransportEventData> _serverEventQueue;
+        private ConcurrentQueue<TransportEventData> _serverEventQueue;
 #endif
 
         public int ServerPeersCount
@@ -93,8 +93,7 @@ namespace LiteNetLibManager
         {
             if (IsClientStarted)
             {
-                _client.ClientSend(writer);
-                return true;
+                return _client.ClientSend(writer);
             }
             return false;
         }
@@ -105,6 +104,8 @@ namespace LiteNetLibManager
             if (IsServerStarted)
                 return false;
             ServerMaxConnections = maxConnections;
+            // Old server callbacks can still enqueue after StopServer; give each run its own queue.
+            _serverEventQueue = new ConcurrentQueue<TransportEventData>();
             string location = _secure ? $"wss://0.0.0.0:{port}/{_path}/" : $"ws://0.0.0.0:{port}/{_path}/";
             X509Certificate2 cert = null;
             if (_secure)
@@ -125,7 +126,7 @@ namespace LiteNetLibManager
                         cert = new X509Certificate2(bytes);
                 }
             }
-            _server = new WebSocketServer(location, cert, _serverEventQueue);
+            _server = new WebSocketServer(location, cert, _serverEventQueue, maxConnections);
             return _server.StartServer();
 #else
             return false;
