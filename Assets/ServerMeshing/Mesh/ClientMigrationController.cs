@@ -246,50 +246,59 @@ namespace MultiplayerARPG.MMO.Mesh
             StandIn localVehicleStandIn = standIns.Find(s => s.isLocalVehicle);
             long tCapture = sw.ElapsedMilliseconds;
 
-            // 2) Keep the controller / camera / HUD alive across the entity's death.
+            // 2) Keep the controller / camera / HUD alive across the entity's death. The kit (v1.1.4+) keeps the controller
+            //    out of the entity's InstantiatedObjects, so it outlives the entity by itself; it only has to be frozen.
             List<Behaviour> disabledInput = new List<Behaviour>();   // controller scripts: resume as soon as the new entity exists
             List<Behaviour> disabledCamera = new List<Behaviour>();  // camera controllers: resume at the model swap
             List<Behaviour> disabledHud = new List<Behaviour>();     // old HUD scripts: never resumed (HUD is re-created)
             List<FollowCameraControls> cameras = new List<FollowCameraControls>();
-            bool keptController = false;
-            if (controller != null && prevEntity != null)
+            Transform cameraAnchor = null;
+            bool keptController = controller != null && prevEntity != null;
+            bool reboundByKit = false; // the kit re-binds the controller itself when the new owned entity spawns
+            System.Action<BasePlayerCharacterController> onControllerSetup = c => reboundByKit = true;
+            if (keptController)
             {
-                keptController = prevEntity.InstantiatedObjects.Remove(controller.gameObject);
-                if (keptController)
+                controller.onSetup += onControllerSetup;
+                // Nothing that dereferences PlayingCharacterEntity may tick while it is null.
+                foreach (MonoBehaviour mb in controller.GetComponentsInChildren<MonoBehaviour>(true))
                 {
-                    // Nothing that dereferences PlayingCharacterEntity may tick while it is null.
-                    foreach (MonoBehaviour mb in controller.GetComponentsInChildren<MonoBehaviour>(true))
+                    if (mb == null || !mb.enabled) continue;
+                    mb.enabled = false;
+                    if (mb is IGameplayCameraController || mb is IMinimapCameraController) disabledCamera.Add(mb); else disabledInput.Add(mb);
+                }
+                foreach (MonoBehaviour mb in FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None))
+                {
+                    if (mb == null || !mb.enabled) continue;
+                    if (mb is IGameplayCameraController || mb is IMinimapCameraController) { mb.enabled = false; disabledCamera.Add(mb); }
+                }
+                if (controller.UISceneGameplay != null)
+                {
+                    // Freeze the HUD's kit scripts (not the uGUI graphics) so it keeps showing the last real values
+                    // instead of reading 0/0 from the dying entity. It is replaced wholesale on re-bind anyway.
+                    foreach (MonoBehaviour mb in controller.UISceneGameplay.GetComponentsInChildren<MonoBehaviour>(true))
                     {
-                        if (mb == null || !mb.enabled) continue;
+                        if (mb == null || !mb.enabled || mb is UnityEngine.EventSystems.UIBehaviour) continue;
+                        string ns = mb.GetType().Namespace ?? string.Empty;
+                        if (!ns.StartsWith("MultiplayerARPG")) continue;
                         mb.enabled = false;
-                        if (mb is IGameplayCameraController || mb is IMinimapCameraController) disabledCamera.Add(mb); else disabledInput.Add(mb);
+                        disabledHud.Add(mb);
                     }
-                    foreach (MonoBehaviour mb in FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None))
-                    {
-                        if (mb == null || !mb.enabled) continue;
-                        if (mb is IGameplayCameraController || mb is IMinimapCameraController) { mb.enabled = false; disabledCamera.Add(mb); }
-                    }
-                    if (controller.UISceneGameplay != null)
-                    {
-                        // Freeze the HUD's kit scripts (not the uGUI graphics) so it keeps showing the last real values
-                        // instead of reading 0/0 from the dying entity. It is replaced wholesale on re-bind anyway.
-                        foreach (MonoBehaviour mb in controller.UISceneGameplay.GetComponentsInChildren<MonoBehaviour>(true))
-                        {
-                            if (mb == null || !mb.enabled || mb is UnityEngine.EventSystems.UIBehaviour) continue;
-                            string ns = mb.GetType().Namespace ?? string.Empty;
-                            if (!ns.StartsWith("MultiplayerARPG")) continue;
-                            mb.enabled = false;
-                            disabledHud.Add(mb);
-                        }
-                    }
-                    // The follow camera keeps rendering; point it at the local stand-in for the gap.
-                    foreach (FollowCameraControls cam in FindObjectsByType<FollowCameraControls>(FindObjectsSortMode.None))
-                    {
-                        if (cam == null) continue;
-                        cameras.Add(cam);
-                        if (localStandIn != null)
-                            cam.target = localStandIn.go.transform;
-                    }
+                }
+                // The follow cameras keep rendering; they follow an anchor of our own for the gap. It starts exactly
+                // on the camera target they had, rides on the local stand-in, and never goes null when the entity
+                // dies (a null target makes FollowCamera add its target offset to the last position every frame).
+                Transform oldTarget = controller.CameraTargetTransform; // what the camera controllers assign (view-mode aware)
+                if (oldTarget == null) oldTarget = prevEntity.EntityTransform;
+                cameraAnchor = new GameObject("[Mesh] CameraAnchor").transform;
+                cameraAnchor.SetPositionAndRotation(oldTarget.position, oldTarget.rotation);
+                if (localStandIn != null && localStandIn.go != null)
+                    cameraAnchor.SetParent(localStandIn.go.transform, true);
+                foreach (FollowCameraControls cam in FindObjectsByType<FollowCameraControls>(FindObjectsSortMode.None))
+                {
+                    if (cam == null) continue;
+                    if (cam.target != null && cam.target != oldTarget && !IsPartOf(cam.target, prevEntity)) continue;
+                    cameras.Add(cam);
+                    cam.target = cameraAnchor;
                 }
             }
 
@@ -372,8 +381,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 mountedAfterMs = tPlayerReady;
             if (newEntity != null && keptController && controller != null)
             {
-                // Input resumes NOW on the new entity (it is already walking when the models swap). The HUD and
-                // camera re-bind are deferred to the swap so the eye keeps following the stand-in.
+                // Input resumes NOW on the new entity (it is already walking when the models swap). The camera
+                // controllers stay off until the swap so the eye keeps following the anchor on the stand-in.
                 GameInstance.PlayingCharacter = newEntity;
                 for (int i = 0; i < disabledInput.Count; ++i)
                     if (disabledInput[i] != null) disabledInput[i].enabled = true;
@@ -390,12 +399,15 @@ namespace MultiplayerARPG.MMO.Mesh
             //    0/0 values. Then swap models and re-bind the controller — no pop, no flash.
             GameObject realModel = playerReady && newEntity.Model != null ? newEntity.Model.gameObject : null;
             GameObject realVehicleModel = null;
-            if (playerReady && localStandIn != null && localStandIn.go != null)
+            Transform st = localStandIn != null && localStandIn.go != null ? localStandIn.go.transform : null;
+            // The camera anchor glides on its own onto the camera target the controller will hand the cameras at the swap,
+            // so that hand-over lands on the same point (riding the stand-in would leave its model-to-target offset).
+            if (cameraAnchor != null) cameraAnchor.SetParent(null, true);
+            if (playerReady && (st != null || cameraAnchor != null))
             {
-                if (realModel != null) realModel.SetActive(false);
+                if (realModel != null && st != null) realModel.SetActive(false);
                 float blend = Mathf.Max(0.05f, _manager.standInBlendSeconds);
                 float t0 = Time.realtimeSinceStartup;
-                Transform st = localStandIn.go.transform;
                 while (newEntity != null)
                 {
                     float elapsed = Time.realtimeSinceStartup - t0;
@@ -413,25 +425,33 @@ namespace MultiplayerARPG.MMO.Mesh
                     if (elapsed >= blend && (dataReady || elapsed >= blend + _manager.entityDataWaitSeconds))
                         break;
                     float remaining = Mathf.Max(blend - elapsed, Time.unscaledDeltaTime);
-                    Vector3 target = newEntity.EntityTransform.position;
-                    float step = Vector3.Distance(st.position, target) / remaining * Time.unscaledDeltaTime;
-                    st.position = Vector3.MoveTowards(st.position, target, step);
-                    // Ease the pose onto the real MODEL's orientation (it may lean/tilt independently of the entity root).
-                    Quaternion targetRot = newEntity.Model != null ? newEntity.Model.transform.rotation : newEntity.EntityTransform.rotation;
-                    st.rotation = Quaternion.RotateTowards(st.rotation, targetRot, Quaternion.Angle(st.rotation, targetRot) / remaining * Time.unscaledDeltaTime);
+                    if (st != null)
+                    {
+                        // Glide onto the real MODEL's pose (it may sit, lean or tilt independently of the entity root).
+                        Transform modelT = newEntity.Model != null ? newEntity.Model.transform : newEntity.EntityTransform;
+                        GlideTowards(st, modelT, remaining);
+                    }
+                    Transform newTarget = cameraAnchor != null ? controller.CameraTargetTransform : null;
+                    if (newTarget != null)
+                        GlideTowards(cameraAnchor, newTarget, remaining);
                     yield return null;
                 }
             }
             long tSettled = sw.ElapsedMilliseconds;
 
-            // 6) Re-bind the kept controller to the new entity (the kit skips this when a controller already exists),
-            //    show the real model, drop the stand-in, resume controller / camera / HUD scripts.
+            // 6) Re-bind the kept controller to the new entity (the kit already did when the owned entity spawned; this
+            //    covers a kit that does not), show the real model, drop the stand-in, hand the cameras the real camera
+            //    target the anchor now sits on, resume controller / camera / HUD scripts.
+            if (keptController && controller != null)
+                controller.onSetup -= onControllerSetup;
             if (playerReady && keptController && controller != null)
             {
-                controller.PlayingCharacterEntity = newEntity;   // Desetup(old) + Setup(new): HUD re-created in place
-                if (!newEntity.InstantiatedObjects.Contains(controller.gameObject))
-                    newEntity.InstantiatedObjects.Add(controller.gameObject); // normal teardown ownership restored
+                if (!reboundByKit)
+                    controller.PlayingCharacterEntity = newEntity;   // Desetup(old) + Setup(new): HUD re-created in place
                 ResetNotificationBadges(controller.UISceneGameplay);
+                Transform newTarget = controller.CameraTargetTransform;
+                for (int i = 0; i < cameras.Count; ++i)
+                    if (cameras[i] != null && newTarget != null) cameras[i].target = newTarget;
             }
             if (realModel != null) realModel.SetActive(true);
             if (realVehicleModel != null) realVehicleModel.SetActive(true);
@@ -440,6 +460,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 Destroy(localStandIn.go);
                 localStandIn.go = null;
             }
+            if (cameraAnchor != null && playerReady)
+                Destroy(cameraAnchor.gameObject); // on a failed hop the cameras keep it until the kit tears them down
             for (int i = 0; i < disabledCamera.Count; ++i)
                 if (disabledCamera[i] != null) disabledCamera[i].enabled = true;
 
@@ -579,6 +601,23 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             root.SetActive(true);
             return list;
+        }
+
+        /// <summary>Move and turn <paramref name="t"/> so it lands on <paramref name="target"/>'s pose in <paramref name="remaining"/> seconds.</summary>
+        private static void GlideTowards(Transform t, Transform target, float remaining)
+        {
+            float k = Time.unscaledDeltaTime / remaining;
+            t.position = Vector3.MoveTowards(t.position, target.position, Vector3.Distance(t.position, target.position) * k);
+            t.rotation = Quaternion.RotateTowards(t.rotation, target.rotation, Quaternion.Angle(t.rotation, target.rotation) * k);
+        }
+
+        /// <summary>The transform belongs to the entity or to the vehicle it rides.</summary>
+        private static bool IsPartOf(Transform t, BasePlayerCharacterEntity entity)
+        {
+            if (t == null || entity == null) return false;
+            if (t.IsChildOf(entity.EntityTransform)) return true;
+            BaseGameEntity vehicle = entity.PassengingVehicleEntity != null ? entity.PassengingVehicleEntity.Entity : null;
+            return vehicle != null && t.IsChildOf(vehicle.EntityTransform);
         }
 
         private static BasePlayerCharacterEntity FindNewOwnedEntity(BasePlayerCharacterEntity prevEntity)

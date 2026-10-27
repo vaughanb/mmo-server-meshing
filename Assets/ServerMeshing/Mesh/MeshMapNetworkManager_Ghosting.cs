@@ -1219,7 +1219,11 @@ namespace MultiplayerARPG.MMO.Mesh
             GameInstance.GetPlayerCharacterEntityHashAssetId(data.EntityId, out int metaDataId);
             GameInstance.SetupByMetaData(player, metaDataId);
             data.CloneTo(player);
-            player.Teleport(data.CurrentPosition, Quaternion.Euler(data.CurrentRotation), false);
+            // stillMoveAfterTeleport keeps the puppet's movement state: a plain teleport REPLACES it with IsTeleport alone,
+            // the flag is cleared at the next send, and the re-owned entity is not simulated here again until the new
+            // client's first state arrives — so observers were sent a state with no IsGrounded (the fall animation) for
+            // the whole client gap. The puppet already stands at (or within a step of) the saved position.
+            player.Teleport(data.CurrentPosition, Quaternion.Euler(data.CurrentRotation), true);
             player.ForceMakeCaches();
             player.FillEmptySlots();
             player.Identity.DoNotDestroyWhenDisconnect = true;
