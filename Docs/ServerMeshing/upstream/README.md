@@ -2,8 +2,9 @@
 
 The server-meshing add-on needed a few small changes in the kit itself (DESIGN.md §17: CE-6 to CE-9, CE-11 to CE-13).
 They are kept here as a patch series against the upstream `develop` branch, one commit per change, with upstream-neutral
-wording (no add-on markers). The local copy of the kit in `Assets/OpenMMORPG/` carries the same changes with
-`MESH-EDIT` markers.
+wording (no add-on markers). The local copy of the kit in `Assets/OpenMMORPG/` carried the same changes with
+`MESH-EDIT` markers until DESIGN 0.94 (2026-10-27); since then it is OpenMMORPG v1.1.4 (`master` at 317d2b8) unchanged,
+which has all nine upstream.
 
 | Patch | Kind | Files |
 |---|---|---|
@@ -63,8 +64,9 @@ same day (d077c5f), after both CI checks passed. Every kit change the add-on rel
 
 **0009: merged.** Committed as 4f23e47 on the upstream branch `forget-dead-map-server-users` off `develop` at d077c5f
 on 2026-10-24; [PR #9](https://github.com/open-mmorpg/OpenMMORPG/pull/9) merged it into `develop` the same day
-(2026-10-24 UTC; f43d0c0) after both CI checks passed. The add-on does not rely on it: its own workaround stays until
-the kit copy has it.
+(2026-10-24 UTC; f43d0c0) after both CI checks passed. The add-on does not rely on it. The kit copy has it since
+DESIGN 0.94 (v1.1.4); the add-on's workaround is still in place (the two do not double up, above) and can go in its own
+step.
 
 ## Pushing (how it was done; for a re-run)
 

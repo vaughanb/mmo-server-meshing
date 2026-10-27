@@ -2358,7 +2358,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 DestroyGhostStatic(_tmpIds[i], "stale");
         }
 
-        private void ForwardGhostStaticHit(string targetMeshId, HitBoxPosition position, Vector3 fromPosition, EntityInfo instigator, Dictionary<DamageElement, MinMaxFloat> damageAmounts, CharacterItem weapon, BaseSkill skill, int skillLevel)
+        private void ForwardGhostStaticHit(string targetMeshId, HitBoxPosition position, Vector3 fromPosition, EntityInfo instigator, DamageElementMinMaxFloatAmounts damageAmounts, CharacterItem weapon, BaseSkill skill, int skillLevel)
         {
             if (!forwardGhostHits || !_ghostStatics.TryGetValue(targetMeshId, out GhostStatic ghost) || ghost.entity == null || ghost.kind == GhostKind.ItemDrop)
                 return;
@@ -2808,7 +2808,7 @@ namespace MultiplayerARPG.MMO.Mesh
         [Tooltip("Forward hits landing on ghosts to the owning cell and apply them to the real entity there.")]
         public bool forwardGhostHits = true;
 
-        private void ForwardGhostHit(string targetMeshId, HitBoxPosition position, Vector3 fromPosition, EntityInfo instigator, Dictionary<DamageElement, MinMaxFloat> damageAmounts, CharacterItem weapon, BaseSkill skill, int skillLevel)
+        private void ForwardGhostHit(string targetMeshId, HitBoxPosition position, Vector3 fromPosition, EntityInfo instigator, DamageElementMinMaxFloatAmounts damageAmounts, CharacterItem weapon, BaseSkill skill, int skillLevel)
         {
             if (!forwardGhostHits || !_ghosts.TryGetValue(targetMeshId, out MeshGhost ghost) || ghost.entity == null)
                 return;
@@ -2820,7 +2820,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 Logging.Log("Mesh", $"Hit on ghost {ghost.entity.CharacterName} ({targetMeshId}) forwarded to zone {id.OwnerZoneId}");
         }
 
-        private static GhostHitMessage BuildGhostHit(string targetMeshId, HitBoxPosition position, Vector3 fromPosition, EntityInfo instigator, Dictionary<DamageElement, MinMaxFloat> damageAmounts, CharacterItem weapon, BaseSkill skill, int skillLevel)
+        private static GhostHitMessage BuildGhostHit(string targetMeshId, HitBoxPosition position, Vector3 fromPosition, EntityInfo instigator, DamageElementMinMaxFloatAmounts damageAmounts, CharacterItem weapon, BaseSkill skill, int skillLevel)
         {
             string instigatorMeshId = string.Empty;
             if (instigator != null)
@@ -2829,7 +2829,14 @@ namespace MultiplayerARPG.MMO.Mesh
                 MeshIdentity instigatorId = instigatorComponent != null ? MeshIdentity.Get(instigatorComponent) : null;
                 instigatorMeshId = instigatorId != null && !string.IsNullOrEmpty(instigatorId.MeshEntityId) ? instigatorId.MeshEntityId : (instigator.Id ?? string.Empty);
             }
-            int n = damageAmounts != null ? damageAmounts.Count : 0;
+            // The kit keeps damage in slot-indexed amounts (RuntimeGameDataSlots, upstream 74ec05b); slots are assigned
+            // per process, so the wire stays keyed by element DataId.
+            int n = 0;
+            for (int slot = 0; slot < RuntimeGameDataSlots.DamageElementCount; ++slot)
+            {
+                if (damageAmounts.Contains(slot))
+                    n++;
+            }
             GhostHitMessage msg = new GhostHitMessage
             {
                 targetMeshId = targetMeshId,
@@ -2844,15 +2851,16 @@ namespace MultiplayerARPG.MMO.Mesh
                 randomSeed = Random.Range(int.MinValue, int.MaxValue),
             };
             int i = 0;
-            if (damageAmounts != null)
+            for (int slot = 0; slot < RuntimeGameDataSlots.DamageElementCount; ++slot)
             {
-                foreach (KeyValuePair<DamageElement, MinMaxFloat> kv in damageAmounts)
-                {
-                    msg.elementDataIds[i] = kv.Key != null ? kv.Key.DataId : 0;
-                    msg.mins[i] = kv.Value.min;
-                    msg.maxs[i] = kv.Value.max;
-                    i++;
-                }
+                if (!damageAmounts.Contains(slot))
+                    continue;
+                DamageElement element = RuntimeGameDataSlots.GetDamageElement(slot);
+                MinMaxFloat amount = damageAmounts[slot];
+                msg.elementDataIds[i] = element != null ? element.DataId : 0;
+                msg.mins[i] = amount.min;
+                msg.maxs[i] = amount.max;
+                i++;
             }
             return msg;
         }
@@ -2876,7 +2884,7 @@ namespace MultiplayerARPG.MMO.Mesh
             if (target.IsDead())
                 return;
 
-            DecodeGhostHit(msg, out Dictionary<DamageElement, MinMaxFloat> damageAmounts, out BaseSkill skill);
+            DecodeGhostHit(msg, out DamageElementMinMaxFloatAmounts damageAmounts, out BaseSkill skill);
             // The attacker as this cell knows it (its ghost here, or a real entity of ours), so the hit rules see an
             // entity with party, guild, faction and PK state. The owner is the authority: the attacking cell judged
             // the hit against its puppet of us, so the kit's rule is applied again here before any damage lands.
@@ -3480,21 +3488,18 @@ namespace MultiplayerARPG.MMO.Mesh
             ReleaseDemotedHandoff(msg.characterId, "handoff failed: " + msg.reason);
         }
 
-        private readonly Dictionary<DamageElement, MinMaxFloat> _hitDamage = new Dictionary<DamageElement, MinMaxFloat>();
-
-        /// <summary>The damage table and skill of a forwarded hit (one reusable dictionary: the kit consumes it synchronously).</summary>
-        private void DecodeGhostHit(GhostHitMessage msg, out Dictionary<DamageElement, MinMaxFloat> damageAmounts, out BaseSkill skill)
+        /// <summary>The damage amounts and skill of a forwarded hit.</summary>
+        private void DecodeGhostHit(GhostHitMessage msg, out DamageElementMinMaxFloatAmounts damageAmounts, out BaseSkill skill)
         {
-            _hitDamage.Clear();
+            damageAmounts = default;
             for (int i = 0; i < msg.elementDataIds.Length; ++i)
             {
                 DamageElement element = null;
                 if (msg.elementDataIds[i] == 0 || !GameInstance.DamageElements.TryGetValue(msg.elementDataIds[i], out element) || element == null)
                     element = GameInstance.Singleton.DefaultDamageElement;
                 if (element == null) continue;
-                _hitDamage[element] = new MinMaxFloat { min = msg.mins[i], max = msg.maxs[i] };
+                damageAmounts[RuntimeGameDataSlots.GetSlot(element)] = new MinMaxFloat { min = msg.mins[i], max = msg.maxs[i] };
             }
-            damageAmounts = _hitDamage;
             skill = null;
             if (msg.skillDataId != 0)
                 GameInstance.Skills.TryGetValue(msg.skillDataId, out skill);
@@ -3503,7 +3508,7 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>A forwarded swing at one of our harvestables or buildings: the entity takes it as the kit would, with the attacker as we know it.</summary>
         private void ApplyGhostHitToStatic(DamageableEntity stat, GhostHitMessage msg)
         {
-            DecodeGhostHit(msg, out Dictionary<DamageElement, MinMaxFloat> damageAmounts, out BaseSkill skill);
+            DecodeGhostHit(msg, out DamageElementMinMaxFloatAmounts damageAmounts, out BaseSkill skill);
             EntityInfo instigator = ResolveInstigator(msg.instigatorMeshId);
             int hpBefore = stat.CurrentHp;
             stat.ApplyDamage((HitBoxPosition)msg.hitBoxPosition, msg.fromPosition, instigator, damageAmounts, msg.hasWeapon ? msg.weapon : CharacterItem.Empty, skill, msg.skillLevel, msg.randomSeed);

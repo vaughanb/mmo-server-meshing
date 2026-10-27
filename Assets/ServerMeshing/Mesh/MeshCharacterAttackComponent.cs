@@ -31,7 +31,7 @@ namespace MultiplayerARPG.MMO.Mesh
             return base.AttackRoutine(peerTimestamp, simulateState);
         }
 
-        protected override void ApplyAttack(CharacterDataCache entityCaches, WeaponHandlingState weaponHandlingState, CharacterItem weapon, int simulateSeed, byte triggerIndex, DamageInfo damageInfo, List<Dictionary<DamageElement, MinMaxFloat>> damageAmounts, AimPosition aimPosition)
+        protected override void ApplyAttack(CharacterDataCache entityCaches, WeaponHandlingState weaponHandlingState, CharacterItem weapon, int simulateSeed, byte triggerIndex, DamageInfo damageInfo, List<DamageElementMinMaxFloatAmounts> damageAmounts, AimPosition aimPosition)
         {
             if (IsServer && !MeshIdentity.IsGhostEntity(Entity) && BaseGameNetworkManager.Singleton is MeshMapNetworkManager mesh)
             {

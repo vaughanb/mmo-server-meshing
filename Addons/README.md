@@ -18,7 +18,7 @@ the `screenshot.png` beside it.
 
 ## Rebuilding
 
-The package and its manifest come from **Server Meshing ▸ Build Packages** in the editor, or in batch mode:
+The package and its manifest come from **Tools ▸ Open MMORPG ▸ Server Meshing ▸ Build Packages** in the editor, or in batch mode:
 
 ```
 Unity.exe -batchmode -quit -projectPath <repo> -executeMethod MultiplayerARPG.MMO.Mesh.Editor.ServerMeshPackageBuilder.BuildAll

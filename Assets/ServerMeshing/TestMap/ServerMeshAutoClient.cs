@@ -16,7 +16,7 @@
 //   fight — walk to (-meshWalkX, -meshWalkZ), attack the nearest monster beyond x=100 (a ghost owned by the
 //           neighbour zone) and report whether its hp dropped (cross-border hit) and whether we got hit back.
 //
-// Enable with command-line `-meshAutoClient` (build) or the "Server Meshing/Auto Client" menu (editor).
+// Enable with command-line `-meshAutoClient` (build) or the "Tools/Open MMORPG/Server Meshing/Testing/Auto Client" menu (editor).
 // Optional: -meshAutoMode walk|self|none  -meshChannel C  -meshUser name  -meshWalkX 130
 // -meshBotNetSeconds 5 logs a "Bot net window" line every 5 s (off unless given): the bot's own client traffic.
 
@@ -1319,13 +1319,13 @@ namespace MultiplayerARPG.MMO.Mesh
         }
 
 #if UNITY_EDITOR
-        [MenuItem("Server Meshing/Auto Client/Enable (walk C->E)")]
+        [MenuItem("Tools/Open MMORPG/Server Meshing/Testing/Auto Client/Enable (walk C->E)")]
         private static void MenuEnableWalk() { EditorPrefs.SetBool(PREF_ENABLE, true); EditorPrefs.SetString(PREF_MODE, "walk"); Debug.Log("[MeshAuto] enabled: walk"); }
-        [MenuItem("Server Meshing/Auto Client/Enable (self-migration)")]
+        [MenuItem("Tools/Open MMORPG/Server Meshing/Testing/Auto Client/Enable (self-migration)")]
         private static void MenuEnableSelf() { EditorPrefs.SetBool(PREF_ENABLE, true); EditorPrefs.SetString(PREF_MODE, "self"); Debug.Log("[MeshAuto] enabled: self"); }
-        [MenuItem("Server Meshing/Auto Client/Enable (enter only)")]
+        [MenuItem("Tools/Open MMORPG/Server Meshing/Testing/Auto Client/Enable (enter only)")]
         private static void MenuEnableNone() { EditorPrefs.SetBool(PREF_ENABLE, true); EditorPrefs.SetString(PREF_MODE, "none"); Debug.Log("[MeshAuto] enabled: none"); }
-        [MenuItem("Server Meshing/Auto Client/Disable")]
+        [MenuItem("Tools/Open MMORPG/Server Meshing/Testing/Auto Client/Disable")]
         private static void MenuDisable() { EditorPrefs.SetBool(PREF_ENABLE, false); Debug.Log("[MeshAuto] disabled"); }
 #endif
     }

@@ -29,7 +29,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         public const string ReferencePath = ReferenceFolder + "/" + ServerMeshShipEntity.PrefabRefPath + ".asset";
 
         /// <summary>Menu builds the prefab from the editor menu.</summary>
-        [MenuItem("Server Meshing/Test Rig/Build Ship Prefab")]
+        [MenuItem("Tools/Open MMORPG/Server Meshing/Testing/Build Ship Prefab")]
         public static void Menu()
         {
             Build();

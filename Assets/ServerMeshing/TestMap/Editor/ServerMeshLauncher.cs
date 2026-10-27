@@ -38,7 +38,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
 
         private readonly List<Process> _runningProcesses = new List<Process>();
 
-        [MenuItem("Server Meshing/Launch Test Cluster")]
+        [MenuItem("Tools/Open MMORPG/Server Meshing/Testing/Launch Test Cluster")]
         public static void ShowWindow()
         {
             var window = GetWindow<ServerMeshLauncher>(WindowTitle);

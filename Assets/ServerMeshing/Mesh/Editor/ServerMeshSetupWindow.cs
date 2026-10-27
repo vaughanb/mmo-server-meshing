@@ -1,4 +1,4 @@
-// Server Meshing add-on — Setup window (Server Meshing ▸ Setup): mesh a map in a few clicks and check the wiring.
+// Server Meshing add-on — Setup window (Tools ▸ Open MMORPG ▸ Server Meshing ▸ Setup): mesh a map in a few clicks and check the wiring.
 //
 // Four panels: the world registry, a map's layout from the open scene's measured bounds and a cell size (with each
 // map's cell mode), a validator (registry errors, every Dynamic map's cut and settings, map infos and scenes registered,
@@ -58,7 +58,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             (typeof(HarvestableEntity), typeof(MeshHarvestableEntity)),
         };
 
-        [MenuItem("Server Meshing/Setup")]
+        [MenuItem("Tools/Open MMORPG/Server Meshing/Setup")]
         public static void Open()
         {
             GetWindow<ServerMeshSetupWindow>("Server Meshing Setup");
@@ -418,7 +418,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                     Selection.activeGameObject = go;
                 }
             }
-            EditorGUILayout.HelpBox("The visualizer draws every cell of the chosen map in the Scene view (and at runtime). Play the rig from Server Meshing ▸ Launch Test Cluster, or start the servers as SETUP.md describes.", MessageType.None);
+            EditorGUILayout.HelpBox("The visualizer draws every cell of the chosen map in the Scene view (and at runtime). Start the servers as SETUP.md describes.", MessageType.None);
         }
     }
 }

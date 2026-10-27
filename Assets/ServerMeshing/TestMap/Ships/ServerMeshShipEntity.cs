@@ -199,7 +199,7 @@ namespace MultiplayerARPG.MMO.Mesh
             ServerMeshShipPrefabRef reference = Resources.Load<ServerMeshShipPrefabRef>(PrefabRefPath);
             if (reference == null)
             {
-                error = $"no Resources/{PrefabRefPath} asset; build the ship prefab with Server Meshing/Test Rig/Build Ship Prefab";
+                error = $"no Resources/{PrefabRefPath} asset; build the ship prefab with Tools/Open MMORPG/Server Meshing/Testing/Build Ship Prefab";
                 return null;
             }
             if (reference.prefab == null)

@@ -47,22 +47,24 @@ right for a sandbox where towns can appear anywhere.
 ## 3. Prerequisites
 
 - The add-on folder `Assets/ServerMeshing/` (it compiles into the game assembly; no asmdef needed).
-- OpenMMORPG `develop` at d077c5f (2026-10-20) or later. It carries all eight kit changes the add-on relies on
-  (DESIGN.md §17, [upstream/README.md](upstream/README.md)): patches 0001-0004 (on `master` too since 2026-09-15: an
-  owner-change movement fix, frame-granular request waits, a virtual `IsWatched()` on the monster activity component, a
-  protected pending-spawn dictionary on the map manager), 0005 (on `master` since 2026-10-01: a cache finalizer that
-  corrupted pooled collections), 0006-0007 (`develop` since 2026-10-02: movement flags sent to every receiver of a
-  tick, entity states read to their length) and 0008 (`develop` since 2026-10-20, [open-mmorpg/OpenMMORPG#8](https://github.com/open-mmorpg/OpenMMORPG/pull/8): a virtual
-  `BuildingPersistenceChannelId` on the kit's `MapNetworkManager`, read at its seven building database sites). The add-on
-  does not compile without 0006 (the state sender calls its `IEntityMovementServerStateFlags`) or without 0008
-  (`MeshMapNetworkManager` overrides the property, §6a.8), Dynamic maps or not. On an older kit, apply
-  [upstream/0008-MapNetworkManager-let-subclasses-choose-the-building-persistence-channel.patch](upstream/0008-MapNetworkManager-let-subclasses-choose-the-building-persistence-channel.patch) (from the project root, `git apply
-  --directory=Assets/OpenMMORPG <patch>`); `MeshKitEditTests` fails if a kit update drops it.
+- OpenMMORPG v1.1.4 (`master` at 317d2b8, 2026-10-25) or later. It carries all eight kit changes the add-on relies on
+  (DESIGN.md §17, [upstream/README.md](upstream/README.md)): patches 0001-0004 (an owner-change movement fix,
+  frame-granular request waits, a virtual `IsWatched()` on the monster activity component, a protected pending-spawn
+  dictionary on the map manager), 0005 (a cache finalizer that corrupted pooled collections), 0006-0007 (movement flags
+  sent to every receiver of a tick, entity states read to their length) and 0008 ([open-mmorpg/OpenMMORPG#8](https://github.com/open-mmorpg/OpenMMORPG/pull/8): a
+  virtual `BuildingPersistenceChannelId` on the kit's `MapNetworkManager`, read at its seven building database sites).
+  The add-on does not compile without 0006 (the state sender calls its `IEntityMovementServerStateFlags`) or without
+  0008 (`MeshMapNetworkManager` overrides the property, §6a.8), Dynamic maps or not; `MeshKitEditTests` fails if a kit
+  update drops either.
+- From 0.95.0 the add-on also needs the kit's slot-indexed damage amounts (`DamageElementMinMaxFloatAmounts`, upstream
+  74ec05b, on `develop` since 2026-10-07 and in v1.1.4): its attack and skill components, the harvestable and the
+  ghost-hit forwarding override and call those signatures. Versions up to 0.94.0 used the damage dictionaries the kit
+  replaced, and compile only on `develop` between bb9895f (2026-10-02) and e642000e (2026-10-07) with patch 0008 applied.
 - Your map scenes in the build settings, your map infos in the game database.
 
 ## 4. Step by step
 
-Open **Server Meshing ▸ Setup** in the editor. The window has four panels that follow this order.
+Open **Tools ▸ Open MMORPG ▸ Server Meshing ▸ Setup** in the editor. The window has four panels that follow this order.
 
 ### 4.1 Create the world registry
 
@@ -129,7 +131,7 @@ neighbour count; at runtime the lines are drawn as debug lines and the player's 
 
 ### 4.5 Run
 
-- **Editor rig:** **Server Meshing ▸ Launch Test Cluster** starts one map-server process per cell of the registry
+- **Editor rig:** **Tools ▸ Open MMORPG ▸ Server Meshing ▸ Testing ▸ Launch Test Cluster** starts one map-server process per cell of the registry
   (plus the central, login and database servers) with the right arguments, or copies the commands to the clipboard.
 - **Several hosts:** give each host's `MeshMapSpawnNetworkManager` a `servedCells` list of base cells (or
   `MESH_SPAWN_CELLS=C,N`) so two machines never start the same cell; see [MULTIHOST.md](MULTIHOST.md), and §6a.4 for
@@ -590,6 +592,10 @@ Every field of the registry's `dynamicSettings`, read only when a map is Dynamic
 
 ## 7. Verifying
 
+This chapter runs the test rig, which lives in the source repository
+([vaughanb/mmo-server-meshing](https://github.com/vaughanb/mmo-server-meshing): `Assets/ServerMeshing/TestMap`,
+`Tools/ServerMeshing/`) and is not part of the add-on package.
+
 - **Harness:** `python Tools/ServerMeshing/regress.py` runs 35 scenarios: the eleven of the mesh itself (pet, party,
   crash, harvest, build, seam, seamcold, sleep, pvp, wake, dynidle; the first eight by default), the twenty-one of
   dynamic cells below, the two of on-demand links (`linkcap`, `partyfar`) and the hours-long `soak` (below), on the rig and grades the logs of every cell that
@@ -604,7 +610,7 @@ Every field of the registry's `dynamicSettings`, read only when a map is Dynamic
 - **Driving the editor from the harness:** `--refresh` makes the open editor import and compile changed scripts (it
   only does so when it has focus), `--unit` runs the add-on's EditMode tests (`Assets/ServerMeshing/Tests/Editor`)
   there (it fails when none ran, and refuses while a scene has unsaved changes), `--build` rebuilds the player into
-  `Build/Server` (`Server Meshing ▸ Test Rig ▸ Build Player` does the same by hand). All three go through
+  `Build/Server` (`Tools ▸ Open MMORPG ▸ Server Meshing ▸ Testing ▸ Build Player` does the same by hand). All three go through
   `ServerMeshPlayRunner`'s request files in `Temp/`, so they work while the editor is in the background; an editor
   that does not answer (a modal dialog, say) ends the run with exit code 3. `python -m unittest discover -s Tools/ServerMeshing -p "test_*.py"` tests the harness's own helpers and the
   provisioner.
@@ -731,7 +737,7 @@ Every field of the registry's `dynamicSettings`, read only when a map is Dynamic
   N | ms/s write … rpc … | alloc … B/rpc gc0 N`; on bots `Bot ships 5.00 s: seen N records N pathed N parked N
   unpathed N | path n N p50 … p95 … p99 … max … m lag p50 … ms | parked max … m | unknownPath N badLength N`. Any
   `Ships error:`, `Feeder error:`, `Sync load error:` or `Bot ships error:` line is a fault. The ship prefab is made in
-  the editor by `Server Meshing ▸ Test Rig ▸ Build Ship Prefab` (or `-executeMethod
+  the editor by `Tools ▸ Open MMORPG ▸ Server Meshing ▸ Testing ▸ Build Ship Prefab` (or `-executeMethod
   MultiplayerARPG.MMO.Mesh.Editor.ServerMeshShipPrefabBuilder.BuildFromCommandLine`), which saves
   `TestMap/Prefabs/ServerMeshShip.prefab` with its own GUID as the asset id (refusing a clash with any other prefab)
   and `TestMap/Resources/ServerMeshShipPrefabRef.asset` pointing at it; the prefab itself stays out of every Resources
@@ -898,20 +904,19 @@ Every field of the registry's `dynamicSettings`, read only when a map is Dynamic
 
 ## 10. Packaging
 
-**Server Meshing ▸ Build Packages** writes the add-on into the repository's `Addons/` tree, in the layout the Open
+**Tools ▸ Open MMORPG ▸ Server Meshing ▸ Build Packages** writes the add-on into the repository's `Addons/` tree, in the layout the Open
 MMORPG Addon Manager expects (`Addons/ServerMeshing/dist/ServerMeshing.unitypackage` beside a generated `package.json`,
 with a hand-written `README.md` and `screenshot.png`; `Addons/README.md` has the rebuild and submission notes).
 `ServerMeshing.unitypackage` holds:
 
 - the add-on (`Assets/ServerMeshing/Mesh`, runtime and Editor) with this guide, DESIGN.md and MULTIHOST.md under
   `Documentation/`, and the top-level README. The spike notes, the upstream patch series and the raw capacity table stay
-  in the repository. Import it into any project that has OpenMMORPG installed (`develop` at d077c5f or later: §3), then
-  follow §4.
-- the test rig: `Assets/ServerMeshing/TestMap` (the two test maps, test items, auto client, launcher, play runner, load
-  generator) plus a reference copy of the harnesses under `TestMap/Tools/`. It references the kit's demo (the enemy
-  prefab, default weapon item and type), so the rig needs `BaseDemo` present. The harnesses assume the repository layout
-  (`Tools/ServerMeshing/`, `Build/Server/`, `Config/`), so copy them there rather than running them from inside
-  `Assets`. Until 0.93.0 the rig was a second add-on, never published; it is now part of this one.
+  in the repository. Import it into any project that has OpenMMORPG installed (v1.1.4 or later: §3), then follow §4.
+
+The test rig is not in the package (since 0.96.0; 0.93.0-0.95.0 carried it): `Assets/ServerMeshing/TestMap` (the two
+test maps, test items, auto client, launcher, play runner, load generator) and the harnesses in `Tools/ServerMeshing/`
+stay in the repository, which is the layout they assume (`Build/Server/`, `Config/`), and the rig references the kit's
+demo (`BaseDemo`: the enemy prefab, default weapon item and type).
 
 From a script, `python Tools/ServerMeshing/regress.py --package` asks the open editor to build it (a package request
 to the play runner, outside Play).

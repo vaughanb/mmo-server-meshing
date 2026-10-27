@@ -180,7 +180,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public override string ToString() => id;
     }
 
-    [CreateAssetMenu(fileName = "ServerMeshWorld", menuName = "Server Meshing/World Registry", order = 100)]
+    [CreateAssetMenu(fileName = "ServerMeshWorld", menuName = "Open MMORPG/Server Meshing/World Registry", order = 100)]
     public class MeshWorldRegistry : ScriptableObject
     {
         /// <summary>Band membership is a bit per neighbour in an int.</summary>

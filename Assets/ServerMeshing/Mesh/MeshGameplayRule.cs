@@ -11,7 +11,7 @@ using UnityEngine;
 
 namespace MultiplayerARPG.MMO.Mesh
 {
-    [CreateAssetMenu(fileName = "MeshGameplayRule", menuName = "Server Meshing/Mesh Gameplay Rule")]
+    [CreateAssetMenu(fileName = "MeshGameplayRule", menuName = "Open MMORPG/Server Meshing/Mesh Gameplay Rule")]
     public class MeshGameplayRule : SimpleGameplayRule
     {
         public override bool RewardExp(BaseCharacterEntity character, int exp, float multiplier, RewardGivenType rewardGivenType, int giverLevel, int sourceLevel, out int rewardedExp)

@@ -36,7 +36,7 @@ namespace MultiplayerARPG.MMO.Mesh
             return base.UseSkillRoutine(peerTimestamp, simulateState);
         }
 
-        protected override void ApplySkillUsing(BaseSkill skill, int skillLevel, WeaponHandlingState weaponHandlingState, CharacterItem weapon, int simulateSeed, byte triggerIndex, List<Dictionary<DamageElement, MinMaxFloat>> damageAmounts, uint targetObjectId, AimPosition aimPosition)
+        protected override void ApplySkillUsing(BaseSkill skill, int skillLevel, WeaponHandlingState weaponHandlingState, CharacterItem weapon, int simulateSeed, byte triggerIndex, List<DamageElementMinMaxFloatAmounts> damageAmounts, uint targetObjectId, AimPosition aimPosition)
         {
             if (IsServer && !MeshIdentity.IsGhostEntity(Entity) && BaseGameNetworkManager.Singleton is MeshMapNetworkManager mesh)
             {

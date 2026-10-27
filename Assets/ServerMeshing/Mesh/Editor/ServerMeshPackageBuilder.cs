@@ -1,22 +1,20 @@
-// Server Meshing add-on — package builder (Server Meshing ▸ Build Packages).
+// Server Meshing add-on — package builder (Tools ▸ Open MMORPG ▸ Server Meshing ▸ Build Packages).
 //
 // Emits the add-on in the layout the Open MMORPG Addon Manager expects, under Addons/ in the repository root:
 //
-//   Addons/ServerMeshing/dist/ServerMeshing.unitypackage   Assets/ServerMeshing/Mesh (runtime + Editor), the README, a
+//   Addons/ServerMeshing/dist/ServerMeshing.unitypackage   Assets/ServerMeshing/Mesh (runtime + Editor), the README and a
 //   Addons/ServerMeshing/dist/package.json                 Documentation/ snapshot of SETUP.md, DESIGN.md and MULTIHOST.md
 //                                                          (the spike notes, the upstream patch series and the raw capacity
-//                                                          table stay in the repository), and the test rig:
-//                                                          Assets/ServerMeshing/TestMap (scenes, prefabs, test data, auto
-//                                                          client, launcher, play runner, load generator) with a snapshot of
-//                                                          Tools/ServerMeshing (regress.py, loadtest.py) under TestMap/Tools/
+//                                                          table stay in the repository). The test rig
+//                                                          (Assets/ServerMeshing/TestMap, Tools/ServerMeshing) stays in the
+//                                                          repository too: it needs the repository's layout and BaseDemo.
 //
 // The package carries an empty, extensionless marker file named after the add-on's guid — that is how the Addon Manager
 // recognises an installed add-on, so the marker name and the "guid" field in package.json must stay in step. The README.md
 // and screenshot.png beside dist/ are authored by hand and are left alone here.
 //
-// Dependencies are NOT followed (the add-on references the kit; the rig references the kit's demo prefabs): the target
-// project must have the kit installed, demo included. The docs and tools snapshots are copied into Assets for the export
-// and removed again, so the canonical copies stay outside Assets.
+// Dependencies are NOT followed (the add-on references the kit): the target project must have the kit installed. The docs
+// snapshot is copied into Assets for the export and removed again, so the canonical copies stay outside Assets.
 //
 // Batch mode:
 //   Unity.exe -batchmode -quit -projectPath <repo> -executeMethod MultiplayerARPG.MMO.Mesh.Editor.ServerMeshPackageBuilder.BuildAll
@@ -35,8 +33,8 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
     {
         // Release metadata. Version is the add-on version reported by the Addon Manager; UpdateDate drives its recency
         // filter and "New" badge, and is bumped by hand with the version rather than tracking the build clock.
-        public const string Version = "0.93.0";
-        public const string UpdateDate = "2026-10-26";
+        public const string Version = "0.96.0";
+        public const string UpdateDate = "2026-10-27";
 
         // Where the published packages will be fetched from. The Addon Manager downloads "packageUrl" verbatim, so this
         // has to point at wherever dist/ is finally hosted — change it here if these move to another repository.
@@ -44,7 +42,6 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
 
         private const string AddOnRoot = "Assets/ServerMeshing";
         private const string DocsSnapshot = AddOnRoot + "/Documentation";
-        private const string ToolsSnapshot = AddOnRoot + "/TestMap/Tools";
 
         // The categories the Addon Manager filters on; anything else is shown as "Uncategorized" and hidden from filters.
         private static readonly string[] Categories =
@@ -72,22 +69,17 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 "their shared edge, so combat, loot, quests and building resolve across it. Empty land costs nothing: a cell " +
                 "with nobody near it does not run.\n" +
                 "Subclasses on the kit's managers and entity prefabs plus one world-registry asset; the package changes no " +
-                "kit file. Needs OpenMMORPG develop at d077c5f (2026-10-20) or later: the add-on does not compile on an " +
+                "kit file. Needs OpenMMORPG v1.1.4 (2026-10-25) or later: the add-on does not compile on an " +
                 "older kit (see the README). Includes a Setup window that validates a project, judges " +
-                "every Dynamic map's cut and settings before anything starts, and fixes what it can.\n" +
-                "Includes the test rig: two test maps cut into ten cells (a 3x3 grid plus one cell across a seam) with " +
-                "content that exercises every path across a cell edge, an auto client, an editor launcher and play runner, " +
-                "a load generator, and the Python regression and capacity harnesses under TestMap/Tools: 35 scenarios, " +
-                "eleven of the mesh itself, twenty-two of dynamic cells (including a three-hour soak) and two of on-demand " +
-                "links. The rig's test data references the kit's BaseDemo (its enemy prefab and default weapon).",
+                "every Dynamic map's cut and settings before anything starts, and fixes what it can.",
             // The marker sits inside Mesh/ so it lands with the code wherever the Addon Manager installs the add-on.
             MarkerFolder = AddOnRoot + "/Mesh",
-            ExportPaths = new[] { AddOnRoot + "/Mesh", DocsSnapshot, AddOnRoot + "/README.md", AddOnRoot + "/TestMap" },
+            ExportPaths = new[] { AddOnRoot + "/Mesh", DocsSnapshot, AddOnRoot + "/README.md" },
         };
 
         private static readonly Addon[] AllAddons = { MeshAddon };
 
-        [MenuItem("Server Meshing/Build Packages")]
+        [MenuItem("Tools/Open MMORPG/Server Meshing/Build Packages")]
         public static void BuildAllFromMenu()
         {
             string[] written = Build();
@@ -124,7 +116,6 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         public static string BuildAddOn()
         {
             CopyFiles(Path.Combine(ProjectRoot(), "Docs", "ServerMeshing"), DocsSnapshot, "SETUP.md", "DESIGN.md", "MULTIHOST.md");
-            CopyTree(Path.Combine(ProjectRoot(), "Tools", "ServerMeshing"), ToolsSnapshot, ".py", ".md");
             try
             {
                 return Export(MeshAddon);
@@ -132,7 +123,6 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             finally
             {
                 RemoveTree(DocsSnapshot);
-                RemoveTree(ToolsSnapshot);
                 AssetDatabase.Refresh();
             }
         }
@@ -141,7 +131,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         // marker out again so it does not sit in the working copy between builds.
         private static string Export(Addon addon)
         {
-            // The docs and tools snapshots were copied straight to disk, so the database has to catch up before the
+            // The docs snapshot was copied straight to disk, so the database has to catch up before the
             // export paths can be checked or exported.
             AssetDatabase.Refresh();
             addon.Validate();
@@ -314,22 +304,6 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             Directory.CreateDirectory(to);
             foreach (string name in names)
                 File.Copy(Path.Combine(from, name), Path.Combine(to, name), true);
-        }
-
-        private static void CopyTree(string from, string toAssetPath, params string[] extensions)
-        {
-            string to = Path.Combine(ProjectRoot(), toAssetPath.Replace('/', Path.DirectorySeparatorChar));
-            foreach (string source in Directory.GetFiles(from, "*", SearchOption.AllDirectories))
-            {
-                if (Array.IndexOf(extensions, Path.GetExtension(source).ToLowerInvariant()) < 0)
-                    continue;
-                if (Path.GetFileName(source) == "buildpackages.py")
-                    continue; // the repository's own packaging script is not part of the rig
-                string relative = source.Substring(from.Length).TrimStart(Path.DirectorySeparatorChar, '/');
-                string target = Path.Combine(to, relative);
-                Directory.CreateDirectory(Path.GetDirectoryName(target));
-                File.Copy(source, target, true);
-            }
         }
 
         private static void RemoveTree(string assetPath)

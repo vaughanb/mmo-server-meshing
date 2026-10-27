@@ -119,7 +119,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             return true;
         }
 
-        [MenuItem("Server Meshing/Test Rig/Build Player (Build/Server)")]
+        [MenuItem("Tools/Open MMORPG/Server Meshing/Testing/Build Player (Build/Server)")]
         public static void BuildFromMenu()
         {
             string result = Build();

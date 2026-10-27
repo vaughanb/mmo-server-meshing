@@ -65,8 +65,8 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 4000000000000000002}
-  - component: {fileID: 33000000000000000002}
-  - component: {fileID: 23000000000000000002}
+  - component: {fileID: 3300000000000000002}
+  - component: {fileID: 2300000000000000002}
   m_Layer: 0
   m_Name: Ball
   m_TagString: Untagged
@@ -89,7 +89,7 @@ Transform:
   m_Children: []
   m_Father: {fileID: 4000000000000000001}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!33 &33000000000000000002
+--- !u!33 &3300000000000000002
 MeshFilter:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -97,7 +97,7 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1000000000000000002}
   m_Mesh: {fileID: 10207, guid: 0000000000000000e000000000000000, type: 0}
---- !u!23 &23000000000000000002
+--- !u!23 &2300000000000000002
 MeshRenderer:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
