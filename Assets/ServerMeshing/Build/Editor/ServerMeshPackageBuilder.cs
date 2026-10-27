@@ -36,7 +36,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
     {
         // Release metadata. Version is the add-on version reported by the Addon Manager; UpdateDate drives its recency
         // filter and "New" badge, and is bumped by hand with the version rather than tracking the build clock.
-        public const string Version = "0.96.3";
+        public const string Version = "0.96.4";
         public const string UpdateDate = "2026-10-27";
 
         // Where the published packages will be fetched from. The Addon Manager downloads "packageUrl" verbatim, so this
@@ -73,7 +73,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 "with nobody near it does not run.\n" +
                 "Subclasses on the kit's managers and entity prefabs plus one world-registry asset; the package changes no " +
                 "kit file. Needs OpenMMORPG v1.1.4 (2026-10-25) or later: the add-on does not compile on an " +
-                "older kit (see the README). Includes a Setup window that validates a project, judges " +
+                "older kit (see the README), or on a build target without the DISABLE_ADDRESSABLES scripting define. Includes a Setup window that validates a project, judges " +
                 "every Dynamic map's cut and settings before anything starts, and fixes what it can.",
             // The marker sits inside Mesh/ so it lands with the code wherever the Addon Manager installs the add-on.
             MarkerFolder = AddOnRoot + "/Mesh",

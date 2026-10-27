@@ -60,6 +60,15 @@ right for a sandbox where towns can appear anywhere.
   74ec05b, on `develop` since 2026-10-07 and in v1.1.4): its attack and skill components, the harvestable and the
   ghost-hit forwarding override and call those signatures. Versions up to 0.94.0 used the damage dictionaries the kit
   replaced, and compile only on `develop` between bb9895f (2026-10-02) and e642000e (2026-10-07) with patch 0008 applied.
+- The scripting define `DISABLE_ADDRESSABLES` on every build target the game builds: **Windows/Mac/Linux** (players,
+  bots) and **Dedicated Server** (the headless servers), and in any build profile that does not inherit it. Each target
+  keeps its own list (Project Settings ▸ Player ▸ the target's tab ▸ Other Settings ▸ Scripting Define Symbols), so a
+  project can play in the editor and still fail its headless build. The add-on finds ghosts, lent monsters, mounts and
+  handed-over entities through the kit's prefab tables and calls the kit's non-Addressables `MountType.GetPrefab` and
+  `GameSpawnArea.Spawn`; without the define it stops with `Server Meshing needs the scripting define
+  DISABLE_ADDRESSABLES` (`MeshAddressablesGuard.cs`) beside CS1929/CS7036 errors in `MeshMapNetworkManager_*.cs`.
+  Validate (§4.3) checks both targets and the active build profile, and its **Add define** adds it. The kit's
+  **Demo Map Server** and **Demo Client** profiles carry it already.
 - Your map scenes in the build settings, your map infos in the game database.
 
 ## 4. Step by step
@@ -114,6 +123,7 @@ override of a script it does not own. A component whose source lies in the kit o
 
 | Check | What Fix does |
 |---|---|
+| `DISABLE_ADDRESSABLES` on the Windows/Mac/Linux and Dedicated Server targets, and in the active build profile (§3) | **Add define** appends it to that target's Scripting Define Symbols (or the profile's Scripting Defines); Unity recompiles |
 | `MapNetworkManager` → `MeshMapNetworkManager` | Swaps the component's script on the prefab. Every serialized field is kept (the subclass adds fields, removes none). |
 | `LoginNetworkManager` → `MeshLoginNetworkManager` | same |
 | `CentralNetworkManager` → `MeshCentralNetworkManager` | same |
@@ -905,6 +915,7 @@ This chapter runs the test rig, which lives in the source repository
 
 | Symptom | Look at |
 |---|---|
+| The build stops with `Server Meshing needs the scripting define DISABLE_ADDRESSABLES`, or `MountType` has no `GetPrefab` (CS1929) and `GameSpawnArea.Spawn` misses `destroyRespawnDelay` (CS7036) | The build target has no `DISABLE_ADDRESSABLES` (§3); usually the Dedicated Server target, whose defines are separate from Windows'. Validate's **Add define**, or add it by hand. |
 | A cell logs `No layout for map` and runs single-server | The map has no layout in the registry, or the registry is not assigned on `MeshMapNetworkManager`. |
 | `No map server registered for zone peer key` | The neighbour is not up (asleep, crashed, or its channel id does not match a cell id). With sleeping on, the central logs `Waking cell …`. |
 | Players see nobody across the line | Band width, `enableBorderGhosting`, or the link port (map port + `meshLinkPortOffset`) blocked. |

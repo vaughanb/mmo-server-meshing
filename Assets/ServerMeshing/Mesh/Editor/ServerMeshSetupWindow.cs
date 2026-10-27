@@ -1,7 +1,7 @@
 // Server Meshing add-on — Setup window (Tools ▸ Open MMORPG ▸ Server Meshing ▸ Setup): mesh a map in a few clicks and check the wiring.
 //
 // Four panels: the world registry, a map's layout from the open scene's measured bounds and a cell size (with each
-// map's cell mode and on-demand links, and the server instance's sleeping cells), a validator (registry errors, every Dynamic map's cut and settings, map infos and scenes registered,
+// map's cell mode and on-demand links, and the server instance's sleeping cells), a validator (the DISABLE_ADDRESSABLES define per build target, registry errors, every Dynamic map's cut and settings, map infos and scenes registered,
 // the add-on's subclasses on the kit's manager and entity prefabs, the registry reference on each, a spawner's served
 // cells, the gameplay rule, the server tick) with Fix buttons, and a one-click cell visualizer for the open scene. Everything it changes is an asset edit you could also do by hand;
 // Docs/ServerMeshing/SETUP.md is the written version of the same steps.
@@ -369,6 +369,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         {
             _checks.Clear();
             _serverInstances = null;   // a swap may have just made one
+            AddDefineChecks();         // registry or not: without the define the add-on does not compile for that target
             if (_registry == null)
             {
                 _checks.Add(new Check { ok = false, text = "No world registry: create one in panel 1." });
