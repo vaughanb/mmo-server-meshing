@@ -19,12 +19,19 @@ namespace MultiplayerARPG.MMO.Mesh
         public float patrolLegSeconds = 120f;
         [Tooltip("Swing at the air whenever the character can while it patrols, so crossings happen mid-attack (DESIGN 1.06; trace with MESH_TRACE_ACTIONS=1).")]
         public bool attackWhileWalking = false;
-        private int _swings;
+        [Tooltip("With attackWhileWalking: cut the pause between swings short when a hop starts, so a swing is sent inside the gap between the warp and the adoption (DESIGN 1.07).")]
+        public bool swingInGap = false;
+        [Tooltip("With attackWhileWalking: turn to face the nearest live monster within this many metres before each swing (0: swing straight ahead).")]
+        public float swingFaceRange = 0f;
+        private int _swings, _gapSwings, _facedSwings;
+
+        private static bool IsHopping => BaseGameNetworkManager.Singleton is MeshMapNetworkManager mesh && mesh.IsClientHopping;
 
         /// <summary>
         /// Swings while <paramref name="running"/>, walking a random 0.6-1.4 s after each swing ends: a swing stops the walk
         /// (the demo's weapons hold the character still), so back-to-back swings would pin it short of the edge. Spaced,
-        /// crossings land at every phase of a swing. Counts the swings started.
+        /// crossings land at every phase of a swing. Counts the swings started, those started during a hop, and those
+        /// aimed at a monster.
         /// </summary>
         private IEnumerator SwingWhile(System.Func<bool> running)
         {
@@ -38,18 +45,61 @@ namespace MultiplayerARPG.MMO.Mesh
                     // synced flag (ClientMulticast), and the demo's sheathing component vetoes swings until the hand closes.
                     if (self.IsWeaponsSheathed && self.IsOwnerClient)
                         self.IsWeaponsSheathed = false;
+                    bool faced = swingFaceRange > 0f && FaceNearestMonster(self, swingFaceRange);
+                    bool hopping = IsHopping;
                     WeaponHandlingState whs = WeaponHandlingState.None;
                     if (self.Attack(ref whs))
                     {
                         _swings++;
+                        if (hopping) _gapSwings++;
+                        if (faced) _facedSwings++;
+                        if (hopping)
+                            Log($"swing sent during a hop ({_gapSwings})");
                         while (running() && GameInstance.PlayingCharacterEntity != null && GameInstance.PlayingCharacterEntity.IsAttacking)
                             yield return null;
-                        yield return new WaitForSecondsRealtime(0.6f + (float)random.NextDouble() * 0.8f);
+                        float resume = Time.realtimeSinceStartup + 0.6f + (float)random.NextDouble() * 0.8f;
+                        bool wasHopping = IsHopping;
+                        while (running() && Time.realtimeSinceStartup < resume)
+                        {
+                            bool nowHopping = IsHopping;
+                            if (swingInGap && nowHopping && !wasHopping)
+                                break; // a hop just started: swing inside its gap
+                            wasHopping = nowHopping;
+                            yield return null;
+                        }
                         continue;
                     }
                 }
                 yield return null;
             }
+        }
+
+        /// <summary>Turns <paramref name="self"/> to the nearest live monster within <paramref name="range"/> metres; false when there is none.</summary>
+        private static bool FaceNearestMonster(BasePlayerCharacterEntity self, float range)
+        {
+            Vector3 position = self.EntityTransform.position;
+            BaseMonsterCharacterEntity nearest = null;
+            float best = range * range;
+            foreach (BaseMonsterCharacterEntity monster in FindObjectsByType<BaseMonsterCharacterEntity>(FindObjectsSortMode.None))
+            {
+                if (monster == null || monster.IsDead())
+                    continue;
+                Vector3 offset = monster.EntityTransform.position - position;
+                offset.y = 0f;
+                if (offset.sqrMagnitude < best)
+                {
+                    best = offset.sqrMagnitude;
+                    nearest = monster;
+                }
+            }
+            if (nearest == null)
+                return false;
+            Vector3 toTarget = nearest.EntityTransform.position - position;
+            toTarget.y = 0f;
+            if (toTarget.sqrMagnitude > 0.0001f)
+                self.SetLookRotation(Quaternion.LookRotation(toTarget.normalized), true);
+            self.SetTargetEntity(nearest);
+            return true;
         }
 
         /// <summary>PatrolLegLine is the line a patrol leg logs when it ends.</summary>
@@ -101,7 +151,7 @@ namespace MultiplayerARPG.MMO.Mesh
             PollStandMigrations();
             Finished = true;
             Passed = legs > missed;
-            Log($"{PatrolResultHead(legs, missed)}{StandMigrationsSuffix()}{(attackWhileWalking ? $" swings={_swings}" : "")} -> {(Passed ? "PASS" : "FAIL")}");
+            Log($"{PatrolResultHead(legs, missed)}{StandMigrationsSuffix()}{(attackWhileWalking ? $" swings={_swings} gapSwings={_gapSwings} facedSwings={_facedSwings}" : "")} -> {(Passed ? "PASS" : "FAIL")}");
         }
 
         /// <summary>Counts migrations every frame while a walk runs (WalkTo does not poll them).</summary>

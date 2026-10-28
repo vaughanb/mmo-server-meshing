@@ -1,7 +1,7 @@
 # Handoff — 2026-10-28
 
 Where the work stands, how to get it running on another machine, and what is left. The design record
-([DESIGN.md](DESIGN.md), version 1.06) has the full reasoning and measurements; this note is the short path in.
+([DESIGN.md](DESIGN.md), version 1.07) has the full reasoning and measurements; this note is the short path in.
 
 ## What was done
 
@@ -140,7 +140,21 @@ Where the work stands, how to get it running on another machine, and what is lef
    - Measured (patrol swinging at the air, 7 hops, 60 swings): every start and trigger applied once by the
      owning cell, none by a ghost; the mid-swing hop carried its swing and the destination applied its trigger;
      no hop changed the weapon's state.
-8. **Verified on the 8 km demo** (editor client plus headless bots), all seamless, no exceptions:
+8. **Undetectable handoff, step 7: commands sent inside the gap (DESIGN 1.07, package 0.96.10).** A swing pressed
+   between the warp and the adoption played on the client and never happened (7 of 7): its call named the
+   origin's object id, the arriving entity had no owner yet, and the call could beat the origin's notice.
+   - Destination (`MeshMapNetworkManager_GapCommands`): parks every client call from a connection with no
+     character registered and replays them in order when one registers, retargeting the origin's object id
+     (`HandoffStateMessage.originObjectId`) to the id here; for 5 s after, a call still naming the old id is
+     retargeted too. The kit's owner check still decides every call.
+   - Origin: a call for a character it just demoted is forwarded over the mesh link (`HandoffLateRpcMessage`,
+     id 135) and replayed at the destination first.
+   - Measured, final code (44 hops, 368 swings): none lost or doubled; 40 gap swings replayed after 17–57 ms;
+     one forwarded call replayed. Against a pinned deer, every hit came from exactly one trigger, including 6
+     gap swings and the forwarded one.
+   - Not covered: a call still queued on the old connection when the warp closes it (up to one 15 ms LiteNetLib
+     update; seen once in 15 hops).
+9. **Verified on the 8 km demo** (editor client plus headless bots), all seamless, no exceptions:
    - a 750 m walk across three cells;
    - 16 quick back-and-forth crossings (adopted after 180–398 ms, none fell back);
    - a second player standing past the line: kept and adopted;
@@ -207,6 +221,10 @@ Where the work stands, how to get it running on another machine, and what is lef
   on the client and in each cell's log, and a carried action shows as `carrying …` on the origin's
   `Handoff SENT` line and `carried …` on the destination. A swing is right when each client trigger is matched by
   exactly one `S` trigger on the cell that owned the player, and by no `S-ghost` one.
+  - `swingInGap = true` also swings the moment each hop starts; the destination logs `parked` and `replayed`.
+  - A target: set `MESH_TEST_MONSTER=x,z[,name]` (scene frame) before Play and the cell owning the spot spawns
+    one monster there, pinned and kept alive, logging every hit (tag `MeshTestMonster`); give the patrol
+    `swingFaceRange = 3` to turn to it. `-1.5,512.8` stands beside the crossing point into (3,4).
 - **Headless bot** (another player), from `Build/DemoMesh8k`:
 
   ```
@@ -223,12 +241,11 @@ Where the work stands, how to get it running on another machine, and what is lef
    localhost (median ~92) and all of it is server frames at 60 fps: enter-game in one, the client's ready in
    the next, the spawn on the sync tick after, plus the client's own frames. Nothing in it is the database or
    the connect. Next steps, in order:
-   - commands the client sends inside the gap (since 1.06 an action already in flight carries over, but a new
-     attack or trigger sent between the warp and the adoption reaches a destination that does not own the
-     entity yet and is dropped; a tighter `attackWhileWalking` spacing would show how often);
-   - a target at the line for the action trace: the 8 km map has no monster within 240 m of x 0, z 512 and
-     PvP is off, so 1.06 traced the hits, not their damage. Ammunition per trigger, a skill item taken after the
-     last trigger and a charge in progress are not carried;
+   - a call still queued on the client's old connection when the warp closes it: LiteNetLib's `Stop` shuts its
+     peers before their logic thread's last send, so up to one 15 ms update of calls is lost. Closing it means
+     keeping the old connection for a frame in CE-14's `MigrateClient` (a core change) or a blocking flush;
+   - ammunition per trigger, a skill item taken after the last trigger and a charge in progress are not
+     carried (1.06), and no skill has been cast across a crossing in a run yet;
    - extrapolating kept entities through the gap, and skipping the interpolation reset of an adopted entity
      whose owner did not change;
    - a server-driven arrival (the destination spawns to the pre-connected, pre-authenticated client when the

@@ -51,6 +51,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public const ushort BuildingTransferReply = 132;  // receiver -> sender: taken (promoted, spawned, owned already), or refused with a reason
         // Slice 7 (on-demand links, slices/slice7_design.md decision 6):
         public const ushort LinkClose = 133;              // sender -> receiver: this link is idle and not needed; the sender stops it next tick
+        public const ushort HandoffLateRpc = 135;         // origin -> destination: a client call for a character the origin just demoted, sent before its client read the warp (DESIGN 1.07)
 
         /// <summary>Counts as traffic for an on-demand link's idle time: everything but the hello, the 2 s registration state and the close notice.</summary>
         public static bool IsCountedTraffic(ushort messageType) => messageType != Hello && messageType != RegistrationState && messageType != LinkClose;
@@ -554,6 +555,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public string accessToken;
         public PlayerCharacterData data;
         public MeshCarriedAction action; // the attack or skill in flight at the crossing (DESIGN 1.06), kind None when idle
+        public uint originObjectId;      // the character's object id on the origin, which its client names it by until it adopts the new one (DESIGN 1.07)
         public void Serialize(NetDataWriter writer)
         {
             writer.Put(characterId);
@@ -561,6 +563,7 @@ namespace MultiplayerARPG.MMO.Mesh
             writer.Put(accessToken ?? string.Empty);
             writer.Put(data);
             writer.Put(action);
+            writer.Put(originObjectId);
         }
         public void Deserialize(NetDataReader reader)
         {
@@ -569,7 +572,21 @@ namespace MultiplayerARPG.MMO.Mesh
             accessToken = reader.GetString();
             data = reader.Get(() => new PlayerCharacterData());
             action = reader.Get<MeshCarriedAction>();
+            originObjectId = reader.GetUInt();
         }
+    }
+
+    /// <summary>
+    /// A client call (an RPC message body) that reached the origin for a character it had just demoted: its client sent it
+    /// before it read the warp. The destination replays it once the character registers there (DESIGN 1.07).
+    /// </summary>
+    public struct HandoffLateRpcMessage : INetSerializable
+    {
+        public string characterId;
+        public ushort messageType;
+        public byte[] data;
+        public void Serialize(NetDataWriter writer) { writer.Put(characterId); writer.Put(messageType); writer.PutBytesWithLength(data ?? new byte[0]); }
+        public void Deserialize(NetDataReader reader) { characterId = reader.GetString(); messageType = reader.GetUShort(); data = reader.GetBytesWithLength(); }
     }
 
     /// <summary>
@@ -690,6 +707,7 @@ namespace MultiplayerARPG.MMO.Mesh
             RegisterMessageHandler(MeshLinkMessageTypes.GhostRemove, HandleGhostRemove);
             RegisterMessageHandler(MeshLinkMessageTypes.HandoffNotice, HandleHandoffNotice);
             RegisterMessageHandler(MeshLinkMessageTypes.HandoffState, HandleHandoffState);
+            RegisterMessageHandler(MeshLinkMessageTypes.HandoffLateRpc, HandleHandoffLateRpc);
             RegisterMessageHandler(MeshLinkMessageTypes.HandoffAck, HandleHandoffAck);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostPartyShare, HandleGhostPartyShare);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostReplay, HandleGhostReplay);
@@ -783,6 +801,12 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             HandoffStateMessage msg = messageHandler.ReadMessage<HandoffStateMessage>();
             _manager.OnHandoffState(messageHandler.ConnectionId, msg);
+        }
+
+        private void HandleHandoffLateRpc(MessageHandlerData messageHandler)
+        {
+            HandoffLateRpcMessage msg = messageHandler.ReadMessage<HandoffLateRpcMessage>();
+            _manager.OnHandoffLateRpc(msg);
         }
 
         private void HandleHandoffAck(MessageHandlerData messageHandler)
@@ -1090,6 +1114,11 @@ namespace MultiplayerARPG.MMO.Mesh
         public void SendHandoffState(HandoffStateMessage msg)
         {
             Send(MeshLinkMessageTypes.HandoffState, msg);
+        }
+
+        public void SendHandoffLateRpc(HandoffLateRpcMessage msg)
+        {
+            Send(MeshLinkMessageTypes.HandoffLateRpc, msg); // the state's channel and order: it lands after the state
         }
 
         public void SendGhostHit(GhostHitMessage msg)

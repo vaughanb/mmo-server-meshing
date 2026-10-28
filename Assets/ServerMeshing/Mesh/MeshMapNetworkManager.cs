@@ -604,6 +604,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 GhostingOnRealPlayerRegistered(playerCharacter, connectionId);
 #endif
             base.RegisterPlayerCharacter(connectionId, playerCharacter);
+            if (IsServer)
+                ReplayParkedRpcs(connectionId, playerCharacter); // DESIGN 1.07: what the client sent inside the gap (MeshMapNetworkManager_GapCommands)
         }
 
         #endregion
@@ -809,6 +811,7 @@ namespace MultiplayerARPG.MMO.Mesh
 #endif
             if (IsServer)
             {
+                DropParkedRpcs(connectionId);
                 GhostingOnPeerDisconnected(connectionId);
                 PreconnectForget(connectionId);
             }
@@ -1070,7 +1073,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     snapshot.CurrentPosition = savePosition;
                     snapshot.CurrentRotation = rotation;
                     MeshCarriedAction action = InFlightAction(entity); // DESIGN 1.06: the destination accepts its remaining triggers
-                    if (SendHandoffState(zone.id, new HandoffStateMessage { characterId = characterId, userId = handoffUserId, accessToken = accessToken, data = snapshot, action = action }))
+                    if (SendHandoffState(zone.id, new HandoffStateMessage { characterId = characterId, userId = handoffUserId, accessToken = accessToken, data = snapshot, action = action, originObjectId = entity.ObjectId }))
                     {
                         if (entity.TryGetComponent(out PlayerCharacterDataUpdater stateUpdater))
                             Destroy(stateUpdater);

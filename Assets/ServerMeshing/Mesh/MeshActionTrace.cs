@@ -21,7 +21,9 @@ namespace MultiplayerARPG.MMO.Mesh
             if (!Enabled || !(entity is BasePlayerCharacterEntity player) || entity.Identity == null)
                 return;
             string role = entity.IsServer ? (MeshIdentity.IsGhostEntity(entity) ? "S-ghost" : "S") : entity.IsOwnerClient ? "C" : "C-other";
-            Logging.Log("MeshAction", $"{System.DateTime.Now:HH:mm:ss.fff} {role} {player.CharacterName} obj={entity.ObjectId} kept={entity.Identity.IsKept} {what}");
+            // The owner's link state: the kit sends a client RPC only while the client counts as connected.
+            string link = role == "C" && entity.Manager != null ? $" link={(entity.Manager.IsClientConnected ? "up" : "down")}" : string.Empty;
+            Logging.Log("MeshAction", $"{System.DateTime.Now:HH:mm:ss.fff} {role} {player.CharacterName} obj={entity.ObjectId} kept={entity.Identity.IsKept} {what}{link}");
         }
     }
 }

@@ -1038,6 +1038,7 @@ namespace MultiplayerARPG.MMO.Mesh
             if (playerCharacter == null)
                 return;
             CarryInFlightAction(playerCharacter); // DESIGN 1.06: before the client's next trigger can arrive
+            NoteArrivalObjectId(playerCharacter, connectionId); // DESIGN 1.07: before the parked calls replay (MeshMapNetworkManager_GapCommands)
             RehandoffBackoffOnArrival(playerCharacter); // Slice 2d: no handoff straight after an arrival, longer after a return (Readiness)
             PrewarmConsume(playerCharacter.Id);
             if (_pendingHandoffAcks.TryGetValue(playerCharacter.Id, out PendingHandoffAck unclaimed))
@@ -3383,6 +3384,7 @@ namespace MultiplayerARPG.MMO.Mesh
             // sent the state with the notice; the client's enter-game is then served from here, with no database read.
             public PlayerCharacterData state; public string userId; public string accessToken;
             public MeshCarriedAction action; // DESIGN 1.06: the attack or skill in flight at the crossing
+            public uint originObjectId;      // DESIGN 1.07: the id the client names the character by until it adopts ours
         }
         private sealed class PendingHandoffAck { public string zone; public string name; public float startTime; public float sentTime; public float linkDownSince = -1f; }
         private readonly Dictionary<string, IncomingHandoff> _incomingHandoffFrom = new Dictionary<string, IncomingHandoff>(); // characterId -> who announced it
@@ -3463,6 +3465,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 userId = msg.userId,
                 accessToken = msg.accessToken,
                 action = msg.action,
+                originObjectId = msg.originObjectId,
             };
             Stamp($"handoff state for {msg.data?.CharacterName} ({msg.characterId}) received from {_incomingHandoffFrom[msg.characterId].fromZone}{(msg.action.IsSet ? $", carrying {msg.action}" : string.Empty)}");
         }
