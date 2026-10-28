@@ -1,7 +1,7 @@
 # Handoff — 2026-10-28
 
 Where the work stands, how to get it running on another machine, and what is left. The design record
-([DESIGN.md](DESIGN.md), version 1.05) has the full reasoning and measurements; this note is the short path in.
+([DESIGN.md](DESIGN.md), version 1.06) has the full reasoning and measurements; this note is the short path in.
 
 ## What was done
 
@@ -126,7 +126,21 @@ Where the work stands, how to get it running on another machine, and what is lef
      no jump, longest client frame 6–13 ms. Cell load 5–6 % (0.9 ms of work a frame) against 3–4 % (1.1 ms)
      at 30, with one player and 13–14 monsters each. Rebuild the map servers after changing it: the cells load
      the copy's init scene.
-7. **Verified on the 8 km demo** (editor client plus headless bots), all seamless, no exceptions:
+7. **Undetectable handoff, step 6: actions carried across the hop (DESIGN 1.06, package 0.96.9).** A swing or
+   cast in flight at the line used to lose its `IsAttacking` / `IsUsingSkill` on the owner (the arrival's respawn
+   RPC cleared them), and its trigger was dropped by the destination and applied by the origin's ghost instead.
+   - Owner: during a hop the respawn RPC fires its event and keeps the action states
+     (`MeshPlayerCharacterEntity.RpcOnRespawn`, `IsClientHopping`).
+   - Origin: the in-flight action's hit validation goes with the handoff state (`HandoffStateMessage.action`,
+     `MeshCarriedAction`); the demotion cancels the ghost's routines and a server ghost never applies a trigger.
+   - Destination: prepares the same validation when the arrival registers (`PrepareCarried`), so the client's
+     trigger is applied there and replayed to the origin's observers.
+   - Puppets hold their weapon as the owner does (`GhostSnapshotMessage.isWeaponsSheathed`): before, a player who
+     drew on one cell and crossed back was promoted from a sheathed ghost and the weapon was put away.
+   - Measured (patrol swinging at the air, 7 hops, 60 swings): every start and trigger applied once by the
+     owning cell, none by a ghost; the mid-swing hop carried its swing and the destination applied its trigger;
+     no hop changed the weapon's state.
+8. **Verified on the 8 km demo** (editor client plus headless bots), all seamless, no exceptions:
    - a 750 m walk across three cells;
    - 16 quick back-and-forth crossings (adopted after 180–398 ms, none fell back);
    - a second player standing past the line: kept and adopted;
@@ -187,6 +201,12 @@ Where the work stands, how to get it running on another machine, and what is lef
   the domain under the servers and every network manager throws every frame for the rest of the Play.
   Right after entering Play call `AssetDatabase.DisallowAutoRefresh()`, and `AllowAutoRefresh()` once
   stopped; never run tests and then enter Play without checking `isCompiling` is false.
+- **Actions across a crossing.** Set `MESH_TRACE_ACTIONS=1` in the editor's process before Play
+  (`System.Environment.SetEnvironmentVariable` through `execute_code`; the cells inherit it) and give the patrol
+  `attackWhileWalking = true`. Every attack or skill start and trigger is logged with its seed (tag `MeshAction`)
+  on the client and in each cell's log, and a carried action shows as `carrying …` on the origin's
+  `Handoff SENT` line and `carried …` on the destination. A swing is right when each client trigger is matched by
+  exactly one `S` trigger on the cell that owned the player, and by no `S-ghost` one.
 - **Headless bot** (another player), from `Build/DemoMesh8k`:
 
   ```
@@ -203,8 +223,12 @@ Where the work stands, how to get it running on another machine, and what is lef
    localhost (median ~92) and all of it is server frames at 60 fps: enter-game in one, the client's ready in
    the next, the spawn on the sync tick after, plus the client's own frames. Nothing in it is the database or
    the connect. Next steps, in order:
-   - holding actions pressed mid-hop (the arrival's respawn RPC still clears the owner's action states, and
-     commands sent during the gap are not replayed);
+   - commands the client sends inside the gap (since 1.06 an action already in flight carries over, but a new
+     attack or trigger sent between the warp and the adoption reaches a destination that does not own the
+     entity yet and is dropped; a tighter `attackWhileWalking` spacing would show how often);
+   - a target at the line for the action trace: the 8 km map has no monster within 240 m of x 0, z 512 and
+     PvP is off, so 1.06 traced the hits, not their damage. Ammunition per trigger, a skill item taken after the
+     last trigger and a charge in progress are not carried;
    - extrapolating kept entities through the gap, and skipping the interpolation reset of an adopted entity
      whose owner did not change;
    - a server-driven arrival (the destination spawns to the pre-connected, pre-authenticated client when the

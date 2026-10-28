@@ -823,6 +823,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     guildId = asPlayer != null ? asPlayer.GuildId : 0,
                     factionId = asPlayer != null ? asPlayer.FactionId : 0,
                     isPkOn = asPlayer != null && asPlayer.IsPkOn,
+                    isWeaponsSheathed = asPlayer != null && asPlayer.IsWeaponsSheathed,
                     rightWeaponDataId = weapons.rightHand.dataId,
                     rightWeaponLevel = weapons.rightHand.level,
                     leftWeaponDataId = weapons.leftHand.dataId,
@@ -1036,6 +1037,7 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (playerCharacter == null)
                 return;
+            CarryInFlightAction(playerCharacter); // DESIGN 1.06: before the client's next trigger can arrive
             RehandoffBackoffOnArrival(playerCharacter); // Slice 2d: no handoff straight after an arrival, longer after a return (Readiness)
             PrewarmConsume(playerCharacter.Id);
             if (_pendingHandoffAcks.TryGetValue(playerCharacter.Id, out PendingHandoffAck unclaimed))
@@ -1341,6 +1343,10 @@ namespace MultiplayerARPG.MMO.Mesh
                 Assets.SetObjectOwnerImmediately(riddenMount.ObjectId, -1); // the mount survives the disconnect too
             MeshIdentity id = MeshIdentity.GetOrAdd(entity);
             id.MeshEntityId = meshId;
+            // DESIGN 1.06: an action in flight went to the destination with the state; the ghost's routine would otherwise
+            // run on, owned by the server now, and apply its triggers here. The observers' clients play their own copy.
+            entity.AttackComponent?.CancelAttack();
+            entity.UseSkillComponent?.CancelSkill();
             MakeGhostInPlace(entity, id, GhostKind.Player, newOwnerZone, riddenMount);
             int pets = DemoteSummonsWith(entity, newOwnerZone);
             Logging.Log("Mesh", $"Player {entity.CharacterName} demoted to ghost (owner {newOwnerZone}, mounted={riddenMount != null}, summons={pets})");
@@ -1654,6 +1660,8 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (msg.kind != GhostKind.Player || !(ghost.entity is BasePlayerCharacterEntity player))
                 return;
+            if (player.IsWeaponsSheathed != msg.isWeaponsSheathed)
+                player.IsWeaponsSheathed = msg.isWeaponsSheathed; // drawn or sheathed as the owner holds it, and kept by a promotion
             EquipWeapons current = player.EquipWeapons;
             if (current.rightHand.dataId == msg.rightWeaponDataId && current.leftHand.dataId == msg.leftWeaponDataId)
                 return;
@@ -3374,6 +3382,7 @@ namespace MultiplayerARPG.MMO.Mesh
             // DESIGN 1.04: the character as the origin held it at the crossing, and its client's identity, when the origin
             // sent the state with the notice; the client's enter-game is then served from here, with no database read.
             public PlayerCharacterData state; public string userId; public string accessToken;
+            public MeshCarriedAction action; // DESIGN 1.06: the attack or skill in flight at the crossing
         }
         private sealed class PendingHandoffAck { public string zone; public string name; public float startTime; public float sentTime; public float linkDownSince = -1f; }
         private readonly Dictionary<string, IncomingHandoff> _incomingHandoffFrom = new Dictionary<string, IncomingHandoff>(); // characterId -> who announced it
@@ -3453,8 +3462,38 @@ namespace MultiplayerARPG.MMO.Mesh
                 state = msg.data,
                 userId = msg.userId,
                 accessToken = msg.accessToken,
+                action = msg.action,
             };
-            Stamp($"handoff state for {msg.data?.CharacterName} ({msg.characterId}) received from {_incomingHandoffFrom[msg.characterId].fromZone}");
+            Stamp($"handoff state for {msg.data?.CharacterName} ({msg.characterId}) received from {_incomingHandoffFrom[msg.characterId].fromZone}{(msg.action.IsSet ? $", carrying {msg.action}" : string.Empty)}");
+        }
+
+        /// <summary>Origin side (DESIGN 1.06): the attack or skill the crossing character is in the middle of, or none.</summary>
+        internal static MeshCarriedAction InFlightAction(BaseCharacterEntity entity)
+        {
+            if (entity.AttackComponent is MeshCharacterAttackComponent attack && attack.TryGetInFlight(out MeshCarriedAction swing))
+                return swing;
+            if (entity.UseSkillComponent is MeshCharacterUseSkillComponent skill && skill.TryGetInFlight(out MeshCarriedAction cast))
+                return cast;
+            return default;
+        }
+
+        /// <summary>
+        /// Destination side (DESIGN 1.06): the action the arriving character was in the middle of on the origin, prepared
+        /// here so the triggers its client still sends are accepted (and replayed to the origin's observers) here.
+        /// </summary>
+        private void CarryInFlightAction(BasePlayerCharacterEntity playerCharacter)
+        {
+            if (!_incomingHandoffFrom.TryGetValue(playerCharacter.Id, out IncomingHandoff incoming) || !incoming.action.IsSet)
+                return;
+            MeshCarriedAction action = incoming.action;
+            incoming.action = default;
+            if (action.kind == MeshCarriedActionKind.Attack && playerCharacter.AttackComponent is MeshCharacterAttackComponent attack)
+                attack.PrepareCarried(action);
+            else if (action.kind == MeshCarriedActionKind.Skill && playerCharacter.UseSkillComponent is MeshCharacterUseSkillComponent skill)
+                skill.PrepareCarried(action);
+            else
+                return;
+            Stamp($"arrival {playerCharacter.CharacterName}: carried {action}");
         }
 
         /// <summary>

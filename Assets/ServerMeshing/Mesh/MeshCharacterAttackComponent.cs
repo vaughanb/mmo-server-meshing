@@ -23,6 +23,8 @@ namespace MultiplayerARPG.MMO.Mesh
             // kit's action manager is fetched there): resolve it now (it is a required component) and play the swing.
             if (_manager == null)
                 _manager = GetComponent<CharacterActionComponentManager>();
+            if (MeshActionTrace.Enabled)
+                MeshActionTrace.Log(Entity, $"attack start seed={(simulateState.SimulateSeed != 0 ? simulateState.SimulateSeed : MeshActionTrace.SeedOf(peerTimestamp))}");
             if (IsServer && !MeshIdentity.IsGhostEntity(Entity) && BaseGameNetworkManager.Singleton is MeshMapNetworkManager mesh)
             {
                 byte weaponHandlingState = (byte)simulateState.WeaponHandlingState;
@@ -33,12 +35,55 @@ namespace MultiplayerARPG.MMO.Mesh
 
         protected override void ApplyAttack(CharacterDataCache entityCaches, WeaponHandlingState weaponHandlingState, CharacterItem weapon, int simulateSeed, byte triggerIndex, DamageInfo damageInfo, List<DamageElementMinMaxFloatAmounts> damageAmounts, AimPosition aimPosition)
         {
-            if (IsServer && !MeshIdentity.IsGhostEntity(Entity) && BaseGameNetworkManager.Singleton is MeshMapNetworkManager mesh)
+            if (MeshActionTrace.Enabled)
+                MeshActionTrace.Log(Entity, $"attack trigger seed={simulateSeed} i={triggerIndex}");
+            if (IsServer && MeshIdentity.IsGhostEntity(Entity))
+                return; // a demoted character's swing belongs to the cell it crossed to (DESIGN 1.06; the routine is cancelled at the demotion)
+            if (IsServer && BaseGameNetworkManager.Singleton is MeshMapNetworkManager mesh)
             {
                 SimulateActionTriggerData data = new SimulateActionTriggerData { simulateSeed = simulateSeed, triggerIndex = triggerIndex, aimPosition = aimPosition };
                 mesh.ForwardGhostReplay(Entity, GhostReplayKind.AttackTrigger, 0, w => w.Put(data));
             }
             base.ApplyAttack(entityCaches, weaponHandlingState, weapon, simulateSeed, triggerIndex, damageInfo, damageAmounts, aimPosition);
+        }
+
+        /// <summary>Origin side (DESIGN 1.06): the swing in flight at a crossing, as its start prepared it for the client's triggers.</summary>
+        public bool TryGetInFlight(out MeshCarriedAction action)
+        {
+            action = default;
+            if (!_simulateState.HasValue)
+                return false;
+            int seed = _simulateState.Value.SimulateSeed;
+            HitValidateData validate = HitRegistrationManager.GetHitValidateData(Entity, seed);
+            if (validate == null || validate.TriggerDurations == null)
+                return false;
+            action = new MeshCarriedAction
+            {
+                kind = MeshCarriedActionKind.Attack,
+                seed = seed,
+                weaponHandlingState = (byte)validate.WeaponHandlingState,
+                triggerDurations = validate.TriggerDurations,
+                fireSpread = validate.FireSpread,
+            };
+            return true;
+        }
+
+        /// <summary>
+        /// Destination side: the hit validation the origin prepared at the swing's start, prepared again for the arriving
+        /// character so the client's trigger is accepted here. Mirrors the kit's AttackRoutine (weapon, damage info, damage
+        /// amounts per trigger); the animation and its timing stay on the client, which is already playing them.
+        /// </summary>
+        public void PrepareCarried(MeshCarriedAction action)
+        {
+            WeaponHandlingState weaponHandlingState = (WeaponHandlingState)action.weaponHandlingState;
+            bool isLeftHand = weaponHandlingState.Has(WeaponHandlingState.IsLeftHand);
+            Entity.GetAttackingData(ref isLeftHand, out _, out _, out CharacterItem weapon, out DamageInfo damageInfo);
+            CharacterDataCache entityCaches = Entity.GetCaches();
+            DamageElementMinMaxFloatAmounts baseDamageAmounts = isLeftHand && entityCaches.HasIndexedLeftHandDamages
+                ? entityCaches.IndexedLeftHandDamages
+                : entityCaches.IndexedRightHandDamages;
+            List<DamageElementMinMaxFloatAmounts> damageAmounts = Entity.PrepareDamageAmounts(isLeftHand, baseDamageAmounts, action.triggerDurations.Length, 1);
+            HitRegistrationManager.PrepareHitRegValidation(Entity, action.seed, action.triggerDurations, action.fireSpread, damageInfo, damageAmounts, weaponHandlingState, weapon, null, 0);
         }
 
         /// <summary>Puppet side: what the owner's server told its own observers, told to ours.</summary>

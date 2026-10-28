@@ -17,6 +17,40 @@ namespace MultiplayerARPG.MMO.Mesh
         [Header("Patrol (soak)")]
         [Tooltip("How long one patrol leg may take before it is counted missed and the next one starts.")]
         public float patrolLegSeconds = 120f;
+        [Tooltip("Swing at the air whenever the character can while it patrols, so crossings happen mid-attack (DESIGN 1.06; trace with MESH_TRACE_ACTIONS=1).")]
+        public bool attackWhileWalking = false;
+        private int _swings;
+
+        /// <summary>
+        /// Swings while <paramref name="running"/>, walking a random 0.6-1.4 s after each swing ends: a swing stops the walk
+        /// (the demo's weapons hold the character still), so back-to-back swings would pin it short of the edge. Spaced,
+        /// crossings land at every phase of a swing. Counts the swings started.
+        /// </summary>
+        private IEnumerator SwingWhile(System.Func<bool> running)
+        {
+            System.Random random = new System.Random(1);
+            while (running())
+            {
+                BasePlayerCharacterEntity self = GameInstance.PlayingCharacterEntity;
+                if (self != null && !self.IsDead())
+                {
+                    // The demo starts characters sheathed and its controller draws before the first swing; the owner sets the
+                    // synced flag (ClientMulticast), and the demo's sheathing component vetoes swings until the hand closes.
+                    if (self.IsWeaponsSheathed && self.IsOwnerClient)
+                        self.IsWeaponsSheathed = false;
+                    WeaponHandlingState whs = WeaponHandlingState.None;
+                    if (self.Attack(ref whs))
+                    {
+                        _swings++;
+                        while (running() && GameInstance.PlayingCharacterEntity != null && GameInstance.PlayingCharacterEntity.IsAttacking)
+                            yield return null;
+                        yield return new WaitForSecondsRealtime(0.6f + (float)random.NextDouble() * 0.8f);
+                        continue;
+                    }
+                }
+                yield return null;
+            }
+        }
 
         /// <summary>PatrolLegLine is the line a patrol leg logs when it ends.</summary>
         public static string PatrolLegLine(int n, float targetX, bool reached, float x, float z)
@@ -43,6 +77,8 @@ namespace MultiplayerARPG.MMO.Mesh
             BeginStandMigrations(self);
             bool patrolling = true;
             StartCoroutine(PollMigrationsWhile(() => patrolling));
+            if (attackWhileWalking)
+                StartCoroutine(SwingWhile(() => patrolling));
             float end = Time.realtimeSinceStartup + observeSeconds;
             int legs = 0, missed = 0;
             float target = walkReturnX;
@@ -65,7 +101,7 @@ namespace MultiplayerARPG.MMO.Mesh
             PollStandMigrations();
             Finished = true;
             Passed = legs > missed;
-            Log($"{PatrolResultHead(legs, missed)}{StandMigrationsSuffix()} -> {(Passed ? "PASS" : "FAIL")}");
+            Log($"{PatrolResultHead(legs, missed)}{StandMigrationsSuffix()}{(attackWhileWalking ? $" swings={_swings}" : "")} -> {(Passed ? "PASS" : "FAIL")}");
         }
 
         /// <summary>Counts migrations every frame while a walk runs (WalkTo does not poll them).</summary>

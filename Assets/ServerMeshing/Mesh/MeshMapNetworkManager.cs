@@ -164,6 +164,9 @@ namespace MultiplayerARPG.MMO.Mesh
             Logging.Log("Mesh", MeshMeteredTransportFactory.SettingLine(timed));
         }
 
+        /// <summary>Client: a hop is under way (from the warp until the new cell's character settles).</summary>
+        public bool IsClientHopping => _migration != null && _migration.IsRunning;
+
         private ClientMigrationController Migration
         {
             get
@@ -1066,7 +1069,8 @@ namespace MultiplayerARPG.MMO.Mesh
                     snapshot.CurrentMapName = mapName;
                     snapshot.CurrentPosition = savePosition;
                     snapshot.CurrentRotation = rotation;
-                    if (SendHandoffState(zone.id, new HandoffStateMessage { characterId = characterId, userId = handoffUserId, accessToken = accessToken, data = snapshot }))
+                    MeshCarriedAction action = InFlightAction(entity); // DESIGN 1.06: the destination accepts its remaining triggers
+                    if (SendHandoffState(zone.id, new HandoffStateMessage { characterId = characterId, userId = handoffUserId, accessToken = accessToken, data = snapshot, action = action }))
                     {
                         if (entity.TryGetComponent(out PlayerCharacterDataUpdater stateUpdater))
                             Destroy(stateUpdater);
@@ -1076,7 +1080,7 @@ namespace MultiplayerARPG.MMO.Mesh
                         if (demotePlayerOnHandoff && entity != null)
                             DemotePlayerToGhost(entity, zone.id);
                         RegisterPendingHandoffAck(characterId, entity.CharacterName, zone.id, startTime);
-                        Logging.Log("Mesh", $"Handoff SENT {entity.CharacterName} -> zone {zone.id} state in memory, serverSide={sw.ElapsedMilliseconds}ms demoted={demotePlayerOnHandoff}; the row is written behind the player");
+                        Logging.Log("Mesh", $"Handoff SENT {entity.CharacterName} -> zone {zone.id} state in memory, serverSide={sw.ElapsedMilliseconds}ms demoted={demotePlayerOnHandoff}{(action.IsSet ? $" carrying {action}" : string.Empty)}; the row is written behind the player");
                         SaveHandoffRowBehind(characterId, entity.CharacterName, zone.id, snapshot, mapName, savePosition, rotation).Forget();
                         return;
                     }

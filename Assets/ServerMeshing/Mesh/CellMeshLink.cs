@@ -553,12 +553,14 @@ namespace MultiplayerARPG.MMO.Mesh
         public string userId;
         public string accessToken;
         public PlayerCharacterData data;
+        public MeshCarriedAction action; // the attack or skill in flight at the crossing (DESIGN 1.06), kind None when idle
         public void Serialize(NetDataWriter writer)
         {
             writer.Put(characterId);
             writer.Put(userId);
             writer.Put(accessToken ?? string.Empty);
             writer.Put(data);
+            writer.Put(action);
         }
         public void Deserialize(NetDataReader reader)
         {
@@ -566,6 +568,7 @@ namespace MultiplayerARPG.MMO.Mesh
             userId = reader.GetString();
             accessToken = reader.GetString();
             data = reader.Get(() => new PlayerCharacterData());
+            action = reader.Get<MeshCarriedAction>();
         }
     }
 
@@ -613,6 +616,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public int guildId;
         public int factionId;
         public bool isPkOn;
+        public bool isWeaponsSheathed; // players: the kit does not save it, so a puppet (and the character it is promoted to) kept a stale one (DESIGN 1.06)
 
         public void Serialize(NetDataWriter writer)
         {
@@ -634,7 +638,7 @@ namespace MultiplayerARPG.MMO.Mesh
             writer.Put(summonerMeshId ?? string.Empty);
             writer.Put(summonId ?? string.Empty);
             writer.Put(summonType);
-            writer.Put(rightWeaponDataId); writer.Put(rightWeaponLevel); writer.Put(leftWeaponDataId); writer.Put(leftWeaponLevel); writer.Put(partyId); writer.Put(guildId); writer.Put(factionId); writer.Put(isPkOn); if (kind == GhostKind.Building) { writer.Put(fullRotation.x); writer.Put(fullRotation.y); writer.Put(fullRotation.z); }
+            writer.Put(rightWeaponDataId); writer.Put(rightWeaponLevel); writer.Put(leftWeaponDataId); writer.Put(leftWeaponLevel); writer.Put(partyId); writer.Put(guildId); writer.Put(factionId); writer.Put(isPkOn); writer.Put(isWeaponsSheathed); if (kind == GhostKind.Building) { writer.Put(fullRotation.x); writer.Put(fullRotation.y); writer.Put(fullRotation.z); }
         }
 
         public void Deserialize(NetDataReader reader)
@@ -657,7 +661,7 @@ namespace MultiplayerARPG.MMO.Mesh
             summonerMeshId = reader.GetString();
             summonId = reader.GetString();
             summonType = reader.GetByte();
-            rightWeaponDataId = reader.GetInt(); rightWeaponLevel = reader.GetInt(); leftWeaponDataId = reader.GetInt(); leftWeaponLevel = reader.GetInt(); partyId = reader.GetInt(); guildId = reader.GetInt(); factionId = reader.GetInt(); isPkOn = reader.GetBool(); if (kind == GhostKind.Building) fullRotation = new Vector3(reader.GetFloat(), reader.GetFloat(), reader.GetFloat());
+            rightWeaponDataId = reader.GetInt(); rightWeaponLevel = reader.GetInt(); leftWeaponDataId = reader.GetInt(); leftWeaponLevel = reader.GetInt(); partyId = reader.GetInt(); guildId = reader.GetInt(); factionId = reader.GetInt(); isPkOn = reader.GetBool(); isWeaponsSheathed = reader.GetBool(); if (kind == GhostKind.Building) fullRotation = new Vector3(reader.GetFloat(), reader.GetFloat(), reader.GetFloat());
         }
     }
 

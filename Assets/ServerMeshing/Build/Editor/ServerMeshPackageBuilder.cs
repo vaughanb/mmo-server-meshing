@@ -36,7 +36,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
     {
         // Release metadata. Version is the add-on version reported by the Addon Manager; UpdateDate drives its recency
         // filter and "New" badge, and is bumped by hand with the version rather than tracking the build clock.
-        public const string Version = "0.96.8";
+        public const string Version = "0.96.9";
         public const string UpdateDate = "2026-10-28";
 
         // Where the published packages will be fetched from. The Addon Manager downloads "packageUrl" verbatim, so this
