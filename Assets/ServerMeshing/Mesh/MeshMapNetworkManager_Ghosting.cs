@@ -360,6 +360,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 client.Update();
             if (_kinematicGhosts.Count > 0)
                 KinematicPuppetsUpdate(); // after the pumps: every snapshot of this frame is in
+            ArrivalWalkUpdate(); // DESIGN 1.09 (MeshMapNetworkManager_ArrivalWalk)
             PrewarmUpdate(); // Slice 2b: queued puppet spawns on a Dynamic map, within the frame's budget
 
             if (!enableBorderGhosting || world == null || !HasOwnZone)
@@ -1077,6 +1078,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 // Finish the promotion: from here on this is the real character.
                 if (_ghosts.TryGetValue(playerCharacter.Id, out MeshGhost ghost))
                     PromoteGhostInPlace(playerCharacter.Id, ghost);
+                if (_incomingHandoffFrom.TryGetValue(playerCharacter.Id, out IncomingHandoff arriving))
+                    BeginArrivalWalk(playerCharacter, arriving.trackOrigin, arriving.time, arriving.velocity); // DESIGN 1.09: on through its client's gap (MeshMapNetworkManager_ArrivalWalk)
                 TrackOwned(playerCharacter);
                 // A fresh spawn is pushed to its owner at once. A re-owned entity would wait for the AOI's next pass
                 // (1 s): the kit's SetOwnerClient is deferred by the AOI (manuallyApplyOwnerChanges) and the owner's
@@ -1333,7 +1336,7 @@ namespace MultiplayerARPG.MMO.Mesh
         /// The departing player's entity stays as a ghost puppet: server-owned (so the client's disconnect does not
         /// destroy it), silenced, invincible, steered by the new owner's snapshots and removed when they stop.
         /// </summary>
-        private void DemotePlayerToGhost(BasePlayerCharacterEntity entity, string newOwnerZone)
+        private void DemotePlayerToGhost(BasePlayerCharacterEntity entity, string newOwnerZone, Vector3 velocity)
         {
             if (entity == null || entity.Identity == null || entity.Identity.IsDestroyed)
                 return;
@@ -1349,6 +1352,7 @@ namespace MultiplayerARPG.MMO.Mesh
             entity.AttackComponent?.CancelAttack();
             entity.UseSkillComponent?.CancelSkill();
             MakeGhostInPlace(entity, id, GhostKind.Player, newOwnerZone, riddenMount);
+            SeedDemotedPuppet(entity, velocity); // DESIGN 1.09: walks on until the destination's snapshots (MeshMapNetworkManager_ArrivalWalk)
             int pets = DemoteSummonsWith(entity, newOwnerZone);
             Logging.Log("Mesh", $"Player {entity.CharacterName} demoted to ghost (owner {newOwnerZone}, mounted={riddenMount != null}, summons={pets})");
         }
@@ -3385,6 +3389,8 @@ namespace MultiplayerARPG.MMO.Mesh
             public PlayerCharacterData state; public string userId; public string accessToken;
             public MeshCarriedAction action; // DESIGN 1.06: the attack or skill in flight at the crossing
             public uint originObjectId;      // DESIGN 1.07: the id the client names the character by until it adopts ours
+            public Vector3 velocity;         // DESIGN 1.09: its velocity at the crossing, to walk it on through its client's gap
+            public Vector3 trackOrigin;      // DESIGN 1.09: where it was at the crossing (the state's position, less the origin's lead)
         }
         private sealed class PendingHandoffAck { public string zone; public string name; public float startTime; public float sentTime; public float linkDownSince = -1f; }
         private readonly Dictionary<string, IncomingHandoff> _incomingHandoffFrom = new Dictionary<string, IncomingHandoff>(); // characterId -> who announced it
@@ -3466,6 +3472,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 accessToken = msg.accessToken,
                 action = msg.action,
                 originObjectId = msg.originObjectId,
+                velocity = msg.velocity,
+                trackOrigin = msg.data != null ? (Vector3)msg.data.CurrentPosition - msg.velocity * handoffLeadSeconds : Vector3.zero,
             };
             Stamp($"handoff state for {msg.data?.CharacterName} ({msg.characterId}) received from {_incomingHandoffFrom[msg.characterId].fromZone}{(msg.action.IsSet ? $", carrying {msg.action}" : string.Empty)}");
         }
@@ -3797,7 +3805,7 @@ namespace MultiplayerARPG.MMO.Mesh
         private void GhostingOnRealPlayerUnregistered(long connectionId) { }
         private void GhostingOnPlayerHandoffStart(string characterId, string toZone) { }
         private bool TryPromoteGhostForArrival(long connectionId, string userId, PlayerCharacterData data, out BasePlayerCharacterEntity entity) { entity = null; return false; }
-        private void DemotePlayerToGhost(BasePlayerCharacterEntity entity, string newOwnerZone) { }
+        private void DemotePlayerToGhost(BasePlayerCharacterEntity entity, string newOwnerZone, Vector3 velocity) { }
         internal void OnMeshNeighbourHello(long connectionId, string zoneId, string incarnation) { }
         internal void OnMeshNeighbourDisconnected(long connectionId) { }
         internal void OnGhostSnapshot(long connectionId, GhostSnapshotMessage msg) { }

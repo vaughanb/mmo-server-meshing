@@ -1079,7 +1079,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     snapshot.CurrentPosition = savePosition;
                     snapshot.CurrentRotation = rotation;
                     MeshCarriedAction action = InFlightAction(entity); // DESIGN 1.06: the destination accepts its remaining triggers
-                    if (SendHandoffState(zone.id, new HandoffStateMessage { characterId = characterId, userId = handoffUserId, accessToken = accessToken, data = snapshot, action = action, originObjectId = entity.ObjectId }))
+                    if (SendHandoffState(zone.id, new HandoffStateMessage { characterId = characterId, userId = handoffUserId, accessToken = accessToken, data = snapshot, action = action, originObjectId = entity.ObjectId, velocity = velocity }))
                     {
                         if (entity.TryGetComponent(out PlayerCharacterDataUpdater stateUpdater))
                             Destroy(stateUpdater);
@@ -1087,7 +1087,7 @@ namespace MultiplayerARPG.MMO.Mesh
                             entity.NetworkDestroy();
                         ServerSendPacket(connectionId, 0, DeliveryMethod.ReliableOrdered, GameNetworkingConsts.Warp, new MMOWarpMessage { networkAddress = peer.networkAddress, networkPort = peer.networkPort });
                         if (demotePlayerOnHandoff && entity != null)
-                            DemotePlayerToGhost(entity, zone.id);
+                            DemotePlayerToGhost(entity, zone.id, velocity);
                         RegisterPendingHandoffAck(characterId, entity.CharacterName, zone.id, startTime);
                         Logging.Log("Mesh", $"Handoff SENT {entity.CharacterName} -> zone {zone.id} state in memory, serverSide={sw.ElapsedMilliseconds}ms demoted={demotePlayerOnHandoff}{(action.IsSet ? $" carrying {action}" : string.Empty)}; the row is written behind the player");
                         SaveHandoffRowBehind(characterId, entity.CharacterName, zone.id, snapshot, mapName, savePosition, rotation).Forget();
@@ -1137,7 +1137,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 // After the warp packet (ordered): the entity becomes a server-owned puppet that survives the client's
                 // disconnect; observers on this cell keep seeing it, now steered by the neighbour's snapshots.
                 if (demotePlayerOnHandoff && entity != null)
-                    DemotePlayerToGhost(entity, zone.id);
+                    DemotePlayerToGhost(entity, zone.id, velocity);
                 RegisterPendingHandoffAck(characterId, entity.CharacterName, zone.id, startTime);
                 Logging.Log("Mesh", $"Handoff SENT {entity.CharacterName} -> zone {zone.id} saved={saved} serverSide={sw.ElapsedMilliseconds}ms demoted={demotePlayerOnHandoff}");
             }

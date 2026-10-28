@@ -177,12 +177,19 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private bool _warmedUp;
 
+        private MeshObservedMotionTrace _observed;
+
         private void Update()
         {
             if (_manager != null)
                 PollPreconnect();
             if (_running || _manager == null || !_manager.IsClientConnected || _manager.Assets == null)
+            {
+                _observed?.Reset();
                 return;
+            }
+            if (MeshObservedMotionTrace.Enabled)
+                (_observed ?? (_observed = new MeshObservedMotionTrace())).Sample(_manager.Assets, GameInstance.PlayingCharacterEntity); // DESIGN 1.09
             if (!_warmedUp && _manager.warmUpMigrationCode && MeshMigrationWarmup.IsReady(GameInstance.PlayingCharacterEntity))
             {
                 // Once per session, as soon as the character's data is in: the first hop then finds the adoption's

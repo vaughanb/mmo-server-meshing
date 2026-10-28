@@ -556,6 +556,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public PlayerCharacterData data;
         public MeshCarriedAction action; // the attack or skill in flight at the crossing (DESIGN 1.06), kind None when idle
         public uint originObjectId;      // the character's object id on the origin, which its client names it by until it adopts the new one (DESIGN 1.07)
+        public Vector3 velocity;         // the character's velocity at the crossing, as the origin measured it: the destination walks it on at that through its client's gap (DESIGN 1.09)
         public void Serialize(NetDataWriter writer)
         {
             writer.Put(characterId);
@@ -564,6 +565,7 @@ namespace MultiplayerARPG.MMO.Mesh
             writer.Put(data);
             writer.Put(action);
             writer.Put(originObjectId);
+            writer.Put(velocity.x); writer.Put(velocity.y); writer.Put(velocity.z);
         }
         public void Deserialize(NetDataReader reader)
         {
@@ -573,6 +575,7 @@ namespace MultiplayerARPG.MMO.Mesh
             data = reader.Get(() => new PlayerCharacterData());
             action = reader.Get<MeshCarriedAction>();
             originObjectId = reader.GetUInt();
+            velocity = new Vector3(reader.GetFloat(), reader.GetFloat(), reader.GetFloat());
         }
     }
 

@@ -344,6 +344,15 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         /// <summary>The server instance's settings, as overrides on the scene's instance (SerializedObject records them).</summary>
         private static void ConfigureServer(GameObject root, MapInfo mapInfo)
         {
+            // Character puppets take their pose from the snapshots (DESIGN 1.09): a steered one dashed to each snapshot and
+            // stood until the next, so a character just across a line moved in stop-go bursts. Dynamic maps already default
+            // to it; the 8 km map is Static, so the copy sets it.
+            foreach (MeshMapNetworkManager map in root.GetComponentsInChildren<MeshMapNetworkManager>(true))
+            {
+                SerializedObject so = new SerializedObject(map);
+                so.FindProperty("puppetMotion").enumValueIndex = (int)MeshPuppetMotion.Kinematic;
+                so.ApplyModifiedPropertiesWithoutUndo();
+            }
             foreach (MeshCentralNetworkManager central in root.GetComponentsInChildren<MeshCentralNetworkManager>(true))
             {
                 SerializedObject so = new SerializedObject(central);

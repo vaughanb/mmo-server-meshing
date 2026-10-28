@@ -812,6 +812,10 @@ PrefabInstance:
       propertyPath: onLoadSceneProgress.m_PersistentCalls.m_Calls.Array.data[0].m_Target
       value: 
       objectReference: {fileID: 1650493581}
+    - target: {fileID: 6213249881384088648, guid: 5f7574e5b970d004d88890c5336c1c0b, type: 3}
+      propertyPath: puppetMotion
+      value: 1
+      objectReference: {fileID: 0}
     - target: {fileID: 7794451676100646400, guid: 5f7574e5b970d004d88890c5336c1c0b, type: 3}
       propertyPath: m_LocalPosition.x
       value: 0

@@ -1,7 +1,7 @@
 # Handoff — 2026-10-28
 
 Where the work stands, how to get it running on another machine, and what is left. The design record
-([DESIGN.md](DESIGN.md), version 1.08) has the full reasoning and measurements; this note is the short path in.
+([DESIGN.md](DESIGN.md), version 1.09) has the full reasoning and measurements; this note is the short path in.
 
 ## What was done
 
@@ -165,7 +165,19 @@ Where the work stands, how to get it running on another machine, and what is lef
    - The CONTINUITY line now ends with `others:` (`MeshKeptMotionMeter`: per walking kept character, its
      longest stand and when it began after the warp, and its fastest frame against its median speed) and
      `kept walking N, handed back M`.
-10. **Verified on the 8 km demo** (editor client plus headless bots), all seamless, no exceptions:
+10. **Undetectable handoff, step 9: someone else's crossing, seen from the line (DESIGN 1.09, package 0.96.12).**
+    With a player standing beside the line, a character on the same cell moved smoothly, but one just across it
+    moved in stop-go bursts all the time (a steered puppet dashes to each 0.1 s snapshot and stands), and at its
+    crossing it stood 50–150 ms and then lunged.
+    - The demo copy's puppets are kinematic (`puppetMotion`, set by the builder and in `DemoMesh8kInit.unity`).
+    - `MeshMapNetworkManager_ArrivalWalk`: the destination walks an arriving character along its crossing track
+      (origin's position and velocity, sent with the handoff state) until its client's first state; the origin
+      starts the demoted copy's kinematic body at once from that velocity.
+    - Measured (150 s, ~20 crossings): stalls across the line about 139 → 20, lunge frames at the crossing 77 → 37;
+      the client's first state still moves the arrival about 0.2 m.
+    - `MESH_TRACE_OBSERVED=1` logs every stall and lunge of a nearby walking character on the client (tag
+      `MeshObserved`).
+11. **Verified on the 8 km demo** (editor client plus headless bots), all seamless, no exceptions:
    - a 750 m walk across three cells;
    - 16 quick back-and-forth crossings (adopted after 180–398 ms, none fell back);
    - a second player standing past the line: kept and adopted;
@@ -257,9 +269,9 @@ Where the work stands, how to get it running on another machine, and what is lef
      keeping the old connection for a frame in CE-14's `MigrateClient` (a core change) or a blocking flush;
    - ammunition per trigger, a skill item taken after the last trigger and a charge in progress are not
      carried (1.06), and no skill has been cast across a crossing in a run yet;
-   - the observer's view of someone else crossing: with 1.08 on, stands of 12–172 ms remain 130–530 ms after
-     the player's own warp, where the second bot's own crossings and turns fall; measure a crossing seen from a
-     player standing still at the line;
+   - someone else's crossing, after 1.09: the client's first state still moves the arrival about 0.2 m in one
+     step for everyone watching, and a kinematic puppet across the line still stalls ~50 ms now and then. The
+     BaseDemo-CE rig's maps are Static and stay steered (they move in bursts across a line);
    - a server-driven arrival (the destination spawns to the pre-connected, pre-authenticated client when the
      handoff commits, without waiting for enter-game and ready) would take the gap to one round trip.
    On Mono the first hop of a session still compiles the hop's first-time code (12.6 ms, the adoption read
