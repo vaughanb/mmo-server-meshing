@@ -482,7 +482,10 @@ namespace LiteNetLibManager
         {
             base.OnClientConnected();
             // Reset client connection id, will be received from server later
-            ClientConnectionId = -1;
+            // MESH-EDIT: CE-14 — a migrating client keeps the old id until the new server answers, so the objects it
+            // owns stay owned (and simulated) across the swap.
+            if (!IsMigratingClient)
+                ClientConnectionId = -1;
             ClientSyncingStates.Clear();
             RttCalculator.Reset();
             _updatingClientSyncElements.Clear();
@@ -538,6 +541,15 @@ namespace LiteNetLibManager
             Players.Clear();
             Assets.Clear();
             LoadOfflineScene();
+        }
+
+        // MESH-EDIT: CE-14 — the client's objects are kept (not destroyed) while it moves to another server.
+        protected override void OnStartMigrateClient()
+        {
+            base.OnStartMigrateClient();
+            ClearPendingRpcs();
+            Players.Clear();
+            Assets.KeepSpawnedObjects(ClientConnectionId);
         }
 
         public override void OnStopClient()
@@ -707,6 +719,9 @@ namespace LiteNetLibManager
             ReadExtraEnterGameResponse(responseCode, response, responseHandler.Reader);
             if (responseCode != AckResponseCode.Success)
                 return;
+            // MESH-EDIT: CE-14 — the kept objects this client owned are owned under its new connection id.
+            if (IsMigratingClient)
+                Assets.RebindKeptObjectsOwner(ClientConnectionId, response.connectionId);
             ClientConnectionId = response.connectionId;
             if (IsClientConnected)
                 HandleServerSceneChange(response.serverSceneInfo);

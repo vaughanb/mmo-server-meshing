@@ -1,0 +1,39 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 03ceab2f395322b419b7f56a3aa15e49, type: 3}
+  m_Name: WeaponGripOverrides
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.Demo.DemoWeaponGripOverrides
+  entries:
+  - itemName: ApprenticeStaff
+    localPosition: {x: -0.023, y: -0.119, z: 0.02}
+    localEulerAngles: {x: 0.00008041198, y: 217.81879, z: 0.00007086484}
+    localScale: {x: 1, y: 1, z: 1}
+  - itemName: HuntingBow
+    localPosition: {x: -0.014198182, y: -0.030853353, z: 0.087311216}
+    localEulerAngles: {x: 12.473892, y: 79.59994, z: 3.7444391}
+    localScale: {x: 1, y: 1, z: 1}
+  - itemName: PaintedRoundShield
+    localPosition: {x: -0.01930633, y: -0.044532135, z: 0.06931949}
+    localEulerAngles: {x: 338.62146, y: 17.004976, z: 5.0625324}
+    localScale: {x: 1, y: 1, z: 1}
+  - itemName: IronShortsword
+    localPosition: {x: -0.0273, y: -0.0479, z: 0.0124}
+    localEulerAngles: {x: -0, y: 80, z: 0}
+    localScale: {x: 1, y: 1, z: 1}
+  - itemName: IronLongsword
+    localPosition: {x: -0.023, y: -0.091, z: 0.016}
+    localEulerAngles: {x: -0, y: 80, z: 0}
+    localScale: {x: 1, y: 1, z: 1}
+  - itemName: ElderStaff
+    localPosition: {x: -0.0226, y: 0.0025, z: 0.0074}
+    localEulerAngles: {x: -0, y: 0, z: 0}
+    localScale: {x: 1, y: 1, z: 1}

@@ -1,0 +1,74 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a278d249b1987cf4ebdb60bb4769bf33, type: 3}
+  m_Name: WhatTheHillsHide
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.Quest
+  btnValidate: 0
+  id: WhatTheHillsHide
+  defaultTitle: What the Hills Hide
+  languageSpecificTitles: []
+  defaultDescription: Robed figures have been going down into the crypt under the
+    hills, and the one that leads them has not come up. End it at the source.
+  languageSpecificDescriptions: []
+  category: 
+  icon: {fileID: 0}
+  requirement:
+    character: {fileID: 0}
+    faction: {fileID: 0}
+    level: 6
+    completedQuests:
+    - {fileID: 11400000, guid: 36ad1670a040b7a488dc14e4c664bbde, type: 2}
+  tasks: []
+  randomTasks:
+  - tasks:
+    - taskType: 0
+      monsterCharacterAmount:
+        monster: {fileID: 11400000, guid: 90e186c18a2d34c48a1c79158e075fc1, type: 2}
+        amount: 1
+      itemAmount:
+        item: {fileID: 0}
+        level: 0
+        amount: 0
+      doNotDecreaseItemsOnQuestComplete: 0
+      npcEntity: {fileID: 0}
+      npcEntityId: 0
+      npcEntityTitle: 
+      npcEntityTitles: []
+      talkToNpcDialog: {fileID: 0}
+      completeAfterTalked: 0
+      customQuestTask: {fileID: 0}
+      useCustomDescription: 0
+      defaultDescription: 
+      languageSpecificDescriptions: []
+      useCustomCompletedDescription: 0
+      defaultCompletedDescription: 
+      languageSpecificCompletedDescriptions: []
+  abandonQuests: []
+  resetAttributes: 0
+  resetSkills: 0
+  changeCharacterClass: {fileID: 0}
+  changeCharacterFaction: {fileID: 0}
+  rewardExp: 900
+  rewardGold: 700
+  rewardStatPoints: 0
+  rewardSkillPoints: 0
+  rewardCurrencies: []
+  rewardItems:
+  - item: {fileID: 11400000, guid: 4813f8d8ebdc81349b469905ed698457, type: 2}
+    level: 0
+    amount: 5
+  selectableRewardItems: []
+  randomRewardItems: []
+  repeatType: 0
+  canAbandon: 1
+  nextAssignQuests: []
+  autoTrackQuest: 1

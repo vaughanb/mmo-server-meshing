@@ -1,0 +1,3948 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &1687182878164330406
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1189771046980561884}
+  m_Layer: 8
+  m_Name: MiniMapContainer
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1189771046980561884
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1687182878164330406}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 953201143620429487}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &2776177086027965279
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 6229630499120129507}
+  m_Layer: 0
+  m_Name: DashHop
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &6229630499120129507
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2776177086027965279}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 7643545823217999981}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &2934151956709629998
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 8524820623634298824}
+  m_Layer: 8
+  m_Name: DamageTransform
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &8524820623634298824
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2934151956709629998}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 0, y: 1.08, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 953201143620429487}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &3190610660028622951
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 3274042601309420324}
+  - component: {fileID: 2324238058237204940}
+  m_Layer: 0
+  m_Name: _FootstepAudioSource
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &3274042601309420324
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3190610660028622951}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 7643545823217999981}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!82 &2324238058237204940
+AudioSource:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3190610660028622951}
+  m_Enabled: 1
+  serializedVersion: 4
+  OutputAudioMixerGroup: {fileID: 0}
+  m_audioClip: {fileID: 0}
+  m_Resource: {fileID: 0}
+  m_PlayOnAwake: 0
+  m_Volume: 1
+  m_Pitch: 1
+  Loop: 0
+  Mute: 0
+  Spatialize: 0
+  SpatializePostEffects: 0
+  Priority: 128
+  DopplerLevel: 1
+  MinDistance: 1
+  MaxDistance: 500
+  Pan2D: 0
+  rolloffMode: 0
+  BypassEffects: 0
+  BypassListenerEffects: 0
+  BypassReverbZones: 0
+  rolloffCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 1
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    - serializedVersion: 3
+      time: 1
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  panLevelCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 1
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  spreadCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  reverbZoneMixCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 1
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+--- !u!1 &3894001199211560798
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 953201143620429487}
+  m_Layer: 0
+  m_Name: Transforms
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &953201143620429487
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3894001199211560798}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children:
+  - {fileID: 8524820623634298824}
+  - {fileID: 2039593403312453650}
+  - {fileID: 1189771046980561884}
+  - {fileID: 5671560747898085554}
+  m_Father: {fileID: 7643545823217999981}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &4389104902903565444
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 2039593403312453650}
+  m_Layer: 8
+  m_Name: UIElementContainer
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &2039593403312453650
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4389104902903565444}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 0, y: 2.05, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 953201143620429487}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &6526385421427787623
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 7643545823217999981}
+  - component: {fileID: 1731703745014105592}
+  - component: {fileID: 7027616053448558788}
+  - component: {fileID: 5334670880994568730}
+  - component: {fileID: 4490087667767862676}
+  - component: {fileID: 3592662186214310626}
+  - component: {fileID: 9093202556357433115}
+  - component: {fileID: 9112448983163727468}
+  - component: {fileID: 6114923041172079287}
+  - component: {fileID: 7828369540235613160}
+  - component: {fileID: 7062245572940816792}
+  - component: {fileID: 1207649095027317655}
+  - component: {fileID: 7605066182175005038}
+  - component: {fileID: 4202669790023529814}
+  - component: {fileID: 8886414933638790817}
+  - component: {fileID: 7761067892534634117}
+  - component: {fileID: 3464313527131776857}
+  - component: {fileID: 3543647905853475013}
+  - component: {fileID: 7483105291137616143}
+  - component: {fileID: 3284730399716422114}
+  - component: {fileID: 5765065429596777152}
+  - component: {fileID: 6379782637759056489}
+  - component: {fileID: 8802783142152439386}
+  - component: {fileID: 6761128493832492630}
+  - component: {fileID: 1360653913874136855}
+  - component: {fileID: 2635833742193938652}
+  - component: {fileID: 7217058095132140879}
+  - component: {fileID: 7898528712931090338}
+  - component: {fileID: 7962668745796926009}
+  - component: {fileID: 9165039042466397638}
+  - component: {fileID: 1542672832455063775}
+  m_Layer: 0
+  m_Name: DemoPlayerCharacterMale
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &7643545823217999981
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6526385421427787623}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children:
+  - {fileID: 953201143620429487}
+  - {fileID: 6911877449040421410}
+  - {fileID: 6229630499120129507}
+  - {fileID: 3274042601309420324}
+  - {fileID: 7130599479170269180}
+  - {fileID: 2148679926243870183}
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1731703745014105592
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6526385421427787623}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9a8b7c6d5e4f4a3b8c9d0e1f2a3b4c51, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _behaviourIndex: 0
+  entityTitle: Male
+  entityTitles: []
+  syncTitle:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  ownerObjects: []
+  nonOwnerObjects: []
+  model: {fileID: 0}
+  cameraTargetTransform: {fileID: 7643545823217999981}
+  fpsCameraTargetTransform: {fileID: 7643545823217999981}
+  canSideSprint: 0
+  canBackwardSprint: 0
+  syncOverrideInput:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  syncOverrideMoveSpeed:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  syncOverrideJumpHeight:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  syncOverrideGravityRate:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  combatTextTransform: {fileID: 8524820623634298824}
+  opponentAimTransform: {fileID: 8524820623634298824}
+  isStaticHitBoxes: 0
+  onNormalDamageHit:
+    m_PersistentCalls:
+      m_Calls: []
+  onCriticalDamageHit:
+    m_PersistentCalls:
+      m_Calls: []
+  onBlockedDamageHit:
+    m_PersistentCalls:
+      m_Calls: []
+  onDamageMissed:
+    m_PersistentCalls:
+      m_Calls: []
+  isInvincible:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  currentHp:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  meleeDamageTransform: {fileID: 8524820623634298824}
+  missileDamageTransform: {fileID: 8524820623634298824}
+  characterUiTransform: {fileID: 2039593403312453650}
+  miniMapUiTransform: {fileID: 1189771046980561884}
+  chatBubbleTransform: {fileID: 5671560747898085554}
+  debugDamageLaunchingColor: {r: 0, g: 1, b: 0, a: 0.04}
+  race: {fileID: 0}
+  onDead:
+    m_PersistentCalls:
+      m_Calls: []
+  onRespawn:
+    m_PersistentCalls:
+      m_Calls: []
+  onLevelUp:
+    m_PersistentCalls:
+      m_Calls: []
+  id:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  metaDataId:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  level:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  exp:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  currentMp:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  currentStamina:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  currentFood:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  currentWater:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  equipWeaponSet:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  isWeaponsSheathed:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  pitch:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  lookPosition:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+    valueChangeDistance: 0.01
+  aimPosition:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  targetEntityId:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  mount:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  summoner:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  selectableWeaponSets:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  attributes:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  skills:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  skillUsages:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  buffs:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  equipItems:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  nonEquipItems:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  summons:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  characterDatabases:
+  - {fileID: 11400000, guid: 014b0665320d99e40bfc8c7593785fda, type: 2}
+  - {fileID: 11400000, guid: 07c0c8b92e13f8c45ac1800ad66cb7ee, type: 2}
+  - {fileID: 11400000, guid: d763dabf6ea6b604b939ab857c455b8d, type: 2}
+  dataId:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  factionId:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  statPoint:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  skillPoint:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  gold:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  userGold:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  userCash:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  partyId:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  guildId:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  persistChannel:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  persistMapName:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  persistPosition:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+    valueChangeDistance: 0.01
+  persistSafeArea:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  respawnMapName:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  respawnPosition:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+    valueChangeDistance: 0.01
+  iconDataId:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  frameDataId:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  backgroundDataId:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  titleDataId:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  lastDeadTime:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  unmuteTime:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  isPkOn:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  pkPoint:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  consecutivePkKills:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  reputation:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  isWarping:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  hotkeys:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  quests:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  currencies:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  privateBools:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  privateInts:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  privateFloats:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  publicBools:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  publicInts:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  publicFloats:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+  guildSkills:
+    _behaviour: {fileID: 0}
+    _elementId: 0
+    logTagName: 
+    isDebug: 0
+--- !u!143 &7027616053448558788
+CharacterController:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6526385421427787623}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Height: 1.8
+  m_Radius: 0.3
+  m_SlopeLimit: 45
+  m_StepOffset: 0.3
+  m_SkinWidth: 0.01
+  m_MinMoveDistance: 0.001
+  m_Center: {x: 0, y: 0.9, z: 0}
+--- !u!114 &5334670880994568730
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6526385421427787623}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ac04ae93f267f7d4596f108f0246ae80, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _behaviourIndex: 0
+  stoppingDistance: 0.1
+  movementSecure: 0
+  jumpHeight: 2
+  applyJumpForceMode: 0
+  applyJumpForceFixedDuration: 0
+  gravity: 9.81
+  maxFallVelocity: 40
+  groundedVerticalVelocity: -2
+  groundSnapDistance: 2
+  doNotChangeVelocityWhileAirborne: 0
+  standForwardMoveSpeedRate: 1
+  standForwardSideMoveSpeedRate: 1
+  standSideMoveSpeedRate: 1
+  standBackwardSideMoveSpeedRate: 0.75
+  standBackwardMoveSpeedRate: 0.75
+  crouchForwardMoveSpeedRate: 1
+  crouchForwardSideMoveSpeedRate: 1
+  crouchSideMoveSpeedRate: 0.65
+  crouchBackwardSideMoveSpeedRate: 0.75
+  crouchBackwardMoveSpeedRate: 0.75
+  crawlForwardMoveSpeedRate: 1
+  crawlForwardSideMoveSpeedRate: 1
+  crawlSideMoveSpeedRate: 1
+  crawlBackwardSideMoveSpeedRate: 0.75
+  crawlBackwardMoveSpeedRate: 0.75
+  swimForwardMoveSpeedRate: 1
+  swimForwardSideMoveSpeedRate: 1
+  swimSideMoveSpeedRate: 1
+  swimBackwardSideMoveSpeedRate: 0.75
+  swimBackwardMoveSpeedRate: 0.75
+  landedPauseMovementDuration: 1
+  beforeCrawlingPauseMovementDuration: 0
+  afterCrawlingPauseMovementDuration: 0
+  underWaterThreshold: 0.75
+  autoSwimToSurface: 1
+  groundCheckOffsets: 0.14
+  groundCheckRadius: 0.28
+  groundCheckGizmosColor: {r: 0, g: 0, b: 1, a: 1}
+  airborneCheckOffsets: 0.14
+  airborneCheckRadius: 0.28
+  airborneCheckGizmosColor: {r: 0, g: 1, b: 1, a: 1}
+  forceUngroundAfterJumpDuration: 0.1
+  crawlCheckOffsets: -0.14
+  crawlCheckRaycasts: 0
+  crawlCheckRadius: 1
+  crawlCheckGizmosColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
+  dashingForceApplier:
+    speed: 8
+    deceleration: 3.2
+    duration: 0
+  alwaysUseRootMotion: 0
+  useRootMotionForMovement: 0
+  useRootMotionForAirMovement: 0
+  useRootMotionForJump: 0
+  useRootMotionForFall: 0
+  useRootMotionUnderWater: 0
+  useRootMotionClimbing: 0
+  rootMotionGroundedVerticalVelocity: -2
+  snapThreshold: 5
+  skinWidthAdjustTarget: {fileID: 0}
+--- !u!114 &4490087667767862676
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6526385421427787623}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 56367cc2ed44f1e49835e9c247771fd9, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  autoAssignAssetIdIfEmpty: 1
+  forceUseAssetGUIDAsAssetId: 0
+  assetId: af635b07bf4c1d04a951854b7f20e9a6
+  autoAssignSceneObjectIdIfEmpty: 1
+  sceneObjectId: BaseCharacter_1
+  forceNotSceneObject: 0
+  networkedObjectId: 0
+  syncChannelId: 0
+  defaultRpcChannelId: 0
+  subChannelId: 
+  visibleRange: 0
+  alwaysVisible: 0
+  doNotDestroyWhenDisconnect: 0
+  poolingSize: 0
+  forceRenderingOffWhileHidding: 1
+  muteAudioSourceWhileHidding: 1
+  onGetInstance:
+    m_PersistentCalls:
+      m_Calls: []
+  onPushBack:
+    m_PersistentCalls:
+      m_Calls: []
+--- !u!114 &3592662186214310626
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6526385421427787623}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 87252d3a79a74ec7b7d77ad14b58da6e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _behaviourIndex: 0
+  doNotRandomAnimation: 0
+  animationResetDelay: 2
+--- !u!114 &9093202556357433115
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6526385421427787623}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cdaafded55144074da73cbd672597457, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _behaviourIndex: 0
+--- !u!114 &9112448983163727468
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6526385421427787623}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f576f59fc954449429e9ad738be7a615, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _behaviourIndex: 0
+--- !u!114 &6114923041172079287
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6526385421427787623}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fce12d44c7554fe19e934f47149d2b2c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _behaviourIndex: 0
+--- !u!114 &7828369540235613160
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6526385421427787623}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0f1ebb96c2e8470489eb6750032b0257, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::NightBlade.CharacterActionComponentManager
+--- !u!114 &7062245572940816792
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6526385421427787623}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 99a250dc50d53944b80c6628ab2509d5, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::NightBlade.CharacterModelManager
+  mainTpsModel: {fileID: 303958005314934857}
+  fpsModelPrefab: {fileID: 0}
+  fpsModelPositionOffsets: {x: 0, y: 0, z: 0}
+  fpsModelRotationOffsets: {x: 0, y: 0, z: 0}
+  vehicleModels: []
+--- !u!114 &1207649095027317655
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6526385421427787623}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e69745e3d4eccf94bb5c64b2011ec1c2, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::NightBlade.CharacterRecoveryComponent
+--- !u!114 &7605066182175005038
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6526385421427787623}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 93f29b9cf2a5bb44c93ee7645834d9fc, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::NightBlade.CharacterSkillAndBuffComponent
+--- !u!114 &4202669790023529814
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6526385421427787623}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3095f43324f7cc948b12c70cae24cecd, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::NightBlade.PlayerCharacterItemLockAndExpireComponent
+--- !u!114 &8886414933638790817
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6526385421427787623}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8af2fdfb0f755ab4a9847cb15871c95d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::NightBlade.PlayerCharacterNpcActionComponent
+  _behaviourIndex: 0
+--- !u!136 &7761067892534634117
+CapsuleCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6526385421427787623}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 2
+  m_Radius: 0.3
+  m_Height: 1.8
+  m_Direction: 1
+  m_Center: {x: 0, y: 0.9, z: 0}
+--- !u!54 &3464313527131776857
+Rigidbody:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6526385421427787623}
+  serializedVersion: 5
+  m_Mass: 1
+  m_LinearDamping: 0
+  m_AngularDamping: 0.05
+  m_CenterOfMass: {x: 0, y: 0, z: 0}
+  m_InertiaTensor: {x: 1, y: 1, z: 1}
+  m_InertiaRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ImplicitCom: 1
+  m_ImplicitTensor: 1
+  m_UseGravity: 1
+  m_IsKinematic: 0
+  m_Interpolate: 0
+  m_Constraints: 0
+  m_CollisionDetection: 0
+--- !u!114 &3543647905853475013
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6526385421427787623}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 527d66d9b1fab6b4c866df06d771398b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.SurfaceSwimmer
+  model: {fileID: 0}
+  depthBelowSurface: 0.15
+  blendSpeed: 4
+--- !u!114 &7483105291137616143
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6526385421427787623}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 40dc475107e65e5479fb2efe1781ae56, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.EasedCharacterLadderComponent
+  _behaviourIndex: 0
+  climbSpeed: 1.2
+  kerbClearance: 0.3
+  topEnterPoseUp: 1.78
+  topEnterPoseIn: 0.86
+--- !u!114 &3284730399716422114
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6526385421427787623}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 563c51e7cb4eabf48aac45deee88a66c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.DashAttackHandler
+  sourceType: 1
+  sourceDataId: 1756692610
+  sourceData: {fileID: 0}
+  enableTestJumpTime: 0
+  testJumpTime: 0
+  jumpCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    - serializedVersion: 3
+      time: 1
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  jumpAnimTransform: {fileID: 6229630499120129507}
+--- !u!114 &5765065429596777152
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6526385421427787623}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 64ef0937eefcfc748980ced7c3ed3ee3, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.PlayerCharacterBodyPartComponent
+  modelSettingId: HAIR
+  colorSettingId: HAIR_COLOR
+  indexOptions: []
+  options:
+  - defaultTitle: Parted
+    languageSpecificTitles: []
+    icon: {fileID: 0}
+    models:
+    - equipSocket: Hair
+      useInstantiatedObject: 1
+      meshPrefab: {fileID: 0}
+      instantiatedObjectIndex: 0
+      priority: 0
+      doNotSetupBones: 0
+      equipmentModelBonesSetupManager: {fileID: 0}
+      localPosition: {x: 0, y: 0, z: 0}
+      localEulerAngles: {x: 0, y: 0, z: 0}
+      doNotChangeScale: 0
+      localScale: {x: 1, y: 1, z: 1}
+      useSpecificSheathEquipWeaponSet: 0
+      specificSheathEquipWeaponSet: 0
+    colors:
+    - defaultTitle: Chestnut
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.22189572, g: 0.13445497, b: 0.070331745, a: 1}
+      materialColor: {r: 0.42, g: 0.27, b: 0.16, a: 1}
+      modelColorSettings:
+      - name: Chestnut
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_SimpleParted
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Dark Brown
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.11696681, g: 0.06450236, b: 0.035460684, a: 1}
+      materialColor: {r: 0.24, g: 0.15, b: 0.1, a: 1}
+      modelColorSettings:
+      - name: Dark Brown
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_SimpleParted
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Black
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.025453765, g: 0.021160943, b: 0.021160943, a: 1}
+      materialColor: {r: 0.08, g: 0.07, b: 0.07, a: 1}
+      modelColorSettings:
+      - name: Black
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_SimpleParted
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Auburn
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.29767773, g: 0.093649276, b: 0.035460684, a: 1}
+      materialColor: {r: 0.55, g: 0.2, b: 0.1, a: 1}
+      modelColorSettings:
+      - name: Auburn
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_SimpleParted
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Ginger
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.47255927, g: 0.22189572, b: 0.070331745, a: 1}
+      materialColor: {r: 0.85, g: 0.42, b: 0.16, a: 1}
+      modelColorSettings:
+      - name: Ginger
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_SimpleParted
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Blonde
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.8912047, g: 0.754744, b: 0.47255927, a: 1}
+      materialColor: {r: 1.6, g: 1.35, b: 0.85, a: 1}
+      modelColorSettings:
+      - name: Blonde
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_SimpleParted
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Grey
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.5017062, g: 0.5017062, b: 0.5017062, a: 1}
+      materialColor: {r: 0.9, g: 0.9, b: 0.9, a: 1}
+      modelColorSettings:
+      - name: Grey
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_SimpleParted
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: White
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.9452763, g: 0.9452763, b: 0.9452763, a: 1}
+      materialColor: {r: 1.7, g: 1.7, b: 1.7, a: 1}
+      modelColorSettings:
+      - name: White
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_SimpleParted
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+  - defaultTitle: Long
+    languageSpecificTitles: []
+    icon: {fileID: 0}
+    models:
+    - equipSocket: Hair
+      useInstantiatedObject: 1
+      meshPrefab: {fileID: 0}
+      instantiatedObjectIndex: 1
+      priority: 0
+      doNotSetupBones: 0
+      equipmentModelBonesSetupManager: {fileID: 0}
+      localPosition: {x: 0, y: 0, z: 0}
+      localEulerAngles: {x: 0, y: 0, z: 0}
+      doNotChangeScale: 0
+      localScale: {x: 1, y: 1, z: 1}
+      useSpecificSheathEquipWeaponSet: 0
+      specificSheathEquipWeaponSet: 0
+    colors:
+    - defaultTitle: Chestnut
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.22189572, g: 0.13445497, b: 0.070331745, a: 1}
+      materialColor: {r: 0.42, g: 0.27, b: 0.16, a: 1}
+      modelColorSettings:
+      - name: Chestnut
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_Long
+          materials:
+          - {fileID: 2100000, guid: 307bdb66c93dfe748836bf4919ce1404, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Dark Brown
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.11696681, g: 0.06450236, b: 0.035460684, a: 1}
+      materialColor: {r: 0.24, g: 0.15, b: 0.1, a: 1}
+      modelColorSettings:
+      - name: Dark Brown
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_Long
+          materials:
+          - {fileID: 2100000, guid: 307bdb66c93dfe748836bf4919ce1404, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Black
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.025453765, g: 0.021160943, b: 0.021160943, a: 1}
+      materialColor: {r: 0.08, g: 0.07, b: 0.07, a: 1}
+      modelColorSettings:
+      - name: Black
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_Long
+          materials:
+          - {fileID: 2100000, guid: 307bdb66c93dfe748836bf4919ce1404, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Auburn
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.29767773, g: 0.093649276, b: 0.035460684, a: 1}
+      materialColor: {r: 0.55, g: 0.2, b: 0.1, a: 1}
+      modelColorSettings:
+      - name: Auburn
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_Long
+          materials:
+          - {fileID: 2100000, guid: 307bdb66c93dfe748836bf4919ce1404, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Ginger
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.47255927, g: 0.22189572, b: 0.070331745, a: 1}
+      materialColor: {r: 0.85, g: 0.42, b: 0.16, a: 1}
+      modelColorSettings:
+      - name: Ginger
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_Long
+          materials:
+          - {fileID: 2100000, guid: 307bdb66c93dfe748836bf4919ce1404, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Blonde
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.8912047, g: 0.754744, b: 0.47255927, a: 1}
+      materialColor: {r: 1.6, g: 1.35, b: 0.85, a: 1}
+      modelColorSettings:
+      - name: Blonde
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_Long
+          materials:
+          - {fileID: 2100000, guid: 307bdb66c93dfe748836bf4919ce1404, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Grey
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.5017062, g: 0.5017062, b: 0.5017062, a: 1}
+      materialColor: {r: 0.9, g: 0.9, b: 0.9, a: 1}
+      modelColorSettings:
+      - name: Grey
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_Long
+          materials:
+          - {fileID: 2100000, guid: 307bdb66c93dfe748836bf4919ce1404, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: White
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.9452763, g: 0.9452763, b: 0.9452763, a: 1}
+      materialColor: {r: 1.7, g: 1.7, b: 1.7, a: 1}
+      modelColorSettings:
+      - name: White
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_Long
+          materials:
+          - {fileID: 2100000, guid: 307bdb66c93dfe748836bf4919ce1404, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+  - defaultTitle: Buzzed
+    languageSpecificTitles: []
+    icon: {fileID: 0}
+    models:
+    - equipSocket: Hair
+      useInstantiatedObject: 1
+      meshPrefab: {fileID: 0}
+      instantiatedObjectIndex: 2
+      priority: 0
+      doNotSetupBones: 0
+      equipmentModelBonesSetupManager: {fileID: 0}
+      localPosition: {x: 0, y: 0, z: 0}
+      localEulerAngles: {x: 0, y: 0, z: 0}
+      doNotChangeScale: 0
+      localScale: {x: 1, y: 1, z: 1}
+      useSpecificSheathEquipWeaponSet: 0
+      specificSheathEquipWeaponSet: 0
+    colors:
+    - defaultTitle: Chestnut
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.22189572, g: 0.13445497, b: 0.070331745, a: 1}
+      materialColor: {r: 0.42, g: 0.27, b: 0.16, a: 1}
+      modelColorSettings:
+      - name: Chestnut
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_Buzzed
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Dark Brown
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.11696681, g: 0.06450236, b: 0.035460684, a: 1}
+      materialColor: {r: 0.24, g: 0.15, b: 0.1, a: 1}
+      modelColorSettings:
+      - name: Dark Brown
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_Buzzed
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Black
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.025453765, g: 0.021160943, b: 0.021160943, a: 1}
+      materialColor: {r: 0.08, g: 0.07, b: 0.07, a: 1}
+      modelColorSettings:
+      - name: Black
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_Buzzed
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Auburn
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.29767773, g: 0.093649276, b: 0.035460684, a: 1}
+      materialColor: {r: 0.55, g: 0.2, b: 0.1, a: 1}
+      modelColorSettings:
+      - name: Auburn
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_Buzzed
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Ginger
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.47255927, g: 0.22189572, b: 0.070331745, a: 1}
+      materialColor: {r: 0.85, g: 0.42, b: 0.16, a: 1}
+      modelColorSettings:
+      - name: Ginger
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_Buzzed
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Blonde
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.8912047, g: 0.754744, b: 0.47255927, a: 1}
+      materialColor: {r: 1.6, g: 1.35, b: 0.85, a: 1}
+      modelColorSettings:
+      - name: Blonde
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_Buzzed
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Grey
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.5017062, g: 0.5017062, b: 0.5017062, a: 1}
+      materialColor: {r: 0.9, g: 0.9, b: 0.9, a: 1}
+      modelColorSettings:
+      - name: Grey
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_Buzzed
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: White
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.9452763, g: 0.9452763, b: 0.9452763, a: 1}
+      materialColor: {r: 1.7, g: 1.7, b: 1.7, a: 1}
+      modelColorSettings:
+      - name: White
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_Buzzed
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+  - defaultTitle: Buns
+    languageSpecificTitles: []
+    icon: {fileID: 0}
+    models:
+    - equipSocket: Hair
+      useInstantiatedObject: 1
+      meshPrefab: {fileID: 0}
+      instantiatedObjectIndex: 3
+      priority: 0
+      doNotSetupBones: 0
+      equipmentModelBonesSetupManager: {fileID: 0}
+      localPosition: {x: 0, y: 0, z: 0}
+      localEulerAngles: {x: 0, y: 0, z: 0}
+      doNotChangeScale: 0
+      localScale: {x: 1, y: 1, z: 1}
+      useSpecificSheathEquipWeaponSet: 0
+      specificSheathEquipWeaponSet: 0
+    colors:
+    - defaultTitle: Chestnut
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.22189572, g: 0.13445497, b: 0.070331745, a: 1}
+      materialColor: {r: 0.42, g: 0.27, b: 0.16, a: 1}
+      modelColorSettings:
+      - name: Chestnut
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_Buns
+          materials:
+          - {fileID: 2100000, guid: 307bdb66c93dfe748836bf4919ce1404, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Dark Brown
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.11696681, g: 0.06450236, b: 0.035460684, a: 1}
+      materialColor: {r: 0.24, g: 0.15, b: 0.1, a: 1}
+      modelColorSettings:
+      - name: Dark Brown
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_Buns
+          materials:
+          - {fileID: 2100000, guid: 307bdb66c93dfe748836bf4919ce1404, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Black
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.025453765, g: 0.021160943, b: 0.021160943, a: 1}
+      materialColor: {r: 0.08, g: 0.07, b: 0.07, a: 1}
+      modelColorSettings:
+      - name: Black
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_Buns
+          materials:
+          - {fileID: 2100000, guid: 307bdb66c93dfe748836bf4919ce1404, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Auburn
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.29767773, g: 0.093649276, b: 0.035460684, a: 1}
+      materialColor: {r: 0.55, g: 0.2, b: 0.1, a: 1}
+      modelColorSettings:
+      - name: Auburn
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_Buns
+          materials:
+          - {fileID: 2100000, guid: 307bdb66c93dfe748836bf4919ce1404, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Ginger
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.47255927, g: 0.22189572, b: 0.070331745, a: 1}
+      materialColor: {r: 0.85, g: 0.42, b: 0.16, a: 1}
+      modelColorSettings:
+      - name: Ginger
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_Buns
+          materials:
+          - {fileID: 2100000, guid: 307bdb66c93dfe748836bf4919ce1404, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Blonde
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.8912047, g: 0.754744, b: 0.47255927, a: 1}
+      materialColor: {r: 1.6, g: 1.35, b: 0.85, a: 1}
+      modelColorSettings:
+      - name: Blonde
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_Buns
+          materials:
+          - {fileID: 2100000, guid: 307bdb66c93dfe748836bf4919ce1404, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Grey
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.5017062, g: 0.5017062, b: 0.5017062, a: 1}
+      materialColor: {r: 0.9, g: 0.9, b: 0.9, a: 1}
+      modelColorSettings:
+      - name: Grey
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_Buns
+          materials:
+          - {fileID: 2100000, guid: 307bdb66c93dfe748836bf4919ce1404, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: White
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.9452763, g: 0.9452763, b: 0.9452763, a: 1}
+      materialColor: {r: 1.7, g: 1.7, b: 1.7, a: 1}
+      modelColorSettings:
+      - name: White
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_Buns
+          materials:
+          - {fileID: 2100000, guid: 307bdb66c93dfe748836bf4919ce1404, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+  - defaultTitle: Bald
+    languageSpecificTitles: []
+    icon: {fileID: 0}
+    models:
+    - equipSocket: Hair
+      useInstantiatedObject: 1
+      meshPrefab: {fileID: 0}
+      instantiatedObjectIndex: 4
+      priority: 0
+      doNotSetupBones: 0
+      equipmentModelBonesSetupManager: {fileID: 0}
+      localPosition: {x: 0, y: 0, z: 0}
+      localEulerAngles: {x: 0, y: 0, z: 0}
+      doNotChangeScale: 0
+      localScale: {x: 1, y: 1, z: 1}
+      useSpecificSheathEquipWeaponSet: 0
+      specificSheathEquipWeaponSet: 0
+    colors:
+    - defaultTitle: Chestnut
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.22189572, g: 0.13445497, b: 0.070331745, a: 1}
+      materialColor: {r: 0.42, g: 0.27, b: 0.16, a: 1}
+      modelColorSettings:
+      - name: Chestnut
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Dark Brown
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.11696681, g: 0.06450236, b: 0.035460684, a: 1}
+      materialColor: {r: 0.24, g: 0.15, b: 0.1, a: 1}
+      modelColorSettings:
+      - name: Dark Brown
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Black
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.025453765, g: 0.021160943, b: 0.021160943, a: 1}
+      materialColor: {r: 0.08, g: 0.07, b: 0.07, a: 1}
+      modelColorSettings:
+      - name: Black
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Auburn
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.29767773, g: 0.093649276, b: 0.035460684, a: 1}
+      materialColor: {r: 0.55, g: 0.2, b: 0.1, a: 1}
+      modelColorSettings:
+      - name: Auburn
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Ginger
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.47255927, g: 0.22189572, b: 0.070331745, a: 1}
+      materialColor: {r: 0.85, g: 0.42, b: 0.16, a: 1}
+      modelColorSettings:
+      - name: Ginger
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Blonde
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.8912047, g: 0.754744, b: 0.47255927, a: 1}
+      materialColor: {r: 1.6, g: 1.35, b: 0.85, a: 1}
+      modelColorSettings:
+      - name: Blonde
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Grey
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.5017062, g: 0.5017062, b: 0.5017062, a: 1}
+      materialColor: {r: 0.9, g: 0.9, b: 0.9, a: 1}
+      modelColorSettings:
+      - name: Grey
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: White
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.9452763, g: 0.9452763, b: 0.9452763, a: 1}
+      materialColor: {r: 1.7, g: 1.7, b: 1.7, a: 1}
+      modelColorSettings:
+      - name: White
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Eyebrows
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+  optionObjects: []
+--- !u!114 &6379782637759056489
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6526385421427787623}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 64ef0937eefcfc748980ced7c3ed3ee3, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.PlayerCharacterBodyPartComponent
+  modelSettingId: BEARD
+  colorSettingId: BEARD_COLOR
+  indexOptions: []
+  options:
+  - defaultTitle: None
+    languageSpecificTitles: []
+    icon: {fileID: 0}
+    models:
+    - equipSocket: Beard
+      useInstantiatedObject: 1
+      meshPrefab: {fileID: 0}
+      instantiatedObjectIndex: 0
+      priority: 0
+      doNotSetupBones: 0
+      equipmentModelBonesSetupManager: {fileID: 0}
+      localPosition: {x: 0, y: 0, z: 0}
+      localEulerAngles: {x: 0, y: 0, z: 0}
+      doNotChangeScale: 0
+      localScale: {x: 1, y: 1, z: 1}
+      useSpecificSheathEquipWeaponSet: 0
+      specificSheathEquipWeaponSet: 0
+    colors:
+    - defaultTitle: Chestnut
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.22189572, g: 0.13445497, b: 0.070331745, a: 1}
+      materialColor: {r: 0.42, g: 0.27, b: 0.16, a: 1}
+      modelColorSettings:
+      - name: Chestnut
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups: []
+    - defaultTitle: Dark Brown
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.11696681, g: 0.06450236, b: 0.035460684, a: 1}
+      materialColor: {r: 0.24, g: 0.15, b: 0.1, a: 1}
+      modelColorSettings:
+      - name: Dark Brown
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups: []
+    - defaultTitle: Black
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.025453765, g: 0.021160943, b: 0.021160943, a: 1}
+      materialColor: {r: 0.08, g: 0.07, b: 0.07, a: 1}
+      modelColorSettings:
+      - name: Black
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups: []
+    - defaultTitle: Auburn
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.29767773, g: 0.093649276, b: 0.035460684, a: 1}
+      materialColor: {r: 0.55, g: 0.2, b: 0.1, a: 1}
+      modelColorSettings:
+      - name: Auburn
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups: []
+    - defaultTitle: Ginger
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.47255927, g: 0.22189572, b: 0.070331745, a: 1}
+      materialColor: {r: 0.85, g: 0.42, b: 0.16, a: 1}
+      modelColorSettings:
+      - name: Ginger
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups: []
+    - defaultTitle: Blonde
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.8912047, g: 0.754744, b: 0.47255927, a: 1}
+      materialColor: {r: 1.6, g: 1.35, b: 0.85, a: 1}
+      modelColorSettings:
+      - name: Blonde
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups: []
+    - defaultTitle: Grey
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.5017062, g: 0.5017062, b: 0.5017062, a: 1}
+      materialColor: {r: 0.9, g: 0.9, b: 0.9, a: 1}
+      modelColorSettings:
+      - name: Grey
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups: []
+    - defaultTitle: White
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.9452763, g: 0.9452763, b: 0.9452763, a: 1}
+      materialColor: {r: 1.7, g: 1.7, b: 1.7, a: 1}
+      modelColorSettings:
+      - name: White
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups: []
+  - defaultTitle: Beard
+    languageSpecificTitles: []
+    icon: {fileID: 0}
+    models:
+    - equipSocket: Beard
+      useInstantiatedObject: 1
+      meshPrefab: {fileID: 0}
+      instantiatedObjectIndex: 1
+      priority: 0
+      doNotSetupBones: 0
+      equipmentModelBonesSetupManager: {fileID: 0}
+      localPosition: {x: 0, y: 0, z: 0}
+      localEulerAngles: {x: 0, y: 0, z: 0}
+      doNotChangeScale: 0
+      localScale: {x: 1, y: 1, z: 1}
+      useSpecificSheathEquipWeaponSet: 0
+      specificSheathEquipWeaponSet: 0
+    colors:
+    - defaultTitle: Chestnut
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.22189572, g: 0.13445497, b: 0.070331745, a: 1}
+      materialColor: {r: 0.42, g: 0.27, b: 0.16, a: 1}
+      modelColorSettings:
+      - name: Chestnut
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_Beard
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Dark Brown
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.11696681, g: 0.06450236, b: 0.035460684, a: 1}
+      materialColor: {r: 0.24, g: 0.15, b: 0.1, a: 1}
+      modelColorSettings:
+      - name: Dark Brown
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_Beard
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Black
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.025453765, g: 0.021160943, b: 0.021160943, a: 1}
+      materialColor: {r: 0.08, g: 0.07, b: 0.07, a: 1}
+      modelColorSettings:
+      - name: Black
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_Beard
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Auburn
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.29767773, g: 0.093649276, b: 0.035460684, a: 1}
+      materialColor: {r: 0.55, g: 0.2, b: 0.1, a: 1}
+      modelColorSettings:
+      - name: Auburn
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_Beard
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Ginger
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.47255927, g: 0.22189572, b: 0.070331745, a: 1}
+      materialColor: {r: 0.85, g: 0.42, b: 0.16, a: 1}
+      modelColorSettings:
+      - name: Ginger
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_Beard
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Blonde
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.8912047, g: 0.754744, b: 0.47255927, a: 1}
+      materialColor: {r: 1.6, g: 1.35, b: 0.85, a: 1}
+      modelColorSettings:
+      - name: Blonde
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_Beard
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: Grey
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.5017062, g: 0.5017062, b: 0.5017062, a: 1}
+      materialColor: {r: 0.9, g: 0.9, b: 0.9, a: 1}
+      modelColorSettings:
+      - name: Grey
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_Beard
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+    - defaultTitle: White
+      languageSpecificTitles: []
+      icon: {fileID: 10913, guid: 0000000000000000f000000000000000, type: 0}
+      iconColor: {r: 0.9452763, g: 0.9452763, b: 0.9452763, a: 1}
+      materialColor: {r: 1.7, g: 1.7, b: 1.7, a: 1}
+      modelColorSettings:
+      - name: White
+        useUpperLevelMaterialColorSetting: 1
+        materialColor: {r: 1, g: 1, b: 1, a: 1}
+        materials: []
+        properties: []
+        materialGroups:
+        - name: Hair_Beard
+          materials:
+          - {fileID: 2100000, guid: 8c195ed2082440c4396d0003b7a2705a, type: 2}
+          properties:
+          - applyMaterialTexture: 0
+            materialTextureProperty: _BaseMap
+            materialTexture: {fileID: 0}
+            applyMaterialColor: 1
+            materialColorProperty: _BaseColor
+            materialColor: {r: 1, g: 1, b: 1, a: 1}
+            useUpperLevelMaterialColorSetting: 1
+  optionObjects: []
+--- !u!114 &8802783142152439386
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6526385421427787623}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 114d020b96a039f4db7477a53f221d53, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.CharacterFootstepSoundComponent
+  audioSource: {fileID: 2324238058237204940}
+  settingType: 2
+  otherSettingId: 
+  walkFootstepSettings:
+    soundData:
+      randomAudioClips:
+      - {fileID: 8300000, guid: a31b2f0e3d7377744905f6db8d9ebb64, type: 3}
+      - {fileID: 8300000, guid: 3078b2f654de3a64e851f35e943440ac, type: 3}
+      - {fileID: 8300000, guid: ffc3fd41223875748bb1af41e3e5b1c8, type: 3}
+      - {fileID: 8300000, guid: 7b1dbaaacd549694e9adf7cca54fbba1, type: 3}
+      - {fileID: 8300000, guid: 381704bc4215b624da8c3c811045cb12, type: 3}
+      - {fileID: 8300000, guid: 90e094201cde45a4a9e9d8ebdf700950, type: 3}
+    stepDelay: 0.55
+    stepThreshold: 0.1
+    randomVolumeMin: 0.7
+    randomVolumeMax: 1
+    randomPitchMin: 0.9
+    randomPitchMax: 1.1
+  moveFootstepSettings:
+    soundData:
+      randomAudioClips:
+      - {fileID: 8300000, guid: a31b2f0e3d7377744905f6db8d9ebb64, type: 3}
+      - {fileID: 8300000, guid: 3078b2f654de3a64e851f35e943440ac, type: 3}
+      - {fileID: 8300000, guid: ffc3fd41223875748bb1af41e3e5b1c8, type: 3}
+      - {fileID: 8300000, guid: 7b1dbaaacd549694e9adf7cca54fbba1, type: 3}
+      - {fileID: 8300000, guid: 381704bc4215b624da8c3c811045cb12, type: 3}
+      - {fileID: 8300000, guid: 90e094201cde45a4a9e9d8ebdf700950, type: 3}
+    stepDelay: 0.36
+    stepThreshold: 0.1
+    randomVolumeMin: 0.7
+    randomVolumeMax: 1
+    randomPitchMin: 0.9
+    randomPitchMax: 1.1
+  sprintFootstepSettings:
+    soundData:
+      randomAudioClips:
+      - {fileID: 8300000, guid: a31b2f0e3d7377744905f6db8d9ebb64, type: 3}
+      - {fileID: 8300000, guid: 3078b2f654de3a64e851f35e943440ac, type: 3}
+      - {fileID: 8300000, guid: ffc3fd41223875748bb1af41e3e5b1c8, type: 3}
+      - {fileID: 8300000, guid: 7b1dbaaacd549694e9adf7cca54fbba1, type: 3}
+      - {fileID: 8300000, guid: 381704bc4215b624da8c3c811045cb12, type: 3}
+      - {fileID: 8300000, guid: 90e094201cde45a4a9e9d8ebdf700950, type: 3}
+    stepDelay: 0.28
+    stepThreshold: 0.1
+    randomVolumeMin: 0.7
+    randomVolumeMax: 1
+    randomPitchMin: 0.9
+    randomPitchMax: 1.1
+  crouchFootstepSettings:
+    soundData:
+      randomAudioClips:
+      - {fileID: 8300000, guid: a31b2f0e3d7377744905f6db8d9ebb64, type: 3}
+      - {fileID: 8300000, guid: 3078b2f654de3a64e851f35e943440ac, type: 3}
+      - {fileID: 8300000, guid: ffc3fd41223875748bb1af41e3e5b1c8, type: 3}
+      - {fileID: 8300000, guid: 7b1dbaaacd549694e9adf7cca54fbba1, type: 3}
+      - {fileID: 8300000, guid: 381704bc4215b624da8c3c811045cb12, type: 3}
+      - {fileID: 8300000, guid: 90e094201cde45a4a9e9d8ebdf700950, type: 3}
+    stepDelay: 0.6
+    stepThreshold: 0.1
+    randomVolumeMin: 0.7
+    randomVolumeMax: 1
+    randomPitchMin: 0.9
+    randomPitchMax: 1.1
+  crawlFootstepSettings:
+    soundData:
+      randomAudioClips:
+      - {fileID: 8300000, guid: a31b2f0e3d7377744905f6db8d9ebb64, type: 3}
+      - {fileID: 8300000, guid: 3078b2f654de3a64e851f35e943440ac, type: 3}
+      - {fileID: 8300000, guid: ffc3fd41223875748bb1af41e3e5b1c8, type: 3}
+      - {fileID: 8300000, guid: 7b1dbaaacd549694e9adf7cca54fbba1, type: 3}
+      - {fileID: 8300000, guid: 381704bc4215b624da8c3c811045cb12, type: 3}
+      - {fileID: 8300000, guid: 90e094201cde45a4a9e9d8ebdf700950, type: 3}
+    stepDelay: 1
+    stepThreshold: 0.1
+    randomVolumeMin: 0.7
+    randomVolumeMax: 1
+    randomPitchMin: 0.9
+    randomPitchMax: 1.1
+  swimFootstepSettings:
+    soundData:
+      randomAudioClips:
+      - {fileID: 8300000, guid: b1befd3c83701f44ba5a871df925316a, type: 3}
+      - {fileID: 8300000, guid: 79cedb0200fe8b344875b4202ecefe44, type: 3}
+      - {fileID: 8300000, guid: 89f62053e09c2e7439204805c9e952bb, type: 3}
+      - {fileID: 8300000, guid: fbc043881456d80439589dbeb3ddf368, type: 3}
+      - {fileID: 8300000, guid: b2a4d1f6be161fd4c9995bb638f9e3b3, type: 3}
+    stepDelay: 1.333
+    stepThreshold: 0.1
+    randomVolumeMin: 0.7
+    randomVolumeMax: 1
+    randomPitchMin: 0.9
+    randomPitchMax: 1.1
+  soundData:
+    randomAudioClips: []
+  stepDelay: 0.35
+  stepThreshold: 0.1
+  randomVolumeMin: 0.75
+  randomVolumeMax: 1
+  randomPitchMin: 0.75
+  randomPitchMax: 1
+--- !u!114 &6761128493832492630
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6526385421427787623}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6737fa654bc9f3f44b65dea301686ec7, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.CharacterHurtSoundComponent
+  clips:
+  - {fileID: 8300000, guid: 546a33cf22e303142959bc023125feed, type: 3}
+  - {fileID: 8300000, guid: 1943f605f3a6a6c45b42aed379b9c1d4, type: 3}
+  - {fileID: 8300000, guid: 8169501ba5f5b564c87ea80d7eb87e86, type: 3}
+  - {fileID: 8300000, guid: b254fbeeb9d847347843d0b9e8045156, type: 3}
+  cooldown: 0.35
+  minPitch: 0.95
+  maxPitch: 1.05
+  volume: 0.45
+--- !u!114 &1360653913874136855
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6526385421427787623}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ece22f44f32f73642913c5dab06a32e9, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.CharacterDeathSoundComponent
+  audioSource: {fileID: 9073725241684626296}
+  settingType: 2
+  otherSettingId: 
+  soundData:
+    randomAudioClips:
+    - {fileID: 8300000, guid: 5ae82e29cb50e3544a086bc8b7af8976, type: 3}
+--- !u!114 &2635833742193938652
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6526385421427787623}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ab2a84b1e4e669549a254bf2251b1eb3, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.SkinTone
+  skinMaterials:
+  - materialName: MI_Body_Female_Dark
+    measuredMean: {r: 0.41065362, g: 0.19049168, b: 0.08721407, a: 1}
+  - materialName: MI_Skin_Female
+    measuredMean: {r: 0.3911393, g: 0.16539946, b: 0.078845404, a: 1}
+  - materialName: MI_Body_Male_Dark
+    measuredMean: {r: 0.41082156, g: 0.19384731, b: 0.08799027, a: 1}
+  - materialName: MI_Skin_Male
+    measuredMean: {r: 0.3882725, g: 0.15894526, b: 0.07648554, a: 1}
+  tones:
+  - {r: 0.8235294, g: 0.6901961, b: 0.63529414, a: 1}
+  - {r: 0.7607843, g: 0.6039216, b: 0.5019608, a: 1}
+  - {r: 0.7176471, g: 0.5294118, b: 0.39215687, a: 1}
+  - {r: 0.6745098, g: 0.47843137, b: 0.32941177, a: 1}
+  - {r: 0.6, g: 0.4117647, b: 0.2901961, a: 1}
+  - {r: 0.5568628, g: 0.3764706, b: 0.2509804, a: 1}
+  - {r: 0.4392157, g: 0.28235295, b: 0.18431373, a: 1}
+  - {r: 0.32941177, g: 0.20392157, b: 0.13333334, a: 1}
+  - {r: 0.22745098, g: 0.13725491, b: 0.09019608, a: 1}
+  toneTitles:
+  - Fair
+  - Light
+  - Warm
+  - Tan
+  - Olive
+  - Bronze
+  - Umber
+  - Deep
+  - Ebony
+  defaultTone: 4
+--- !u!114 &7217058095132140879
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6526385421427787623}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 100e9986ac771364c9504c3d7e3f966e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.CharacterSize
+  scales:
+  - 0.85493577
+  - 0.88251436
+  - 0.91009295
+  - 0.93767154
+  - 0.9652501
+  - 0.99282867
+  - 1.0204072
+  - 1.0479858
+  - 1.0755644
+  sizeTitles:
+  - 1.55 m
+  - 1.60 m
+  - 1.65 m
+  - 1.70 m
+  - 1.75 m
+  - 1.80 m
+  - 1.85 m
+  - 1.90 m
+  - 1.95 m
+  defaultSize: 6
+  standingHeight: 1.8130016
+  anchors:
+  - {fileID: 8524820623634298824}
+  - {fileID: 2039593403312453650}
+  - {fileID: 1189771046980561884}
+  - {fileID: 5671560747898085554}
+--- !u!114 &7898528712931090338
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6526385421427787623}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: efc676ff475b809408b12a5bb5d129ef, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.AirborneSnapGuard
+  settleTime: 0.35
+--- !u!114 &7962668745796926009
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6526385421427787623}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 420a5e4235acc894aab573f31b6e4a67, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.PlayerCharacterInteractionComponent
+  _behaviourIndex: 0
+  reachTolerance: 1.5
+--- !u!114 &9165039042466397638
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6526385421427787623}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f16b378b0fdd6c942953e422473c2504, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.WeaponSheathSounds
+  sheathClips:
+  - {fileID: 8300000, guid: 067c0fcedcff3f1418c49a060339f690, type: 3}
+  unsheathClips:
+  - {fileID: 8300000, guid: f8c4467ac3d15834f8af7848752efe29, type: 3}
+  volume: 1
+  sheatheLead: 0.22
+  near: 5
+  far: 40
+  height: 1.3
+--- !u!114 &1542672832455063775
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6526385421427787623}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ccf89b7facc02e94a9bc8b7e95447cd5, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.FootstepEffects
+  hubPrefab: {fileID: 9216742072220532207, guid: b33de71d4bc02b64b86200c8b6de5d70, type: 3}
+  seaLevel: 0
+  seaMaterial: {fileID: 2100000, guid: 40d53cd7933e5684cb01281c8409bdb4, type: 2}
+  printLayer: Island_Sand
+  wetBand: 1.2
+  swashBand: 0.25
+  printLength: 0.36
+  printWidth: 0.17
+  dryTint: {r: 0.72, g: 0.66, b: 0.5, a: 1}
+  wetTint: {r: 0.46, g: 0.4, b: 0.29, a: 1}
+  dryOpacity: 0.9
+  wetOpacity: 0.95
+  dryLife: 30
+  wetLife: 20
+  swashLife: 6
+  plantHeight: 0.025
+  liftHeight: 0.05
+  restepDistance: 0.3
+  plantConfirm: 0.05
+  minStepInterval: 0.35
+  wetPrints: 6
+  sandKickSpeed: 3.2
+  splashDepth: 0.03
+  stillFoot: 0.5
+  idleRippleEvery: 1.5
+  splashClips:
+  - {fileID: 8300000, guid: 9e424402d0f41b94ba22e02c1e90a740, type: 3}
+  - {fileID: 8300000, guid: bf425021ef3e38d4f9193a42873202ce, type: 3}
+  - {fileID: 8300000, guid: a27fe7829e1398344973954a4d1f8c3c, type: 3}
+  splashVolume: 0.6
+  splashNear: 4
+  splashFar: 35
+  muteDryStepsInWater: 1
+  syncStepSounds: 1
+  maxCameraDistance: 35
+--- !u!1 &7845482062070148211
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 5671560747898085554}
+  m_Layer: 8
+  m_Name: ChatBubbleTransform
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &5671560747898085554
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7845482062070148211}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 0, y: 2.2, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 953201143620429487}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &8172454838907976646
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 7130599479170269180}
+  - component: {fileID: 9073725241684626296}
+  m_Layer: 0
+  m_Name: _DeathAudioSource
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &7130599479170269180
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8172454838907976646}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 7643545823217999981}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!82 &9073725241684626296
+AudioSource:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8172454838907976646}
+  m_Enabled: 1
+  serializedVersion: 4
+  OutputAudioMixerGroup: {fileID: 0}
+  m_audioClip: {fileID: 0}
+  m_Resource: {fileID: 0}
+  m_PlayOnAwake: 0
+  m_Volume: 1
+  m_Pitch: 1
+  Loop: 0
+  Mute: 0
+  Spatialize: 0
+  SpatializePostEffects: 0
+  Priority: 128
+  DopplerLevel: 1
+  MinDistance: 1
+  MaxDistance: 500
+  Pan2D: 0
+  rolloffMode: 0
+  BypassEffects: 0
+  BypassListenerEffects: 0
+  BypassReverbZones: 0
+  rolloffCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 1
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    - serializedVersion: 3
+      time: 1
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  panLevelCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 1
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  spreadCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  reverbZoneMixCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 1
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+--- !u!1001 &2638627000534229011
+PrefabInstance:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Modification:
+    serializedVersion: 3
+    m_TransformParent: {fileID: 7643545823217999981}
+    m_Modifications:
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: vehicleModels.Array.size
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: vehicleModels.Array.data[0].vehicleType
+      value: 
+      objectReference: {fileID: 11400000, guid: 944b86752f0760d438b6a3a0e8235237, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: deactivateObjectsWhenSwitchModel.Array.size
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: 'deactivateObjectsWhenSwitchModel.Array.data[0]'
+      value: 
+      objectReference: {fileID: 4796186565588762985}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: vehicleModels.Array.data[0].modelsForEachSeats.Array.size
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: 'vehicleModels.Array.data[0].modelsForEachSeats.Array.data[0]'
+      value: 
+      objectReference: {fileID: 5047883014848118668}
+    - target: {fileID: 2606315256177395391, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: m_Name
+      value: Model
+      objectReference: {fileID: 0}
+    - target: {fileID: 8896195505882563121, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: m_LocalPosition.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 8896195505882563121, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: m_LocalPosition.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 8896195505882563121, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: m_LocalPosition.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 8896195505882563121, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: m_LocalRotation.w
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 8896195505882563121, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: m_LocalRotation.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 8896195505882563121, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: m_LocalRotation.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 8896195505882563121, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: m_LocalRotation.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 8896195505882563121, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 8896195505882563121, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 8896195505882563121, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.z
+      value: 0
+      objectReference: {fileID: 0}
+    m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents: []
+  m_SourcePrefab: {fileID: 100100000, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+--- !u!1 &51004885410932396 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 2606315256177395391, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+  m_PrefabInstance: {fileID: 2638627000534229011}
+  m_PrefabAsset: {fileID: 0}
+--- !u!114 &303958005314934857 stripped
+MonoBehaviour:
+  m_CorrespondingSourceObject: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+  m_PrefabInstance: {fileID: 2638627000534229011}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 51004885410932396}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 07350a417f6b8f8448b8cbaa847ba456, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.SeatAwarePlayableCharacterModel
+--- !u!4 &6911877449040421410 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 8896195505882563121, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+  m_PrefabInstance: {fileID: 2638627000534229011}
+  m_PrefabAsset: {fileID: 0}
+--- !u!1001 &7396044938653845462
+PrefabInstance:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Modification:
+    serializedVersion: 3
+    m_TransformParent: {fileID: 7643545823217999981}
+    m_Modifications:
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: weaponAnimations.Array.size
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.fallState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.idleState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.jumpState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.landedState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.pickupState.clip
+      value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.dashEndState.clip
+      value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.dashLoopState.clip
+      value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.swimIdleState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.climbIdleState.clip
+      value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.crawlIdleState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.dashStartState.clip
+      value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.skillCastState.clip
+      value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.crouchIdleState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: activateObjectsWhenSwitchModel.Array.size
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.moveStates.upState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.walkStates.upState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: deactivateObjectsWhenSwitchModel.Array.size
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.moveStates.downState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.moveStates.leftState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.sprintStates.upState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.walkStates.downState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.walkStates.leftState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: 'activateObjectsWhenSwitchModel.Array.data[0]'
+      value: 
+      objectReference: {fileID: 4796186565588762985}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.moveStates.rightState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.walkStates.rightState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.sprintStates.downState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.sprintStates.leftState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.swimMoveStates.upState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: 'deactivateObjectsWhenSwitchModel.Array.data[0]'
+      value: 
+      objectReference: {fileID: 51004885410932396}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.climbIdleState.animSpeedRate
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.climbMoveStates.upState.clip
+      value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.crawlMoveStates.upState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.moveStates.forwardState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.sprintStates.rightState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.walkStates.forwardState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.crouchMoveStates.upState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.moveStates.backwardState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.swimMoveStates.downState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.swimMoveStates.leftState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.walkStates.backwardState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.climbMoveStates.downState.clip
+      value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.climbMoveStates.leftState.clip
+      value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.crawlMoveStates.downState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.crawlMoveStates.leftState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.sprintStates.forwardState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.swimMoveStates.rightState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.climbMoveStates.rightState.clip
+      value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.crawlMoveStates.rightState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.crouchMoveStates.downState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.crouchMoveStates.leftState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.sprintStates.backwardState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.crouchMoveStates.rightState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.moveStates.forwardLeftState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.swimMoveStates.forwardState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.walkStates.forwardLeftState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.climbMoveStates.forwardState.clip
+      value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.crawlMoveStates.forwardState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.moveStates.backwardLeftState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.moveStates.forwardRightState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.skillActivateAnimation.state.clip
+      value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.swimMoveStates.backwardState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.walkStates.backwardLeftState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.walkStates.forwardRightState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.climbMoveStates.backwardState.clip
+      value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.crawlMoveStates.backwardState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.crouchMoveStates.forwardState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.moveStates.backwardRightState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.sprintStates.forwardLeftState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.walkStates.backwardRightState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.crouchMoveStates.backwardState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.leftHandAttackAnimations.Array.size
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.sprintStates.backwardLeftState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.sprintStates.forwardRightState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.rightHandAttackAnimations.Array.size
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.sprintStates.backwardRightState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.swimMoveStates.forwardLeftState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.climbMoveStates.forwardLeftState.clip
+      value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.climbMoveStates.upState.animSpeedRate
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.crawlMoveStates.forwardLeftState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.swimMoveStates.backwardLeftState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.swimMoveStates.forwardRightState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.climbMoveStates.backwardLeftState.clip
+      value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.climbMoveStates.forwardRightState.clip
+      value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.climbTopEnterExitStates.exitState.clip
+      value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.crawlMoveStates.backwardLeftState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.crawlMoveStates.forwardRightState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.crouchMoveStates.forwardLeftState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.swimMoveStates.backwardRightState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.climbMoveStates.backwardRightState.clip
+      value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.climbMoveStates.downState.animSpeedRate
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.climbTopEnterExitStates.enterState.clip
+      value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.crawlMoveStates.backwardRightState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.crouchMoveStates.backwardLeftState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.crouchMoveStates.forwardRightState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.crouchMoveStates.backwardRightState.clip
+      value: 
+      objectReference: {fileID: 7400000, guid: 78a472b9ea70f464abca5d11c4f887d8, type: 2}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.climbBottomEnterExitStates.exitState.clip
+      value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.climbBottomEnterExitStates.enterState.clip
+      value: 
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.climbTopEnterExitStates.exitState.animSpeedRate
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.climbBottomEnterExitStates.exitState.animSpeedRate
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.climbBottomEnterExitStates.enterState.animSpeedRate
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.climbTopEnterExitStates.enterState.transitionDuration
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: defaultAnimations.skillActivateAnimation.triggerDurationRates.Array.size
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2606315256177395391, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: m_Name
+      value: ModelRiding
+      objectReference: {fileID: 0}
+    - target: {fileID: 8896195505882563121, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: m_LocalPosition.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 8896195505882563121, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: m_LocalPosition.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 8896195505882563121, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: m_LocalPosition.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 8896195505882563121, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: m_LocalRotation.w
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 8896195505882563121, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: m_LocalRotation.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 8896195505882563121, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: m_LocalRotation.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 8896195505882563121, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: m_LocalRotation.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 8896195505882563121, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 8896195505882563121, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 8896195505882563121, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.z
+      value: 0
+      objectReference: {fileID: 0}
+    m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents:
+    - targetCorrespondingSourceObject: {fileID: 2606315256177395391, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 353968812944665743}
+  m_SourcePrefab: {fileID: 100100000, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+--- !u!4 &2148679926243870183 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 8896195505882563121, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+  m_PrefabInstance: {fileID: 7396044938653845462}
+  m_PrefabAsset: {fileID: 0}
+--- !u!1 &4796186565588762985 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 2606315256177395391, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+  m_PrefabInstance: {fileID: 7396044938653845462}
+  m_PrefabAsset: {fileID: 0}
+--- !u!114 &353968812944665743
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4796186565588762985}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a0d972e4292533d46aabf200d05364e8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.RiderLegSpread
+  abductionDegrees: 35
+  dropDegrees: 45
+--- !u!114 &5047883014848118668 stripped
+MonoBehaviour:
+  m_CorrespondingSourceObject: {fileID: 2353598599733327962, guid: 0e14f5a7800a8694ea84ac1fbe04c8db, type: 3}
+  m_PrefabInstance: {fileID: 7396044938653845462}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4796186565588762985}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 07350a417f6b8f8448b8cbaa847ba456, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.SeatAwarePlayableCharacterModel

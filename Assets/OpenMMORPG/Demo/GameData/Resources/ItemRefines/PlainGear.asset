@@ -1,0 +1,77 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 049e06506c625da4eb20a1397a22b120, type: 3}
+  m_Name: PlainGear
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.ItemRefine
+  btnValidate: 0
+  id: PlainGear
+  defaultTitle: PlainGear
+  languageSpecificTitles: []
+  defaultDescription: 
+  languageSpecificDescriptions: []
+  category: 
+  icon: {fileID: 0}
+  titleColor: {r: 0, g: 0, b: 0, a: 0}
+  levels:
+  - titleColor: {r: 0, g: 0, b: 0, a: 0}
+    successRate: 0.85
+    requireItems:
+    - item: {fileID: 11400000, guid: 9bed9a16985b66343bbbcd35db39e60e, type: 2}
+      level: 0
+      amount: 2
+    requireCurrencies: []
+    requireGold: 40
+    refineFailDecreaseLevels: 0
+    refineFailDestroyItem: 0
+    availableEnhancers: []
+    failReturnings: []
+  - titleColor: {r: 0, g: 0, b: 0, a: 0}
+    successRate: 0.55
+    requireItems:
+    - item: {fileID: 11400000, guid: 9bed9a16985b66343bbbcd35db39e60e, type: 2}
+      level: 0
+      amount: 5
+    requireCurrencies: []
+    requireGold: 110
+    refineFailDecreaseLevels: 0
+    refineFailDestroyItem: 0
+    availableEnhancers: []
+    failReturnings: []
+  - titleColor: {r: 0, g: 0, b: 0, a: 0}
+    successRate: 0.3
+    requireItems:
+    - item: {fileID: 11400000, guid: 9bed9a16985b66343bbbcd35db39e60e, type: 2}
+      level: 0
+      amount: 9
+    requireCurrencies: []
+    requireGold: 260
+    refineFailDecreaseLevels: 0
+    refineFailDestroyItem: 0
+    availableEnhancers: []
+    failReturnings: []
+  repairPrices:
+  - durabilityRate: 1
+    requireItems: []
+    requireCurrencies: []
+    requireGold: 9
+  - durabilityRate: 0.75
+    requireItems: []
+    requireCurrencies: []
+    requireGold: 16
+  - durabilityRate: 0.5
+    requireItems: []
+    requireCurrencies: []
+    requireGold: 24
+  - durabilityRate: 0.25
+    requireItems: []
+    requireCurrencies: []
+    requireGold: 30

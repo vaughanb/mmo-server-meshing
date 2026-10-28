@@ -1,0 +1,290 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4b67f350c4283834f81cded3a656ff5e, type: 3}
+  m_Name: Mage
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.PlayerCharacter
+  btnValidate: 0
+  id: Mage
+  defaultTitle: Mage
+  languageSpecificTitles: []
+  defaultDescription: Hits hardest at range and worst of the three in reach of a
+    blade.
+  languageSpecificDescriptions: []
+  category: 
+  icon: {fileID: 21300000, guid: 866a5f7d157c1b846b96de9a542fe770, type: 3}
+  expTable: {fileID: 0}
+  stats:
+    baseStats:
+      hp: 95
+      hpRecovery: 2
+      hpLeechRate: 0
+      mp: 120
+      mpRecovery: 2
+      mpLeechRate: 0
+      stamina: 100
+      staminaRecovery: 12
+      staminaLeechRate: 0
+      food: 0
+      water: 0
+      accuracy: 0
+      evasion: 0
+      criRate: 0.05
+      criDmgRate: 1.5
+      blockRate: 0
+      blockDmgRate: 0
+      moveSpeed: 4
+      sprintSpeed: 0
+      atkSpeed: 0.9
+      weightLimit: 140
+      slotLimit: 0
+      goldRate: 0
+      expRate: 0
+      itemDropRate: 0
+      jumpHeight: 0
+      headDamageAbsorbs: 0
+      bodyDamageAbsorbs: 0
+      fallDamageAbsorbs: 0
+      gravityRate: 0
+      protectedSlotLimit: 0
+      ammoCapacityModifier: 0
+      ammoCapacityRate: 0
+      recoilModifier: 0
+      recoilYawModifier: 0
+      recoilRollModifier: 0
+      recoilRate: 0
+      recoilYawRate: 0
+      recoilRollRate: 0
+      rateOfFireModifier: 0
+      rateOfFireRate: 0
+      reloadDurationModifier: 0
+      reloadDurationRate: 0
+      fireSpreadRangeModifier: 0
+      fireSpreadRangeRate: 0
+      fireSpreadModifier: 0
+      fireSpreadRate: 0
+      decreaseFoodDecreation: 0
+      decreaseWaterDecreation: 0
+      decreaseStaminaDecreation: 0
+      buyItemPriceRate: 0
+      sellItemPriceRate: -0.75
+    statsIncreaseEachLevel:
+      hp: 18
+      hpRecovery: 0.4
+      hpLeechRate: 0
+      mp: 24
+      mpRecovery: 0
+      mpLeechRate: 0
+      stamina: 6
+      staminaRecovery: 0
+      staminaLeechRate: 0
+      food: 0
+      water: 0
+      accuracy: 0
+      evasion: 0
+      criRate: 0
+      criDmgRate: 0
+      blockRate: 0
+      blockDmgRate: 0
+      moveSpeed: 0
+      sprintSpeed: 0
+      atkSpeed: 0
+      weightLimit: 6
+      slotLimit: 0
+      goldRate: 0
+      expRate: 0
+      itemDropRate: 0
+      jumpHeight: 0
+      headDamageAbsorbs: 0
+      bodyDamageAbsorbs: 0
+      fallDamageAbsorbs: 0
+      gravityRate: 0
+      protectedSlotLimit: 0
+      ammoCapacityModifier: 0
+      ammoCapacityRate: 0
+      recoilModifier: 0
+      recoilYawModifier: 0
+      recoilRollModifier: 0
+      recoilRate: 0
+      recoilYawRate: 0
+      recoilRollRate: 0
+      rateOfFireModifier: 0
+      rateOfFireRate: 0
+      reloadDurationModifier: 0
+      reloadDurationRate: 0
+      fireSpreadRangeModifier: 0
+      fireSpreadRangeRate: 0
+      fireSpreadModifier: 0
+      fireSpreadRate: 0
+      decreaseFoodDecreation: 0
+      decreaseWaterDecreation: 0
+      decreaseStaminaDecreation: 0
+      buyItemPriceRate: 0
+      sellItemPriceRate: 0
+    rateIncreaseEachLevel:
+      hp: 0
+      hpRecovery: 0
+      hpLeechRate: 0
+      mp: 0
+      mpRecovery: 0
+      mpLeechRate: 0
+      stamina: 0
+      staminaRecovery: 0
+      staminaLeechRate: 0
+      food: 0
+      water: 0
+      accuracy: 0
+      evasion: 0
+      criRate: 0
+      criDmgRate: 0
+      blockRate: 0
+      blockDmgRate: 0
+      moveSpeed: 0
+      sprintSpeed: 0
+      atkSpeed: 0
+      weightLimit: 0
+      slotLimit: 0
+      goldRate: 0
+      expRate: 0
+      itemDropRate: 0
+      jumpHeight: 0
+      headDamageAbsorbs: 0
+      bodyDamageAbsorbs: 0
+      fallDamageAbsorbs: 0
+      gravityRate: 0
+      protectedSlotLimit: 0
+      ammoCapacityModifier: 0
+      ammoCapacityRate: 0
+      recoilModifier: 0
+      recoilYawModifier: 0
+      recoilRollModifier: 0
+      recoilRate: 0
+      recoilYawRate: 0
+      recoilRollRate: 0
+      rateOfFireModifier: 0
+      rateOfFireRate: 0
+      reloadDurationModifier: 0
+      reloadDurationRate: 0
+      fireSpreadRangeModifier: 0
+      fireSpreadRangeRate: 0
+      fireSpreadModifier: 0
+      fireSpreadRate: 0
+      decreaseFoodDecreation: 0
+      decreaseWaterDecreation: 0
+      decreaseStaminaDecreation: 0
+      buyItemPriceRate: 0
+      sellItemPriceRate: 0
+    statsIncreaseEachLevelByLevels: []
+  attributes:
+  - attribute: {fileID: 11400000, guid: 0d87aaef7ab62154eaa5a864b28cebf3, type: 2}
+    amount:
+      baseAmount: 5
+      amountIncreaseEachLevel: 2
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+  - attribute: {fileID: 11400000, guid: de3752f03389c6648803d16eb25d93b5, type: 2}
+    amount:
+      baseAmount: 2
+      amountIncreaseEachLevel: 0.8
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+  - attribute: {fileID: 11400000, guid: 3308e4db38750b341a095fbfa1fa95dc, type: 2}
+    amount:
+      baseAmount: 2
+      amountIncreaseEachLevel: 0.6
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+  - attribute: {fileID: 11400000, guid: 995f86739e2aece49aaca1ec67a4e664, type: 2}
+    amount:
+      baseAmount: 1
+      amountIncreaseEachLevel: 0.3
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+  resistances: []
+  armors: []
+  statusEffectResistances: []
+  selfStatusEffectsWhenAttacking: []
+  enemyStatusEffectsWhenAttacking: []
+  selfStatusEffectsWhenAttacked: []
+  enemyStatusEffectsWhenAttacked: []
+  skills:
+  - skill: {fileID: 11400000, guid: 20b867d0187aa55458948a252c809496, type: 2}
+    level: 0
+    skillLevel:
+      baseAmount: 1
+      amountIncreaseEachLevel: 0
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+  - skill: {fileID: 11400000, guid: 51eab8bdfe6c6ef48a950279b6fb16fc, type: 2}
+    level: 0
+    skillLevel:
+      baseAmount: 1
+      amountIncreaseEachLevel: 0
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+  - skill: {fileID: 11400000, guid: d482cd221d4c7304a860dca357fc86c7, type: 2}
+    level: 0
+    skillLevel:
+      baseAmount: 0
+      amountIncreaseEachLevel: 0
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+  - skill: {fileID: 11400000, guid: 1fbe1afeb40f4724a9a4e1dee99bf3dc, type: 2}
+    level: 0
+    skillLevel:
+      baseAmount: 0
+      amountIncreaseEachLevel: 0
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+  - skill: {fileID: 11400000, guid: cd256d91b2e63d84a85c37ea2e3c043b, type: 2}
+    level: 0
+    skillLevel:
+      baseAmount: 0
+      amountIncreaseEachLevel: 0
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+  - skill: {fileID: 11400000, guid: 1384ac101bf4101419711658217a1646, type: 2}
+    level: 0
+    skillLevel:
+      baseAmount: 0
+      amountIncreaseEachLevel: 0
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+  - skill: {fileID: 11400000, guid: e617cfdd8acc6c446b6c471ef0cb8e13, type: 2}
+    level: 0
+    skillLevel:
+      baseAmount: 0
+      amountIncreaseEachLevel: 0
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+  rightHandEquipItem: {fileID: 11400000, guid: ed38eef67ac1e044d9ee747094a4a564, type: 2}
+  leftHandEquipItem: {fileID: 0}
+  armorItems:
+  - {fileID: 11400000, guid: f23b66f1821b860489ed58417583f22f, type: 2}
+  - {fileID: 11400000, guid: 611669dad31abdc4496e44599be9bf46, type: 2}
+  - {fileID: 11400000, guid: c583cfc16a4613946bc8415b0ef56ef7, type: 2}
+  - {fileID: 11400000, guid: 348cb42ed88cc6944ac65a7e25a47d88, type: 2}
+  startItems:
+  - item: {fileID: 11400000, guid: 4813f8d8ebdc81349b469905ed698457, type: 2}
+    level: 0
+    amount: 5
+  - item: {fileID: 11400000, guid: c5b44435fcd2ef04c933bbefe1539264, type: 2}
+    level: 0
+    amount: 1
+  - item: {fileID: 11400000, guid: 16260e31b7b45484d99f58e932158201, type: 2}
+    level: 0
+    amount: 1
+  startMap: {fileID: 11400000, guid: 0a5e6a3017686de4386e0acf0947d47b, type: 2}
+  useOverrideStartPosition: 0
+  overrideStartPosition: {x: 0, y: 0, z: 0}
+  useOverrideStartRotation: 0
+  overrideStartRotation: {x: 0, y: 0, z: 0}
+  startPointsByCondition: []

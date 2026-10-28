@@ -1,0 +1,27 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7ed975d25ec712146bb64ff053188e4c, type: 3}
+  m_Name: Fire
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.DamageElement
+  btnValidate: 0
+  id: Fire
+  defaultTitle: Fire
+  languageSpecificTitles: []
+  defaultDescription: Burns on after the blow lands.
+  languageSpecificDescriptions: []
+  category: 
+  icon: {fileID: 0}
+  resistanceBattlePointScore: 5
+  armorBattlePointScore: 5
+  damageBattlePointScore: 10
+  maxResistanceAmount: 0.75
+  damageHitEffects: []

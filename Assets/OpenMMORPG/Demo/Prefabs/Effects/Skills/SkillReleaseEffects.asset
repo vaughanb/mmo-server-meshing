@@ -1,0 +1,27 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: da3563b3ca9335c40910317c75b403a5, type: 3}
+  m_Name: SkillReleaseEffects
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.SkillReleaseEffects
+  entries:
+  - skill: {fileID: 11400000, guid: 31dfacb66a8c0de48bf5e36d439877d1, type: 2}
+    effects:
+    - {fileID: 3903369645364530184, guid: 45eaf2b5a4dc93546bdfde3e3518882b, type: 3}
+  - skill: {fileID: 11400000, guid: 3ce63d976f4154043bc8aa2af752b24d, type: 2}
+    effects:
+    - {fileID: 6952838113918181585, guid: c125c889dac35a94093c1d3bade97b9c, type: 3}
+  - skill: {fileID: 11400000, guid: bc6a5581331c4b5419ffe003f78fb5da, type: 2}
+    effects:
+    - {fileID: 3317551467209130850, guid: ca12212af136da445916f097892b31a9, type: 3}
+  - skill: {fileID: 11400000, guid: 8948b87628e8708459c305d735aae7bd, type: 2}
+    effects:
+    - {fileID: 6441028541316134183, guid: f9a3dde7e01272748abdbab0ce9c6fc4, type: 3}

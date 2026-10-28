@@ -1,0 +1,49 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 88ba107595674354c87fbbacb6446343, type: 3}
+  m_Name: Mushroom
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.Harvestable
+  btnValidate: 0
+  id: Mushroom
+  defaultTitle: Browncap Mushroom
+  languageSpecificTitles: []
+  defaultDescription: 
+  languageSpecificDescriptions: []
+  category: 
+  icon: {fileID: 21300000, guid: 3bae909229c8e2f43b19afed6f525c03, type: 3}
+  harvestEffectivenesses:
+  - weaponType: {fileID: 11400000, guid: 8bf9de9cb5b0fda498255c0b13cb217b, type: 2}
+    damageEffectiveness: 1
+    items:
+    - item: {fileID: 11400000, guid: b868faca66b10f64f928d706a27073b8, type: 2}
+      amountPerDamage: 0.1
+      randomWeight: 100
+  - weaponType: {fileID: 11400000, guid: 75690c1b909d21b40bf28be845b75474, type: 2}
+    damageEffectiveness: 1
+    items:
+    - item: {fileID: 11400000, guid: b868faca66b10f64f928d706a27073b8, type: 2}
+      amountPerDamage: 0.1
+      randomWeight: 100
+  - weaponType: {fileID: 11400000, guid: 1a16eb003d7f19744b981f74a024c702, type: 2}
+    damageEffectiveness: 1
+    items:
+    - item: {fileID: 11400000, guid: b868faca66b10f64f928d706a27073b8, type: 2}
+      amountPerDamage: 0.1
+      randomWeight: 100
+  - weaponType: {fileID: 11400000, guid: fc3e5b2dd1a0ac340bca470db6f480b4, type: 2}
+    damageEffectiveness: 1
+    items:
+    - item: {fileID: 11400000, guid: b868faca66b10f64f928d706a27073b8, type: 2}
+      amountPerDamage: 0.1
+      randomWeight: 100
+  skillHarvestEffectivenesses: []
+  expPerDamage: 3

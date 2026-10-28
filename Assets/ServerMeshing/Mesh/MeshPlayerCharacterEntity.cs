@@ -10,6 +10,22 @@ namespace MultiplayerARPG.MMO.Mesh
 {
     public class MeshPlayerCharacterEntity : PlayerCharacterEntity
     {
+        // The ownership the owner / non-owner objects (HUD, nameplate, controller binding) were last built for.
+        private bool? _ownerObjectsBuiltFor;
+
+        /// <summary>
+        /// A character a migrating client kept and the new cell's spawn adopted (CE-14) keeps the objects the kit builds
+        /// for it when its ownership did not change: rebuilding the HUD, nameplate and controller binding would show the
+        /// cell swap to the player.
+        /// </summary>
+        protected override void EntityOnSetOwnerClient(bool isOwnerClient)
+        {
+            if (Identity != null && Identity.IsBeingAdopted && _ownerObjectsBuiltFor == isOwnerClient)
+                return;
+            _ownerObjectsBuiltFor = isOwnerClient;
+            base.EntityOnSetOwnerClient(isOwnerClient);
+        }
+
         /// <summary>A puppet must not take buffs/debuffs/heals locally: forward them to the owner of the real character.</summary>
         public override void ApplyBuff(int dataId, BuffType type, int level, EntityInfo buffApplier, CharacterItem buffApplierWeapon)
         {

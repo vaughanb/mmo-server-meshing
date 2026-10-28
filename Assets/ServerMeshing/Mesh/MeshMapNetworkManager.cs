@@ -37,6 +37,12 @@ namespace MultiplayerARPG.MMO.Mesh
         [Tooltip("Seconds to fade the screenshot mask out once the player is back (mask strategy only).")]
         public float migrationMaskFadeSeconds = 0.25f;
 
+        [Tooltip("CONTINUITY (CE-14): move the running client to the new cell without stopping it; every entity on screen is kept and adopted by the new cell's spawn of it, so the player's character, its controller, camera, HUD, animation and sounds simply carry on. Falls back to the stand-in swap when the new cell does not seat us.")]
+        public bool useEntityContinuity = true;
+
+        [Tooltip("CONTINUITY: seconds after the player's character is adopted to let the new cell's other spawns adopt their kept entities, before the kept entities it did not spawn are removed.")]
+        public float keptObjectGraceSeconds = 1f;
+
         [Tooltip("SEAMLESS: keep the world rendering through the swap with dead-reckoned visual stand-ins and a preserved controller/camera/HUD, instead of holding a screenshot.")]
         public bool useVisualStandIns = true;
 
@@ -67,6 +73,9 @@ namespace MultiplayerARPG.MMO.Mesh
 
         [Tooltip("Seconds of the player's current velocity to add to the saved position, so the neighbour spawns it where the client's dead-reckoned stand-in will be by then (~the measured gap).")]
         public float handoffLeadSeconds = 0.3f;
+
+        [Tooltip("An arrival whose ghost already stands within this many metres of the saved position is promoted where it stands, not teleported: a teleport makes the arriving client snap its character to the saved spot, which a client that kept moving through the hop (entity continuity) has already walked past.")]
+        public float arrivalTeleportDistance = 2f;
 
         public bool IsMigrating { get; private set; }
 
@@ -207,6 +216,17 @@ namespace MultiplayerARPG.MMO.Mesh
             loadOfflineSceneWhenClientStopped = false;
             IsMigrating = true;
             // SPIKE-TODO: if a kit loading-screen UI appears on warp, suppress it here and restore in EndMigration().
+        }
+
+        /// <summary>
+        /// A continuity migration (CE-14) keeps the client's objects for the new cell to adopt; the kit's movement
+        /// handlers are keyed by the old cell's object ids, so they are dropped here and re-registered on adoption
+        /// (an entry left behind would block the new cell's object of the same id).
+        /// </summary>
+        protected override void OnStartMigrateClient()
+        {
+            base.OnStartMigrateClient();
+            EntityMovementDataHandlers.Clear();
         }
 
         internal void EndMigration()

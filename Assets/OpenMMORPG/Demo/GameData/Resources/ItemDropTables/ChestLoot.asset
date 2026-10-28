@@ -1,0 +1,94 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bb0558005f522274081c7cfc8f474dfe, type: 3}
+  m_Name: ChestLoot
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.ItemDropTable
+  randomItems:
+  - item: {fileID: 11400000, guid: 4813f8d8ebdc81349b469905ed698457, type: 2}
+    minLevel: 0
+    maxLevel: 1
+    minAmount: 1
+    maxAmount: 2
+    dropRate: 0.5
+  - item: {fileID: 11400000, guid: 2d2fba5c8e4e7af499a64facb2e71ec4, type: 2}
+    minLevel: 0
+    maxLevel: 1
+    minAmount: 1
+    maxAmount: 2
+    dropRate: 0.45
+  - item: {fileID: 11400000, guid: 79f6e7f1fec15fa49b46f3a9ecaef95f, type: 2}
+    minLevel: 0
+    maxLevel: 1
+    minAmount: 10
+    maxAmount: 20
+    dropRate: 0.4
+  - item: {fileID: 11400000, guid: 4446a510a2b006f4399e4d9524f3b4d2, type: 2}
+    minLevel: 0
+    maxLevel: 1
+    minAmount: 1
+    maxAmount: 1
+    dropRate: 0.35
+  - item: {fileID: 11400000, guid: f3b2b683e39464640b24709a54ff3ec5, type: 2}
+    minLevel: 0
+    maxLevel: 1
+    minAmount: 1
+    maxAmount: 2
+    dropRate: 0.35
+  - item: {fileID: 11400000, guid: 0d815ca4a4e7a1c43862b6a3f326766d, type: 2}
+    minLevel: 0
+    maxLevel: 1
+    minAmount: 1
+    maxAmount: 2
+    dropRate: 0.3
+  - item: {fileID: 11400000, guid: 593531c59904ae9429ca0e409ba9592d, type: 2}
+    minLevel: 0
+    maxLevel: 1
+    minAmount: 2
+    maxAmount: 4
+    dropRate: 0.3
+  - item: {fileID: 11400000, guid: d86ee534fa79d5f4896338f39c96c98e, type: 2}
+    minLevel: 0
+    maxLevel: 1
+    minAmount: 2
+    maxAmount: 4
+    dropRate: 0.3
+  - item: {fileID: 11400000, guid: 930d0a16a8f995c42be080b274f6524d, type: 2}
+    minLevel: 0
+    maxLevel: 1
+    minAmount: 1
+    maxAmount: 1
+    dropRate: 0.25
+  - item: {fileID: 11400000, guid: b2dfdb17ca25331428a559776362d287, type: 2}
+    minLevel: 0
+    maxLevel: 1
+    minAmount: 1
+    maxAmount: 2
+    dropRate: 0.25
+  - item: {fileID: 11400000, guid: 4967fbade1a5564438cb750b5bb65cba, type: 2}
+    minLevel: 0
+    maxLevel: 1
+    minAmount: 1
+    maxAmount: 3
+    dropRate: 0.2
+  - item: {fileID: 11400000, guid: 0ab43cc011126b340845dd2a04496f02, type: 2}
+    minLevel: 0
+    maxLevel: 1
+    minAmount: 1
+    maxAmount: 1
+    dropRate: 0.1
+  - item: {fileID: 11400000, guid: 6edfe3a8da850aa4999a2aa1f6ded002, type: 2}
+    minLevel: 0
+    maxLevel: 1
+    minAmount: 1
+    maxAmount: 1
+    dropRate: 0.05
+  randomCurrencies: []

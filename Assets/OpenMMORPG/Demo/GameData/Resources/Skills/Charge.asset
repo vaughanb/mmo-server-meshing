@@ -1,0 +1,241 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e2ea843108c8a44994bbf8e5816f63e, type: 3}
+  m_Name: Charge
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.SimpleDashAttackSkill
+  btnValidate: 0
+  id: Charge
+  defaultTitle: Charge
+  languageSpecificTitles: []
+  defaultDescription: Closes the ground to your target at a run, and lands on arrival.
+  languageSpecificDescriptions: []
+  category: 
+  icon: {fileID: 21300000, guid: 1cbec6fb4f80aa745a0fe6d52d831fec, type: 3}
+  maxLevel: 5
+  battlePointScore: 0
+  cannotReset: 0
+  moveSpeedRateWhileUsingSkill: 0
+  movementRestrictionWhileUsingSkill:
+    jumpRestricted: 0
+    dashRestricted: 0
+    turnRestricted: 0
+  useSkillRestriction:
+    restrictedWhileAirborne: 0
+    restrictedWhileCrouching: 0
+    restrictedWhileCrouchMoving: 0
+    restrictedWhileCrawling: 0
+    restrictedWhileCrawlMoving: 0
+  consumeHp:
+    baseAmount: 0
+    amountIncreaseEachLevel: 0
+    rateIncreaseEachLevel: 0
+    amountIncreaseEachLevelByLevels: []
+  consumeMp:
+    baseAmount: 0
+    amountIncreaseEachLevel: 0
+    rateIncreaseEachLevel: 0
+    amountIncreaseEachLevelByLevels: []
+  consumeStamina:
+    baseAmount: 0
+    amountIncreaseEachLevel: 0
+    rateIncreaseEachLevel: 0
+    amountIncreaseEachLevelByLevels: []
+  consumeHpRate:
+    baseAmount: 0
+    amountIncreaseEachLevel: 0
+    rateIncreaseEachLevel: 0
+    amountIncreaseEachLevelByLevels: []
+  consumeMpRate:
+    baseAmount: 0
+    amountIncreaseEachLevel: 0
+    rateIncreaseEachLevel: 0
+    amountIncreaseEachLevelByLevels: []
+  consumeStaminaRate:
+    baseAmount: 0
+    amountIncreaseEachLevel: 0
+    rateIncreaseEachLevel: 0
+    amountIncreaseEachLevelByLevels: []
+  coolDownDuration:
+    baseAmount: 16
+    amountIncreaseEachLevel: -1
+    rateIncreaseEachLevel: 0
+    amountIncreaseEachLevelByLevels: []
+  skillCastEffects: []
+  castDuration:
+    baseAmount: 0
+    amountIncreaseEachLevel: 0
+    rateIncreaseEachLevel: 0
+    amountIncreaseEachLevelByLevels: []
+  canBeInterruptedWhileCasting: 0
+  skillActivateEffects:
+  - {fileID: 4302422172943647669, guid: a2ed3d6dc0629d54b8c879282d5043e1, type: 3}
+  requirement:
+    disallow: 0
+    characterLevel:
+      baseAmount: 5
+      amountIncreaseEachLevel: 2
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+    skillPoint:
+      baseAmount: 1
+      amountIncreaseEachLevel: 1
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+    gold:
+      baseAmount: 0
+      amountIncreaseEachLevel: 0
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+    attributeAmounts: []
+    skillLevels: []
+    currencyAmounts: []
+    itemAmounts: []
+  btnMakeRequirementEachLevels: 0
+  requirementEachLevels:
+  - disallow: 0
+    characterLevel: 5
+    skillPoint: 1
+    gold: 0
+    attributeAmounts: []
+    skillLevels: []
+    currencyAmounts: []
+    itemAmounts: []
+  - disallow: 0
+    characterLevel: 7
+    skillPoint: 2
+    gold: 0
+    attributeAmounts: []
+    skillLevels: []
+    currencyAmounts: []
+    itemAmounts: []
+  - disallow: 0
+    characterLevel: 9
+    skillPoint: 3
+    gold: 0
+    attributeAmounts: []
+    skillLevels: []
+    currencyAmounts: []
+    itemAmounts: []
+  - disallow: 0
+    characterLevel: 11
+    skillPoint: 4
+    gold: 0
+    attributeAmounts: []
+    skillLevels: []
+    currencyAmounts: []
+    itemAmounts: []
+  - disallow: 0
+    characterLevel: 13
+    skillPoint: 5
+    gold: 0
+    attributeAmounts: []
+    skillLevels: []
+    currencyAmounts: []
+    itemAmounts: []
+  requireShield: 0
+  availableWeapons: []
+  availableArmors: []
+  availableVehicles: []
+  requireItems: []
+  requireAmmoType: 0
+  requireAmmoAmount: 0
+  requireAmmos: []
+  playableCharacterModelSettings:
+    applySkillAnimations: 0
+    skillAnimations:
+      skill: {fileID: 0}
+      castState:
+        clip: {fileID: 0}
+        animSpeedRate: 0
+        transitionDuration: 0
+        isAdditive: 0
+        applyFootIk: 0
+        applyPlayableIk: 0
+        avatarMask: {fileID: 0}
+        clipWhileMoving: {fileID: 0}
+        avatarMaskWhileMoving: {fileID: 0}
+        clipWhileSprinting: {fileID: 0}
+        avatarMaskWhileSprinting: {fileID: 0}
+        clipWhileAirbourne: {fileID: 0}
+        avatarMaskWhileAirbourne: {fileID: 0}
+        skipMovementValidation: 0
+        shouldUseRootMotion: 0
+      castStatesByWeaponTypes: []
+      activateAnimationType: 0
+      activateAnimation:
+        state:
+          clip: {fileID: 0}
+          animSpeedRate: 0
+          transitionDuration: 0
+          isAdditive: 0
+          applyFootIk: 0
+          applyPlayableIk: 0
+          avatarMask: {fileID: 0}
+          clipWhileMoving: {fileID: 0}
+          avatarMaskWhileMoving: {fileID: 0}
+          clipWhileSprinting: {fileID: 0}
+          avatarMaskWhileSprinting: {fileID: 0}
+          clipWhileAirbourne: {fileID: 0}
+          avatarMaskWhileAirbourne: {fileID: 0}
+          skipMovementValidation: 0
+          shouldUseRootMotion: 0
+        triggerDurationRates: []
+        durationType: 0
+        fixedDuration: 0
+        extendDuration: 0
+        audioClips: []
+      activateAnimationsByWeaponTypes: []
+  castDistance:
+    baseAmount: 12
+    amountIncreaseEachLevel: 0
+    rateIncreaseEachLevel: 0
+    amountIncreaseEachLevelByLevels: []
+  forceMode: 1
+  forceApplierData:
+    speed: 18
+    deceleration: 12
+    duration: 0.6
+  dashToEnemyPosition: 1
+  dashToEnemyByDuration: 0
+  dashToEnemyStoppingDistance: 1.6
+  preDashEnemyLookupRadius: -1
+  preDashDamageAmounts: []
+  preDashKnockbackEffect:
+    force: 0
+    deceleration: 0
+    duration: 1
+  dashMovingEnemyLookupRadius: -1
+  dashMovingDamageAmounts: []
+  dashMovingTriggerInterval: 0.25
+  dashMovingKnockbackEffect:
+    force: 0
+    deceleration: 0
+    duration: 1
+  postDashEnemyLookupRadius: 4
+  postDashDamageAmounts:
+  - damageElement: {fileID: 0}
+    amount:
+      baseAmount:
+        min: 10
+        max: 15
+      amountIncreaseEachLevel:
+        min: 4
+        max: 4
+      rateIncreaseEachLevel:
+        min: 0
+        max: 0
+      amountIncreaseEachLevelByLevels: []
+  postDashKnockbackEffect:
+    force: 9
+    deceleration: 18
+    duration: 0.5
+  attackStatusEffects: []

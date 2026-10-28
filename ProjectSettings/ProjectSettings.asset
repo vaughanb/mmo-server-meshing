@@ -4,7 +4,7 @@
 PlayerSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 28
-  productGUID: 38184ba24ec0bdb4387cd5c7cb128982
+  productGUID: 0440e506f250d6d459e0acba947b46e2
   AndroidProfiler: 0
   AndroidFilterTouchesWhenObscured: 0
   AndroidEnableSustainedPerformanceMode: 0
@@ -147,7 +147,7 @@ PlayerSettings:
   loadStoreDebugModeEnabled: 0
   visionOSBundleVersion: 1.0
   tvOSBundleVersion: 1.0
-  bundleVersion: 1.97
+  bundleVersion: 1.0
   preloadedAssets:
   - {fileID: -944628639613478452, guid: b7b0acfa1d32d3f4fb4dd990fef8568c, type: 3}
   metroInputSource: 0
@@ -171,16 +171,16 @@ PlayerSettings:
   androidMaxAspectRatio: 2.4
   androidMinAspectRatio: 1
   applicationIdentifier:
-    Android: com.suriyun.unitymultiplayerarpg
-    Standalone: com.suriyun.unitymultiplayerarpg
-    iPhone: com.suriyun.unitymultiplayerarpg
+    Android: com.DefaultCompany.OpenMMORPG
+    Standalone: com.DefaultCompany.OpenMMORPG
+    iPhone: com.DefaultCompany.OpenMMORPG
   buildNumber:
     Standalone: 0
     VisionOS: 0
     iPhone: 1970
     tvOS: 0
-  overrideDefaultApplicationIdentifier: 1
-  AndroidBundleVersionCode: 1970
+  overrideDefaultApplicationIdentifier: 0
+  AndroidBundleVersionCode: 1
   AndroidMinSdkVersion: 29
   AndroidTargetSdkVersion: 0
   AndroidPreferredInstallLocation: 1
@@ -261,7 +261,7 @@ PlayerSettings:
   iOSAutomaticallyDetectAndAddCapabilities: 1
   appleEnableProMotion: 0
   shaderPrecisionModel: 0
-  clonedFromGUID: 1037554f9e879934497b85f58da110b2
+  clonedFromGUID: c15d9d515d3c2cd4a9970867485c7ba5
   templatePackageId: 
   templateDefaultScene: 
   useCustomMainManifest: 1
@@ -277,7 +277,7 @@ PlayerSettings:
   AndroidSplashScreenScale: 0
   androidSplashScreen: {fileID: 0}
   AndroidKeystoreName: '{inproject}: user.keystore'
-  AndroidKeyaliasName: com.suriyun.unitymultiplayerarpg
+  AndroidKeyaliasName: 
   AndroidEnableArmv9SecurityFeatures: 0
   AndroidEnableArm64MTE: 0
   AndroidBuildApkPerCpuArchitecture: 0
@@ -843,14 +843,9 @@ PlayerSettings:
   webWasm2023: 0
   webEnableSubmoduleStrippingCompatibility: 0
   scriptingDefineSymbols:
-    1: UNITY_SERVER
-    4: NO_GPGS
-    7: UNITY_SERVER;ENABLE_PURCHASING;UNITY_PURCHASING
-    Android: STEAMWORKS_NET
+    Android: 
     Server: DISABLE_ADDRESSABLES
-    Standalone: STEAMWORKS_NET;DISABLE_ADDRESSABLES
-    WebGL: STEAMWORKS_NET
-    iPhone: STEAMWORKS_NET
+    Standalone: DISABLE_ADDRESSABLES
   additionalCompilerArguments: {}
   platformArchitecture: {}
   scriptingBackend:
@@ -890,14 +885,14 @@ PlayerSettings:
   editorAssembliesCompatibilityLevel: 2
   m_RenderingPath: 1
   m_MobileRenderingPath: 1
-  metroPackageName: kit-ce-project
+  metroPackageName: mmo-server-meshing
   metroPackageVersion: 
   metroCertificatePath: 
   metroCertificatePassword: 
   metroCertificateSubject: 
   metroCertificateIssuer: 
   metroCertificateNotAfter: 0000000000000000
-  metroApplicationDescription: kit-ce-project
+  metroApplicationDescription: mmo-server-meshing
   wsaImages: {}
   metroTileShortName: 
   metroTileShowName: 0

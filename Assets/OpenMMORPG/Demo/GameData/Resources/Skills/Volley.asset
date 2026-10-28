@@ -1,0 +1,716 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 02b9ef4d0edc1ac41b530d9b25e800b2, type: 3}
+  m_Name: Volley
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.SimpleAreaAttackSkill
+  btnValidate: 0
+  id: Volley
+  defaultTitle: Volley
+  languageSpecificTitles: []
+  defaultDescription: Arrows into a patch of ground, and keeps them coming.
+  languageSpecificDescriptions: []
+  category: 
+  icon: {fileID: 21300000, guid: 8278b91c1337e1f43bb8130dee3fedd4, type: 3}
+  maxLevel: 5
+  battlePointScore: 0
+  cannotReset: 0
+  moveSpeedRateWhileUsingSkill: 0
+  movementRestrictionWhileUsingSkill:
+    jumpRestricted: 0
+    dashRestricted: 0
+    turnRestricted: 0
+  useSkillRestriction:
+    restrictedWhileAirborne: 0
+    restrictedWhileCrouching: 0
+    restrictedWhileCrouchMoving: 0
+    restrictedWhileCrawling: 0
+    restrictedWhileCrawlMoving: 0
+  consumeHp:
+    baseAmount: 0
+    amountIncreaseEachLevel: 0
+    rateIncreaseEachLevel: 0
+    amountIncreaseEachLevelByLevels: []
+  consumeMp:
+    baseAmount: 45
+    amountIncreaseEachLevel: 0
+    rateIncreaseEachLevel: 0
+    amountIncreaseEachLevelByLevels: []
+  consumeStamina:
+    baseAmount: 0
+    amountIncreaseEachLevel: 0
+    rateIncreaseEachLevel: 0
+    amountIncreaseEachLevelByLevels: []
+  consumeHpRate:
+    baseAmount: 0
+    amountIncreaseEachLevel: 0
+    rateIncreaseEachLevel: 0
+    amountIncreaseEachLevelByLevels: []
+  consumeMpRate:
+    baseAmount: 0
+    amountIncreaseEachLevel: 0
+    rateIncreaseEachLevel: 0
+    amountIncreaseEachLevelByLevels: []
+  consumeStaminaRate:
+    baseAmount: 0
+    amountIncreaseEachLevel: 0
+    rateIncreaseEachLevel: 0
+    amountIncreaseEachLevelByLevels: []
+  coolDownDuration:
+    baseAmount: 20
+    amountIncreaseEachLevel: -0.8
+    rateIncreaseEachLevel: 0
+    amountIncreaseEachLevelByLevels: []
+  skillCastEffects:
+  - {fileID: 8666545036515664570, guid: c0865d014538fc74d862b9d7d6b31e65, type: 3}
+  castDuration:
+    baseAmount: 1.169
+    amountIncreaseEachLevel: 0
+    rateIncreaseEachLevel: 0
+    amountIncreaseEachLevelByLevels: []
+  canBeInterruptedWhileCasting: 1
+  skillActivateEffects: []
+  requirement:
+    disallow: 0
+    characterLevel:
+      baseAmount: 5
+      amountIncreaseEachLevel: 2
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+    skillPoint:
+      baseAmount: 1
+      amountIncreaseEachLevel: 1
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+    gold:
+      baseAmount: 0
+      amountIncreaseEachLevel: 0
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+    attributeAmounts: []
+    skillLevels: []
+    currencyAmounts: []
+    itemAmounts: []
+  btnMakeRequirementEachLevels: 0
+  requirementEachLevels:
+  - disallow: 0
+    characterLevel: 5
+    skillPoint: 1
+    gold: 0
+    attributeAmounts: []
+    skillLevels: []
+    currencyAmounts: []
+    itemAmounts: []
+  - disallow: 0
+    characterLevel: 7
+    skillPoint: 2
+    gold: 0
+    attributeAmounts: []
+    skillLevels: []
+    currencyAmounts: []
+    itemAmounts: []
+  - disallow: 0
+    characterLevel: 9
+    skillPoint: 3
+    gold: 0
+    attributeAmounts: []
+    skillLevels: []
+    currencyAmounts: []
+    itemAmounts: []
+  - disallow: 0
+    characterLevel: 11
+    skillPoint: 4
+    gold: 0
+    attributeAmounts: []
+    skillLevels: []
+    currencyAmounts: []
+    itemAmounts: []
+  - disallow: 0
+    characterLevel: 13
+    skillPoint: 5
+    gold: 0
+    attributeAmounts: []
+    skillLevels: []
+    currencyAmounts: []
+    itemAmounts: []
+  requireShield: 0
+  availableWeapons:
+  - {fileID: 11400000, guid: b863a51d8fe22e3439ec3bf92a6f499f, type: 2}
+  availableArmors: []
+  availableVehicles: []
+  requireItems: []
+  requireAmmoType: 1
+  requireAmmoAmount: 5
+  requireAmmos: []
+  playableCharacterModelSettings:
+    applySkillAnimations: 0
+    skillAnimations:
+      skill: {fileID: 0}
+      castState:
+        clip: {fileID: 0}
+        animSpeedRate: 0
+        transitionDuration: 0
+        isAdditive: 0
+        applyFootIk: 0
+        applyPlayableIk: 0
+        avatarMask: {fileID: 0}
+        clipWhileMoving: {fileID: 0}
+        avatarMaskWhileMoving: {fileID: 0}
+        clipWhileSprinting: {fileID: 0}
+        avatarMaskWhileSprinting: {fileID: 0}
+        clipWhileAirbourne: {fileID: 0}
+        avatarMaskWhileAirbourne: {fileID: 0}
+        skipMovementValidation: 0
+        shouldUseRootMotion: 0
+      castStatesByWeaponTypes: []
+      activateAnimationType: 0
+      activateAnimation:
+        state:
+          clip: {fileID: 0}
+          animSpeedRate: 0
+          transitionDuration: 0
+          isAdditive: 0
+          applyFootIk: 0
+          applyPlayableIk: 0
+          avatarMask: {fileID: 0}
+          clipWhileMoving: {fileID: 0}
+          avatarMaskWhileMoving: {fileID: 0}
+          clipWhileSprinting: {fileID: 0}
+          avatarMaskWhileSprinting: {fileID: 0}
+          clipWhileAirbourne: {fileID: 0}
+          avatarMaskWhileAirbourne: {fileID: 0}
+          skipMovementValidation: 0
+          shouldUseRootMotion: 0
+        triggerDurationRates: []
+        durationType: 0
+        fixedDuration: 0
+        extendDuration: 0
+        audioClips: []
+      activateAnimationsByWeaponTypes: []
+  castDistance:
+    baseAmount: 18
+    amountIncreaseEachLevel: 0
+    rateIncreaseEachLevel: 0
+    amountIncreaseEachLevelByLevels: []
+  areaDuration:
+    baseAmount: 3
+    amountIncreaseEachLevel: 0
+    rateIncreaseEachLevel: 0
+    amountIncreaseEachLevelByLevels: []
+  applyDuration:
+    baseAmount: 0.75
+    amountIncreaseEachLevel: 0
+    rateIncreaseEachLevel: 0
+    amountIncreaseEachLevelByLevels: []
+  overrideTargetDetectionLayerMask: 0
+  targetDetectionLayerMask:
+    serializedVersion: 2
+    m_Bits: 0
+  overrideGroundDetectionLayerMask: 0
+  groundDetectionLayerMask:
+    serializedVersion: 2
+    m_Bits: 0
+  targetObjectPrefab: {fileID: 2153720758484917481, guid: 4950cc0d8b520784aadbb8419544d0bd, type: 3}
+  areaDamageEntity: {fileID: 2394157897326771046, guid: 0184de07813eb1141b42b009ac22e4e2, type: 3}
+  skillAttackType: 0
+  damageAmount:
+    damageElement: {fileID: 0}
+    amount:
+      baseAmount:
+        min: 6
+        max: 9
+      amountIncreaseEachLevel:
+        min: 2
+        max: 2
+      rateIncreaseEachLevel:
+        min: 0
+        max: 0
+      amountIncreaseEachLevelByLevels: []
+  effectivenessAttributes: []
+  weaponDamageInflictions: []
+  weaponDamageMultiplicator:
+    baseAmount: 0
+    amountIncreaseEachLevel: 0
+    rateIncreaseEachLevel: 0
+    amountIncreaseEachLevelByLevels: []
+  additionalDamageAmounts: []
+  increaseDamageAmountsWithBuffs: 0
+  isDebuff: 0
+  debuff:
+    tag: 
+    restrictTags: []
+    enableApplyChance: 0
+    applyChance:
+      baseAmount: 0
+      amountIncreaseEachLevel: 0
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+    increaseStats:
+      baseStats:
+        hp: 0
+        hpRecovery: 0
+        hpLeechRate: 0
+        mp: 0
+        mpRecovery: 0
+        mpLeechRate: 0
+        stamina: 0
+        staminaRecovery: 0
+        staminaLeechRate: 0
+        food: 0
+        water: 0
+        accuracy: 0
+        evasion: 0
+        criRate: 0
+        criDmgRate: 0
+        blockRate: 0
+        blockDmgRate: 0
+        moveSpeed: 0
+        sprintSpeed: 0
+        atkSpeed: 0
+        weightLimit: 0
+        slotLimit: 0
+        goldRate: 0
+        expRate: 0
+        itemDropRate: 0
+        jumpHeight: 0
+        headDamageAbsorbs: 0
+        bodyDamageAbsorbs: 0
+        fallDamageAbsorbs: 0
+        gravityRate: 0
+        protectedSlotLimit: 0
+        ammoCapacityModifier: 0
+        ammoCapacityRate: 0
+        recoilModifier: 0
+        recoilYawModifier: 0
+        recoilRollModifier: 0
+        recoilRate: 0
+        recoilYawRate: 0
+        recoilRollRate: 0
+        rateOfFireModifier: 0
+        rateOfFireRate: 0
+        reloadDurationModifier: 0
+        reloadDurationRate: 0
+        fireSpreadRangeModifier: 0
+        fireSpreadRangeRate: 0
+        fireSpreadModifier: 0
+        fireSpreadRate: 0
+        decreaseFoodDecreation: 0
+        decreaseWaterDecreation: 0
+        decreaseStaminaDecreation: 0
+        buyItemPriceRate: 0
+        sellItemPriceRate: 0
+      statsIncreaseEachLevel:
+        hp: 0
+        hpRecovery: 0
+        hpLeechRate: 0
+        mp: 0
+        mpRecovery: 0
+        mpLeechRate: 0
+        stamina: 0
+        staminaRecovery: 0
+        staminaLeechRate: 0
+        food: 0
+        water: 0
+        accuracy: 0
+        evasion: 0
+        criRate: 0
+        criDmgRate: 0
+        blockRate: 0
+        blockDmgRate: 0
+        moveSpeed: 0
+        sprintSpeed: 0
+        atkSpeed: 0
+        weightLimit: 0
+        slotLimit: 0
+        goldRate: 0
+        expRate: 0
+        itemDropRate: 0
+        jumpHeight: 0
+        headDamageAbsorbs: 0
+        bodyDamageAbsorbs: 0
+        fallDamageAbsorbs: 0
+        gravityRate: 0
+        protectedSlotLimit: 0
+        ammoCapacityModifier: 0
+        ammoCapacityRate: 0
+        recoilModifier: 0
+        recoilYawModifier: 0
+        recoilRollModifier: 0
+        recoilRate: 0
+        recoilYawRate: 0
+        recoilRollRate: 0
+        rateOfFireModifier: 0
+        rateOfFireRate: 0
+        reloadDurationModifier: 0
+        reloadDurationRate: 0
+        fireSpreadRangeModifier: 0
+        fireSpreadRangeRate: 0
+        fireSpreadModifier: 0
+        fireSpreadRate: 0
+        decreaseFoodDecreation: 0
+        decreaseWaterDecreation: 0
+        decreaseStaminaDecreation: 0
+        buyItemPriceRate: 0
+        sellItemPriceRate: 0
+      rateIncreaseEachLevel:
+        hp: 0
+        hpRecovery: 0
+        hpLeechRate: 0
+        mp: 0
+        mpRecovery: 0
+        mpLeechRate: 0
+        stamina: 0
+        staminaRecovery: 0
+        staminaLeechRate: 0
+        food: 0
+        water: 0
+        accuracy: 0
+        evasion: 0
+        criRate: 0
+        criDmgRate: 0
+        blockRate: 0
+        blockDmgRate: 0
+        moveSpeed: 0
+        sprintSpeed: 0
+        atkSpeed: 0
+        weightLimit: 0
+        slotLimit: 0
+        goldRate: 0
+        expRate: 0
+        itemDropRate: 0
+        jumpHeight: 0
+        headDamageAbsorbs: 0
+        bodyDamageAbsorbs: 0
+        fallDamageAbsorbs: 0
+        gravityRate: 0
+        protectedSlotLimit: 0
+        ammoCapacityModifier: 0
+        ammoCapacityRate: 0
+        recoilModifier: 0
+        recoilYawModifier: 0
+        recoilRollModifier: 0
+        recoilRate: 0
+        recoilYawRate: 0
+        recoilRollRate: 0
+        rateOfFireModifier: 0
+        rateOfFireRate: 0
+        reloadDurationModifier: 0
+        reloadDurationRate: 0
+        fireSpreadRangeModifier: 0
+        fireSpreadRangeRate: 0
+        fireSpreadModifier: 0
+        fireSpreadRate: 0
+        decreaseFoodDecreation: 0
+        decreaseWaterDecreation: 0
+        decreaseStaminaDecreation: 0
+        buyItemPriceRate: 0
+        sellItemPriceRate: 0
+      statsIncreaseEachLevelByLevels: []
+    increaseStatsRate:
+      baseStats:
+        hp: 0
+        hpRecovery: 0
+        hpLeechRate: 0
+        mp: 0
+        mpRecovery: 0
+        mpLeechRate: 0
+        stamina: 0
+        staminaRecovery: 0
+        staminaLeechRate: 0
+        food: 0
+        water: 0
+        accuracy: 0
+        evasion: 0
+        criRate: 0
+        criDmgRate: 0
+        blockRate: 0
+        blockDmgRate: 0
+        moveSpeed: 0
+        sprintSpeed: 0
+        atkSpeed: 0
+        weightLimit: 0
+        slotLimit: 0
+        goldRate: 0
+        expRate: 0
+        itemDropRate: 0
+        jumpHeight: 0
+        headDamageAbsorbs: 0
+        bodyDamageAbsorbs: 0
+        fallDamageAbsorbs: 0
+        gravityRate: 0
+        protectedSlotLimit: 0
+        ammoCapacityModifier: 0
+        ammoCapacityRate: 0
+        recoilModifier: 0
+        recoilYawModifier: 0
+        recoilRollModifier: 0
+        recoilRate: 0
+        recoilYawRate: 0
+        recoilRollRate: 0
+        rateOfFireModifier: 0
+        rateOfFireRate: 0
+        reloadDurationModifier: 0
+        reloadDurationRate: 0
+        fireSpreadRangeModifier: 0
+        fireSpreadRangeRate: 0
+        fireSpreadModifier: 0
+        fireSpreadRate: 0
+        decreaseFoodDecreation: 0
+        decreaseWaterDecreation: 0
+        decreaseStaminaDecreation: 0
+        buyItemPriceRate: 0
+        sellItemPriceRate: 0
+      statsIncreaseEachLevel:
+        hp: 0
+        hpRecovery: 0
+        hpLeechRate: 0
+        mp: 0
+        mpRecovery: 0
+        mpLeechRate: 0
+        stamina: 0
+        staminaRecovery: 0
+        staminaLeechRate: 0
+        food: 0
+        water: 0
+        accuracy: 0
+        evasion: 0
+        criRate: 0
+        criDmgRate: 0
+        blockRate: 0
+        blockDmgRate: 0
+        moveSpeed: 0
+        sprintSpeed: 0
+        atkSpeed: 0
+        weightLimit: 0
+        slotLimit: 0
+        goldRate: 0
+        expRate: 0
+        itemDropRate: 0
+        jumpHeight: 0
+        headDamageAbsorbs: 0
+        bodyDamageAbsorbs: 0
+        fallDamageAbsorbs: 0
+        gravityRate: 0
+        protectedSlotLimit: 0
+        ammoCapacityModifier: 0
+        ammoCapacityRate: 0
+        recoilModifier: 0
+        recoilYawModifier: 0
+        recoilRollModifier: 0
+        recoilRate: 0
+        recoilYawRate: 0
+        recoilRollRate: 0
+        rateOfFireModifier: 0
+        rateOfFireRate: 0
+        reloadDurationModifier: 0
+        reloadDurationRate: 0
+        fireSpreadRangeModifier: 0
+        fireSpreadRangeRate: 0
+        fireSpreadModifier: 0
+        fireSpreadRate: 0
+        decreaseFoodDecreation: 0
+        decreaseWaterDecreation: 0
+        decreaseStaminaDecreation: 0
+        buyItemPriceRate: 0
+        sellItemPriceRate: 0
+      rateIncreaseEachLevel:
+        hp: 0
+        hpRecovery: 0
+        hpLeechRate: 0
+        mp: 0
+        mpRecovery: 0
+        mpLeechRate: 0
+        stamina: 0
+        staminaRecovery: 0
+        staminaLeechRate: 0
+        food: 0
+        water: 0
+        accuracy: 0
+        evasion: 0
+        criRate: 0
+        criDmgRate: 0
+        blockRate: 0
+        blockDmgRate: 0
+        moveSpeed: 0
+        sprintSpeed: 0
+        atkSpeed: 0
+        weightLimit: 0
+        slotLimit: 0
+        goldRate: 0
+        expRate: 0
+        itemDropRate: 0
+        jumpHeight: 0
+        headDamageAbsorbs: 0
+        bodyDamageAbsorbs: 0
+        fallDamageAbsorbs: 0
+        gravityRate: 0
+        protectedSlotLimit: 0
+        ammoCapacityModifier: 0
+        ammoCapacityRate: 0
+        recoilModifier: 0
+        recoilYawModifier: 0
+        recoilRollModifier: 0
+        recoilRate: 0
+        recoilYawRate: 0
+        recoilRollRate: 0
+        rateOfFireModifier: 0
+        rateOfFireRate: 0
+        reloadDurationModifier: 0
+        reloadDurationRate: 0
+        fireSpreadRangeModifier: 0
+        fireSpreadRangeRate: 0
+        fireSpreadModifier: 0
+        fireSpreadRate: 0
+        decreaseFoodDecreation: 0
+        decreaseWaterDecreation: 0
+        decreaseStaminaDecreation: 0
+        buyItemPriceRate: 0
+        sellItemPriceRate: 0
+      statsIncreaseEachLevelByLevels: []
+    increaseAttributes: []
+    increaseAttributesRate: []
+    increaseResistances: []
+    increaseArmors: []
+    increaseArmorsRate: []
+    increaseDamages: []
+    increaseDamagesRate: []
+    increaseSkills: []
+    isOverrideDamageInfo: 0
+    overrideDamageInfo:
+      damageType: 0
+      hitOnlySelectedTarget: 0
+      startAttackDistance: 0.5
+      hitDistance: 2
+      hitFov: 60
+      originOffsets: 1
+      missileDistance: 10
+      missileSpeed: 10
+      isHeadshotInstantDeath: 1
+      missileDamageEntity: {fileID: 0}
+      projectileEffect: {fileID: 0}
+      pierceThroughEntities: 0
+      impactEffects: {fileID: 0}
+      throwForce: 15
+      throwableLifeTime: 2
+      throwableDamageEntity: {fileID: 0}
+      customDamageInfo: {fileID: 0}
+    isOverrideSkills: 0
+    overrideSkills: []
+    mount:
+      mountEntity: {fileID: 0}
+      level:
+        baseAmount: 0
+        amountIncreaseEachLevel: 0
+        rateIncreaseEachLevel: 0
+        amountIncreaseEachLevelByLevels: []
+    increaseStatusEffectResistances: []
+    duration:
+      baseAmount: 0
+      amountIncreaseEachLevel: 0
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+    noDuration: 0
+    recoveryHp:
+      baseAmount: 0
+      amountIncreaseEachLevel: 0
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+    recoveryMp:
+      baseAmount: 0
+      amountIncreaseEachLevel: 0
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+    recoveryStamina:
+      baseAmount: 0
+      amountIncreaseEachLevel: 0
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+    recoveryFood:
+      baseAmount: 0
+      amountIncreaseEachLevel: 0
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+    recoveryWater:
+      baseAmount: 0
+      amountIncreaseEachLevel: 0
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+    buffRemovals: []
+    damageOverTimes: []
+    ailment: 0
+    disallowMove: 0
+    disallowSprint: 0
+    disallowWalk: 0
+    disallowJump: 0
+    disallowDash: 0
+    disallowCrouch: 0
+    disallowCrawl: 0
+    disallowAttack: 0
+    disallowUseSkill: 0
+    disallowUseItem: 0
+    freezeAnimation: 0
+    removeBuffWhenAttackChance:
+      baseAmount: 0
+      amountIncreaseEachLevel: 0
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+    removeBuffWhenAttackedChance:
+      baseAmount: 0
+      amountIncreaseEachLevel: 0
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+    removeBuffWhenUseSkillChance:
+      baseAmount: 0
+      amountIncreaseEachLevel: 0
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+    removeBuffWhenUseItemChance:
+      baseAmount: 0
+      amountIncreaseEachLevel: 0
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+    removeBuffWhenPickupItemChance:
+      baseAmount: 0
+      amountIncreaseEachLevel: 0
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+    isHide: 0
+    isRevealsHide: 0
+    isBlind: 0
+    muteFootstepSound: 0
+    selfStatusEffectsWhenAttacking: []
+    enemyStatusEffectsWhenAttacking: []
+    selfStatusEffectsWhenAttacked: []
+    enemyStatusEffectsWhenAttacked: []
+    doNotRemoveOnDead: 0
+    isExtendDuration: 0
+    maxStack:
+      baseAmount: 0
+      amountIncreaseEachLevel: 0
+      rateIncreaseEachLevel: 0
+      amountIncreaseEachLevelByLevels: []
+    effects: []
+  attackStatusEffects: []
+  harvestType: 0
+  harvestDamageAmount:
+    baseAmount:
+      min: 0
+      max: 0
+    amountIncreaseEachLevel:
+      min: 0
+      max: 0
+    rateIncreaseEachLevel:
+      min: 0
+      max: 0
+    amountIncreaseEachLevelByLevels: []
+  damageHitEffects:
+  - {fileID: 1182101789617869598, guid: 8663f19019611ca47b4a014154d4f812, type: 3}
+  isWarpToAimPosition: 0

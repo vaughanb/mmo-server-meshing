@@ -1,0 +1,36 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 81d38317bfc76fb42a04d40e1e61328f, type: 3}
+  m_Name: CraftRangerHood
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.ItemCraftFormula
+  btnValidate: 0
+  id: 
+  defaultTitle: Ranger Hood
+  languageSpecificTitles: []
+  defaultDescription: 
+  languageSpecificDescriptions: []
+  category: 
+  icon: {fileID: 0}
+  itemCraft:
+    craftingItem: {fileID: 11400000, guid: 7ff55bb40cbbf2f4792e992e9133824b, type: 2}
+    amount: 1
+    requireGold: 35
+    requireItems:
+    - item: {fileID: 11400000, guid: b2dfdb17ca25331428a559776362d287, type: 2}
+      level: 0
+      amount: 2
+    - item: {fileID: 11400000, guid: 79671e252186f6d40b7f70dbf060bc8c, type: 2}
+      level: 0
+      amount: 1
+    requireCurrencies: []
+  craftDuration: 0
+  canBeCraftedWithoutSource: 0

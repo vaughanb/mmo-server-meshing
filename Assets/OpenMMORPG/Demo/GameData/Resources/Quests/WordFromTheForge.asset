@@ -1,0 +1,73 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a278d249b1987cf4ebdb60bb4769bf33, type: 3}
+  m_Name: WordFromTheForge
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.Quest
+  btnValidate: 0
+  id: WordFromTheForge
+  defaultTitle: Word from the Forge
+  languageSpecificTitles: []
+  defaultDescription: Bram the smith has missed his supper three nights running.
+    Ask him why at the forge, and bring Hilde his answer.
+  languageSpecificDescriptions: []
+  category: 
+  icon: {fileID: 0}
+  requirement:
+    character: {fileID: 0}
+    faction: {fileID: 0}
+    level: 0
+    completedQuests: []
+  tasks: []
+  randomTasks:
+  - tasks:
+    - taskType: 2
+      monsterCharacterAmount:
+        monster: {fileID: 0}
+        amount: 0
+      itemAmount:
+        item: {fileID: 0}
+        level: 0
+        amount: 0
+      doNotDecreaseItemsOnQuestComplete: 0
+      npcEntity: {fileID: 0}
+      npcEntityId: 1103315962
+      npcEntityTitle: Bram the Smith
+      npcEntityTitles: []
+      talkToNpcDialog: {fileID: 11400000, guid: 4d447fab7a0e8b649a61f495cf348e6d, type: 2}
+      completeAfterTalked: 0
+      customQuestTask: {fileID: 0}
+      useCustomDescription: 0
+      defaultDescription: 
+      languageSpecificDescriptions: []
+      useCustomCompletedDescription: 0
+      defaultCompletedDescription: 
+      languageSpecificCompletedDescriptions: []
+  abandonQuests: []
+  resetAttributes: 0
+  resetSkills: 0
+  changeCharacterClass: {fileID: 0}
+  changeCharacterFaction: {fileID: 0}
+  rewardExp: 60
+  rewardGold: 30
+  rewardStatPoints: 0
+  rewardSkillPoints: 0
+  rewardCurrencies: []
+  rewardItems:
+  - item: {fileID: 11400000, guid: 930d0a16a8f995c42be080b274f6524d, type: 2}
+    level: 0
+    amount: 1
+  selectableRewardItems: []
+  randomRewardItems: []
+  repeatType: 0
+  canAbandon: 1
+  nextAssignQuests: []
+  autoTrackQuest: 1

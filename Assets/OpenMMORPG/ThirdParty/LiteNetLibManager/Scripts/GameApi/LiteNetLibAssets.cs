@@ -65,6 +65,19 @@ namespace LiteNetLibManager
         internal readonly Dictionary<uint, LiteNetLibIdentity> SpawnedObjects = new Dictionary<uint, LiteNetLibIdentity>();
         internal readonly Dictionary<uint, long> ChangingOwnerObjects = new Dictionary<uint, long>();
 
+        // MESH-EDIT: CE-14 — client migration keeps its objects and adopts them. See Docs/ServerMeshing/DESIGN.md §17.
+        /// <summary>Picks the kept object a new server's spawn is (or null to instantiate one). Null: the default rule.</summary>
+        public delegate LiteNetLibIdentity KeptObjectResolver(int hashAssetId, Vector3 position, long connectionId, IReadOnlyCollection<LiteNetLibIdentity> keptObjects);
+        /// <summary>Overrides the default rule that matches a spawn to a kept object (see <see cref="ResolveKeptObject"/>).</summary>
+        public KeptObjectResolver keptObjectResolver;
+        /// <summary>The default rule adopts a kept object of the same prefab only within this distance of the spawn.</summary>
+        public float keptObjectAdoptDistance = 10f;
+        /// <summary>Raised when a spawn adopted a kept object (after its spawn callbacks), with the id it had before.</summary>
+        public System.Action<LiteNetLibIdentity, uint> onObjectAdopted;
+        private readonly HashSet<LiteNetLibIdentity> _keptObjects = new HashSet<LiteNetLibIdentity>();
+        /// <summary>The objects a migrating client kept from the server it left and no spawn has adopted yet.</summary>
+        public IReadOnlyCollection<LiteNetLibIdentity> KeptObjects => _keptObjects;
+
         public LiteNetLibGameManager Manager { get; private set; }
         public bool IsInitialized { get; private set; } = false;
 
@@ -117,6 +130,7 @@ namespace LiteNetLibManager
         public void Clear(bool doNotResetObjectId = false)
         {
             IsInitialized = false;
+            DestroyKeptObjects(); // MESH-EDIT: CE-14
             ClearSpawnedObjects();
             ClearPooledObjects();
             SpawnPoints.Clear();
@@ -230,6 +244,94 @@ namespace LiteNetLibManager
             return GuidToPrefabs.Remove(addressablePrefab.HashAssetId);
         }
 #endif
+
+        // MESH-EDIT: CE-14 — client migration keeps its objects and adopts them. See Docs/ServerMeshing/DESIGN.md §17.
+        /// <summary>
+        /// Moves every spawned object out of the spawned set without destroying it, for a client moving to another
+        /// server: it keeps running and can be adopted by that server's spawn of the same object. Objects the client
+        /// owned (connection id <paramref name="ownerConnectionId"/>) stay owned; the others lose the old server's
+        /// connection id, which could collide with the new server's.
+        /// </summary>
+        public void KeepSpawnedObjects(long ownerConnectionId)
+        {
+            foreach (LiteNetLibIdentity identity in SpawnedObjects.Values)
+            {
+                if (identity == null)
+                    continue;
+                identity.PrepareKeep(ownerConnectionId >= 0 && identity.ConnectionId == ownerConnectionId);
+                _keptObjects.Add(identity);
+            }
+            SpawnedObjects.Clear();
+            ChangingOwnerObjects.Clear();
+        }
+
+        /// <summary>Kept objects owned under <paramref name="oldConnectionId"/> are owned under <paramref name="newConnectionId"/>.</summary>
+        public void RebindKeptObjectsOwner(long oldConnectionId, long newConnectionId)
+        {
+            if (oldConnectionId < 0)
+                return;
+            foreach (LiteNetLibIdentity identity in _keptObjects)
+            {
+                if (identity != null && identity.ConnectionId == oldConnectionId)
+                    identity.ConnectionId = newConnectionId;
+            }
+        }
+
+        /// <summary>Destroys the kept objects no spawn adopted (a kept scene object is deactivated, as on a clear).</summary>
+        public void DestroyKeptObjects()
+        {
+            foreach (LiteNetLibIdentity identity in _keptObjects)
+            {
+                if (identity == null)
+                    continue;
+                identity.IsKept = false;
+                if (identity.IsSceneObject)
+                    identity.gameObject.SetActive(false);
+                else
+                    Destroy(identity.gameObject);
+            }
+            _keptObjects.Clear();
+        }
+
+        /// <summary>
+        /// The kept object a spawn of <paramref name="hashAssetId"/> at <paramref name="position"/> owned by
+        /// <paramref name="connectionId"/> is: <see cref="keptObjectResolver"/> when set, else the kept object of the same
+        /// prefab with the same ownership: the owned one, or the nearest within <see cref="keptObjectAdoptDistance"/>.
+        /// </summary>
+        public LiteNetLibIdentity ResolveKeptObject(int hashAssetId, Vector3 position, long connectionId)
+        {
+            if (keptObjectResolver != null)
+            {
+                LiteNetLibIdentity resolved = keptObjectResolver(hashAssetId, position, connectionId, _keptObjects);
+                return resolved != null && _keptObjects.Contains(resolved) ? resolved : null;
+            }
+            bool owned = connectionId >= 0 && connectionId == Manager.ClientConnectionId;
+            LiteNetLibIdentity best = null;
+            float bestSqr = keptObjectAdoptDistance * keptObjectAdoptDistance;
+            foreach (LiteNetLibIdentity identity in _keptObjects)
+            {
+                if (identity == null || identity.IsSceneObject || identity.HashAssetId != hashAssetId)
+                    continue;
+                bool keptOwned = identity.ConnectionId >= 0 && identity.ConnectionId == Manager.ClientConnectionId;
+                if (owned != keptOwned)
+                    continue;
+                if (owned)
+                    return identity;
+                float sqr = (identity.transform.position - position).sqrMagnitude;
+                if (sqr <= bestSqr)
+                {
+                    bestSqr = sqr;
+                    best = identity;
+                }
+            }
+            return best;
+        }
+
+        private void EndAdoption(LiteNetLibIdentity identity, uint adoptedFrom)
+        {
+            identity.IsBeingAdopted = false;
+            onObjectAdopted?.Invoke(identity, adoptedFrom);
+        }
 
         public void ClearSpawnedObjects()
         {
@@ -378,6 +480,14 @@ namespace LiteNetLibManager
                         LiteNetLibIdentity sceneObject = sceneObjects[k];
                         if (sceneObject.ForceNotSceneObject)
                             continue;
+                        // MESH-EDIT: CE-14 — a kept object stays as it is: a spawned prefab is no scene object, and a
+                        // kept scene object stays active until the new server spawns (adopts) it.
+                        if (_keptObjects.Contains(sceneObject))
+                        {
+                            if (sceneObject.IsSceneObject)
+                                SceneObjects[sceneObject.HashSceneObjectId] = sceneObject;
+                            continue;
+                        }
                         sceneObject.gameObject.SetActive(false);
                         SceneObjects[sceneObject.HashSceneObjectId] = sceneObject;
                     }
@@ -414,6 +524,10 @@ namespace LiteNetLibManager
                 return null;
             }
 
+            uint adoptedFrom = identity.ObjectId; // MESH-EDIT: CE-14
+            bool adopted = _keptObjects.Remove(identity);
+            if (adopted)
+                identity.BeginAdoption(adoptedFrom);
             identity.gameObject.SetActive(true);
             identity.Initial(Manager, true, objectId, connectionId);
             identity.InitTransform(position, rotation);
@@ -431,6 +545,8 @@ namespace LiteNetLibManager
                 identity.OnStartOwnerClient();
             if (onObjectSpawn != null)
                 onObjectSpawn.Invoke(identity);
+            if (adopted) // MESH-EDIT: CE-14
+                EndAdoption(identity, adoptedFrom);
 
             return identity;
         }
@@ -452,6 +568,18 @@ namespace LiteNetLibManager
                 if (Manager.LogWarn)
                     Logging.LogWarning(LogTag, $"NetworkSpawn - Asset Id: {hashAssetId} is not registered.");
                 return null;
+            }
+            // MESH-EDIT: CE-14 — a migrating client adopts the kept object this spawn is, instead of instantiating one.
+            LiteNetLibIdentity kept = Manager.IsServer || _keptObjects.Count == 0 ? null : ResolveKeptObject(hashAssetId, position, connectionId);
+            if (kept != null)
+            {
+                uint adoptedFrom = kept.ObjectId;
+                _keptObjects.Remove(kept);
+                kept.BeginAdoption(adoptedFrom);
+                LiteNetLibIdentity spawned = NetworkSpawn(kept, objectId, connectionId, initialReader, initialTick);
+                if (spawned != null)
+                    EndAdoption(spawned, adoptedFrom);
+                return spawned;
             }
             return NetworkSpawn(GetObjectInstance(hashAssetId, position, rotation), objectId, connectionId, initialReader, initialTick);
         }
