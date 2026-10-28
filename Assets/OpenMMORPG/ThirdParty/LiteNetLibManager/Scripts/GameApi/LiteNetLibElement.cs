@@ -24,6 +24,13 @@ namespace LiteNetLibManager
             get { return _isSetup && Identity.IsSpawned; }
         }
 
+        // MESH-EDIT: CE-14 — the element belongs to a kept object a migrating client's new server is adopting (its
+        // initial state is then applied as a diff). False for an element with no behaviour or identity behind it.
+        public bool IsBeingAdopted
+        {
+            get { return _behaviour != null && _behaviour.Identity != null && _behaviour.Identity.IsBeingAdopted; }
+        }
+
         public bool IsDestroyed
         {
             get { return _isSetup && Identity.IsDestroyed; }

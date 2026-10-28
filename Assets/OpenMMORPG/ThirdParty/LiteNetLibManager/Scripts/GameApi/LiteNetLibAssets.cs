@@ -74,6 +74,8 @@ namespace LiteNetLibManager
         public float keptObjectAdoptDistance = 10f;
         /// <summary>Raised when a spawn adopted a kept object (after its spawn callbacks), with the id it had before.</summary>
         public System.Action<LiteNetLibIdentity, uint> onObjectAdopted;
+        /// <summary>How long the latest adoption's spawn took (its callbacks and initial state), for the adopter to attribute a frame.</summary>
+        public double LastAdoptionMilliseconds { get; private set; }
         private readonly HashSet<LiteNetLibIdentity> _keptObjects = new HashSet<LiteNetLibIdentity>();
         /// <summary>The objects a migrating client kept from the server it left and no spawn has adopted yet.</summary>
         public IReadOnlyCollection<LiteNetLibIdentity> KeptObjects => _keptObjects;
@@ -275,6 +277,38 @@ namespace LiteNetLibManager
                 if (identity != null && identity.ConnectionId == oldConnectionId)
                     identity.ConnectionId = newConnectionId;
             }
+        }
+
+        private static readonly NetDataWriter s_warmUpWriter = new NetDataWriter();
+
+        /// <summary>
+        /// Runs the adoption's initial-state read once over <paramref name="identity"/>'s own sync lists (the state it
+        /// has, read back as an adoption: nothing differs, so nothing fires), so that code is compiled before the first
+        /// migration instead of in the frame the first adoption happens. Returns how many lists it read; 0 on a server.
+        /// </summary>
+        public int WarmUpAdoption(LiteNetLibIdentity identity)
+        {
+            if (identity == null || !identity.IsSpawned || identity.IsBeingAdopted || Manager == null || Manager.IsServer)
+                return 0;
+            int count = 0;
+            identity.IsBeingAdopted = true;
+            try
+            {
+                foreach (LiteNetLibSyncElement element in identity.SyncElements.Values)
+                {
+                    if (!(element is LiteNetLibSyncList))
+                        continue;
+                    s_warmUpWriter.Reset();
+                    element.WriteSyncData(0, true, s_warmUpWriter);
+                    element.ReadSyncData(0, true, new NetDataReader(s_warmUpWriter.Data, 0, s_warmUpWriter.Length));
+                    count++;
+                }
+            }
+            finally
+            {
+                identity.IsBeingAdopted = false;
+            }
+            return count;
         }
 
         /// <summary>Destroys the kept objects no spawn adopted (a kept scene object is deactivated, as on a clear).</summary>
@@ -576,7 +610,9 @@ namespace LiteNetLibManager
                 uint adoptedFrom = kept.ObjectId;
                 _keptObjects.Remove(kept);
                 kept.BeginAdoption(adoptedFrom);
+                long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
                 LiteNetLibIdentity spawned = NetworkSpawn(kept, objectId, connectionId, initialReader, initialTick);
+                LastAdoptionMilliseconds = (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
                 if (spawned != null)
                     EndAdoption(spawned, adoptedFrom);
                 return spawned;
@@ -735,6 +771,12 @@ namespace LiteNetLibManager
                 if (Manager.IsServer)
                     Manager.QueueOwnerOnlyStateOnOwnerChange(spawnedObject, playerA, playerB);
                 return;
+            }
+            else if (!Manager.IsServer)
+            {
+                // MESH-EDIT: CE-14 — on a client the owner message overtakes the object's spawn (the server sends it at
+                // once, the spawn on its next sync tick) and the spawn carries the owner: nothing is lost.
+                if (Manager.LogDev) Logging.Log(LogTag, $"SetObjectOwner - Object Id: {objectId} is not spawned yet; its spawn carries the owner.");
             }
             else if (Manager.LogWarn)
             {

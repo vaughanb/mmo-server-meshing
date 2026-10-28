@@ -296,7 +296,7 @@ namespace MultiplayerARPG.MMO.Mesh
         private void Stamp(string what)
         {
             if (traceHandoffTiming)
-                Logging.Log("MeshTrace", $"{System.DateTime.Now:HH:mm:ss.fff} {(IsServer ? "S" : "C")} {what}");
+                Logging.Log("MeshTrace", $"{System.DateTime.Now:HH:mm:ss.fff} {(IsServer ? "S" : "C")} f{Time.frameCount} {what}");
         }
 
         [Tooltip("DEBUG (editor): save a screenshot every few frames during a seamless swap to <project>/Logs/MigrationFrames for visual inspection.")]
@@ -337,8 +337,17 @@ namespace MultiplayerARPG.MMO.Mesh
                 foreach (BaseGameNetworkManagerComponent component in ManagerComponents)
                     component.OnClientOnlineSceneLoaded(this);
                 _clientSceneLoadedTime = Time.unscaledTime - INSTANTIATES_OBJECTS_DELAY;
-                MeshRegisterSceneEntities();
-                Stamp("online scene loaded: end (fast path, no GC/settle)");
+                if (SameSceneHop)
+                {
+                    // The scene did not change: its spawn areas, entity prefabs and pools are registered already, and
+                    // the registration's PoolSystem.Clear() would destroy every pooled effect mid-hop for nothing.
+                    Stamp("online scene loaded: end (same scene, registration kept)");
+                }
+                else
+                {
+                    MeshRegisterSceneEntities();
+                    Stamp("online scene loaded: end (fast path, no GC/settle)");
+                }
                 if (IsClientReadyToInstantiateObjects())
                     SendClientReady();
                 else
@@ -348,6 +357,9 @@ namespace MultiplayerARPG.MMO.Mesh
             base.OnClientOnlineSceneLoaded();
             Stamp("online scene loaded: end (entities registered + GC)");
         }
+
+        [Tooltip("Run the adoption's state read once over the player's own character when its data is in, so the first crossing of a session does not compile it (6-7 ms of its frame on Mono).")]
+        public bool warmUpMigrationCode = true;
 
         /// <summary>Mirror of the private BaseGameNetworkManager.RegisterEntities() without the forced GC.</summary>
         private void MeshRegisterSceneEntities()

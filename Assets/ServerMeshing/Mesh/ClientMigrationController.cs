@@ -171,10 +171,19 @@ namespace MultiplayerARPG.MMO.Mesh
                 StartCoroutine(MigrateMaskedRoutine(address, port));
         }
 
+        private bool _warmedUp;
+
         private void Update()
         {
             if (_running || _manager == null || !_manager.IsClientConnected || _manager.Assets == null)
                 return;
+            if (!_warmedUp && _manager.warmUpMigrationCode && MeshMigrationWarmup.IsReady(GameInstance.PlayingCharacterEntity))
+            {
+                // Once per session, as soon as the character's data is in: the first hop then finds the adoption's
+                // read already compiled (CE-14, DESIGN 1.02).
+                _warmedUp = true;
+                MeshMigrationWarmup.Run(_manager.Assets, GameInstance.PlayingCharacterEntity);
+            }
             TrackVelocities();
         }
 
@@ -690,16 +699,32 @@ namespace MultiplayerARPG.MMO.Mesh
             Vector3 posBefore = entity != null ? entity.EntityTransform.position : Vector3.zero;
             uint objectIdBefore = identity != null ? identity.ObjectId : 0;
             int adoptedCount = 0;
-            void CountAdoption(LiteNetLibIdentity adopted, uint previousObjectId) => adoptedCount++;
+            double adoptionMs = 0, playerAdoptionMs = -1; // the spawn work of the adoptions (all, and the player's own)
+            void CountAdoption(LiteNetLibIdentity adopted, uint previousObjectId)
+            {
+                adoptedCount++;
+                adoptionMs += _manager.Assets.LastAdoptionMilliseconds;
+                if (ReferenceEquals(adopted, identity))
+                    playerAdoptionMs = _manager.Assets.LastAdoptionMilliseconds;
+            }
             // What the player could notice, frame by frame, from the hop until shortly after it settles.
             List<float> frameMs = new List<float>(), playerSteps = new List<float>(), cameraSteps = new List<float>();
+            // The longest frame and where it fell: the MeshTrace stamps carry the same frame numbers (f<n>).
+            float worstFrameMs = 0f;
+            int worstFrame = -1, connectedFrame = -1, adoptedFrame = -1;
             // Steps far longer than the frame explains (more than twice the move speed allows): where a jump happened.
             System.Text.StringBuilder jumps = new System.Text.StringBuilder();
             Vector3 lastPlayer = posBefore;
             Vector3 lastCamera = Camera.main != null ? Camera.main.transform.position : Vector3.zero;
             void Sample()
             {
-                frameMs.Add(Time.unscaledDeltaTime * 1000f);
+                float ms = Time.unscaledDeltaTime * 1000f;
+                frameMs.Add(ms);
+                if (ms > worstFrameMs)
+                {
+                    worstFrameMs = ms;
+                    worstFrame = Time.frameCount - 1; // the delta is the frame that just ended
+                }
                 if (entity != null)
                 {
                     Vector3 p = entity.EntityTransform.position;
@@ -739,13 +764,17 @@ namespace MultiplayerARPG.MMO.Mesh
             while (Time.realtimeSinceStartup < deadline)
             {
                 if (tConnected < 0 && _manager.IsClientConnected)
+                {
                     tConnected = sw.ElapsedMilliseconds;
+                    connectedFrame = Time.frameCount;
+                }
                 if (entity == null)
                     break;
                 if (!identity.IsKept && identity.IsSpawned && entity.IsOwnerClient)
                 {
                     adoptedPlayer = true;
                     tAdopted = sw.ElapsedMilliseconds;
+                    adoptedFrame = Time.frameCount;
                     break;
                 }
                 if (_manager.MigrationRefused || _manager.MigrationDisconnected)
@@ -803,7 +832,8 @@ namespace MultiplayerARPG.MMO.Mesh
             Logging.Log("Spike2",
                 $"Migration to {address}:{port} | CONTINUITY fellBack=False kept={keptCount} adopted={adoptedCount} unadopted={unadopted} | " +
                 $"connected={tConnected}ms playerAdopted={tAdopted}ms settled={tSettled}ms | player object {objectIdBefore} -> {identity.ObjectId}, " +
-                $"moved {Vector3.Distance(posBefore, posAfter):0.##} m during the hop | frames {Spread(frameMs, "ms")} | player step {Spread(playerSteps, "m")} | camera step {Spread(cameraSteps, "m")} | jumps:{(jumps.Length > 0 ? jumps.ToString() : " none")}");
+                $"moved {Vector3.Distance(posBefore, posAfter):0.##} m during the hop | frames {Spread(frameMs, "ms")} | player step {Spread(playerSteps, "m")} | camera step {Spread(cameraSteps, "m")} | jumps:{(jumps.Length > 0 ? jumps.ToString() : " none")} | " +
+                $"longest frame {worstFrameMs:0.#}ms at f{worstFrame} (connected f{connectedFrame}, adopted f{adoptedFrame}) | adoption spawn work {playerAdoptionMs:0.##}ms player, {adoptionMs:0.##}ms all");
         }
 
         #endregion
