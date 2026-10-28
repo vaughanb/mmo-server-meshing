@@ -39,7 +39,8 @@ namespace MultiplayerARPG.MMO.Mesh
         [Tooltip("Destination: how long after an arrival registers a client RPC naming the character's object id on the origin is still retargeted to its id here (the client adopts the new id one trip after the spawn).")]
         public float arrivalIdRemapSeconds = 5f;
         private readonly Dictionary<string, List<ParkedRpc>> _lateRpcs = new Dictionary<string, List<ParkedRpc>>(); // characterId -> calls the origin forwarded
-        private int _parkedTotal, _retargetedTotal, _lateForwardedTotal;
+        private int _parkedTotal, _retargetedTotal, _lateForwardedTotal, _foreignStatesDropped;
+        private float _nextForeignStateLog;
 
         protected override void HandleClientCallFunction(MessageHandlerData messageHandler)
         {
@@ -140,7 +141,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 parked.RemoveAt(0);
             parked.Add(new ParkedRpc { messageType = messageHandler.MessageType, transportHandler = messageHandler.TransportHandler, data = CopyRest(messageHandler.Reader), time = Time.unscaledTime });
             _parkedTotal++;
-            Stamp($"RPC from {messageHandler.ConnectionId} for arriving {characterName} parked until it registers ({parked.Count} waiting)");
+            Stamp($"{(messageHandler.MessageType == GameMsgTypes.SyncBaseLine ? "state" : "RPC")} from {messageHandler.ConnectionId} for {characterName} parked until a character registers ({parked.Count} waiting)");
         }
 
         /// <summary>Arrival side, as the character registers: the id its client still names it by, retargeted for a while.</summary>
@@ -174,6 +175,12 @@ namespace MultiplayerARPG.MMO.Mesh
             for (int i = 0; i < parked.Count; ++i)
             {
                 ParkedRpc held = parked[i];
+                if (held.messageType == GameMsgTypes.SyncBaseLine)
+                {
+                    if (HandleClientState(connectionId, held.messageType, held.transportHandler, held.data, player))
+                        retargeted++;
+                    continue;
+                }
                 if (originId != 0 && originId != player.ObjectId && PeekRpcTarget(new NetDataReader(held.data), out uint target) && target == originId)
                 {
                     retargeted++;
@@ -182,7 +189,99 @@ namespace MultiplayerARPG.MMO.Mesh
                 else
                     base.HandleClientCallFunction(new MessageHandlerData(held.messageType, held.transportHandler, connectionId, new NetDataReader(held.data)));
             }
-            Stamp($"arrival {player.CharacterName}: replayed {parked.Count} RPC(s) parked for up to {oldest * 1000f:0} ms ({retargeted} from object {originId} to {player.ObjectId})");
+            Stamp($"arrival {player.CharacterName}: replayed {parked.Count} call(s) and state(s) parked for up to {oldest * 1000f:0} ms ({retargeted} from object {originId} to {player.ObjectId})");
+        }
+
+        /// <summary>
+        /// A client's own state (the kit's SyncBaseLine: the sync fields its client writes, such as the weapons' sheath).
+        /// The kit applies it to whatever object the id names, with no owner check, and after a hop the client names its
+        /// character by the origin's id until it adopts ours: the state went to another object here ("sync element not
+        /// found", or into another character of the same kind). Parked like a call until the caller has a character, then
+        /// retargeted like one, and dropped when the object it names is not the caller's. Only a one-state message is
+        /// read (the client's character alone, by far the most): the layout has no per-state length to find a second by.
+        /// </summary>
+        protected override void HandleClientSyncBaseLine(MessageHandlerData messageHandler)
+        {
+            if (IsServer && PeekStateTarget(messageHandler.Reader, out _))
+            {
+                long connectionId = messageHandler.ConnectionId;
+                if (!ServerUserHandlers.TryGetPlayerCharacter(connectionId, out IPlayerCharacterData registered))
+                {
+                    ParkRpc(messageHandler, "its character");
+                    return;
+                }
+                HandleClientState(connectionId, messageHandler.MessageType, messageHandler.TransportHandler, CopyRest(messageHandler.Reader), registered as BasePlayerCharacterEntity);
+                return;
+            }
+            base.HandleClientSyncBaseLine(messageHandler);
+        }
+
+        /// <summary>A one-state message from a connection with a character: retargeted from the origin's id when it names it, applied when the object is the caller's. True when retargeted.</summary>
+        private bool HandleClientState(long connectionId, ushort messageType, TransportHandler transportHandler, byte[] data, BasePlayerCharacterEntity player)
+        {
+            if (!PeekStateTarget(new NetDataReader(data), out uint objectId))
+            {
+                base.HandleClientSyncBaseLine(new MessageHandlerData(messageType, transportHandler, connectionId, new NetDataReader(data)));
+                return false;
+            }
+            bool retargeted = false;
+            if (player != null && objectId != player.ObjectId && _arrivalIdRemaps.TryGetValue(connectionId, out ArrivalIdRemap remap)
+                && remap.from == objectId && Time.unscaledTime < remap.until)
+            {
+                data = RetargetState(data, player.ObjectId);
+                objectId = player.ObjectId;
+                retargeted = true;
+            }
+            if (!Assets.TryGetSpawnedObject(objectId, out LiteNetLibIdentity identity) || identity.ConnectionId != connectionId)
+            {
+                _foreignStatesDropped++;
+                if (Time.unscaledTime >= _nextForeignStateLog)
+                {
+                    _nextForeignStateLog = Time.unscaledTime + 5f;
+                    Stamp($"a client state from {connectionId} names object {objectId}, which is not its own; dropped ({_foreignStatesDropped} so far)");
+                }
+                return retargeted;
+            }
+            if (retargeted)
+                _retargetedTotal++;
+            base.HandleClientSyncBaseLine(new MessageHandlerData(messageType, transportHandler, connectionId, new NetDataReader(data)));
+            return retargeted;
+        }
+
+        /// <summary>The object id of a client state message that carries one state (tick, count 1, object id, its elements).</summary>
+        private static bool PeekStateTarget(NetDataReader reader, out uint objectId)
+        {
+            objectId = 0;
+            if (reader == null || reader.AvailableBytes < 4)
+                return false;
+            NetDataReader peek = new NetDataReader(reader.RawData, reader.Position, reader.Position + reader.AvailableBytes);
+            try
+            {
+                peek.GetPackedUInt(); // tick
+                if (peek.GetUShort() != 1)
+                    return false;
+                objectId = peek.GetPackedUInt();
+                return true;
+            }
+            catch (System.Exception)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>A one-state message with its object id replaced, the rest unchanged.</summary>
+        private static byte[] RetargetState(byte[] data, uint objectId)
+        {
+            NetDataReader reader = new NetDataReader(data);
+            uint tick = reader.GetPackedUInt();
+            ushort count = reader.GetUShort();
+            reader.GetPackedUInt();
+            s_retargetWriter.Reset();
+            s_retargetWriter.PutPackedUInt(tick);
+            s_retargetWriter.Put(count);
+            s_retargetWriter.PutPackedUInt(objectId);
+            s_retargetWriter.Put(data, reader.Position, reader.AvailableBytes);
+            return s_retargetWriter.CopyData();
         }
 
         /// <summary>

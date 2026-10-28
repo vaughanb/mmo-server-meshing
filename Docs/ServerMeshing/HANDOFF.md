@@ -1,7 +1,7 @@
 # Handoff — 2026-10-28
 
 Where the work stands, how to get it running on another machine, and what is left. The design record
-([DESIGN.md](DESIGN.md), version 1.09) has the full reasoning and measurements; this note is the short path in.
+([DESIGN.md](DESIGN.md), version 1.10) has the full reasoning and measurements; this note is the short path in.
 
 ## What was done
 
@@ -177,7 +177,14 @@ Where the work stands, how to get it running on another machine, and what is lef
       the client's first state still moves the arrival about 0.2 m.
     - `MESH_TRACE_OBSERVED=1` logs every stall and lunge of a nearby walking character on the client (tag
       `MeshObserved`).
-11. **Verified on the 8 km demo** (editor client plus headless bots), all seamless, no exceptions:
+11. **A crossing client's own state syncs (DESIGN 1.10, package 0.96.13).** The cells logged `sync element not
+    found` about twice a hop: after a hop the client syncs its own fields under the origin's object id until it
+    adopts the destination's, and the kit applies a client state to whatever object the id names, without an
+    owner check (another player's character would have taken them silently). The destination now parks a
+    one-state message from an unregistered caller and replays it at registration, retargets the origin's id
+    after, and drops one naming an object that is not the caller's. Measured: none of the error in a 150 s
+    two-bot run.
+12. **Verified on the 8 km demo** (editor client plus headless bots), all seamless, no exceptions:
    - a 750 m walk across three cells;
    - 16 quick back-and-forth crossings (adopted after 180–398 ms, none fell back);
    - a second player standing past the line: kept and adopted;
