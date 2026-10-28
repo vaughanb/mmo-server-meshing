@@ -240,6 +240,7 @@ namespace MultiplayerARPG.MMO.Mesh
 
         internal void EndMigration()
         {
+            EndReadyWithEnterGame(); // DESIGN 1.13
             loadOfflineSceneWhenClientStopped = _prevLoadOfflineScene;
             IsMigrating = false;
             MigrationDisconnected = false; // never carried into the next hop
@@ -343,6 +344,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 Assets.onInitializeFinish.AddListener(() => Stamp("assets initialize finish"));
             }
             base.OnClientConnected();
+            SendReadyWithEnterGame(); // DESIGN 1.13: on a same-map hop, the ready goes with the enter-game (MeshMapNetworkManager_EarlyReady)
         }
 
         private bool _assetEventsHooked;
@@ -417,12 +419,14 @@ namespace MultiplayerARPG.MMO.Mesh
                 _migrationRefusedAttempt = MigrationAttempt;
                 Logging.LogWarning("Mesh", $"Enter-game refused ({responseCode}) on migration attempt {MigrationAttempt}");
             }
-            if (EnterGameUnanswered(ref responseHandler, responseCode)) return; // the kit throws on an unanswered request (MeshMapNetworkManager_EnterGame)
+            if (EnterGameUnanswered(ref responseHandler, responseCode)) { ReleaseHeldStates(false); return; } // the kit throws on an unanswered request (MeshMapNetworkManager_EnterGame)
             base.HandleEnterGameResponse(responseHandler, responseCode, response);
+            ReleaseHeldStates(responseCode == AckResponseCode.Success); // DESIGN 1.13: what came before the answer (MeshMapNetworkManager_EarlyReady)
         }
 
         public override void SendClientReady()
         {
+            if (SkipReadySentWithEnterGame()) return; // DESIGN 1.13 (MeshMapNetworkManager_EarlyReady)
             Stamp("send client ready");
             base.SendClientReady();
         }
@@ -555,6 +559,16 @@ namespace MultiplayerARPG.MMO.Mesh
         public override UniTask<bool> DeserializeClientReadyData(uint requestId, long connectionId, NetDataReader reader, LiteNetLibIdentity playerIdentity)
         {
             Stamp($"client ready request from {connectionId}");
+#if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
+            // DESIGN 1.13: a hop's ready can come with (or before) its enter-game; it waits for it (MeshMapNetworkManager_EarlyReady).
+            if (IsServer && earlyReadyWaitSeconds > 0f && !ReadyCanProceed(connectionId) && ContainsConnectionId(connectionId))
+                return WaitForEnterGameThenReady(requestId, connectionId, reader, playerIdentity);
+#endif
+            return ClientReadyAfterEnterGame(requestId, connectionId, reader, playerIdentity);
+        }
+
+        private UniTask<bool> ClientReadyAfterEnterGame(uint requestId, long connectionId, NetDataReader reader, LiteNetLibIdentity playerIdentity)
+        {
 #if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
             // The kit refuses client-ready on four conditions and logs none of them: it sets a UITextKeys for the
             // response and returns false, and the peer is dropped. Seen as a cell accepting enter-game, loading the

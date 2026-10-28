@@ -698,6 +698,7 @@ namespace MultiplayerARPG.MMO.Mesh
             public string address;
             public int port;
             public string cellId;
+            public bool sameMap;         // the cell is on the map we are on (DESIGN 1.13)
             public bool connected;
             public float startedAt;
             public long buildMs;
@@ -709,7 +710,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public float preconnectTimeoutSeconds = 5f;
 
         /// <summary>The cell we are on says we approach <paramref name="cellId"/>: hold a connection to it. Idempotent for the same address.</summary>
-        public void Preconnect(string address, int port, string cellId)
+        public void Preconnect(string address, int port, string cellId, bool sameMap)
         {
             // Also while a hop settles: the hint is the new cell's (the one we left stopped ticking for us), and a cell
             // sends it once per change, so a dropped hint would never come again.
@@ -729,7 +730,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 Logging.LogWarning("Spike2", $"Pre-connect: could not start a connection to cell {cellId} at {address}:{port}; the hop will connect as before");
                 return;
             }
-            _warm = new WarmConnection { transport = transport, address = address, port = port, cellId = cellId, startedAt = Time.realtimeSinceStartup, buildMs = sw.ElapsedMilliseconds };
+            _warm = new WarmConnection { transport = transport, address = address, port = port, cellId = cellId, sameMap = sameMap, startedAt = Time.realtimeSinceStartup, buildMs = sw.ElapsedMilliseconds };
             Logging.Log("Spike2", $"Pre-connect: connecting to cell {cellId} at {address}:{port} (transport built and started in {_warm.buildMs} ms, frame {Time.frameCount})");
         }
 
@@ -782,13 +783,15 @@ namespace MultiplayerARPG.MMO.Mesh
         /// At the hop: the warm connection to exactly this address, connected, is handed over (and forgotten here); a
         /// warm connection to anywhere else, or one still connecting, is dropped and the hop connects as before.
         /// </summary>
-        private ITransport TakeWarmConnection(string address, int port)
+        private ITransport TakeWarmConnection(string address, int port, out bool sameMap)
         {
+            sameMap = false;
             if (_warm == null)
                 return null;
             if (_warm.connected && _warm.address == address && _warm.port == port)
             {
                 ITransport transport = _warm.transport;
+                sameMap = _warm.sameMap;
                 _warm = null;
                 return transport;
             }
@@ -890,8 +893,10 @@ namespace MultiplayerARPG.MMO.Mesh
             _manager.BeginMigrationAttempt();
             _manager.Assets.onObjectAdopted += CountAdoption;
             // A connection opened ahead of the hop to this very cell is taken over: no transport rebuilt, no connect round trip.
-            ITransport warm = TakeWarmConnection(address, port);
+            ITransport warm = TakeWarmConnection(address, port, out bool warmSameMap);
             bool preconnected = warm != null;
+            // DESIGN 1.13: a hop that keeps the scene sends its ready with its enter-game (MeshMapNetworkManager_EarlyReady).
+            _manager.PipelineReadyOnNextConnect = preconnected && warmSameMap;
             bool started = identity != null && (preconnected ? _manager.MigrateClient(address, port, warm) : _manager.MigrateClient(address, port));
             if (!started)
             {

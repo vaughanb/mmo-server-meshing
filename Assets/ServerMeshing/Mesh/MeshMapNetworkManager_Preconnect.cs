@@ -25,12 +25,14 @@ namespace MultiplayerARPG.MMO.Mesh
         public string cellId;
         public string networkAddress;
         public int networkPort;
+        public bool sameMap; // the cell is on this cell's map: a hop to it keeps the scene, so its client may send ready with enter-game (DESIGN 1.13)
 
         public void Deserialize(NetDataReader reader)
         {
             cellId = reader.GetString();
             networkAddress = reader.GetString();
             networkPort = reader.GetInt();
+            sameMap = reader.GetBool();
         }
 
         public void Serialize(NetDataWriter writer)
@@ -38,6 +40,7 @@ namespace MultiplayerARPG.MMO.Mesh
             writer.Put(cellId ?? string.Empty);
             writer.Put(networkAddress ?? string.Empty);
             writer.Put(networkPort);
+            writer.Put(sameMap);
         }
     }
 
@@ -100,7 +103,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 _preconnectHints[connectionId] = key;
             MeshPreconnectMessage message = key == null
                 ? new MeshPreconnectMessage()
-                : new MeshPreconnectMessage { cellId = nearest.id, networkAddress = peer.networkAddress, networkPort = peer.networkPort };
+                : new MeshPreconnectMessage { cellId = nearest.id, networkAddress = peer.networkAddress, networkPort = peer.networkPort, sameMap = string.Equals(nearest.mapId, OwnCell.mapId) };
             ServerSendPacket(connectionId, 0, DeliveryMethod.ReliableOrdered, MeshPreconnectMsgType, message);
             Logging.Log("Mesh", key == null
                 ? $"Pre-connect: {entity.CharacterName} (conn {connectionId}) left the edge band; told to drop its warm connection"
@@ -127,7 +130,7 @@ namespace MultiplayerARPG.MMO.Mesh
             if (string.IsNullOrEmpty(message.networkAddress))
                 Migration.DropPreconnect("the cell says we left the edge band");
             else
-                Migration.Preconnect(message.networkAddress, message.networkPort, message.cellId);
+                Migration.Preconnect(message.networkAddress, message.networkPort, message.cellId, message.sameMap);
         }
 
         public override void OnStopClient()
