@@ -873,6 +873,10 @@ PrefabInstance:
       propertyPath: dayNightTimeUpdater
       value: 
       objectReference: {fileID: 11400000, guid: cb9f7698012cfa843ae22e3cbb3f0a39, type: 2}
+    - target: {fileID: 205807986548817939, guid: 10627540e656d6f42835228840ed1cc9, type: 3}
+      propertyPath: serverTargetFrameRate
+      value: 60
+      objectReference: {fileID: 0}
     - target: {fileID: 987338275038060923, guid: 10627540e656d6f42835228840ed1cc9, type: 3}
       propertyPath: m_LocalPosition.x
       value: 0

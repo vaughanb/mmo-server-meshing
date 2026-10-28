@@ -52,6 +52,12 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         public const string BuildFolder = "Build/DemoMesh8k";
         /// <summary>AwakeRings: one ring of 1,024 m cells is a full cell ahead of a player in any direction.</summary>
         public const int AwakeRings = 1;
+        /// <summary>
+        /// The cells' frame rate (the kit's GameInstance.serverTargetFrameRate, 30 by default). A crossing's gap is a few
+        /// server frames (enter-game, ready, the spawn's sync tick), so 60 halves it (DESIGN 1.05); the copy's scene
+        /// overrides it, the kit's prefab and the rig keep 30.
+        /// </summary>
+        public const int ServerFrameRate = 60;
         public const string MapInfoObject = "[Mesh] 8 km map info";
         public const string StartMapObject = "[Mesh] 8 km start map";
 
@@ -172,6 +178,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             SerializedObject instance = new SerializedObject(gameInstance);
             instance.FindProperty("gameplayRule").objectReferenceValue = rule;
             instance.FindProperty("dayNightTimeUpdater").objectReferenceValue = EnsureDaytime();
+            instance.FindProperty("serverTargetFrameRate").intValue = ServerFrameRate;
             instance.ApplyModifiedPropertiesWithoutUndo();
             ConfigureServer(central.transform.root.gameObject, mapInfo);
 

@@ -1,7 +1,7 @@
 # Handoff — 2026-10-28
 
 Where the work stands, how to get it running on another machine, and what is left. The design record
-([DESIGN.md](DESIGN.md), version 1.04) has the full reasoning and measurements; this note is the short path in.
+([DESIGN.md](DESIGN.md), version 1.05) has the full reasoning and measurements; this note is the short path in.
 
 ## What was done
 
@@ -117,7 +117,16 @@ Where the work stands, how to get it running on another machine, and what is lef
    - Tests: the enter-game peek's token overload (`MeshMergeMapSideTests`); the full EditMode suite ran clean
      (3,226: 3,225 passed, 1 skipped by design). The row-behind save and the destination's periodic saves
      cannot cross: the kit's updater proceeds every 5 s, the behind-save takes ~90 ms and retries for 3 s.
-6. **Verified on the 8 km demo** (editor client plus headless bots), all seamless, no exceptions:
+6. **Undetectable handoff, step 5: cells at 60 fps (DESIGN 1.05).** The gap left after 1.04 was server frames
+   at the kit's `serverTargetFrameRate` of 30. The demo copy's scene now overrides it to 60 on its
+   GameInstance (`ServerMeshDemo8kBuilder.ServerFrameRate`, kept by **Build 8 km Demo Copy**); the kit's
+   prefab and the BaseDemo-CE rig keep 30.
+   - Measured (patrol, ten hops): the cells at 59.7 fps by their stamps; the gap 63–119 ms, median ~92 (was
+     112–183 at 30), first hop of a session 155 ms; every hop pre-connected and served from the handoff state,
+     no jump, longest client frame 6–13 ms. Cell load 5–6 % (0.9 ms of work a frame) against 3–4 % (1.1 ms)
+     at 30, with one player and 13–14 monsters each. Rebuild the map servers after changing it: the cells load
+     the copy's init scene.
+7. **Verified on the 8 km demo** (editor client plus headless bots), all seamless, no exceptions:
    - a 750 m walk across three cells;
    - 16 quick back-and-forth crossings (adopted after 180–398 ms, none fell back);
    - a second player standing past the line: kept and adopted;
@@ -190,14 +199,16 @@ Where the work stands, how to get it running on another machine, and what is lef
 
 ## Open items, in rough order
 
-1. **The gap is server frames now.** With 1.04 the gap between the warp and the adoption is 112–183 ms
-   on localhost and nothing in it is the database or the connect: the destination handles enter-game in one
-   frame, the client's ready in the next, and spawns on the sync tick after, each a frame at the kit's
-   `serverTargetFrameRate` of 30 (33 ms). Next steps, in order:
-   - the cells' frame rate (60 would roughly halve the gap; the demo copy can override it on its
-     GameInstance, the rig's load figures were taken at 30);
-   - holding actions pressed mid-hop (the arrival's respawn RPC still clears the owner's action states);
-   - extrapolating kept entities through the gap.
+1. **What is left of the gap.** With 1.05 the gap between the warp and the adoption is 63–119 ms on
+   localhost (median ~92) and all of it is server frames at 60 fps: enter-game in one, the client's ready in
+   the next, the spawn on the sync tick after, plus the client's own frames. Nothing in it is the database or
+   the connect. Next steps, in order:
+   - holding actions pressed mid-hop (the arrival's respawn RPC still clears the owner's action states, and
+     commands sent during the gap are not replayed);
+   - extrapolating kept entities through the gap, and skipping the interpolation reset of an adopted entity
+     whose owner did not change;
+   - a server-driven arrival (the destination spawns to the pre-connected, pre-authenticated client when the
+     handoff commits, without waiting for enter-game and ready) would take the gap to one round trip.
    On Mono the first hop of a session still compiles the hop's first-time code (12.6 ms, the adoption read
    is warmed up); an IL2CPP client has no JIT. Nothing has been measured with real latency yet; pre-connect
    is what keeps the connect out of a laggy hop, the gap will still scale with the round trip until the
