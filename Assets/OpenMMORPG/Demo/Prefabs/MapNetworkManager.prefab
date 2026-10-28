@@ -1,0 +1,232 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &118443896413433224
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 7794451676100646400}
+  - component: {fileID: 832756405420229149}
+  - component: {fileID: 6213249881384088648}
+  - component: {fileID: 5788993006180215721}
+  m_Layer: 0
+  m_Name: MapNetworkManager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &7794451676100646400
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 118443896413433224}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 3}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &832756405420229149
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 118443896413433224}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4884384bff23a9c439e7ce9681ea5724, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  playerSpawnRandomly: 0
+  playerPrefab: {fileID: 0}
+  spawnablePrefabs: []
+  offlineScene:
+    sceneAsset: {fileID: 0}
+    sceneName: 01Home_MMO
+  onlineScene:
+    sceneAsset: {fileID: 0}
+    sceneName: 
+  onInitializeStart:
+    m_PersistentCalls:
+      m_Calls: []
+  onInitializeFinish:
+    m_PersistentCalls:
+      m_Calls: []
+  onLoadSceneStart:
+    m_PersistentCalls:
+      m_Calls: []
+  onLoadSceneProgress:
+    m_PersistentCalls:
+      m_Calls: []
+  onLoadSceneFinish:
+    m_PersistentCalls:
+      m_Calls: []
+  onLoadSceneFail:
+    m_PersistentCalls:
+      m_Calls: []
+  onSceneFileSizeRetrieving:
+    m_PersistentCalls:
+      m_Calls: []
+  onSceneFileSizeRetrieved:
+    m_PersistentCalls:
+      m_Calls: []
+  onSceneDepsDownloading:
+    m_PersistentCalls:
+      m_Calls: []
+  onSceneDepsFileDownloading:
+    m_PersistentCalls:
+      m_Calls: []
+  onSceneDepsDownloaded:
+    m_PersistentCalls:
+      m_Calls: []
+  onLoadAdditiveSceneStart:
+    m_PersistentCalls:
+      m_Calls: []
+  onLoadAdditiveSceneProgress:
+    m_PersistentCalls:
+      m_Calls: []
+  onLoadAdditiveSceneFinish:
+    m_PersistentCalls:
+      m_Calls: []
+  onObjectSpawn:
+    m_PersistentCalls:
+      m_Calls: []
+  onObjectDestroy:
+    m_PersistentCalls:
+      m_Calls: []
+  disablePooling: 0
+  limitByPoolingSize: 1
+  manuallyApplyOwnerChanges: 0
+--- !u!114 &6213249881384088648
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 118443896413433224}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: dfc19a1e2d10e4944bc3a692126aeedb, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  currentLogLevel: 2
+  networkAddress: localhost
+  networkPort: 7770
+  useWebSocket: 0
+  webSocketSecure: 0
+  webSocketCertificateFilePath: 
+  webSocketCertificatePassword: 
+  updateFps: 20
+  maxConnections: 1100
+  transportFactory: {fileID: 0}
+  packetVersion: 1
+  pingDuration: 1
+  doNotEnterGameOnConnect: 0
+  doNotReadyOnSceneLoaded: 0
+  doNotDestroyOnSceneChanges: 0
+  loadOfflineSceneWhenClientStopped: 1
+  baseLineSyncInterval: 1
+  onSpawnEntitiesStart:
+    m_PersistentCalls:
+      m_Calls: []
+  onSpawnEntitiesProgress:
+    m_PersistentCalls:
+      m_Calls: []
+  onSpawnEntitiesFinish:
+    m_PersistentCalls:
+      m_Calls: []
+  clusterServerAddress: 127.0.0.1
+  clusterServerPort: 6010
+  publicAddress: 127.0.0.1
+  mapSpawnMillisecondsTimeout: 0
+  playerCharacterDespawnMillisecondsDelay: 5000
+  useMaskedMigration: 1
+  migrationReadyTimeoutSeconds: 10
+  migrationMaskFadeSeconds: 0.25
+  useVisualStandIns: 1
+  standInMatchDistance: 2.5
+  standInMaxLifetimeSeconds: 1.5
+  standInBlendSeconds: 0.3
+  entityDataWaitSeconds: 1
+  world: {fileID: 11400000, guid: 7a2b3c4d5e6f47a8b9c0d1e2f3a4b5c6, type: 2}
+  enableServerBoundaryHandoff: 1
+  boundaryCheckInterval: 0.1
+  handoffHysteresis: 1
+  handoffLeadSeconds: 0.3
+  traceHandoffTiming: 1
+  debugCaptureMigrationFrames: 0
+  fastClientReadyOnMigration: 1
+  handoffRetrySeconds: 2
+  clusterRegisterRetrySeconds: 3
+  clusterConnectRetrySeconds: 5
+  heldRpcTimeoutSeconds: 15
+  handoffMaxLeadSpeed: 15
+  demotePlayerOnHandoff: 1
+  promoteGhostOnArrival: 1
+  arrivalLoadRetrySeconds: 90
+  databaseReconnectSeconds: 5
+  databaseReconnectGraceSeconds: 15
+  databaseDrainWaitSeconds: 35
+  resendStrandedDatabaseReads: 1
+  enableBorderGhosting: 1
+  ghostMonsters: 1
+  ownSpawnAreasByZone: 1
+  ghostBandWidth: 80
+  ghostSnapshotInterval: 0.1
+  ghostStaleSeconds: 2
+  ghostTeleportDistance: 4
+  ghostLeadSeconds: 0.1
+  meshLinkPortOffset: 10000
+  meshStatsIntervalSeconds: 10
+  expectedMaxSpeed: 8
+  linkAllZones: 1
+  linkSuspectTimeoutSeconds: 2
+  handoffLinkSettleSeconds: 0.5
+  reservedArrivalTimeout: 15
+  ghostHarvestables: 1
+  ghostBuildings: 1
+  staticSnapshotInterval: 1
+  handoffMonsters: 1
+  monsterHandoffCooldown: 2
+  forwardGhostHits: 1
+  partyMemberOnlineWindowSeconds: 5
+  fastSpawnOnHandoff: 1
+  handoffAckGuardSeconds: 20
+  handoffRollbackHoldSeconds: 20
+  handoffLinkDownGraceSeconds: 3
+  handoffResaveMeters: 2
+  handoffResaveAttempts: 3
+  layoutGatePlacementSeconds: 30
+  linkIdleSeconds: 30
+  linkOpenGraceSeconds: 10
+  loadReportSeconds: 5
+  occupancyBucketSize: 0
+  puppetMotion: 0
+  rehandoffCooldownSeconds: 2
+  rehandoffBackoffMaxSeconds: 30
+  seamPreloadDistance: 80
+  seamUnloadHysteresis: 40
+  monsterHandoffFailedRetrySeconds: 10
+  staticHandoffRetrySeconds: 10
+--- !u!114 &5788993006180215721
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 118443896413433224}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ea0153bad48b072499e0114b20deb608, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  assets: {fileID: 832756405420229149}

@@ -1,0 +1,73 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a278d249b1987cf4ebdb60bb4769bf33, type: 3}
+  m_Name: ThinTheCamp
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.Quest
+  btnValidate: 0
+  id: ThinTheCamp
+  defaultTitle: Thin the Camp
+  languageSpecificTitles: []
+  defaultDescription: Bandits have taken the headland southeast of here. Cut their
+    numbers down and bring me proof.
+  languageSpecificDescriptions: []
+  category: 
+  icon: {fileID: 0}
+  requirement:
+    character: {fileID: 0}
+    faction: {fileID: 0}
+    level: 0
+    completedQuests: []
+  tasks: []
+  randomTasks:
+  - tasks:
+    - taskType: 254
+      monsterCharacterAmount:
+        monster: {fileID: 0}
+        amount: 0
+      itemAmount:
+        item: {fileID: 0}
+        level: 0
+        amount: 0
+      doNotDecreaseItemsOnQuestComplete: 0
+      npcEntity: {fileID: 0}
+      npcEntityId: 0
+      npcEntityTitle: 
+      npcEntityTitles: []
+      talkToNpcDialog: {fileID: 0}
+      completeAfterTalked: 0
+      customQuestTask: {fileID: 11400000, guid: b043b5ddba4fe4d4e8bd09c02e669b4e, type: 2}
+      useCustomDescription: 0
+      defaultDescription: 
+      languageSpecificDescriptions: []
+      useCustomCompletedDescription: 0
+      defaultCompletedDescription: 
+      languageSpecificCompletedDescriptions: []
+  abandonQuests: []
+  resetAttributes: 0
+  resetSkills: 0
+  changeCharacterClass: {fileID: 0}
+  changeCharacterFaction: {fileID: 0}
+  rewardExp: 400
+  rewardGold: 250
+  rewardStatPoints: 0
+  rewardSkillPoints: 0
+  rewardCurrencies: []
+  rewardItems:
+  - item: {fileID: 11400000, guid: 492f07d69ea13664fb73939fb672edf0, type: 2}
+    level: 0
+    amount: 1
+  selectableRewardItems: []
+  randomRewardItems: []
+  repeatType: 0
+  canAbandon: 1
+  nextAssignQuests: []
+  autoTrackQuest: 1

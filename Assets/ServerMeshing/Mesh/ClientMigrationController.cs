@@ -163,7 +163,9 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             _prevAddress = _manager.networkAddress;
             _prevPort = _manager.networkPort;
-            if (_manager.useVisualStandIns)
+            if (_manager.useEntityContinuity)
+                StartCoroutine(MigrateContinuousRoutine(address, port));
+            else if (_manager.useVisualStandIns)
                 StartCoroutine(MigrateSeamlessRoutine(address, port));
             else
                 StartCoroutine(MigrateMaskedRoutine(address, port));
@@ -224,7 +226,7 @@ namespace MultiplayerARPG.MMO.Mesh
         private Vector3 _frameShift; // a seam crossing re-bases the world during the hop: old-frame samples are compared in the new frame
         internal void NoteFrameShift(Vector3 shift) { _frameShift += shift; }
 
-        private IEnumerator MigrateSeamlessRoutine(string address, int port)
+        private IEnumerator MigrateSeamlessRoutine(string address, int port, bool isFallback = false)
         {
             _running = true;
             _frameShift = Vector3.zero;
@@ -313,8 +315,8 @@ namespace MultiplayerARPG.MMO.Mesh
             float deadline = Time.realtimeSinceStartup + _manager.migrationReadyTimeoutSeconds;
             long tConnected = -1;
             int framesWithoutCamera = 0;
-            bool fellBack = false;
-            bool legFellBack = false; // the fallback is per leg: a redirect (TryRedirectToQueuedHop) starts a new one
+            bool fellBack = isFallback; // a continuity hop that fell back here is already the fallback leg
+            bool legFellBack = isFallback; // the fallback is per leg: a redirect (TryRedirectToQueuedHop) starts a new one
             BasePlayerCharacterEntity newEntity = null;
             while (true)
             {
@@ -575,6 +577,10 @@ namespace MultiplayerARPG.MMO.Mesh
                     Destroy(mb);
                 foreach (Collider col in clone.GetComponentsInChildren<Collider>(true))
                     Destroy(col);
+                // A model animated by a script (the kit's PlayableCharacterModel) would freeze once stripped: keep its clips playing.
+                MeshStandInAnimation.Attach(entity.Model.gameObject, clone);
+                // The footsteps play from a script on the entity too: keep them stepping on the stand-in.
+                MeshStandInFootsteps.Attach(entity, clone);
                 clone.name = "[StandIn] " + entity.name;
                 list.Add(new StandIn
                 {
@@ -651,6 +657,153 @@ namespace MultiplayerARPG.MMO.Mesh
                 else alive++;
             }
             return alive;
+        }
+
+        #endregion
+
+        #region Continuity strategy (CE-14)
+
+        /// <summary>"max X (median Y)" of per-frame samples: a hitch or a jump stands out against the median.</summary>
+        private static string Spread(List<float> samples, string unit)
+        {
+            if (samples.Count == 0)
+                return "n/a";
+            List<float> sorted = new List<float>(samples);
+            sorted.Sort();
+            return $"max {sorted[sorted.Count - 1]:0.###}{unit} (median {sorted[sorted.Count / 2]:0.###}{unit}, {sorted.Count} frames)";
+        }
+
+        /// <summary>
+        /// The client moves to the new cell without stopping (LiteNetLibManager.MigrateClient): everything on screen is
+        /// kept, still running, and the new cell's spawn of each entity adopts the kept one instead of creating another.
+        /// The player's character is the same object throughout, so its controller, camera, HUD, animation, sounds and
+        /// effects carry on with nothing to stand in for them. Once it is adopted, the new cell's other spawns get
+        /// keptObjectGraceSeconds to adopt theirs; kept entities it never spawned are then removed. A cell that does
+        /// not seat us falls back to the stand-in swap toward the cell we came from.
+        /// </summary>
+        private IEnumerator MigrateContinuousRoutine(string address, int port)
+        {
+            _running = true;
+            System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
+            BasePlayerCharacterEntity entity = GameInstance.PlayingCharacterEntity;
+            LiteNetLibIdentity identity = entity != null ? entity.Identity : null;
+            Vector3 posBefore = entity != null ? entity.EntityTransform.position : Vector3.zero;
+            uint objectIdBefore = identity != null ? identity.ObjectId : 0;
+            int adoptedCount = 0;
+            void CountAdoption(LiteNetLibIdentity adopted, uint previousObjectId) => adoptedCount++;
+            // What the player could notice, frame by frame, from the hop until shortly after it settles.
+            List<float> frameMs = new List<float>(), playerSteps = new List<float>(), cameraSteps = new List<float>();
+            // Steps far longer than the frame explains (more than twice the move speed allows): where a jump happened.
+            System.Text.StringBuilder jumps = new System.Text.StringBuilder();
+            Vector3 lastPlayer = posBefore;
+            Vector3 lastCamera = Camera.main != null ? Camera.main.transform.position : Vector3.zero;
+            void Sample()
+            {
+                frameMs.Add(Time.unscaledDeltaTime * 1000f);
+                if (entity != null)
+                {
+                    Vector3 p = entity.EntityTransform.position;
+                    float step = Vector3.Distance(p, lastPlayer);
+                    playerSteps.Add(step);
+                    float allowed = Mathf.Max(0.05f, 2f * entity.GetMoveSpeed() * Time.unscaledDeltaTime);
+                    if (step > allowed && jumps.Length < 400)
+                        jumps.Append($" {step:0.##}m@{sw.ElapsedMilliseconds}ms{(identity.IsKept ? "(kept)" : "")}");
+                    lastPlayer = p;
+                }
+                if (Camera.main != null)
+                {
+                    Vector3 c = Camera.main.transform.position;
+                    cameraSteps.Add(Vector3.Distance(c, lastCamera));
+                    lastCamera = c;
+                }
+            }
+
+            _manager.BeginMigration();
+            _manager.BeginMigrationAttempt();
+            _manager.Assets.onObjectAdopted += CountAdoption;
+            if (identity == null || !_manager.MigrateClient(address, port))
+            {
+                Logging.LogWarning("Spike2", $"Continuity migration to {address}:{port} could not start; using the stand-in swap");
+                _manager.Assets.onObjectAdopted -= CountAdoption;
+                _manager.EndMigrateClient();
+                _manager.EndMigration();
+                _running = false;
+                StartCoroutine(MigrateSeamlessRoutine(address, port));
+                yield break;
+            }
+            int keptCount = _manager.Assets.KeptObjects.Count;
+
+            long tConnected = -1, tAdopted = -1;
+            bool adoptedPlayer = false;
+            float deadline = Time.realtimeSinceStartup + _manager.migrationReadyTimeoutSeconds;
+            while (Time.realtimeSinceStartup < deadline)
+            {
+                if (tConnected < 0 && _manager.IsClientConnected)
+                    tConnected = sw.ElapsedMilliseconds;
+                if (entity == null)
+                    break;
+                if (!identity.IsKept && identity.IsSpawned && entity.IsOwnerClient)
+                {
+                    adoptedPlayer = true;
+                    tAdopted = sw.ElapsedMilliseconds;
+                    break;
+                }
+                if (_manager.MigrationRefused || _manager.MigrationDisconnected)
+                    break;
+                yield return null;
+                Sample();
+            }
+
+            if (!adoptedPlayer)
+            {
+                string why = entity == null ? "character lost" : _manager.MigrationDisconnected ? _manager.MigrationDisconnectReason.ToString() : _manager.MigrationRefused ? "refused" : "timeout";
+                Logging.LogWarning("Spike2", $"Continuity migration to {address}:{port} failed ({why}); falling back to {_prevAddress}:{_prevPort} with the stand-in swap");
+                _manager.Assets.onObjectAdopted -= CountAdoption;
+                _manager.EndMigrateClient();
+                _manager.EndMigration();
+                _running = false;
+                FallbackCount++;
+                StartCoroutine(MigrateSeamlessRoutine(_prevAddress, _prevPort, true));
+                yield break;
+            }
+
+            // The new cell's other spawns come with the player's; give stragglers a moment, then drop what it never spawned.
+            float settleEnd = Time.realtimeSinceStartup + _manager.keptObjectGraceSeconds;
+            while (Time.realtimeSinceStartup < settleEnd && _manager.Assets.KeptObjects.Count > 0)
+            {
+                yield return null;
+                Sample();
+            }
+            long tSettled = sw.ElapsedMilliseconds;
+            int unadopted = _manager.Assets.KeptObjects.Count;
+            _manager.Assets.DestroyKeptObjects();
+            _manager.Assets.onObjectAdopted -= CountAdoption;
+            _manager.EndMigrateClient();
+            _manager.EndMigration();
+            _running = false;
+            // Half a second more of samples: a hitch from the adoption can land a frame or two after it.
+            float tailEnd = Time.realtimeSinceStartup + 0.5f;
+            while (Time.realtimeSinceStartup < tailEnd && !_running)
+            {
+                yield return null;
+                Sample();
+            }
+            sw.Stop();
+
+            Vector3 posAfter = entity != null ? entity.EntityTransform.position : posBefore;
+            LastResult = new Result
+            {
+                address = address, port = port, connected = tConnected >= 0, playerReady = true, seamless = true, fellBack = false,
+                connectedMs = tConnected, playerReadyMs = tAdopted, fadedMs = tSettled,
+                positionBefore = posBefore, positionAfter = posAfter,
+                positionJump = 0f, resyncJump = 0f, framesWithoutCamera = 0, standIns = 0,
+            };
+            CompletedCount++;
+            RunQueuedHop();
+            Logging.Log("Spike2",
+                $"Migration to {address}:{port} | CONTINUITY fellBack=False kept={keptCount} adopted={adoptedCount} unadopted={unadopted} | " +
+                $"connected={tConnected}ms playerAdopted={tAdopted}ms settled={tSettled}ms | player object {objectIdBefore} -> {identity.ObjectId}, " +
+                $"moved {Vector3.Distance(posBefore, posAfter):0.##} m during the hop | frames {Spread(frameMs, "ms")} | player step {Spread(playerSteps, "m")} | camera step {Spread(cameraSteps, "m")} | jumps:{(jumps.Length > 0 ? jumps.ToString() : " none")}");
         }
 
         #endregion

@@ -1,0 +1,71 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8e5c1c1bd1fa26a4f86d8c90d93e542a, type: 3}
+  m_Name: PassageStone
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.WarpToMapItem
+  btnValidate: 0
+  id: PassageStone
+  defaultTitle: Passage Stone
+  languageSpecificTitles: []
+  defaultDescription: Cold basalt with a hole worn through it. Look at the crypt
+    door through the hole and you are already inside.
+  languageSpecificDescriptions: []
+  category: 
+  icon: {fileID: 21300000, guid: 99e3f2dd3c67d0f45ad355f0614aaddc, type: 3}
+  iconSettingsInitialized: 0
+  iconRotation: {x: 45, y: 90, z: 90}
+  iconZoom: 1.4
+  iconLightingSettings:
+    useSceneLighting: 0
+    exposureEV: 0
+    ambientColor: {r: 0.28, g: 0.3, b: 0.35, a: 1}
+    keyLightIntensity: 1.6
+    keyLightColor: {r: 1, g: 0.97, b: 0.92, a: 1}
+    keyLightAngleX: 35
+    keyLightAngleY: -30
+    fillLightIntensity: 0.55
+    fillLightColor: {r: 0.85, g: 0.9, b: 1, a: 1}
+    fillLightAngleX: 15
+    fillLightAngleY: 150
+    cameraPitch: 15
+    framePadding: 1.1
+    unlitBlend: 0
+    unlitBrightness: 1
+  sellPrice: 150
+  weight: 0.3
+  noSlotUsage: 0
+  maxStack: 5
+  overrideAmmoCapacity: 0
+  itemRefine: {fileID: 0}
+  lockDuration: 0
+  expireDurationUnit: 2
+  expireDuration: 0
+  dropModel: {fileID: 0}
+  dismantleReturnGold: 0
+  dismantleReturnItems: []
+  dismantleReturnCurrencies: []
+  restrictDealing: 0
+  restrictDropping: 0
+  restrictSelling: 0
+  deadDropProtected: 0
+  requirement:
+    availableClass: {fileID: 0}
+    availableClasses: []
+    availableFactions: []
+    level: 0
+    attributeAmounts: []
+  warpPortalType: 0
+  warpToMapInfo: {fileID: 11400000, guid: 2cd775729bb582b42bfa622e9b4f3f5c, type: 2}
+  warpToPosition: {x: 3, y: 3.05, z: -7.6}
+  warpOverrideRotation: 1
+  warpToRotation: {x: 0, y: 0, z: 0}
+  useItemCooldown: 15

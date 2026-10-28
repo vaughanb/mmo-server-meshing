@@ -1,0 +1,210 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4b67f350c4283834f81cded3a656ff5e, type: 3}
+  m_Name: BaseCharacter
+  m_EditorClassIdentifier: 
+  btnValidate: 0
+  id: Islander
+  defaultTitle: Islander
+  languageSpecificTitles: []
+  defaultDescription: 
+  languageSpecificDescriptions: []
+  category: 
+  icon: {fileID: 0}
+  expTable: {fileID: 0}
+  stats:
+    baseStats:
+      hp: 120
+      hpRecovery: 2
+      hpLeechRate: 0
+      mp: 60
+      mpRecovery: 2
+      mpLeechRate: 0
+      stamina: 100
+      staminaRecovery: 12
+      staminaLeechRate: 0
+      food: 0
+      water: 0
+      accuracy: 0
+      evasion: 0
+      criRate: 0.05
+      criDmgRate: 1.5
+      blockRate: 0
+      blockDmgRate: 0
+      moveSpeed: 4.2
+      sprintSpeed: 0
+      atkSpeed: 1
+      weightLimit: 140
+      slotLimit: 0
+      goldRate: 0
+      expRate: 0
+      itemDropRate: 0
+      jumpHeight: 0
+      headDamageAbsorbs: 0
+      bodyDamageAbsorbs: 0
+      fallDamageAbsorbs: 0
+      gravityRate: 0
+      protectedSlotLimit: 0
+      ammoCapacityModifier: 0
+      ammoCapacityRate: 0
+      recoilModifier: 0
+      recoilYawModifier: 0
+      recoilRollModifier: 0
+      recoilRate: 0
+      recoilYawRate: 0
+      recoilRollRate: 0
+      rateOfFireModifier: 0
+      rateOfFireRate: 0
+      reloadDurationModifier: 0
+      reloadDurationRate: 0
+      fireSpreadRangeModifier: 0
+      fireSpreadRangeRate: 0
+      fireSpreadModifier: 0
+      fireSpreadRate: 0
+      decreaseFoodDecreation: 0
+      decreaseWaterDecreation: 0
+      decreaseStaminaDecreation: 0
+      buyItemPriceRate: 0
+      sellItemPriceRate: 0
+    statsIncreaseEachLevel:
+      hp: 25
+      hpRecovery: 0.4
+      hpLeechRate: 0
+      mp: 12
+      mpRecovery: 0
+      mpLeechRate: 0
+      stamina: 6
+      staminaRecovery: 0
+      staminaLeechRate: 0
+      food: 0
+      water: 0
+      accuracy: 0
+      evasion: 0
+      criRate: 0
+      criDmgRate: 0
+      blockRate: 0
+      blockDmgRate: 0
+      moveSpeed: 0
+      sprintSpeed: 0
+      atkSpeed: 0
+      weightLimit: 6
+      slotLimit: 0
+      goldRate: 0
+      expRate: 0
+      itemDropRate: 0
+      jumpHeight: 0
+      headDamageAbsorbs: 0
+      bodyDamageAbsorbs: 0
+      fallDamageAbsorbs: 0
+      gravityRate: 0
+      protectedSlotLimit: 0
+      ammoCapacityModifier: 0
+      ammoCapacityRate: 0
+      recoilModifier: 0
+      recoilYawModifier: 0
+      recoilRollModifier: 0
+      recoilRate: 0
+      recoilYawRate: 0
+      recoilRollRate: 0
+      rateOfFireModifier: 0
+      rateOfFireRate: 0
+      reloadDurationModifier: 0
+      reloadDurationRate: 0
+      fireSpreadRangeModifier: 0
+      fireSpreadRangeRate: 0
+      fireSpreadModifier: 0
+      fireSpreadRate: 0
+      decreaseFoodDecreation: 0
+      decreaseWaterDecreation: 0
+      decreaseStaminaDecreation: 0
+      buyItemPriceRate: 0
+      sellItemPriceRate: 0
+    rateIncreaseEachLevel:
+      hp: 0
+      hpRecovery: 0
+      hpLeechRate: 0
+      mp: 0
+      mpRecovery: 0
+      mpLeechRate: 0
+      stamina: 0
+      staminaRecovery: 0
+      staminaLeechRate: 0
+      food: 0
+      water: 0
+      accuracy: 0
+      evasion: 0
+      criRate: 0
+      criDmgRate: 0
+      blockRate: 0
+      blockDmgRate: 0
+      moveSpeed: 0
+      sprintSpeed: 0
+      atkSpeed: 0
+      weightLimit: 0
+      slotLimit: 0
+      goldRate: 0
+      expRate: 0
+      itemDropRate: 0
+      jumpHeight: 0
+      headDamageAbsorbs: 0
+      bodyDamageAbsorbs: 0
+      fallDamageAbsorbs: 0
+      gravityRate: 0
+      protectedSlotLimit: 0
+      ammoCapacityModifier: 0
+      ammoCapacityRate: 0
+      recoilModifier: 0
+      recoilYawModifier: 0
+      recoilRollModifier: 0
+      recoilRate: 0
+      recoilYawRate: 0
+      recoilRollRate: 0
+      rateOfFireModifier: 0
+      rateOfFireRate: 0
+      reloadDurationModifier: 0
+      reloadDurationRate: 0
+      fireSpreadRangeModifier: 0
+      fireSpreadRangeRate: 0
+      fireSpreadModifier: 0
+      fireSpreadRate: 0
+      decreaseFoodDecreation: 0
+      decreaseWaterDecreation: 0
+      decreaseStaminaDecreation: 0
+      buyItemPriceRate: 0
+      sellItemPriceRate: 0
+    statsIncreaseEachLevelByLevels: []
+  attributes: []
+  resistances: []
+  armors: []
+  statusEffectResistances: []
+  selfStatusEffectsWhenAttacking: []
+  enemyStatusEffectsWhenAttacking: []
+  selfStatusEffectsWhenAttacked: []
+  enemyStatusEffectsWhenAttacked: []
+  skills: []
+  rightHandEquipItem: {fileID: 11400000, guid: 34a7184280bba49478543799e69e1c4a, type: 2}
+  leftHandEquipItem: {fileID: 0}
+  armorItems:
+  - {fileID: 11400000, guid: f23b66f1821b860489ed58417583f22f, type: 2}
+  - {fileID: 11400000, guid: 611669dad31abdc4496e44599be9bf46, type: 2}
+  - {fileID: 11400000, guid: c583cfc16a4613946bc8415b0ef56ef7, type: 2}
+  - {fileID: 11400000, guid: 348cb42ed88cc6944ac65a7e25a47d88, type: 2}
+  startItems:
+  - item: {fileID: 11400000, guid: 4813f8d8ebdc81349b469905ed698457, type: 2}
+    level: 0
+    amount: 5
+  startMap: {fileID: 11400000, guid: 0a5e6a3017686de4386e0acf0947d47b, type: 2}
+  useOverrideStartPosition: 0
+  overrideStartPosition: {x: 0, y: 0, z: 0}
+  useOverrideStartRotation: 0
+  overrideStartRotation: {x: 0, y: 0, z: 0}
+  startPointsByCondition: []

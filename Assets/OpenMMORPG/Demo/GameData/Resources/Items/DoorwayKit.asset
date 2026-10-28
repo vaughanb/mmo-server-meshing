@@ -1,0 +1,66 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 971073f9608c6a14b987e20c9c5ca140, type: 3}
+  m_Name: DoorwayKit
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.BuildingItem
+  btnValidate: 0
+  id: DoorwayKit
+  defaultTitle: Doorway Kit
+  languageSpecificTitles: []
+  defaultDescription: A wall section with an arched opening. Hang a door in it.
+  languageSpecificDescriptions: []
+  category: 
+  icon: {fileID: 21300000, guid: c7d7b93db93d9474fbd38d9eba5cee87, type: 3}
+  iconSettingsInitialized: 0
+  iconRotation: {x: 45, y: 90, z: 90}
+  iconZoom: 1.4
+  iconLightingSettings:
+    useSceneLighting: 0
+    exposureEV: 0
+    ambientColor: {r: 0.28, g: 0.3, b: 0.35, a: 1}
+    keyLightIntensity: 1.6
+    keyLightColor: {r: 1, g: 0.97, b: 0.92, a: 1}
+    keyLightAngleX: 35
+    keyLightAngleY: -30
+    fillLightIntensity: 0.55
+    fillLightColor: {r: 0.85, g: 0.9, b: 1, a: 1}
+    fillLightAngleX: 15
+    fillLightAngleY: 150
+    cameraPitch: 15
+    framePadding: 1.1
+    unlitBlend: 0
+    unlitBrightness: 1
+  sellPrice: 20
+  weight: 2
+  noSlotUsage: 0
+  maxStack: 10
+  overrideAmmoCapacity: 0
+  itemRefine: {fileID: 0}
+  lockDuration: 0
+  expireDurationUnit: 2
+  expireDuration: 0
+  dropModel: {fileID: 0}
+  dismantleReturnGold: 0
+  dismantleReturnItems: []
+  dismantleReturnCurrencies: []
+  restrictDealing: 0
+  restrictDropping: 0
+  restrictSelling: 0
+  deadDropProtected: 0
+  requirement:
+    availableClass: {fileID: 0}
+    availableClasses: []
+    availableFactions: []
+    level: 0
+    attributeAmounts: []
+  buildingEntity: {fileID: 4495706710893815523, guid: 23dabac0dbf7f5547a3e28cc261af90a, type: 3}
+  useItemCooldown: 0

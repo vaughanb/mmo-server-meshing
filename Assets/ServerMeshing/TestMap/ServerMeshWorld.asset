@@ -30,6 +30,13 @@ MonoBehaviour:
     - NW
     - N
     - NE
+    cellRects: []
+    cellMode: 0
+    minCellSize: 0
+    maxCellsPerBase: 0
+    autoSplit: 0
+    autoMerge: 0
+    onDemandLinks: 0
   - mapId: ServerMeshTestMap2
     worldOrigin: {x: 400, y: 0, z: 0}
     gridOrigin: {x: -100, y: 0, z: -100}
@@ -43,4 +50,71 @@ MonoBehaviour:
     - id: C2
       min: {x: -100, y: -100}
       size: {x: 200, y: 200}
+    cellMode: 0
+    minCellSize: 0
+    maxCellsPerBase: 0
+    autoSplit: 0
+    autoMerge: 0
+    onDemandLinks: 0
+  - mapId: ServerMeshTestMap8k
+    worldOrigin: {x: 0, y: 0, z: 20000}
+    gridOrigin: {x: -4096, y: 0, z: -4096}
+    cellSize: 1024
+    columns: 8
+    rows: 8
+    cellIdFormat: '{map}-{x}-{y}'
+    cellIds: []
+    cellRects: []
+    cellMode: 0
+    minCellSize: 0
+    maxCellsPerBase: 0
+    autoSplit: 0
+    autoMerge: 0
+    onDemandLinks: 0
   touchTolerance: 0.5
+  dynamicSettings:
+    bandWidth: 80
+    defaultMinCellSize: 100
+    defaultMaxCellsPerBase: 4
+    layoutGateWarnSeconds: 10
+    recoveryCeilingSeconds: 60
+    coordinatorStorePath: 
+    handoffAckGuardSeconds: 20
+    drainRatePerSecond: 5
+    drainEntityRatePerSecond: 20
+    maxConcurrentHandoffsPerDestination: 20
+    prewarmSeconds: 2
+    prewarmSpawnBudgetShare: 0.25
+    splitStepTimeoutSeconds: 60
+    splitCooldownSeconds: 30
+    drainMonsterAgeSeconds: 5
+    retireMaxSeconds: 90
+    childDownGraceSeconds: 20
+    childMaxRestarts: 3
+    childRestartIntervalSeconds: 10
+    childRestartStableSeconds: 60
+    childHungSeconds: 30
+    childFenceSeconds: 10
+    fenceSaveSeconds: 5
+    retireKillAfterSeconds: 270
+    splitUtil: 0.8
+    splitDwellSeconds: 45
+    fastPathSaturatedShare: 0.2
+    fastPathUtil: 0.95
+    fastPathSeconds: 10
+    mergeUtil: 0.5
+    mergeDwellSeconds: 300
+    opCooldownSeconds: 120
+    splitBenefitRatio: 0.75
+    reportFreshSeconds: 15
+    measureAfterSeconds: 10
+    flapWindowSeconds: 900
+    flapReliefShare: 0.1
+    flapMaxMultiplier: 8
+    hostHeadroomShare: 0.8
+    modelFloorPlayers: 9.1
+    puppetPlayerWeight: 0.174
+    ownedMonsterWeight: 0.126
+    puppetMonsterWeight: 0.1
+    buildingTransfersInFlight: 2
+    buildingStorageCloseSeconds: 5

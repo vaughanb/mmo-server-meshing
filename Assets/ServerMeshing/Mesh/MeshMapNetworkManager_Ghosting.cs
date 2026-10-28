@@ -1218,12 +1218,17 @@ namespace MultiplayerARPG.MMO.Mesh
             // Same setup the kit does for a fresh spawn, on the existing object.
             GameInstance.GetPlayerCharacterEntityHashAssetId(data.EntityId, out int metaDataId);
             GameInstance.SetupByMetaData(player, metaDataId);
+            Vector3 standing = player.EntityTransform.position; // before CloneTo, which carries the saved position
             data.CloneTo(player);
             // stillMoveAfterTeleport keeps the puppet's movement state: a plain teleport REPLACES it with IsTeleport alone,
             // the flag is cleared at the next send, and the re-owned entity is not simulated here again until the new
             // client's first state arrives — so observers were sent a state with no IsGrounded (the fall animation) for
             // the whole client gap. The puppet already stands at (or within a step of) the saved position.
-            player.Teleport(data.CurrentPosition, Quaternion.Euler(data.CurrentRotation), true);
+            // A ghost within arrivalTeleportDistance of the saved position stays where it stands: the teleport's IsTeleport state
+            // reaches the arriving client too and snaps its character back to the saved spot, which a client that kept
+            // moving through the hop (entity continuity, CE-14) has already walked past. Its own next state moves it on.
+            if (Vector3.Distance(standing, data.CurrentPosition) > arrivalTeleportDistance)
+                player.Teleport(data.CurrentPosition, Quaternion.Euler(data.CurrentRotation), true);
             player.ForceMakeCaches();
             player.FillEmptySlots();
             player.Identity.DoNotDestroyWhenDisconnect = true;

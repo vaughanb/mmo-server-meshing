@@ -1,0 +1,247 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0bc493348cdb9474d89497ed882aae38, type: 3}
+  m_Name: SmithCraft
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.NpcDialog
+  graph: {fileID: 0}
+  position: {x: 0, y: 0}
+  ports:
+    keys:
+    - menus
+    - questAcceptedDialog
+    - questDeclinedDialog
+    - questAbandonedDialog
+    - questCompletedDialog
+    - craftDoneDialog
+    - craftItemWillOverwhelmingDialog
+    - craftNotMeetRequirementsDialog
+    - craftCancelDialog
+    - saveRespawnConfirmDialog
+    - saveRespawnCancelDialog
+    - warpCancelDialog
+    - refineItemCancelDialog
+    - dismantleItemCancelDialog
+    - storageCancelDialog
+    - repairItemCancelDialog
+    - input
+    values:
+    - _fieldName: menus
+      _node: {fileID: 11400000}
+      _typeQualifiedName: MultiplayerARPG.NpcDialogMenu[], Assembly-CSharp, Version=0.0.0.0,
+        Culture=neutral, PublicKeyToken=null
+      connections: []
+      _direction: 1
+      _connectionType: 1
+      _typeConstraint: 0
+      _dynamic: 0
+    - _fieldName: questAcceptedDialog
+      _node: {fileID: 11400000}
+      _typeQualifiedName: MultiplayerARPG.BaseNpcDialog, Assembly-CSharp, Version=0.0.0.0,
+        Culture=neutral, PublicKeyToken=null
+      connections: []
+      _direction: 1
+      _connectionType: 1
+      _typeConstraint: 0
+      _dynamic: 0
+    - _fieldName: questDeclinedDialog
+      _node: {fileID: 11400000}
+      _typeQualifiedName: MultiplayerARPG.BaseNpcDialog, Assembly-CSharp, Version=0.0.0.0,
+        Culture=neutral, PublicKeyToken=null
+      connections: []
+      _direction: 1
+      _connectionType: 1
+      _typeConstraint: 0
+      _dynamic: 0
+    - _fieldName: questAbandonedDialog
+      _node: {fileID: 11400000}
+      _typeQualifiedName: MultiplayerARPG.BaseNpcDialog, Assembly-CSharp, Version=0.0.0.0,
+        Culture=neutral, PublicKeyToken=null
+      connections: []
+      _direction: 1
+      _connectionType: 1
+      _typeConstraint: 0
+      _dynamic: 0
+    - _fieldName: questCompletedDialog
+      _node: {fileID: 11400000}
+      _typeQualifiedName: MultiplayerARPG.BaseNpcDialog, Assembly-CSharp, Version=0.0.0.0,
+        Culture=neutral, PublicKeyToken=null
+      connections: []
+      _direction: 1
+      _connectionType: 1
+      _typeConstraint: 0
+      _dynamic: 0
+    - _fieldName: craftDoneDialog
+      _node: {fileID: 11400000}
+      _typeQualifiedName: MultiplayerARPG.BaseNpcDialog, Assembly-CSharp, Version=0.0.0.0,
+        Culture=neutral, PublicKeyToken=null
+      connections: []
+      _direction: 1
+      _connectionType: 1
+      _typeConstraint: 0
+      _dynamic: 0
+    - _fieldName: craftItemWillOverwhelmingDialog
+      _node: {fileID: 11400000}
+      _typeQualifiedName: MultiplayerARPG.BaseNpcDialog, Assembly-CSharp, Version=0.0.0.0,
+        Culture=neutral, PublicKeyToken=null
+      connections: []
+      _direction: 1
+      _connectionType: 1
+      _typeConstraint: 0
+      _dynamic: 0
+    - _fieldName: craftNotMeetRequirementsDialog
+      _node: {fileID: 11400000}
+      _typeQualifiedName: MultiplayerARPG.BaseNpcDialog, Assembly-CSharp, Version=0.0.0.0,
+        Culture=neutral, PublicKeyToken=null
+      connections: []
+      _direction: 1
+      _connectionType: 1
+      _typeConstraint: 0
+      _dynamic: 0
+    - _fieldName: craftCancelDialog
+      _node: {fileID: 11400000}
+      _typeQualifiedName: MultiplayerARPG.BaseNpcDialog, Assembly-CSharp, Version=0.0.0.0,
+        Culture=neutral, PublicKeyToken=null
+      connections: []
+      _direction: 1
+      _connectionType: 1
+      _typeConstraint: 0
+      _dynamic: 0
+    - _fieldName: saveRespawnConfirmDialog
+      _node: {fileID: 11400000}
+      _typeQualifiedName: MultiplayerARPG.BaseNpcDialog, Assembly-CSharp, Version=0.0.0.0,
+        Culture=neutral, PublicKeyToken=null
+      connections: []
+      _direction: 1
+      _connectionType: 1
+      _typeConstraint: 0
+      _dynamic: 0
+    - _fieldName: saveRespawnCancelDialog
+      _node: {fileID: 11400000}
+      _typeQualifiedName: MultiplayerARPG.BaseNpcDialog, Assembly-CSharp, Version=0.0.0.0,
+        Culture=neutral, PublicKeyToken=null
+      connections: []
+      _direction: 1
+      _connectionType: 1
+      _typeConstraint: 0
+      _dynamic: 0
+    - _fieldName: warpCancelDialog
+      _node: {fileID: 11400000}
+      _typeQualifiedName: MultiplayerARPG.BaseNpcDialog, Assembly-CSharp, Version=0.0.0.0,
+        Culture=neutral, PublicKeyToken=null
+      connections: []
+      _direction: 1
+      _connectionType: 1
+      _typeConstraint: 0
+      _dynamic: 0
+    - _fieldName: refineItemCancelDialog
+      _node: {fileID: 11400000}
+      _typeQualifiedName: MultiplayerARPG.BaseNpcDialog, Assembly-CSharp, Version=0.0.0.0,
+        Culture=neutral, PublicKeyToken=null
+      connections: []
+      _direction: 1
+      _connectionType: 1
+      _typeConstraint: 0
+      _dynamic: 0
+    - _fieldName: dismantleItemCancelDialog
+      _node: {fileID: 11400000}
+      _typeQualifiedName: MultiplayerARPG.BaseNpcDialog, Assembly-CSharp, Version=0.0.0.0,
+        Culture=neutral, PublicKeyToken=null
+      connections: []
+      _direction: 1
+      _connectionType: 1
+      _typeConstraint: 0
+      _dynamic: 0
+    - _fieldName: storageCancelDialog
+      _node: {fileID: 11400000}
+      _typeQualifiedName: MultiplayerARPG.BaseNpcDialog, Assembly-CSharp, Version=0.0.0.0,
+        Culture=neutral, PublicKeyToken=null
+      connections: []
+      _direction: 1
+      _connectionType: 1
+      _typeConstraint: 0
+      _dynamic: 0
+    - _fieldName: repairItemCancelDialog
+      _node: {fileID: 11400000}
+      _typeQualifiedName: MultiplayerARPG.BaseNpcDialog, Assembly-CSharp, Version=0.0.0.0,
+        Culture=neutral, PublicKeyToken=null
+      connections: []
+      _direction: 1
+      _connectionType: 1
+      _typeConstraint: 0
+      _dynamic: 0
+    - _fieldName: input
+      _node: {fileID: 11400000}
+      _typeQualifiedName: MultiplayerARPG.BaseNpcDialog, Assembly-CSharp, Version=0.0.0.0,
+        Culture=neutral, PublicKeyToken=null
+      connections: []
+      _direction: 0
+      _connectionType: 0
+      _typeConstraint: 0
+      _dynamic: 0
+  input: {fileID: 0}
+  title: Commission
+  titles: []
+  description: Bring me the makings and I'll do the work. It is the same steel either
+    way.
+  descriptions: []
+  icon: {fileID: 0}
+  voice: {fileID: 0}
+  enterDialogActionOnClient: {fileID: 0}
+  enterDialogActionsOnClient: []
+  enterDialogActionOnServer: {fileID: 0}
+  enterDialogActionsOnServer: []
+  type: 3
+  menus: []
+  confirmRequirement:
+    gold: 0
+    currencyAmounts: []
+    itemAmounts: []
+  quest: {fileID: 0}
+  questAcceptedDialog: {fileID: 0}
+  questDeclinedDialog: {fileID: 0}
+  questAbandonedDialog: {fileID: 0}
+  questCompletedDialog: {fileID: 0}
+  sellItems: []
+  itemCraft:
+    craftingItem: {fileID: 11400000, guid: 15d926d4af6cd75428afb9722f6054b3, type: 2}
+    amount: 1
+    requireGold: 110
+    requireItems:
+    - item: {fileID: 11400000, guid: 9bed9a16985b66343bbbcd35db39e60e, type: 2}
+      level: 0
+      amount: 4
+    - item: {fileID: 11400000, guid: 593531c59904ae9429ca0e409ba9592d, type: 2}
+      level: 0
+      amount: 1
+    - item: {fileID: 11400000, guid: b2dfdb17ca25331428a559776362d287, type: 2}
+      level: 0
+      amount: 1
+    requireCurrencies: []
+  craftDoneDialog: {fileID: 0}
+  craftItemWillOverwhelmingDialog: {fileID: 0}
+  craftNotMeetRequirementsDialog: {fileID: 0}
+  craftCancelDialog: {fileID: 0}
+  saveRespawnMap: {fileID: 0}
+  saveRespawnPosition: {x: 0, y: 0, z: 0}
+  saveRespawnConfirmDialog: {fileID: 0}
+  saveRespawnCancelDialog: {fileID: 0}
+  warpPortalType: 0
+  warpMap: {fileID: 0}
+  warpPosition: {x: 0, y: 0, z: 0}
+  warpOverrideRotation: 0
+  warpRotation: {x: 0, y: 0, z: 0}
+  warpCancelDialog: {fileID: 0}
+  refineItemCancelDialog: {fileID: 0}
+  dismantleItemCancelDialog: {fileID: 0}
+  storageCancelDialog: {fileID: 0}
+  repairItemCancelDialog: {fileID: 0}
+  btnSetAllAmountToItsMaxStack: 0

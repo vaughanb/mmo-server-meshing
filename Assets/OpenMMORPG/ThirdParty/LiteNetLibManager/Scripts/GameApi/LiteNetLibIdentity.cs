@@ -186,6 +186,30 @@ namespace LiteNetLibManager
         private HashSet<AudioSource> _hiddingAudioSources = new HashSet<AudioSource>();
 #endif
         public long ConnectionId { get; internal set; } = -1;
+
+        // MESH-EDIT: CE-14 — client migration keeps its objects and adopts them. See Docs/ServerMeshing/DESIGN.md §17.
+        /// <summary>Kept by a migrating client, waiting for the new server to spawn (adopt) it.</summary>
+        public bool IsKept { get; internal set; }
+        /// <summary>True during the spawn callbacks of a spawn that adopted this kept object (it was live before).</summary>
+        public bool IsBeingAdopted { get; internal set; }
+        /// <summary>The object id it had on the server the client left, when it was last adopted (0: never adopted).</summary>
+        public uint AdoptedFromObjectId { get; internal set; }
+
+        internal void PrepareKeep(bool keepOwner)
+        {
+            foreach (LiteNetLibSyncElement syncElement in SyncElements.Values)
+                syncElement.UnregisterUpdating();
+            if (!keepOwner)
+                ConnectionId = -1;
+            IsKept = true;
+        }
+
+        internal void BeginAdoption(uint previousObjectId)
+        {
+            IsKept = false;
+            IsBeingAdopted = true;
+            AdoptedFromObjectId = previousObjectId;
+        }
         public bool IsPooledInstance { get; internal set; } = false;
         public LiteNetLibGameManager Manager { get; internal set; }
 

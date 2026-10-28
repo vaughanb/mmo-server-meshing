@@ -1,0 +1,68 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!21 &2100000
+Material:
+  serializedVersion: 8
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: Island_Sea
+  m_Shader: {fileID: 4800000, guid: 33f1d814200bd3a43bb4f1eb364dfce7, type: 3}
+  m_Parent: {fileID: 0}
+  m_ModifiedSerializedProperties: 0
+  m_ValidKeywords:
+  - _REFRACTION_ON
+  - _SHORE_ON
+  m_InvalidKeywords: []
+  m_LightmapFlags: 4
+  m_EnableInstancingVariants: 0
+  m_DoubleSidedGI: 0
+  m_CustomRenderQueue: -1
+  stringTagMap: {}
+  disabledShaderPasses: []
+  m_LockedProperties: 
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs: []
+    m_Ints: []
+    m_Floats:
+    - _DeepOpacity: 0.94
+    - _DepthDistance: 5.5
+    - _FoamBreakup: 0.55
+    - _FoamCoverage: 0.35
+    - _FoamDepth: 1.4
+    - _FoamSoftness: 0.22
+    - _FoamSwell: 1.6
+    - _FresnelPower: 5
+    - _GlintSharpen: 0.35
+    - _Glossiness: 0.85
+    - _NormalStrength: 1
+    - _Refraction: 1
+    - _RefractionStrength: 0.22
+    - _RippleLength: 2.4
+    - _RippleSpeed: 0.4
+    - _RippleStrength: 1
+    - _ShallowOpacity: 0.18
+    - _Shore: 1
+    - _SparkleStrength: 1.1
+    - _SunDiffuse: 0.25
+    - _WarpLength: 3.2
+    - _WarpSpeed: 0.12
+    - _WarpStrength: 0.2
+    - _WaveHeading: 35
+    - _WaveHeight: 0.18
+    - _WaveLength: 13
+    - _WaveSpeed: 0.6
+    - _WaveSpread: 22
+    m_Colors:
+    - _DeepColor: {r: 0.03, g: 0.19999996, b: 0.32999998, a: 1}
+    - _DisplaceFade: {r: 110, g: 280, b: 0, a: 0}
+    - _FoamColor: {r: 0.95, g: 0.97999996, b: 1, a: 1}
+    - _GlintColor: {r: 1, g: 0.96999997, b: 0.88, a: 1}
+    - _HorizonColor: {r: 0.62, g: 0.8, b: 0.86, a: 1}
+    - _RippleFade: {r: 45, g: 200, b: 0, a: 0}
+    - _ShallowColor: {r: 0.41999996, g: 0.78, b: 0.74, a: 1}
+    - _SwellNormalFade: {r: 320, g: 900, b: 0, a: 0}
+  m_BuildTextureStacks: []
+  m_AllowLocking: 1
