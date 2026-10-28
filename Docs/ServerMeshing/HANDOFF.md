@@ -1,7 +1,7 @@
 # Handoff — 2026-10-28
 
 Where the work stands, how to get it running on another machine, and what is left. The design record
-([DESIGN.md](DESIGN.md), version 1.14) has the full reasoning and measurements; this note is the short path in.
+([DESIGN.md](DESIGN.md), version 1.15) has the full reasoning and measurements; this note is the short path in.
 
 ## What was done
 
@@ -199,7 +199,12 @@ Where the work stands, how to get it running on another machine, and what is lef
     instead of after the answer; it holds the server's state messages until the answer is handled, and the
     destination holds a ready that beats its enter-game. No core change. The gap's median fell to about 47 ms
     (36–65; the session's first hop ~140). `pipelineReadyOnHop` switches it.
-15. **Verified on the 8 km demo** (editor client plus headless bots), all seamless, no exceptions:
+15. **What the client queued before the warp is not lost (DESIGN 1.15, package 0.97.2).** LiteNetLib's `Stop`
+    dropped a connection's unsent queue, so a call made in the warp's frame never left the client (12 of 13 in
+    the reproduction). Before the kit stops the old connection, the client now wakes its send thread and waits
+    (at most 5 ms; 0.0–0.19 ms measured) until the queue is out; the origin forwards it. 19 of 19 reproduced
+    swings ran once. Reproduce with the patrol's `swingAtWarp`.
+16. **Verified on the 8 km demo** (editor client plus headless bots), all seamless, no exceptions:
    - a 750 m walk across three cells;
    - 16 quick back-and-forth crossings (adopted after 180–398 ms, none fell back);
    - a second player standing past the line: kept and adopted;
@@ -286,9 +291,6 @@ Where the work stands, how to get it running on another machine, and what is lef
    localhost (median ~92) and all of it is server frames at 60 fps: enter-game in one, the client's ready in
    the next, the spawn on the sync tick after, plus the client's own frames. Nothing in it is the database or
    the connect. Next steps, in order:
-   - a call still queued on the client's old connection when the warp closes it: LiteNetLib's `Stop` shuts its
-     peers before their logic thread's last send, so up to one 15 ms update of calls is lost. Closing it means
-     keeping the old connection for a frame in CE-14's `MigrateClient` (a core change) or a blocking flush;
    - ammunition per trigger, a skill item taken after the last trigger and a charge in progress are not
      carried (1.06), and no skill has been cast across a crossing in a run yet;
    - someone else's crossing, after 1.11: the client's first state still moves the arrival about 0.14 m in one

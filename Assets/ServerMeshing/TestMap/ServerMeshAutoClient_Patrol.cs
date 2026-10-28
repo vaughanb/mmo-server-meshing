@@ -23,7 +23,36 @@ namespace MultiplayerARPG.MMO.Mesh
         public bool swingInGap = false;
         [Tooltip("With attackWhileWalking: turn to face the nearest live monster within this many metres before each swing (0: swing straight ahead).")]
         public float swingFaceRange = 0f;
-        private int _swings, _gapSwings, _facedSwings;
+        [Tooltip("Swing in the frame of each warp, just before the old connection closes: the call is queued on a connection about to stop (DESIGN 1.15).")]
+        public bool swingAtWarp = false;
+        private int _swings, _gapSwings, _facedSwings, _warpSwings;
+
+        /// <summary>Draws the weapon again whenever the demo puts it away, while <paramref name="running"/>.</summary>
+        private IEnumerator KeepDrawnWhile(System.Func<bool> running)
+        {
+            while (running())
+            {
+                BasePlayerCharacterEntity self = GameInstance.PlayingCharacterEntity;
+                if (self != null && self.IsWeaponsSheathed && self.IsOwnerClient)
+                    self.IsWeaponsSheathed = false;
+                yield return null;
+            }
+        }
+
+        /// <summary>The hop is about to close the old connection: swing now, so the call sits in its queue.</summary>
+        private void SwingAtWarp()
+        {
+            BasePlayerCharacterEntity self = GameInstance.PlayingCharacterEntity;
+            if (self == null || self.IsDead())
+                return;
+            WeaponHandlingState whs = WeaponHandlingState.None;
+            if (self.Attack(ref whs))
+            {
+                _swings++;
+                _warpSwings++;
+                Log($"swing sent at the warp ({_warpSwings})");
+            }
+        }
 
         private static bool IsHopping => BaseGameNetworkManager.Singleton is MeshMapNetworkManager mesh && mesh.IsClientHopping;
 
@@ -129,6 +158,12 @@ namespace MultiplayerARPG.MMO.Mesh
             StartCoroutine(PollMigrationsWhile(() => patrolling));
             if (attackWhileWalking)
                 StartCoroutine(SwingWhile(() => patrolling));
+            MeshMapNetworkManager warpMesh = swingAtWarp ? BaseGameNetworkManager.Singleton as MeshMapNetworkManager : null;
+            if (warpMesh != null)
+            {
+                warpMesh.ClientConnectionClosing += SwingAtWarp;
+                StartCoroutine(KeepDrawnWhile(() => patrolling)); // a sheathed character's swing is refused, and the demo sheathes an idle one
+            }
             float end = Time.realtimeSinceStartup + observeSeconds;
             int legs = 0, missed = 0;
             float target = walkReturnX;
@@ -147,11 +182,13 @@ namespace MultiplayerARPG.MMO.Mesh
                 yield return new WaitForSecondsRealtime(1f);
             }
             patrolling = false;
+            if (warpMesh != null)
+                warpMesh.ClientConnectionClosing -= SwingAtWarp;
             _walkZOverride = null;
             PollStandMigrations();
             Finished = true;
             Passed = legs > missed;
-            Log($"{PatrolResultHead(legs, missed)}{StandMigrationsSuffix()}{(attackWhileWalking ? $" swings={_swings} gapSwings={_gapSwings} facedSwings={_facedSwings}" : "")} -> {(Passed ? "PASS" : "FAIL")}");
+            Log($"{PatrolResultHead(legs, missed)}{StandMigrationsSuffix()}{(attackWhileWalking || swingAtWarp ? $" swings={_swings} gapSwings={_gapSwings} facedSwings={_facedSwings} warpSwings={_warpSwings}" : "")} -> {(Passed ? "PASS" : "FAIL")}");
         }
 
         /// <summary>Counts migrations every frame while a walk runs (WalkTo does not poll them).</summary>

@@ -235,6 +235,7 @@ namespace MultiplayerARPG.MMO.Mesh
         protected override void OnStartMigrateClient()
         {
             base.OnStartMigrateClient();
+            FlushOldConnection(); // DESIGN 1.15: what is queued on the old connection goes before it closes (MeshMapNetworkManager_HopFlush)
             EntityMovementDataHandlers.Clear();
         }
 
