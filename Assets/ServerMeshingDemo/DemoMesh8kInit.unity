@@ -813,6 +813,10 @@ PrefabInstance:
       value: 
       objectReference: {fileID: 1650493581}
     - target: {fileID: 6213249881384088648, guid: 5f7574e5b970d004d88890c5336c1c0b, type: 3}
+      propertyPath: updateFps
+      value: 60
+      objectReference: {fileID: 0}
+    - target: {fileID: 6213249881384088648, guid: 5f7574e5b970d004d88890c5336c1c0b, type: 3}
       propertyPath: puppetMotion
       value: 1
       objectReference: {fileID: 0}

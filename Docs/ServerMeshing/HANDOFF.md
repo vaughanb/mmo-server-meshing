@@ -1,7 +1,7 @@
 # Handoff — 2026-10-28
 
 Where the work stands, how to get it running on another machine, and what is left. The design record
-([DESIGN.md](DESIGN.md), version 1.11) has the full reasoning and measurements; this note is the short path in.
+([DESIGN.md](DESIGN.md), version 1.12) has the full reasoning and measurements; this note is the short path in.
 
 ## What was done
 
@@ -188,7 +188,13 @@ Where the work stands, how to get it running on another machine, and what is lef
     crossing character takes the crossing track as soon as the handoff state arrives, so it is on the track by
     the registration instead of easing onto it from ~0.5 m behind. The client's first state now moves it
     0.02–0.34 m (median ~0.14 m, was ~0.28 m); what is left is scatter in where the client is, not a bias.
-13. **Verified on the 8 km demo** (editor client plus headless bots), all seamless, no exceptions:
+13. **The demo copy's network tick is 60 Hz (DESIGN 1.12).** At the kit's 20 Hz the spawn of a crossing's character
+    waited for the server's next tick and its client's first state for the client's, up to 50 ms each. The
+    copy's map network manager (cells and editor client) now runs `updateFps` 60
+    (`ServerMeshDemo8kBuilder.NetworkUpdateFps`); the gap's median fell to about 80 ms and the client's first
+    state reaches the destination 33–67 ms after the registration (was 67–150). Rebuild the map servers after
+    changing it.
+14. **Verified on the 8 km demo** (editor client plus headless bots), all seamless, no exceptions:
    - a 750 m walk across three cells;
    - 16 quick back-and-forth crossings (adopted after 180–398 ms, none fell back);
    - a second player standing past the line: kept and adopted;
@@ -284,7 +290,10 @@ Where the work stands, how to get it running on another machine, and what is lef
      step for everyone watching, and a kinematic puppet across the line still stalls ~50 ms now and then. The
      BaseDemo-CE rig's maps are Static and stay steered (they move in bursts across a line);
    - a server-driven arrival (the destination spawns to the pre-connected, pre-authenticated client when the
-     handoff commits, without waiting for enter-game and ready) would take the gap to one round trip.
+     handoff commits, without waiting for enter-game and ready) would take the gap to one round trip. After 1.12
+     it would remove the handshake, about 32 ms of a ~61 ms gap on one machine and a round trip more with
+     latency; it needs the kit's client to take its connection id and the spawn without its enter-game and ready
+     (CE-14's client migration), so it is a core change.
    On Mono the first hop of a session still compiles the hop's first-time code (12.6 ms, the adoption read
    is warmed up); an IL2CPP client has no JIT. Nothing has been measured with real latency yet; pre-connect
    is what keeps the connect out of a laggy hop, the gap will still scale with the round trip until the

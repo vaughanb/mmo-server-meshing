@@ -58,6 +58,13 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         /// overrides it, the kit's prefab and the rig keep 30.
         /// </summary>
         public const int ServerFrameRate = 60;
+        /// <summary>
+        /// The map network manager's network tick (LiteNetLibManager.updateFps, 20 by default), on the cells and on the
+        /// client alike: the spawn of a crossing's character waits for the next server tick and its client's first state
+        /// for the next client tick, up to 50 ms each at 20 (DESIGN 1.12). The copy's scene overrides it; the kit's prefab,
+        /// the login, central and database managers, and the rig keep 20.
+        /// </summary>
+        public const int NetworkUpdateFps = 60;
         public const string MapInfoObject = "[Mesh] 8 km map info";
         public const string StartMapObject = "[Mesh] 8 km start map";
 
@@ -351,6 +358,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             {
                 SerializedObject so = new SerializedObject(map);
                 so.FindProperty("puppetMotion").enumValueIndex = (int)MeshPuppetMotion.Kinematic;
+                so.FindProperty("updateFps").intValue = NetworkUpdateFps;
                 so.ApplyModifiedPropertiesWithoutUndo();
             }
             foreach (MeshCentralNetworkManager central in root.GetComponentsInChildren<MeshCentralNetworkManager>(true))
