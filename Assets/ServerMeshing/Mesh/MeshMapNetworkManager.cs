@@ -43,6 +43,12 @@ namespace MultiplayerARPG.MMO.Mesh
         [Tooltip("CONTINUITY: seconds after the player's character is adopted to let the new cell's other spawns adopt their kept entities, before the kept entities it did not spawn are removed.")]
         public float keptObjectGraceSeconds = 1f;
 
+        [Tooltip("CONTINUITY: keep the other kept characters walking at their last velocity through a hop's gap, until the new cell's first state for each (DESIGN 1.08). Off: they stand, then catch up.")]
+        public bool extrapolateKeptCharacters = true;
+
+        [Tooltip("CONTINUITY: the longest a kept character is walked on without a state, in seconds; past it, it holds.")]
+        public float keptExtrapolationMaxSeconds = 0.3f;
+
         [Tooltip("SEAMLESS: keep the world rendering through the swap with dead-reckoned visual stand-ins and a preserved controller/camera/HUD, instead of holding a screenshot.")]
         public bool useVisualStandIns = true;
 

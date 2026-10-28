@@ -1,7 +1,7 @@
 # Handoff — 2026-10-28
 
 Where the work stands, how to get it running on another machine, and what is left. The design record
-([DESIGN.md](DESIGN.md), version 1.07) has the full reasoning and measurements; this note is the short path in.
+([DESIGN.md](DESIGN.md), version 1.08) has the full reasoning and measurements; this note is the short path in.
 
 ## What was done
 
@@ -154,7 +154,18 @@ Where the work stands, how to get it running on another machine, and what is lef
      gap swings and the forwarded one.
    - Not covered: a call still queued on the old connection when the warp closes it (up to one 15 ms LiteNetLib
      update; seen once in 15 hops).
-9. **Verified on the 8 km demo** (editor client plus headless bots), all seamless, no exceptions:
+9. **Undetectable handoff, step 8: the other characters keep walking through a hop (DESIGN 1.08, package
+   0.96.11).** A character walking beside the player stood 52–108 ms at the player's hop (no states reach a kept
+   entity until the new cell adopts it), then caught up at 2–4 times its speed.
+   - `MeshKeptExtrapolator` moves each kept character that was walking on at the velocity it was drawn with
+     (capped at 0.3 s) from the frame the kit stands it, until the new cell's first state after the adoption;
+     the kit interpolates from there. `extrapolateKeptCharacters` switches it.
+   - Measured (A/B, a second bot 3 m beside): off, the stand began inside the gap in 14 of 17 walking hops; on,
+     in none of 16, with the new cell's first correction 0.2–7.7 cm.
+   - The CONTINUITY line now ends with `others:` (`MeshKeptMotionMeter`: per walking kept character, its
+     longest stand and when it began after the warp, and its fastest frame against its median speed) and
+     `kept walking N, handed back M`.
+10. **Verified on the 8 km demo** (editor client plus headless bots), all seamless, no exceptions:
    - a 750 m walk across three cells;
    - 16 quick back-and-forth crossings (adopted after 180–398 ms, none fell back);
    - a second player standing past the line: kept and adopted;
@@ -246,8 +257,9 @@ Where the work stands, how to get it running on another machine, and what is lef
      keeping the old connection for a frame in CE-14's `MigrateClient` (a core change) or a blocking flush;
    - ammunition per trigger, a skill item taken after the last trigger and a charge in progress are not
      carried (1.06), and no skill has been cast across a crossing in a run yet;
-   - extrapolating kept entities through the gap, and skipping the interpolation reset of an adopted entity
-     whose owner did not change;
+   - the observer's view of someone else crossing: with 1.08 on, stands of 12–172 ms remain 130–530 ms after
+     the player's own warp, where the second bot's own crossings and turns fall; measure a crossing seen from a
+     player standing still at the line;
    - a server-driven arrival (the destination spawns to the pre-connected, pre-authenticated client when the
      handoff commits, without waiting for enter-game and ready) would take the gap to one round trip.
    On Mono the first hop of a session still compiles the hop's first-time code (12.6 ms, the adoption read

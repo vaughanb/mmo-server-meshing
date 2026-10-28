@@ -216,7 +216,9 @@ namespace MultiplayerARPG.MMO.Mesh
                 {
                     Vector3 v = (pos - t.lastPos) / dt;
                     if (v.magnitude > 15f) v = Vector3.zero; // teleport, not motion
-                    t.velocity = Vector3.Lerp(t.velocity, v, 0.5f);
+                    // Smoothed over ~0.1 s, not per frame: a remote character's motion comes in logic ticks, and at a few
+                    // milliseconds a frame a per-frame blend followed each tick's pause (DESIGN 1.08).
+                    t.velocity = Vector3.Lerp(t.velocity, v, 1f - Mathf.Exp(-dt / VelocitySmoothingSeconds));
                 }
                 t.lastPos = pos;
                 t.lastTime = now;
@@ -230,6 +232,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 for (int i = 0; i < _tmpRemove.Count; ++i) _tracked.Remove(_tmpRemove[i]);
             }
         }
+
+        private const float VelocitySmoothingSeconds = 0.1f;
 
         private Vector3 VelocityOf(BaseGameEntity entity)
         {
@@ -836,6 +840,8 @@ namespace MultiplayerARPG.MMO.Mesh
             int worstFrame = -1, connectedFrame = -1, adoptedFrame = -1;
             // Steps far longer than the frame explains (more than twice the move speed allows): where a jump happened.
             System.Text.StringBuilder jumps = new System.Text.StringBuilder();
+            MeshKeptMotionMeter others = null;
+            MeshKeptExtrapolator keepWalking = null;
             Vector3 lastPlayer = posBefore;
             Vector3 lastCamera = Camera.main != null ? Camera.main.transform.position : Vector3.zero;
             // Garbage collections during the hop, and whether one fell in the longest frame (Mono's collector stops the world).
@@ -845,6 +851,8 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 float ms = Time.unscaledDeltaTime * 1000f;
                 frameMs.Add(ms);
+                keepWalking?.Sample(); // before the meter: it measures what is drawn
+                others?.Sample(ms);
                 int gcNow = System.GC.CollectionCount(0);
                 if (ms > worstFrameMs)
                 {
@@ -891,6 +899,9 @@ namespace MultiplayerARPG.MMO.Mesh
                 yield break;
             }
             int keptCount = _manager.Assets.KeptObjects.Count;
+            others = new MeshKeptMotionMeter(_manager.Assets.KeptObjects, entity); // DESIGN 1.08: the other characters through the gap
+            if (_manager.extrapolateKeptCharacters)
+                keepWalking = new MeshKeptExtrapolator(_manager.Assets.KeptObjects, entity, VelocityOf, _manager.keptExtrapolationMaxSeconds);
 
             long tConnected = -1, tAdopted = -1;
             if (preconnected)
@@ -957,6 +968,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 Sample();
             }
             sw.Stop();
+            keepWalking?.Release();
 
             Vector3 posAfter = entity != null ? entity.EntityTransform.position : posBefore;
             LastResult = new Result
@@ -974,7 +986,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 $"Migration to {address}:{port} | CONTINUITY fellBack=False preconnected={preconnected} kept={keptCount} adopted={adoptedCount} unadopted={unadopted} | " +
                 $"connected={tConnected}ms playerAdopted={tAdopted}ms settled={tSettled}ms | player object {objectIdBefore} -> {identity.ObjectId}, " +
                 $"moved {Vector3.Distance(posBefore, posAfter):0.##} m during the hop | frames {Spread(frameMs, "ms")} | player step {Spread(playerSteps, "m")} | camera step {Spread(cameraSteps, "m")} | jumps:{(jumps.Length > 0 ? jumps.ToString() : " none")} | " +
-                $"longest frame {worstFrameMs:0.#}ms at f{worstFrame} (connected f{connectedFrame}, adopted f{adoptedFrame}){(gcInWorstFrame ? " with a GC" : "")} | gcs {System.GC.CollectionCount(0) - gcAtStart} | adoption spawn work {playerAdoptionMs:0.##}ms player, {adoptionMs:0.##}ms all");
+                $"longest frame {worstFrameMs:0.#}ms at f{worstFrame} (connected f{connectedFrame}, adopted f{adoptedFrame}){(gcInWorstFrame ? " with a GC" : "")} | gcs {System.GC.CollectionCount(0) - gcAtStart} | adoption spawn work {playerAdoptionMs:0.##}ms player, {adoptionMs:0.##}ms all{others?.Summary()}{(keepWalking != null ? $" | kept walking {keepWalking.Walked}, handed back {keepWalking.HandedBack}{keepWalking.CorrectionSummary()}" : " | kept walking off")}");
         }
 
         #endregion
