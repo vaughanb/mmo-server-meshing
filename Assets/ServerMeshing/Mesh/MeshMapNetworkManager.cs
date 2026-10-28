@@ -234,6 +234,7 @@ namespace MultiplayerARPG.MMO.Mesh
             loadOfflineSceneWhenClientStopped = _prevLoadOfflineScene;
             IsMigrating = false;
             MigrationDisconnected = false; // never carried into the next hop
+            FlushStamps();
         }
 
         /// <summary>Set while migrating when the new cell dropped us; the controller reads it, BeginMigrationAttempt clears it.</summary>
@@ -295,8 +296,26 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private void Stamp(string what)
         {
-            if (traceHandoffTiming)
-                Logging.Log("MeshTrace", $"{System.DateTime.Now:HH:mm:ss.fff} {(IsServer ? "S" : "C")} f{Time.frameCount} {what}");
+            if (!traceHandoffTiming)
+                return;
+            // A client's stamps during a hop are buffered and written once the hop ends: in the editor each log line
+            // captures a stack trace (milliseconds each), which showed up as the hop's own frame cost.
+            if (!IsServer && IsMigrating)
+            {
+                _stampBuffer.Append(System.DateTime.Now.ToString("HH:mm:ss.fff")).Append(" C f").Append(Time.frameCount).Append(' ').Append(what).Append('\n');
+                return;
+            }
+            Logging.Log("MeshTrace", $"{System.DateTime.Now:HH:mm:ss.fff} {(IsServer ? "S" : "C")} f{Time.frameCount} {what}");
+        }
+
+        private readonly System.Text.StringBuilder _stampBuffer = new System.Text.StringBuilder();
+
+        private void FlushStamps()
+        {
+            if (_stampBuffer.Length == 0)
+                return;
+            Logging.Log("MeshTrace", "hop stamps:\n" + _stampBuffer.ToString().TrimEnd('\n'));
+            _stampBuffer.Clear();
         }
 
         [Tooltip("DEBUG (editor): save a screenshot every few frames during a seamless swap to <project>/Logs/MigrationFrames for visual inspection.")]
@@ -676,6 +695,7 @@ namespace MultiplayerARPG.MMO.Mesh
             _velocities.Clear();
             _handoffsInProgress.Clear();
             _handoffRetryAfter.Clear();
+            PreconnectForgetAll();
             base.OnStopServer();
         }
 
@@ -693,7 +713,10 @@ namespace MultiplayerARPG.MMO.Mesh
             }
 #endif
             if (IsServer)
+            {
                 GhostingOnPeerDisconnected(connectionId);
+                PreconnectForget(connectionId);
+            }
             base.OnPeerDisconnected(connectionId, reason, socketError);
         }
 
@@ -855,6 +878,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 }
                 Vector3 pos = entity.EntityTransform.position;
                 TrackVelocity(entity.Id, pos, now);
+                PreconnectHint(entity, pos); // the client holds a connection to the cell it is approaching (MeshMapNetworkManager_Preconnect)
                 if (MeshCell.Same(world.OwnerOf(OwnCell, pos), OwnCell))
                     continue;
                 // Hysteresis: only flip once clearly past the edge, so loitering on the line doesn't thrash.

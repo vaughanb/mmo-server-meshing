@@ -335,6 +335,38 @@ namespace LiteNetLibManager
             return true;
         }
 
+        /// <summary>
+        /// <see cref="MigrateClient(string, int)"/> on a transport that is connected to the new server already (opened
+        /// ahead of the hop, its connect event consumed by the holder): the client takes it over and enters the game at
+        /// once, with no connect round trip. The transport becomes the client's and is destroyed with it.
+        /// </summary>
+        public virtual bool MigrateClient(string networkAddress, int networkPort, ITransport connectedTransport)
+        {
+            if (!IsClient || IsServer || Client == null)
+            {
+                if (LogError) Logging.LogError(LogTag, "Cannot migrate: not a running client.");
+                return false;
+            }
+            if (connectedTransport == null || !connectedTransport.IsClientStarted)
+            {
+                if (LogError) Logging.LogError(LogTag, "Cannot migrate on a transport that is not connected.");
+                return false;
+            }
+            if (LogInfo) Logging.Log(LogTag, $"Migrating client to {networkAddress}:{networkPort} on a pre-connected transport.");
+            IsMigratingClient = true;
+            OnStartMigrateClient();
+            Client.StopClient();
+            if (_clientTransport != null && !ReferenceEquals(_clientTransport, connectedTransport))
+                _clientTransport.Destroy();
+            this.networkAddress = networkAddress;
+            this.networkPort = networkPort;
+            _clientTransport = connectedTransport;
+            if (!Client.AdoptConnectedTransport(connectedTransport))
+                return false;
+            OnClientConnected();
+            return true;
+        }
+
         /// <summary>Called by <see cref="MigrateClient"/> before the old connection is closed.</summary>
         protected virtual void OnStartMigrateClient() { }
 

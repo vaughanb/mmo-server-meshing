@@ -42,7 +42,11 @@ namespace MultiplayerARPG.MMO.Mesh
             public int standIns;
             public bool mountedBefore;      // the character was riding when the handoff started
             public long mountedAfterMs;     // when the new entity was seen riding again (-1 = never during the swap)
+            public bool preconnected;       // continuity only: the hop used a connection opened ahead of it (DESIGN 1.03)
         }
+
+        /// <summary>Continuity hops that used a pre-connected transport, for automated tests / tooling.</summary>
+        public static int PreconnectedHops;
 
         public static Result LastResult;
         public static int CompletedCount;
@@ -175,6 +179,8 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private void Update()
         {
+            if (_manager != null)
+                PollPreconnect();
             if (_running || _manager == null || !_manager.IsClientConnected || _manager.Assets == null)
                 return;
             if (!_warmedUp && _manager.warmUpMigrationCode && MeshMigrationWarmup.IsReady(GameInstance.PlayingCharacterEntity))
@@ -670,6 +676,122 @@ namespace MultiplayerARPG.MMO.Mesh
 
         #endregion
 
+        #region Pre-connect (DESIGN 1.03)
+
+        // The idle connection to the cell we are approaching, opened on the cell's hint (MeshMapNetworkManager_Preconnect)
+        // and handed to the continuity hop when it goes to that very address. Its connect event is consumed here, so
+        // LiteNetLibManager.MigrateClient(address, port, transport) raises the manager's connected event itself.
+        private sealed class WarmConnection
+        {
+            public ITransport transport;
+            public string address;
+            public int port;
+            public string cellId;
+            public bool connected;
+            public float startedAt;
+            public long buildMs;
+        }
+
+        private WarmConnection _warm;
+
+        [Tooltip("A pre-connect that has not connected after this many seconds is dropped (the hop then connects as before).")]
+        public float preconnectTimeoutSeconds = 5f;
+
+        /// <summary>The cell we are on says we approach <paramref name="cellId"/>: hold a connection to it. Idempotent for the same address.</summary>
+        public void Preconnect(string address, int port, string cellId)
+        {
+            // Also while a hop settles: the hint is the new cell's (the one we left stopped ticking for us), and a cell
+            // sends it once per change, so a dropped hint would never come again.
+            if (_warm != null && _warm.address == address && _warm.port == port)
+                return;
+            DropPreconnect("another cell is nearer now");
+            if (_manager.TransportFactory == null)
+            {
+                Logging.LogWarning("Spike2", "Pre-connect: no transport factory yet; the hop will connect as before");
+                return;
+            }
+            System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
+            ITransport transport = _manager.TransportFactory.Build();
+            if (transport == null || !transport.StartClient(address, port))
+            {
+                transport?.Destroy();
+                Logging.LogWarning("Spike2", $"Pre-connect: could not start a connection to cell {cellId} at {address}:{port}; the hop will connect as before");
+                return;
+            }
+            _warm = new WarmConnection { transport = transport, address = address, port = port, cellId = cellId, startedAt = Time.realtimeSinceStartup, buildMs = sw.ElapsedMilliseconds };
+            Logging.Log("Spike2", $"Pre-connect: connecting to cell {cellId} at {address}:{port} (transport built and started in {_warm.buildMs} ms, frame {Time.frameCount})");
+        }
+
+        /// <summary>Closes the warm connection, if any.</summary>
+        public void DropPreconnect(string why)
+        {
+            if (_warm == null)
+                return;
+            WarmConnection warm = _warm;
+            _warm = null;
+            try
+            {
+                warm.transport.Destroy();
+            }
+            catch (System.Exception ex)
+            {
+                Logging.LogWarning("Spike2", $"Pre-connect: closing the connection to cell {warm.cellId} threw: {ex.Message}");
+            }
+            Logging.Log("Spike2", $"Pre-connect: dropped the connection to cell {warm.cellId} ({why})");
+        }
+
+        /// <summary>Every frame: the warm connection's events (connected, dropped) and its timeout.</summary>
+        private void PollPreconnect()
+        {
+            if (_warm == null)
+                return;
+            while (_warm != null && _warm.transport.ClientReceive(out TransportEventData eventData))
+            {
+                switch (eventData.type)
+                {
+                    case ENetworkEvent.ConnectEvent:
+                        _warm.connected = true;
+                        Logging.Log("Spike2", $"Pre-connect: connected to cell {_warm.cellId} after {(Time.realtimeSinceStartup - _warm.startedAt) * 1000f:0} ms (frame {Time.frameCount})");
+                        break;
+                    case ENetworkEvent.DisconnectEvent:
+                        DropPreconnect($"it disconnected: {eventData.disconnectInfo.Reason}");
+                        break;
+                    case ENetworkEvent.ErrorEvent:
+                        DropPreconnect($"network error {eventData.socketError}");
+                        break;
+                    default:
+                        break; // nothing is expected before we enter the game there
+                }
+            }
+            if (_warm != null && !_warm.connected && Time.realtimeSinceStartup - _warm.startedAt > preconnectTimeoutSeconds)
+                DropPreconnect($"no answer in {preconnectTimeoutSeconds:0.#} s");
+        }
+
+        /// <summary>
+        /// At the hop: the warm connection to exactly this address, connected, is handed over (and forgotten here); a
+        /// warm connection to anywhere else, or one still connecting, is dropped and the hop connects as before.
+        /// </summary>
+        private ITransport TakeWarmConnection(string address, int port)
+        {
+            if (_warm == null)
+                return null;
+            if (_warm.connected && _warm.address == address && _warm.port == port)
+            {
+                ITransport transport = _warm.transport;
+                _warm = null;
+                return transport;
+            }
+            DropPreconnect(_warm.connected ? $"the hop goes to {address}:{port}, not to cell {_warm.cellId}" : "it was still connecting at the hop");
+            return null;
+        }
+
+        private void OnDisable()
+        {
+            DropPreconnect("controller disabled");
+        }
+
+        #endregion
+
         #region Continuity strategy (CE-14)
 
         /// <summary>"max X (median Y)" of per-frame samples: a hitch or a jump stands out against the median.</summary>
@@ -716,15 +838,21 @@ namespace MultiplayerARPG.MMO.Mesh
             System.Text.StringBuilder jumps = new System.Text.StringBuilder();
             Vector3 lastPlayer = posBefore;
             Vector3 lastCamera = Camera.main != null ? Camera.main.transform.position : Vector3.zero;
+            // Garbage collections during the hop, and whether one fell in the longest frame (Mono's collector stops the world).
+            int gcAtStart = System.GC.CollectionCount(0), gcLastSample = gcAtStart;
+            bool gcInWorstFrame = false;
             void Sample()
             {
                 float ms = Time.unscaledDeltaTime * 1000f;
                 frameMs.Add(ms);
+                int gcNow = System.GC.CollectionCount(0);
                 if (ms > worstFrameMs)
                 {
                     worstFrameMs = ms;
                     worstFrame = Time.frameCount - 1; // the delta is the frame that just ended
+                    gcInWorstFrame = gcNow != gcLastSample;
                 }
+                gcLastSample = gcNow;
                 if (entity != null)
                 {
                     Vector3 p = entity.EntityTransform.position;
@@ -746,8 +874,14 @@ namespace MultiplayerARPG.MMO.Mesh
             _manager.BeginMigration();
             _manager.BeginMigrationAttempt();
             _manager.Assets.onObjectAdopted += CountAdoption;
-            if (identity == null || !_manager.MigrateClient(address, port))
+            // A connection opened ahead of the hop to this very cell is taken over: no transport rebuilt, no connect round trip.
+            ITransport warm = TakeWarmConnection(address, port);
+            bool preconnected = warm != null;
+            bool started = identity != null && (preconnected ? _manager.MigrateClient(address, port, warm) : _manager.MigrateClient(address, port));
+            if (!started)
             {
+                if (warm != null)
+                    try { warm.Destroy(); } catch (System.Exception) { }
                 Logging.LogWarning("Spike2", $"Continuity migration to {address}:{port} could not start; using the stand-in swap");
                 _manager.Assets.onObjectAdopted -= CountAdoption;
                 _manager.EndMigrateClient();
@@ -759,6 +893,11 @@ namespace MultiplayerARPG.MMO.Mesh
             int keptCount = _manager.Assets.KeptObjects.Count;
 
             long tConnected = -1, tAdopted = -1;
+            if (preconnected)
+            {
+                tConnected = sw.ElapsedMilliseconds; // connected before the hop began
+                connectedFrame = Time.frameCount;
+            }
             bool adoptedPlayer = false;
             float deadline = Time.realtimeSinceStartup + _manager.migrationReadyTimeoutSeconds;
             while (Time.realtimeSinceStartup < deadline)
@@ -825,15 +964,17 @@ namespace MultiplayerARPG.MMO.Mesh
                 address = address, port = port, connected = tConnected >= 0, playerReady = true, seamless = true, fellBack = false,
                 connectedMs = tConnected, playerReadyMs = tAdopted, fadedMs = tSettled,
                 positionBefore = posBefore, positionAfter = posAfter,
-                positionJump = 0f, resyncJump = 0f, framesWithoutCamera = 0, standIns = 0,
+                positionJump = 0f, resyncJump = 0f, framesWithoutCamera = 0, standIns = 0, preconnected = preconnected,
             };
             CompletedCount++;
+            if (preconnected)
+                PreconnectedHops++;
             RunQueuedHop();
             Logging.Log("Spike2",
-                $"Migration to {address}:{port} | CONTINUITY fellBack=False kept={keptCount} adopted={adoptedCount} unadopted={unadopted} | " +
+                $"Migration to {address}:{port} | CONTINUITY fellBack=False preconnected={preconnected} kept={keptCount} adopted={adoptedCount} unadopted={unadopted} | " +
                 $"connected={tConnected}ms playerAdopted={tAdopted}ms settled={tSettled}ms | player object {objectIdBefore} -> {identity.ObjectId}, " +
                 $"moved {Vector3.Distance(posBefore, posAfter):0.##} m during the hop | frames {Spread(frameMs, "ms")} | player step {Spread(playerSteps, "m")} | camera step {Spread(cameraSteps, "m")} | jumps:{(jumps.Length > 0 ? jumps.ToString() : " none")} | " +
-                $"longest frame {worstFrameMs:0.#}ms at f{worstFrame} (connected f{connectedFrame}, adopted f{adoptedFrame}) | adoption spawn work {playerAdoptionMs:0.##}ms player, {adoptionMs:0.##}ms all");
+                $"longest frame {worstFrameMs:0.#}ms at f{worstFrame} (connected f{connectedFrame}, adopted f{adoptedFrame}){(gcInWorstFrame ? " with a GC" : "")} | gcs {System.GC.CollectionCount(0) - gcAtStart} | adoption spawn work {playerAdoptionMs:0.##}ms player, {adoptionMs:0.##}ms all");
         }
 
         #endregion

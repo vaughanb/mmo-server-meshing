@@ -1,7 +1,7 @@
-# Handoff — 2026-10-27
+# Handoff — 2026-10-28
 
 Where the work stands, how to get it running on another machine, and what is left. The design record
-([DESIGN.md](DESIGN.md), version 1.01) has the full reasoning and measurements; this note is the short path in.
+([DESIGN.md](DESIGN.md), version 1.03) has the full reasoning and measurements; this note is the short path in.
 
 ## What was done
 
@@ -68,7 +68,33 @@ Where the work stands, how to get it running on another machine, and what is lef
    - Tests: 5 new in `LiteNetLibManager.Tests/KeptObjectAdoptionTests`; the full EditMode suite ran clean
      (3,223: 3,222 passed, 1 skipped by design).
    - Also fixed: a stale Build Settings entry for the 8 km scene's old path (`ServerMeshingDemo/ServerMeshTestMap8k.unity`).
-4. **Verified on the 8 km demo** (editor client plus headless bots), all seamless, no exceptions:
+4. **Undetectable handoff, step 3: pre-connect (DESIGN 1.03, package 0.96.7).** The connect frame was the
+   longest frame left in a hop (the client transport destroyed and rebuilt when the warp arrived) and the
+   connect handshake a round trip of the gap.
+   - Server: the boundary tick tells each owned player's client which neighbouring cell it is approaching
+     (`preconnectDistance`, 30 m, nearest registered and linked neighbour), one `MeshPreconnectMessage`
+     per change, an empty address when it leaves the band (`MeshMapNetworkManager_Preconnect.cs`).
+   - Client: `ClientMigrationController` holds one warm, idle connection to that cell (built from the
+     manager's transport factory, polled every frame, dropped on disconnect, on a 5 s timeout, on a hint to
+     another cell, and when the client stops). A continuity hop to exactly that address takes it over.
+   - Core (CE-14): `LiteNetLibClient.AdoptConnectedTransport` and
+     `LiteNetLibManager.MigrateClient(address, port, connectedTransport)` — the client continues on the
+     warm transport and raises its own connected event, so enter-game goes out in the hop's frame.
+   - The per-hop line carries `preconnected=True|False`; `ClientMigrationController.PreconnectedHops` counts them.
+   - The destination sees an ordinary connected peer that has not entered the game (one `LiteNetLibPlayer`);
+     LiteNetLib keeps it alive (1 s ping, 5 s timeout). The map servers must be rebuilt for the hint to exist.
+   - Tests: 3 new in `LiteNetLibManager.Tests/PreconnectedMigrationTests`; the full EditMode suite ran clean
+     (3,226: 3,225 passed, 1 skipped by design).
+   - Found on the way: a hint that arrived while a hop still settled was dropped and, being sent once per
+     change, never came again (half the first run's hops connected cold); hints are taken at any time now.
+     The client's trace stamps are buffered during a hop and written once at its end: in the editor each log
+     line captures a stack trace, and five of them sat in the enter-game frame.
+   - Measured (patrol x −15 ↔ 15 at z 512, ten hops a run): every hop `preconnected=True`; the warm
+     connection connects 1–62 ms after the hint, long before the line; steady hops' longest frame
+     6.3–8.5 ms against a 3.1–3.4 ms median with no GC in it, the session's first hop 12.6 ms (first-time
+     code) — the connect frame is no longer where a hop spends its time; the gap (`playerAdopted`)
+     stays 250–360 ms, which is the destination's database load and relates data, the next item.
+5. **Verified on the 8 km demo** (editor client plus headless bots), all seamless, no exceptions:
    - a 750 m walk across three cells;
    - 16 quick back-and-forth crossings (adopted after 180–398 ms, none fell back);
    - a second player standing past the line: kept and adopted;
@@ -106,7 +132,10 @@ Where the work stands, how to get it running on another machine, and what is lef
   It also gives per-frame `frames` / `player step` / `camera step` spreads, `jumps:` (frames whose
   step exceeds twice the move speed), `longest frame <ms> at f<n> (connected f<n>, adopted f<n>)` and
   `adoption spawn work`. `unadopted` > 0 or any jump means something on screen popped; a longest frame on the
-  adoption frame means the state read did work (compare with the `MeshTrace … C f<n>` stamps, same numbers).
+  adoption frame means the state read did work (compare with the `MeshTrace` stamps, same frame numbers;
+  since 1.03 a client's stamps during a hop come as one `hop stamps:` entry with a `C f<n>` line each, written
+  when the hop ends). `preconnected=True` says the hop used the warm connection; `Pre-connect:` lines (tag
+  `Spike2` on the client, `Mesh` in a cell's log) show the hint and the connect.
 - **Per-cell server logs:** `Logs/Log_Map(ServerMeshTestMap8k)-Ch(<cell>)-…info.log`. Their
   `Work window` lines carry player and monster counts.
 - **Editor auto-client** (no UI). Enter Play, wait for `Sleeping cells: 64 cell(s) start on demand`, then
@@ -138,15 +167,17 @@ Where the work stands, how to get it running on another machine, and what is lef
 
 ## Open items, in rough order
 
-1. **What is left of the crossing's frame.** With 1.02 the longest frame of a hop is 5.6–9.7 ms against a
-   3 ms median and sits in the connect frame (the client transport is destroyed and rebuilt there) or in the
-   tail, no longer on any hop step. The plan's next steps take the rest:
-   - pre-connecting to the next cell (removes the connect frame and most of the 250–340 ms gap);
-   - in-memory state transfer instead of the database round trip;
+1. **The gap, not the frame.** With 1.03 a hop's longest frame is 5–8.5 ms against a 3 ms median, in no
+   particular frame and with no GC in it; the connect is gone from the hop. What is left is the 250–360 ms
+   between the warp and the adoption, which is the destination's database load and relates-data load, and
+   what happens to actions during it. The plan's next steps, in order:
+   - in-memory state transfer instead of the database round trip (the gap becomes a round trip);
    - holding actions pressed mid-hop (the arrival's respawn RPC still clears the owner's action states);
    - extrapolating kept entities through the gap.
-   On Mono the first hop of a session still compiles the hop's other first-time code (the adoption read is
-   warmed up); an IL2CPP client has no JIT.
+   On Mono the first hop of a session still compiles the hop's first-time code (12.6 ms, the adoption read
+   is warmed up); an IL2CPP client has no JIT. Nothing has been measured with real latency yet; pre-connect
+   is what keeps the connect out of a laggy hop, the gap will still scale with the round trip until the
+   transfer is in memory.
 2. **Monsters at a crossing:** not yet exercised. They use the same nearest-prefab rule as players, but
    no pack has chased a player over a line yet; the level 1–2 wolves did not aggro.
 3. **Mount and pet crossings.** Demo characters start with no mount or pet item; add one to the test
