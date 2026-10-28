@@ -3473,8 +3473,9 @@ namespace MultiplayerARPG.MMO.Mesh
                 action = msg.action,
                 originObjectId = msg.originObjectId,
                 velocity = msg.velocity,
-                trackOrigin = msg.data != null ? (Vector3)msg.data.CurrentPosition - msg.velocity * handoffLeadSeconds : Vector3.zero,
+                trackOrigin = msg.data != null ? (Vector3)msg.data.CurrentPosition - msg.velocity * (handoffLeadSeconds - arrivalTrackLeadSeconds) : Vector3.zero,
             };
+            SteerArrivingPuppet(msg.characterId, _incomingHandoffFrom[msg.characterId].trackOrigin, msg.velocity); // DESIGN 1.11 (MeshMapNetworkManager_ArrivalWalk)
             Stamp($"handoff state for {msg.data?.CharacterName} ({msg.characterId}) received from {_incomingHandoffFrom[msg.characterId].fromZone}{(msg.action.IsSet ? $", carrying {msg.action}" : string.Empty)}");
         }
 

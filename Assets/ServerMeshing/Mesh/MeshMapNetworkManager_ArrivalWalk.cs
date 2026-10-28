@@ -28,6 +28,9 @@ namespace MultiplayerARPG.MMO.Mesh
         [Tooltip("Destination: how fast an arriving character's puppet pose eases onto its crossing track (the time constant, seconds).")]
         public float arrivalWalkEaseSeconds = 0.1f;
 
+        [Tooltip("Destination: how far ahead of the origin's last reckoning the crossing track runs, in seconds of the crossing velocity: the client is ahead of what its server last heard (about 0.1 m at 4 m/s on one machine, DESIGN 1.11).")]
+        public float arrivalTrackLeadSeconds = 0.025f;
+
 #if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
         private sealed class ArrivalWalk
         {
@@ -87,7 +90,10 @@ namespace MultiplayerARPG.MMO.Mesh
                     // The kit moved it: the client's first state. What it corrected is what an observer sees jump.
                     Vector3 offTrack = t.position - onTrack;
                     offTrack.y = 0f;
-                    Stamp($"arrival {walk.name}: walked {(now - walk.since) * 1000f:0} ms at {walk.velocity.magnitude:0.0} m/s, then its client's state moved it {moved.magnitude:0.###} m ({offTrack.magnitude:0.###} m off the crossing track)");
+                    Vector3 along = walk.velocity.normalized;
+                    float ahead = Vector3.Dot(offTrack, along);                                 // + the client is ahead of the track
+                    float aside = Vector3.Cross(along, offTrack).y;
+                    Stamp($"arrival {walk.name}: walked {(now - walk.since) * 1000f:0} ms at {walk.velocity.magnitude:0.0} m/s, then its client's state moved it {moved.magnitude:0.###} m ({offTrack.magnitude:0.###} m off the crossing track: {ahead:+0.###;-0.###} m along, {aside:+0.###;-0.###} m aside, {(now - walk.trackTime) * 1000f:0} ms after the crossing)");
                     _arrivalWalks.RemoveAt(i);
                     continue;
                 }
@@ -96,6 +102,34 @@ namespace MultiplayerARPG.MMO.Mesh
                 t.position = target;
                 walk.written = target;
             }
+        }
+
+        /// <summary>
+        /// Destination, as the handoff state arrives (DESIGN 1.11): the crossing character's kinematic puppet here takes the
+        /// crossing track as its sample, so its track's own blend carries it onto the track before the arrival registers. The
+        /// walk then starts from a pose near the track instead of one that trailed it by ~0.5 m and was still easing off when
+        /// the client's first state came (most of the 0.12-0.66 m step).
+        /// </summary>
+        private void SteerArrivingPuppet(string characterId, Vector3 trackOrigin, Vector3 velocity)
+        {
+            if (!walkArrivals || puppetMotion != MeshPuppetMotion.Kinematic || string.IsNullOrEmpty(characterId)
+                || !_ghosts.TryGetValue(characterId, out MeshGhost ghost) || ghost.body == null || ghost.entity == null)
+                return;
+            velocity.y = 0f;
+            if (velocity.magnitude < ArrivalWalkMinSpeed)
+                return;
+            BaseCharacterEntity entity = ghost.entity;
+            GhostSnapshotMessage track = new GhostSnapshotMessage
+            {
+                kind = GhostKind.Player,
+                characterId = characterId,
+                position = trackOrigin,
+                yaw = entity.EntityTransform.eulerAngles.y,
+                velocity = velocity,
+                movementState = (byte)entity.MovementState,
+                extraMovementState = (byte)entity.ExtraMovementState,
+            };
+            FeedKinematicPuppet(ghost, track, Vector3.Distance(ghost.body.Pose(Time.unscaledTime), trackOrigin), true);
         }
 
         /// <summary>
@@ -124,6 +158,7 @@ namespace MultiplayerARPG.MMO.Mesh
         }
 #else
         private void BeginArrivalWalk(BasePlayerCharacterEntity entity, Vector3 trackOrigin, float trackTime, Vector3 velocity) { }
+        private void SteerArrivingPuppet(string characterId, Vector3 trackOrigin, Vector3 velocity) { }
         private void ArrivalWalkUpdate() { }
         private void SeedDemotedPuppet(BasePlayerCharacterEntity entity, Vector3 velocity) { }
 #endif

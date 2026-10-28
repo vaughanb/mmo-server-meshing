@@ -1,7 +1,7 @@
 # Handoff — 2026-10-28
 
 Where the work stands, how to get it running on another machine, and what is left. The design record
-([DESIGN.md](DESIGN.md), version 1.10) has the full reasoning and measurements; this note is the short path in.
+([DESIGN.md](DESIGN.md), version 1.11) has the full reasoning and measurements; this note is the short path in.
 
 ## What was done
 
@@ -184,7 +184,11 @@ Where the work stands, how to get it running on another machine, and what is lef
     one-state message from an unregistered caller and replays it at registration, retargets the origin's id
     after, and drops one naming an object that is not the caller's. Measured: none of the error in a 150 s
     two-bot run.
-12. **Verified on the 8 km demo** (editor client plus headless bots), all seamless, no exceptions:
+12. **The arriving character's last step halved (DESIGN 1.11, package 0.96.14).** The destination's puppet of a
+    crossing character takes the crossing track as soon as the handoff state arrives, so it is on the track by
+    the registration instead of easing onto it from ~0.5 m behind. The client's first state now moves it
+    0.02–0.34 m (median ~0.14 m, was ~0.28 m); what is left is scatter in where the client is, not a bias.
+13. **Verified on the 8 km demo** (editor client plus headless bots), all seamless, no exceptions:
    - a 750 m walk across three cells;
    - 16 quick back-and-forth crossings (adopted after 180–398 ms, none fell back);
    - a second player standing past the line: kept and adopted;
@@ -276,7 +280,7 @@ Where the work stands, how to get it running on another machine, and what is lef
      keeping the old connection for a frame in CE-14's `MigrateClient` (a core change) or a blocking flush;
    - ammunition per trigger, a skill item taken after the last trigger and a charge in progress are not
      carried (1.06), and no skill has been cast across a crossing in a run yet;
-   - someone else's crossing, after 1.09: the client's first state still moves the arrival about 0.2 m in one
+   - someone else's crossing, after 1.11: the client's first state still moves the arrival about 0.14 m in one
      step for everyone watching, and a kinematic puppet across the line still stalls ~50 ms now and then. The
      BaseDemo-CE rig's maps are Static and stay steered (they move in bursts across a line);
    - a server-driven arrival (the destination spawns to the pre-connected, pre-authenticated client when the
