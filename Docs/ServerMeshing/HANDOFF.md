@@ -45,7 +45,30 @@ Where the work stands, how to get it running on another machine, and what is lef
      - `arrivalTeleportDistance`: the arrival no longer teleports the character back.
      - `MeshStandInAnimation` and `MeshStandInFootsteps` keep the fallback's look-alikes animating and
        stepping.
-3. **Verified on the 8 km demo** (editor client plus headless bots), all seamless, no exceptions:
+3. **Undetectable handoff, step 2: the long frame (DESIGN 1.02, package 0.96.6).** Before, each crossing had one
+   frame of 19–48 ms against a 5 ms median. It was the adoption itself: the new cell's spawn of a kept object
+   read its initial state as a first load, so every sync field fired its change callback and every sync list was
+   cleared and re-added entry by entry; the character re-marked its appearance and stat caches and every HUD
+   list rebuilt. The enter-game step also re-ran the kit's asset registration and cleared every effect pool.
+   - Core edit (CE-14, upstreamable): an adopted object's initial state is applied as a **diff** — a sync field
+     fires only when its value differs, a sync list fires Set / Add / RemoveLast only for what differs
+     (`LiteNetLibElement.IsBeingAdopted`, `LiteNetLibSyncField`, `LiteNetLibSyncList.ReadInitialAsDiff`);
+     `LiteNetLibAssets.WarmUpAdoption` and `LastAdoptionMilliseconds`; the client's `SetObjectOwner … is not
+     spawned` is a dev log, not a warning.
+   - Add-on: a hop that stays in the active scene (`MeshMapNetworkManager.SameSceneHop`) skips
+     `Assets.Initialize`, `InitPoolingQueues` and `MeshRegisterSceneEntities`; `MeshMigrationWarmup` runs the
+     adoption read once over the player's character when its data is in (`warmUpMigrationCode`), so the first
+     hop of a session does not compile it.
+   - The per-hop log line now attributes the frame: `longest frame <ms> at f<n> (connected f<n>, adopted f<n>) |
+     adoption spawn work <ms> player, <ms> all`; every `MeshTrace` stamp carries `f<frame>`.
+   - Measured (patrol x −15 ↔ 15 at z 512, 9–10 crossings a run, five runs, all adopted, `maxJump=0`):
+     adoption spawn work 0.15–0.19 ms (0.86 ms on a session's first hop, after the warm-up; 6.3–7.2 ms
+     before it); the longest frame per hop 5.6–12.5 ms against a 3 ms median, in the connect frame or in
+     the tail, no longer on the adoption or the enter-game step.
+   - Tests: 5 new in `LiteNetLibManager.Tests/KeptObjectAdoptionTests`; the full EditMode suite ran clean
+     (3,223: 3,222 passed, 1 skipped by design).
+   - Also fixed: a stale Build Settings entry for the 8 km scene's old path (`ServerMeshingDemo/ServerMeshTestMap8k.unity`).
+4. **Verified on the 8 km demo** (editor client plus headless bots), all seamless, no exceptions:
    - a 750 m walk across three cells;
    - 16 quick back-and-forth crossings (adopted after 180–398 ms, none fell back);
    - a second player standing past the line: kept and adopted;
@@ -78,20 +101,31 @@ Where the work stands, how to get it running on another machine, and what is lef
 
 ## How to test
 
-- **Per-hop log line.** Every crossing logs one line in `Editor.log`:
+- **Per-hop log line.** Every crossing logs one line in `Editor.log` (tag `Spike2`; `grep CONTINUITY`):
   `Migration to … | CONTINUITY fellBack=False kept=K adopted=A unadopted=U | connected=…ms playerAdopted=…ms …`.
-  It also gives per-frame `frames` / `player step` / `camera step` spreads, and `jumps:` (frames whose
-  step exceeds twice the move speed). `unadopted` > 0 or any jump means something on screen popped.
+  It also gives per-frame `frames` / `player step` / `camera step` spreads, `jumps:` (frames whose
+  step exceeds twice the move speed), `longest frame <ms> at f<n> (connected f<n>, adopted f<n>)` and
+  `adoption spawn work`. `unadopted` > 0 or any jump means something on screen popped; a longest frame on the
+  adoption frame means the state read did work (compare with the `MeshTrace … C f<n>` stamps, same numbers).
 - **Per-cell server logs:** `Logs/Log_Map(ServerMeshTestMap8k)-Ch(<cell>)-…info.log`. Their
   `Work window` lines carry player and monster counts.
 - **Editor auto-client** (no UI). Enter Play, wait for `Sleeping cells: 64 cell(s) start on demand`, then
   add `MultiplayerARPG.MMO.Mesh.ServerMeshAutoClient` to a new DontDestroyOnLoad object. Before its
   `Start`, set:
-  - `mode` (stand / patrol / walk…), `username`, `characterName`, `channelId` = "C";
-  - `walkTargetX`, `walkTargetZ`, and for patrol `walkReturnX` and `observeSeconds`.
+  - `mode` (stand / patrol / walk…), `username`, `characterName`, `channelId` = "C",
+    `expectedMapName` = "ServerMeshTestMap8k" (its default is the 3×3 rig's map; without it every run
+    creates another character);
+  - `walkTargetX`, `walkTargetZ`, and for patrol `walkReturnX` and `observeSeconds` (−15, 512, 15, 75 gives
+    nine or ten crossings).
 
-  This is how every test above ran, through the Unity MCP bridge's `execute_code`. The EditorPrefs
+  This is how every test above ran, through the Unity MCP bridge's `execute_code` (its CodeDom compiler is
+  C# 6: no local functions, and types are found by name through the loaded assemblies). The EditorPrefs
   route (`ServerMesh.AutoClient.*`) also works, but leaves prefs set: delete them afterwards.
+- **Guard the Play against a recompile.** A script recompile while playing (the test framework does one
+  after a run; the Bezi sidekick's embedded `Packages/com.bezi.sidekick` was touched mid-Play once) reloads
+  the domain under the servers and every network manager throws every frame for the rest of the Play.
+  Right after entering Play call `AssetDatabase.DisallowAutoRefresh()`, and `AllowAutoRefresh()` once
+  stopped; never run tests and then enter Play without checking `isCompiling` is false.
 - **Headless bot** (another player), from `Build/DemoMesh8k`:
 
   ```
@@ -104,29 +138,28 @@ Where the work stands, how to get it running on another machine, and what is lef
 
 ## Open items, in rough order
 
-1. **The one long frame at each crossing.** 19–48 ms against a median of about 5 ms. Movement stays
-   continuous, but it is the last thing a sharp eye could catch. It is probably the reconnect's
-   `Assets.Initialize` and the adoption's initial sync. This leads into the plan's next steps:
+1. **What is left of the crossing's frame.** With 1.02 the longest frame of a hop is 5.6–9.7 ms against a
+   3 ms median and sits in the connect frame (the client transport is destroyed and rebuilt there) or in the
+   tail, no longer on any hop step. The plan's next steps take the rest:
+   - pre-connecting to the next cell (removes the connect frame and most of the 250–340 ms gap);
    - in-memory state transfer instead of the database round trip;
-   - pre-connecting to the next cell;
-   - holding actions pressed mid-hop;
+   - holding actions pressed mid-hop (the arrival's respawn RPC still clears the owner's action states);
    - extrapolating kept entities through the gap.
+   On Mono the first hop of a session still compiles the hop's other first-time code (the adoption read is
+   warmed up); an IL2CPP client has no JIT.
 2. **Monsters at a crossing:** not yet exercised. They use the same nearest-prefab rule as players, but
    no pack has chased a player over a line yet; the level 1–2 wolves did not aggro.
 3. **Mount and pet crossings.** Demo characters start with no mount or pet item; add one to the test
    character first.
-4. **`SetObjectOwner - Object Id: N is not spawned` warning** on the client at every hop. The new cell's
-   owner message arrives before its spawn record. The spawn carries the owner, so it is harmless, but it
-   should be quietened.
-5. **Write the CE-14 upstream patch** into `Docs/ServerMeshing/upstream/` (as 0001–0009 were) and open
-   the PR.
-6. **Run the rig regression** (`python Tools/ServerMeshing/regress.py`). Continuity is now the default
+4. **Write the CE-14 upstream patch** into `Docs/ServerMeshing/upstream/` (as 0001–0009 were) and open
+   the PR. It now covers `LiteNetLibElement`, `LiteNetLibSyncField` and `LiteNetLibSyncList` too (§17).
+5. **Run the rig regression** (`python Tools/ServerMeshing/regress.py`). Continuity is now the default
    on the BaseDemo-CE rig too, and the suite has not been run since. It needs:
    - `Config/mySqlConfig.json` with MySQL credentials (only the `.example` is here);
    - Build Settings switched back to BaseDemo-CE;
    - a `Build/Server` rig build.
-7. **Bump the package version** for the add-on changes. The changelog row is DESIGN 1.01; the package
-   is still 0.96.5.
+6. **Run the full EditMode suite** after any further core edit (3,218 tests; `WebSocketClientSendTests.
+   ReusedWriter_SendsOwnedPayloadsInOrder` is timing-flaky and passes alone).
 
 ## Gotchas found on the way
 

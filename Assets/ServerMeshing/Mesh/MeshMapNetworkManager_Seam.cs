@@ -178,13 +178,33 @@ namespace MultiplayerARPG.MMO.Mesh
         /// </summary>
         protected override async void HandleServerSceneChange(ServerSceneInfo serverSceneInfo)
         {
+            bool swapped = false;
             if (!IsServer && _seam != null && _seam.loaded && !_seamLoading && _seam.scene.IsValid() && _seam.scene.isLoaded
                 && string.Equals(_seam.sceneName, serverSceneInfo.sceneName) && !string.Equals(SceneManager.GetActiveScene().name, serverSceneInfo.sceneName))
             {
                 await SwapToPreloadedScene();
+                swapped = true;
+            }
+            // A hop between cells of one scene: the scene the kit is about to "load" is the one already active and
+            // registered, so OnClientOnlineSceneLoaded skips the scene-entity registration (and its pool clear).
+            SameSceneHop = !swapped && IsMigrating && !IsServer && string.Equals(SceneManager.GetActiveScene().name, serverSceneInfo.sceneName);
+            if (SameSceneHop && fastClientReadyOnMigration)
+            {
+                // The kit's same-scene branch without Assets.Initialize() and InitPoolingQueues(): the prefabs, spawn
+                // points, scene objects and pools it would register again are the ones registered when this scene
+                // loaded, and nothing cleared them (a migration keeps the client's assets). Measured on the 8 km demo:
+                // that registration was the longest frame left in a crossing (9-12 ms against a 3 ms median).
+                Stamp("enter-game: same scene, assets kept registered");
+                OnClientOnlineSceneLoaded();
+                if (!doNotReadyOnSceneLoaded)
+                    SendClientReady();
+                return;
             }
             base.HandleServerSceneChange(serverSceneInfo);
         }
+
+        /// <summary>Set by HandleServerSceneChange for a migration that stays in the active scene; consumed by OnClientOnlineSceneLoaded.</summary>
+        internal bool SameSceneHop { get; private set; }
 
         private async UniTask SwapToPreloadedScene()
         {

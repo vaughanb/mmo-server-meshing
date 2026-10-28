@@ -359,6 +359,11 @@ namespace LiteNetLibManager
 
         internal override void ReadSyncData(uint tick, bool initial, NetDataReader reader)
         {
+            if (initial && IsBeingAdopted)
+            {
+                ReadInitialAsDiff(reader);
+                return;
+            }
             if (initial)
             {
                 _list.Clear();
@@ -381,6 +386,43 @@ namespace LiteNetLibManager
                 {
                     DeserializeOperation(reader);
                 }
+            }
+        }
+
+        // MESH-EDIT: CE-14 — a kept object being adopted by the new server's spawn was live a moment ago, with this list
+        // filled. Its initial state is applied as the operations that turn the list it has into the list it was sent
+        // (Set where an entry differs, Add for extra entries, RemoveLast for missing ones) instead of Clear + AddInitial
+        // of every entry, so listeners (appearance, stat caches, UI) only hear about what changed. Entries are compared
+        // in their wire form: the current entry is serialized as the initial state would have been and the bytes compared.
+        private void ReadInitialAsDiff(NetDataReader reader)
+        {
+            int count = reader.GetPackedInt();
+            int common = Math.Min(count, _list.Count);
+            for (int i = 0; i < common; ++i)
+            {
+                int start = reader.Position;
+                TType incoming = DeserializeValue(reader);
+                int length = reader.Position - start;
+                s_Writer.Reset();
+                SerializeValue(s_Writer, _list[i]);
+                if (s_Writer.Length == length && new ReadOnlySpan<byte>(s_Writer.Data, 0, length).SequenceEqual(new ReadOnlySpan<byte>(reader.RawData, start, length)))
+                    continue;
+                TType oldItem = _list[i];
+                _list[i] = incoming;
+                OnOperation(LiteNetLibSyncListOp.Set, i, oldItem, incoming);
+            }
+            for (int i = common; i < count; ++i)
+            {
+                TType incoming = DeserializeValue(reader);
+                _list.Add(incoming);
+                OnOperation(LiteNetLibSyncListOp.Add, i, default, incoming);
+            }
+            while (_list.Count > count)
+            {
+                int index = _list.Count - 1;
+                TType oldItem = _list[index];
+                _list.RemoveAt(index);
+                OnOperation(LiteNetLibSyncListOp.RemoveLast, index, oldItem, default);
             }
         }
 
