@@ -84,10 +84,27 @@ namespace MultiplayerARPG.MMO.Mesh.Sync
             return false;
         }
 
-        /// <summary>WriteState is the inner handler's server write, for the sender.</summary>
+        /// <summary>
+        /// WriteState is the inner handler's server write, for the sender. While the kit sends quantized positions
+        /// (MeshKinematicCharacterBody.QuantizedCellSize) a quantized inner handler's clients read that layout, which its
+        /// own WriteServerState does not write, so the record is built from its CreateMovementData instead, as the kit's
+        /// quantized send path does, in MeshKinematicCharacterBody.QuantizedMode.
+        /// </summary>
         public bool WriteState(long sampleTimestamp, NetDataWriter writer, out bool sendReliably)
         {
-            return Inner.WriteServerState(sampleTimestamp, writer, out sendReliably);
+            float cellSize = MeshKinematicCharacterBody.QuantizedCellSize;
+            if (cellSize <= 0f || !(Inner is IQuantizedEntityMovementDataHandler quantized))
+                return Inner.WriteServerState(sampleTimestamp, writer, out sendReliably);
+            sendReliably = false;
+            if (!quantized.CanWriteQuantizedServerState)
+                return false;
+            MovementData data = Inner.CreateMovementData(out List<EntityMovementForceApplier> forceAppliers);
+            sendReliably = data.shouldSendReliably;
+            writer.PutPackedUInt(data.movementState);
+            writer.Put(data.extraMovementState);
+            MeshKinematicCharacterBody.WriteKitPose(writer, data.worldPosition, data.yAngle, cellSize);
+            writer.PutList(forceAppliers);
+            return true;
         }
 
         /// <summary>OnReplaced tells the owner of this wrapper that another layer took its slot.</summary>

@@ -17,6 +17,19 @@ namespace MultiplayerARPG
         bool WriteServerState(long writeTimestamp, NetDataWriter writer,out bool shouldSendReliably);
     }
 
+    /// <summary>
+    /// A data handler whose client reads server states with EntityMovementFunctions.ClientReadSyncTransformMessage3D,
+    /// so the quantized send path (DefaultGridManagerComponent) may send its states from CreateMovementData.
+    /// That path keeps calling WriteServerState for every other handler, since their clients read their own format.
+    /// </summary>
+    public interface IQuantizedEntityMovementDataHandler
+    {
+        /// <summary>
+        /// Whether the handler has a state to send yet. False wherever WriteServerState would return false.
+        /// </summary>
+        bool CanWriteQuantizedServerState { get; }
+    }
+
     // The one-shot jump, dash, teleport and still-move flags.
     // The server send loops write each entity once per receiver, and the kit cleared these flags inside
     // that write, so only the first player written in a tick got them. A data handler with such flags

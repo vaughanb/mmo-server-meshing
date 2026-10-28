@@ -7,7 +7,7 @@ using UnityEngine.AI;
 
 namespace MultiplayerARPG
 {
-    public partial class BuiltInEntityMovementFunctions3D : IEntityMovementDataHandler, IEntityMovementServerStateFlags
+    public partial class BuiltInEntityMovementFunctions3D : IEntityMovementDataHandler, IEntityMovementServerStateFlags, IQuantizedEntityMovementDataHandler
     {
         private const int FORCE_GROUNDED_FRAMES_AFTER_TELEPORT = 3;
         private const float MIN_DISTANCE_TO_SIMULATE_MOVEMENT = 0.01f;
@@ -1280,6 +1280,9 @@ namespace MultiplayerARPG
             }
             return false;
         }
+
+        // IQuantizedEntityMovementDataHandler. Matches WriteServerState, which sends nothing before start.
+        public bool CanWriteQuantizedServerState => _isStarted;
 
         // This is used to create movement data for server, and it will be sent to clients, so it can be used to sync movement state from server to clients, and it's called at server, so it can be used to create movement data from server state.
         public MovementData CreateMovementData(out List<EntityMovementForceApplier> forceAppliers)

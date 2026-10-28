@@ -61,7 +61,7 @@ namespace MultiplayerARPG.MMO.Mesh.Sync
     /// <summary>IMeshStateRegistry is the sender's registration surface on the network manager's GameObject.</summary>
     public interface IMeshStateRegistry
     {
-        /// <summary>Register hands the source to the sender; false keeps it on the kit path (no sender, grid path enabled, duplicate id).</summary>
+        /// <summary>Register hands the source to the sender; false keeps it on the kit path (no sender, duplicate id).</summary>
         bool Register(IMeshStateSource source);
 
         /// <summary>Unregister forgets the source (despawn, handoff).</summary>

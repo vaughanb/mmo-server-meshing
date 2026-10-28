@@ -1,5 +1,9 @@
 # Spike 0 — Coordinate & movement serialization across two cells
 
+> **Retired 2026-10-28 (DESIGN 1.13).** The script measured the kit's old fixed movement grid
+> (`GridUtility.GetCellLocalPosition`, `GridSize`), which OpenMMORPG PR 11 replaced with signed cells
+> (`QuantizedPosition`); `Assets/ServerMeshing/Spike0` was deleted. This page is kept as the record.
+
 > Goal: prove the v0.5 coordinate model — **logical global coords `(meshCellId, localPosition)` with
 > per-cell-local Unity frames** — survives the kit's existing movement serialization, and that a
 > position translated across a shared cell edge reconstructs correctly. Run **before** Spike 2.

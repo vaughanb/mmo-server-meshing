@@ -100,15 +100,13 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>
         /// Refusal is why a puppet cannot move kinematically, or None: Handler unless <paramref name="kitHandler"/> is a
         /// BuiltInEntityMovementFunctions3D or a NavMeshEntityMovement (the handlers whose bytes the body reproduces), then
-        /// Grid unless <paramref name="gridDisabled"/> (the grid path never calls WriteServerState), then Mounted, then
-        /// Summoned. The first two never change for a puppet; the last two can.
+        /// Mounted, then Summoned. The first never changes for a puppet; the last two can. The body is not a quantized
+        /// handler, so the kit's quantized send path calls its WriteServerState like the raw one does.
         /// </summary>
-        public static MeshPuppetFallback Refusal(IEntityMovementDataHandler kitHandler, bool mounted, bool summoned, bool gridDisabled)
+        public static MeshPuppetFallback Refusal(IEntityMovementDataHandler kitHandler, bool mounted, bool summoned)
         {
             if (kitHandler is not (BuiltInEntityMovementFunctions3D or NavMeshEntityMovement))
                 return MeshPuppetFallback.Handler;
-            if (!gridDisabled)
-                return MeshPuppetFallback.Grid;
             if (mounted)
                 return MeshPuppetFallback.Mounted;
             if (summoned)
@@ -117,19 +115,65 @@ namespace MultiplayerARPG.MMO.Mesh
         }
 
         /// <summary>
-        /// WriteKitTransform appends exactly the kit's server transform record: packed flags, the extra state byte, the
-        /// position, the packed compressed yaw (normalised to [0, 360) as Transform.eulerAngles.y is) and an empty
-        /// force-applier list.
+        /// QuantizedMode is the compression mode of every quantized position the add-on writes: the finest (about 2 mm
+        /// steps in 128 m cells), since one record goes to every receiver whatever its distance.
+        /// </summary>
+        public const int QuantizedMode = QuantizedPosition.MaxMode;
+
+        /// <summary>
+        /// QuantizedCellSize is the kit's cell size in metres while the kit sends quantized positions, so clients read
+        /// every 3D server record in that layout; 0 while it sends raw floats or there is no grid manager (EditMode).
+        /// </summary>
+        public static float QuantizedCellSize
+        {
+            get
+            {
+                IBaseGridManagerComponenent grid = DefaultGridManagerComponent.Instance;
+                if (grid is UnityEngine.Object gridObject ? gridObject == null : grid == null)
+                    return 0f;
+                return grid.IsDisabled ? 0f : grid.CellSize;
+            }
+        }
+
+        /// <summary>
+        /// WriteKitTransform appends exactly the kit's server transform record for the kit's current position format (see
+        /// QuantizedCellSize): packed flags, the extra state byte, the pose (WriteKitPose) and an empty force-applier list.
         /// </summary>
         public static void WriteKitTransform(NetDataWriter writer, uint flags, byte extra, Vector3 position, float yawDegrees)
+        {
+            WriteKitTransform(writer, flags, extra, position, yawDegrees, QuantizedCellSize);
+        }
+
+        /// <summary>
+        /// WriteKitTransform appends the kit's server transform record with the pose raw when
+        /// <paramref name="quantizedCellSize"/> is 0, else quantized in cells of that size.
+        /// </summary>
+        public static void WriteKitTransform(NetDataWriter writer, uint flags, byte extra, Vector3 position, float yawDegrees, float quantizedCellSize)
         {
             if (writer == null)
                 throw new ArgumentNullException(nameof(writer));
             writer.PutPackedUInt(flags);
             writer.Put(extra);
+            WriteKitPose(writer, position, yawDegrees, quantizedCellSize);
+            writer.Put(0);
+        }
+
+        /// <summary>
+        /// WriteKitPose appends the position and yaw of a kit server record. Raw when <paramref name="quantizedCellSize"/>
+        /// is 0: the Vector3 and the packed compressed yaw (normalised to [0, 360) as Transform.eulerAngles.y is), as
+        /// EntityMovementFunctions.ServerWriteSyncTransform3D. Quantized otherwise: the signed cells and offsets in
+        /// QuantizedMode, then the one-byte yaw, as DefaultGridManagerComponent.WriteEntityServerState.
+        /// </summary>
+        public static void WriteKitPose(NetDataWriter writer, Vector3 position, float yawDegrees, float quantizedCellSize)
+        {
+            if (quantizedCellSize > 0f)
+            {
+                writer.PutQuantizedPosition(QuantizedPosition.Encode(position.x, position.y, position.z, quantizedCellSize, QuantizedMode));
+                writer.Put(GridUtility.CompressAngle(yawDegrees));
+                return;
+            }
             writer.PutVector3(position);
             writer.PutPackedInt(EntityMovementFunctions.GetCompressedAngle(Mathf.Repeat(yawDegrees, 360f)));
-            writer.Put(0);
         }
 
         /// <summary>
@@ -279,7 +323,7 @@ namespace MultiplayerARPG.MMO.Mesh
             Tick(now);
         }
 
-        /// <summary>CreateMovementData is the current pose with no force appliers (only the refused grid path asks for it).</summary>
+        /// <summary>CreateMovementData is the current pose with no force appliers (the kit's send loops never ask the body for it).</summary>
         public MovementData CreateMovementData(out List<EntityMovementForceApplier> forceAppliers)
         {
             forceAppliers = _noForceAppliers;
@@ -298,10 +342,20 @@ namespace MultiplayerARPG.MMO.Mesh
         {
         }
 
-        /// <summary>ReadServerStateAtClient consumes exactly one record of the kit's server layout and applies nothing.</summary>
+        /// <summary>ReadServerStateAtClient consumes exactly one record of the kit's server layout (raw or quantized, see QuantizedCellSize) and applies nothing.</summary>
         public void ReadServerStateAtClient(long peerTimestamp, NetDataReader reader)
         {
-            reader.ServerReadSyncTransformMessage3D(out _, out _, out _, out _);
+            if (QuantizedCellSize > 0f)
+            {
+                reader.GetPackedUInt();
+                reader.GetByte();
+                reader.GetEncodedPosition();
+                reader.GetByte();
+            }
+            else
+            {
+                reader.ServerReadSyncTransformMessage3D(out _, out _, out _, out _);
+            }
             reader.GetList<EntityMovementForceApplier>();
         }
 

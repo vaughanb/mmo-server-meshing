@@ -73,7 +73,7 @@ namespace MultiplayerARPG.MMO.Mesh
             public float ownMoveSpeedOverride = -1f; // the kit's OverrideMoveSpeed before steering took it over (-1: none)
             public MeshKinematicCharacterBody body;        // kinematic motion in the kit's handler slot (null: steered)
             public IReadOnlyList<string> suppressedExtras; // what Ghostify silenced beyond its deny list, handed back to Unghostify
-            public MeshPuppetFallback refusal;             // why this puppet stays steered for good (handler, grid, install), or None
+            public MeshPuppetFallback refusal;             // why this puppet stays steered for good (handler, install), or None
         }
 
         private MeshLinkServer _linkServer;

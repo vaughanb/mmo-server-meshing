@@ -801,31 +801,75 @@ namespace MultiplayerARPG
         {
             NetDataWriter reliableWriter = EntityMovementDataBuffers.ReliablePacketWriter;
             NetDataWriter unreliableWriter = EntityMovementDataBuffers.UnreliablePacketWriter;
+            NetDataWriter stateDataWriter = EntityMovementDataBuffers.StateDataWriter;
 
-            int posBeforeWriteReliableStateCount;
-            int reliableStateCount;
-            int posBeforeWriteUnreliableStateCount;
-            int unreliableStateCount;
-            int posAfterWriteUnreliableStateCount;
+            long connectionId = 0;
+            int posBeforeWriteReliableStateCount = 0;
+            int reliableStateCount = 0;
+            int posBeforeWriteUnreliableStateCount = 0;
+            int unreliableStateCount = 0;
+            int posAfterWriteUnreliableStateCount = 0;
 
-            int tempLastPosition;
+            List<uint> subscribingObjectIds = new List<uint>();
+            List<uint> quantizedObjectIds = new List<uint>();
+            Dictionary<uint, List<EntityMovementForceApplier>> forceAppliersByObjectId = new Dictionary<uint, List<EntityMovementForceApplier>>();
 
-            //Native collections for job
-            NativeHashMap<uint, MovementData> movementDatas;
-            //Native collection for results
-            NativeList<MovementResult> movementEnttitiesDataResults;
-            NativeHashMap<uint, byte> ModesResults;
+            void SendUnreliablePacket()
+            {
+                int lastPosition = unreliableWriter.Length;
+                unreliableWriter.SetPosition(posBeforeWriteUnreliableStateCount);
+                unreliableWriter.Put(unreliableStateCount);
+                unreliableWriter.SetPosition(lastPosition);
+                try
+                {
+                    ServerSendMessage(connectionId, BaseGameEntity.MOVEMENT_DATA_CHANNEL, DeliveryMethod.Unreliable, unreliableWriter);
+                }
+                catch (TooBigPacketException)
+                {
+                    Logging.LogError(LogTag, $"Too Big Packet {unreliableWriter.Length}");
+                }
+            }
+
+            // Adds the state in stateDataWriter to this player's reliable or unreliable packet, sending the
+            // unreliable one first when the state would not fit in it
+            void AppendState(uint objectId, bool reliably)
+            {
+                if (reliably)
+                {
+                    reliableWriter.PutPackedUInt(objectId);
+                    reliableWriter.Put(stateDataWriter.Length);
+                    reliableWriter.Put(stateDataWriter.Data, 0, stateDataWriter.Length);
+                    reliableStateCount++;
+                    return;
+                }
+                // Up to 5 bytes for the packed object ID and 4 for the state length
+                const byte idAndLengthSize = 9;
+                if (unreliableWriter.Length + stateDataWriter.Length + idAndLengthSize >= MAX_UNRELIABLE_PACKET_SIZE)
+                {
+                    SendUnreliablePacket();
+                    unreliableStateCount = 0;
+                    unreliableWriter.SetPosition(posAfterWriteUnreliableStateCount);
+                }
+                unreliableWriter.PutPackedUInt(objectId);
+                unreliableWriter.Put(stateDataWriter.Length);
+                unreliableWriter.Put(stateDataWriter.Data, 0, stateDataWriter.Length);
+                unreliableStateCount++;
+            }
 
             // One-shot flags reach every player, then are consumed once
             _serverStateFlagsPass.Begin();
             foreach (LiteNetLibPlayer player in Players.Values)
             {
-                //if (player.ConnectionId == ClientConnectionId)
-                //    continue;
-
-                //Try get position for interest management, it will be used for determining data compression mode, but it's not required, so it won't cause problem if failed to get position
-                if (!DefaultServerUserHandlers.PlayerCharacters.TryGetValue(player.ConnectionId, out IPlayerCharacterData playerCharacter))
+                // The host's own client shares the server's entities, as in SendServerEntityMovementState
+                if (player.ConnectionId == ClientConnectionId)
                     continue;
+
+                // The receiver's character picks each entity's compression mode
+                if (!DefaultServerUserHandlers.PlayerCharacters.TryGetValue(player.ConnectionId, out IPlayerCharacterData playerCharacter) ||
+                    !(playerCharacter is BasePlayerCharacterEntity receiverEntity))
+                    continue;
+
+                connectionId = player.ConnectionId;
 
                 // Prepare packets per player: WritePacket resets the shared writers, so each
                 // player gets a fresh header and counters instead of accumulating prior players' states.
@@ -842,141 +886,106 @@ namespace MultiplayerARPG
                 unreliableWriter.Put(unreliableStateCount);
                 posAfterWriteUnreliableStateCount = unreliableWriter.Length;
 
-                //HashSet<uint> objectIds = player.GetSubscribingObjectIds();
-                //DG fix
-                var objectIds = new HashSet<uint>();
-                var enumerator = player.GetSubscribingObjectIds();
-                while (enumerator.MoveNext())
+                subscribingObjectIds.Clear();
+                quantizedObjectIds.Clear();
+                forceAppliersByObjectId.Clear();
+                var subscribingEnumerator = player.GetSubscribingObjectIds();
+                while (subscribingEnumerator.MoveNext())
                 {
-                    objectIds.Add(enumerator.Current);
+                    subscribingObjectIds.Add(subscribingEnumerator.Current);
                 }
 
-                movementDatas = new NativeHashMap<uint, MovementData>(objectIds.Count, Allocator.TempJob);
-                movementEnttitiesDataResults = new NativeList<MovementResult>(objectIds.Count, Allocator.TempJob);
-                ModesResults = new NativeHashMap<uint, byte>(objectIds.Count, Allocator.TempJob);
-                BasePlayerCharacterEntity basePlayerCharacterEntity = playerCharacter as BasePlayerCharacterEntity;
-
-                Dictionary<uint, List<EntityMovementForceApplier>> forceApplyers = new Dictionary<uint, List<EntityMovementForceApplier>>();
-
-                foreach (uint objectId in objectIds)
+                NativeHashMap<uint, MovementData> movementDatas = new NativeHashMap<uint, MovementData>(Mathf.Max(1, subscribingObjectIds.Count), Allocator.TempJob);
+                NativeArray<uint> jobObjectIds = default;
+                NativeList<MovementResult> movementResults = default;
+                NativeHashMap<uint, byte> modesResults = default;
+                try
                 {
-                    if (!_entityMovementDataHandlers.TryGetValue(objectId, out IEntityMovementDataHandler dataHandler))
-                        continue;
-
-                    MovementData movementData = dataHandler.CreateMovementData(out List<EntityMovementForceApplier> forceAppliers);
-                    _serverStateFlagsPass.Record(dataHandler);
-                    movementDatas[objectId] = movementData;
-                    forceApplyers[objectId] = forceAppliers;
-                }
-
-                var job = new MovementJob
-                {
-                    previousModes = (playerCharacter as BasePlayerCharacterEntity).EntityCompressionModes,
-                    gridData = DefaultGridManagerComponent.Instance.GridData,
-                    objectIds = new NativeArray<uint>(objectIds.ToArray(), Allocator.TempJob),
-                    entityData = movementDatas,
-                    receivingPlayerPosition = playerCharacter.CurrentPosition,
-                    movementResults = movementEnttitiesDataResults,
-                    ModesResults = ModesResults
-                };
-
-                JobHandle handle = job.Schedule();
-                handle.Complete(); // wait for job
-
-                basePlayerCharacterEntity.EntityCompressionModes.Clear();
-                var it = ModesResults.GetEnumerator();
-
-                while (it.MoveNext())
-                {
-                    var kv = it.Current;
-                    basePlayerCharacterEntity.EntityCompressionModes.TryAdd(kv.Key, kv.Value);
-                }
-
-                foreach (MovementResult MovementResult in movementEnttitiesDataResults)
-                {
-                    EntityMovementDataBuffers.StateDataWriter.Reset();
-                    forceApplyers.TryGetValue(MovementResult.objectId, out List<EntityMovementForceApplier> entityForceApplyers);
-
-                    if (!DefaultGridManagerComponent.Instance.WriteEntityServerState(EntityMovementDataBuffers.StateDataWriter, MovementResult, entityForceApplyers))
-                        continue;
-
-                    // Increase data writing counter
-                    if (MovementResult.reliably)
+                    foreach (uint objectId in subscribingObjectIds)
                     {
-                        reliableWriter.PutPackedUInt(MovementResult.objectId);
-                        reliableWriter.Put(EntityMovementDataBuffers.StateDataWriter.Length);
-                        reliableWriter.Put(EntityMovementDataBuffers.StateDataWriter.Data, 0, EntityMovementDataBuffers.StateDataWriter.Length);
-                        reliableStateCount++;
-                    }
-                    else
-                    {
-                        tempLastPosition = unreliableWriter.Length;
-                        // If packet will too big, send created one then re-create a new packet
-                        const byte intSize = 4;
-                        if (tempLastPosition + EntityMovementDataBuffers.StateDataWriter.Length + intSize >= MAX_UNRELIABLE_PACKET_SIZE)
+                        if (!_entityMovementDataHandlers.TryGetValue(objectId, out IEntityMovementDataHandler dataHandler))
+                            continue;
+
+                        if (dataHandler is IQuantizedEntityMovementDataHandler quantizedHandler)
                         {
-                            unreliableWriter.SetPosition(posBeforeWriteUnreliableStateCount);
-                            unreliableWriter.Put(unreliableStateCount);
-                            unreliableWriter.SetPosition(tempLastPosition);
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-                            try
-                            {
-#endif
-                                ServerSendMessage(player.ConnectionId, BaseGameEntity.MOVEMENT_DATA_CHANNEL, DeliveryMethod.Unreliable, unreliableWriter);
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-                            }
-                            catch (TooBigPacketException ex)
-                            {
-                                Logging.LogError(LogTag, $"Too Big Packet {unreliableWriter.Length}");
-                                throw ex;
-                            }
-#endif
-                            unreliableStateCount = 0;
-                            unreliableWriter.SetPosition(posAfterWriteUnreliableStateCount);
+                            if (!quantizedHandler.CanWriteQuantizedServerState || movementDatas.ContainsKey(objectId))
+                                continue;
+                            movementDatas[objectId] = dataHandler.CreateMovementData(out List<EntityMovementForceApplier> forceAppliers);
+                            forceAppliersByObjectId[objectId] = forceAppliers;
+                            quantizedObjectIds.Add(objectId);
+                            _serverStateFlagsPass.Record(dataHandler);
+                            continue;
                         }
-                        unreliableWriter.PutPackedUInt(MovementResult.objectId);
-                        unreliableWriter.Put(EntityMovementDataBuffers.StateDataWriter.Length);
-                        unreliableWriter.Put(EntityMovementDataBuffers.StateDataWriter.Data, 0, EntityMovementDataBuffers.StateDataWriter.Length);
-                        unreliableStateCount++;
+
+                        // A handler whose client can't read quantized states (2D and the simple movements)
+                        // keeps sending its own format
+                        stateDataWriter.Reset();
+                        if (!dataHandler.WriteServerState(writeTimestamp, stateDataWriter, out bool shouldSendReliably))
+                            continue;
+                        _serverStateFlagsPass.Record(dataHandler);
+                        AppendState(objectId, shouldSendReliably);
+                    }
+
+                    jobObjectIds = new NativeArray<uint>(quantizedObjectIds.Count, Allocator.TempJob);
+                    for (int i = 0; i < quantizedObjectIds.Count; ++i)
+                    {
+                        jobObjectIds[i] = quantizedObjectIds[i];
+                    }
+                    movementResults = new NativeList<MovementResult>(Mathf.Max(1, quantizedObjectIds.Count), Allocator.TempJob);
+                    modesResults = new NativeHashMap<uint, byte>(Mathf.Max(1, quantizedObjectIds.Count), Allocator.TempJob);
+
+                    MovementJob job = new MovementJob
+                    {
+                        previousModes = receiverEntity.EntityCompressionModes,
+                        gridData = DefaultGridManagerComponent.Instance.GridData,
+                        objectIds = jobObjectIds,
+                        entityData = movementDatas,
+                        receivingPlayerPosition = playerCharacter.CurrentPosition,
+                        movementResults = movementResults,
+                        ModesResults = modesResults
+                    };
+                    job.Schedule().Complete();
+
+                    receiverEntity.EntityCompressionModes.Clear();
+                    var modesEnumerator = modesResults.GetEnumerator();
+                    while (modesEnumerator.MoveNext())
+                    {
+                        var kv = modesEnumerator.Current;
+                        receiverEntity.EntityCompressionModes.TryAdd(kv.Key, kv.Value);
+                    }
+
+                    foreach (MovementResult movementResult in movementResults)
+                    {
+                        stateDataWriter.Reset();
+                        forceAppliersByObjectId.TryGetValue(movementResult.objectId, out List<EntityMovementForceApplier> entityForceAppliers);
+                        if (!DefaultGridManagerComponent.Instance.WriteEntityServerState(stateDataWriter, movementResult, entityForceAppliers))
+                            continue;
+                        AppendState(movementResult.objectId, movementResult.reliably);
                     }
                 }
-                movementDatas.Dispose();
-                movementEnttitiesDataResults.Dispose();
-                job.ModesResults.Dispose();
-                job.objectIds.Dispose();
-                forceApplyers.Clear();
+                finally
+                {
+                    movementDatas.Dispose();
+                    if (jobObjectIds.IsCreated)
+                        jobObjectIds.Dispose();
+                    if (movementResults.IsCreated)
+                        movementResults.Dispose();
+                    if (modesResults.IsCreated)
+                        modesResults.Dispose();
+                }
 
                 // Send reliable data to client
                 if (reliableStateCount > 0)
                 {
-                    tempLastPosition = reliableWriter.Length;
+                    int lastPosition = reliableWriter.Length;
                     reliableWriter.SetPosition(posBeforeWriteReliableStateCount);
                     reliableWriter.Put(reliableStateCount);
-                    reliableWriter.SetPosition(tempLastPosition);
-                    ServerSendMessage(player.ConnectionId, BaseGameEntity.MOVEMENT_DATA_CHANNEL, DeliveryMethod.ReliableOrdered, reliableWriter);
+                    reliableWriter.SetPosition(lastPosition);
+                    ServerSendMessage(connectionId, BaseGameEntity.MOVEMENT_DATA_CHANNEL, DeliveryMethod.ReliableOrdered, reliableWriter);
                 }
                 // Send unreliable data to client
                 if (unreliableStateCount > 0)
-                {
-                    tempLastPosition = unreliableWriter.Length;
-                    unreliableWriter.SetPosition(posBeforeWriteUnreliableStateCount);
-                    unreliableWriter.Put(unreliableStateCount);
-                    unreliableWriter.SetPosition(tempLastPosition);
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-                    try
-                    {
-#endif
-                        ServerSendMessage(player.ConnectionId, BaseGameEntity.MOVEMENT_DATA_CHANNEL, DeliveryMethod.Unreliable, unreliableWriter);
-
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-                    }
-                    catch (TooBigPacketException ex)
-                    {
-                        Logging.LogError(LogTag, $"Too Big Packet {unreliableWriter.Length}");
-                        throw ex;
-                    }
-#endif
-                }
+                    SendUnreliablePacket();
             }
             _serverStateFlagsPass.ConsumeAll();
         }

@@ -62,7 +62,6 @@ namespace MultiplayerARPG.MMO.Mesh
         private readonly MeshWorkHistogram _puppetSteerKinematic = new MeshWorkHistogram(PuppetSteerBinMetres, PuppetSteerBinCount);
         private readonly MeshWorkHistogram _puppetSteerSteered = new MeshWorkHistogram(PuppetSteerBinMetres, PuppetSteerBinCount);
         private readonly HashSet<string> _puppetHandlerRefusalsLogged = new HashSet<string>();
-        private bool _puppetGridRefusalLogged;
         private float _puppetSnapDistance;
         private float _puppetWindowStart;
         private int _puppetSnaps, _puppetObservedTicks, _puppetUnobservedPoses;
@@ -102,7 +101,6 @@ namespace MultiplayerARPG.MMO.Mesh
             _slots = MeshMovementHandlerSlots.For(this);
             _kinematicGhosts.Clear();
             _puppetHandlerRefusalsLogged.Clear();
-            _puppetGridRefusalLogged = false;
             ResetPuppetWindow(Time.unscaledTime);
             if (puppetMotion == MeshPuppetMotion.Kinematic)
                 Logging.Log("Mesh", System.FormattableString.Invariant($"Puppet motion kinematic (from {source}): character puppets take their pose from the owner's snapshots and snap past {_puppetSnapDistance:0.0#} m; pets and mounted puppets stay steered"));
@@ -133,8 +131,7 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>
         /// EnsurePuppetMotion begins kinematic motion for a puppet without it, at a snapshot, once its mount, summoner and
         /// affiliation are synced and before it is steered. A mounted puppet or a pet stays steered for this snapshot; a
-        /// puppet whose kit handler the body does not replace, on a cell that sends movement on the kit's grid path, or
-        /// whose install fails stays steered for good.
+        /// puppet whose kit handler the body does not replace, or whose install fails, stays steered for good.
         /// </summary>
         private void EnsurePuppetMotion(MeshGhost ghost, GhostSnapshotMessage msg)
         {
@@ -149,8 +146,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 RefusePuppetMotion(ghost, MeshPuppetFallback.Install, $"the kit's movement-handler slot has no entry for object {objectId}");
                 return;
             }
-            bool gridDisabled = DefaultGridManagerComponent.Instance == null || DefaultGridManagerComponent.Instance.IsDisabled;
-            MeshPuppetFallback refusal = MeshKinematicCharacterBody.Refusal(kit, mounted: false, summoned: false, gridDisabled);
+            MeshPuppetFallback refusal = MeshKinematicCharacterBody.Refusal(kit, mounted: false, summoned: false);
             if (refusal != MeshPuppetFallback.None)
             {
                 RefusePuppetMotion(ghost, refusal, kit.GetType().Name);
@@ -178,8 +174,8 @@ namespace MultiplayerARPG.MMO.Mesh
         }
 
         /// <summary>
-        /// RefusePuppetMotion keeps a puppet steered for good. A handler type is reported once per type and the grid path
-        /// once per run, since every puppet with them is refused alike; a failed install is reported per puppet.
+        /// RefusePuppetMotion keeps a puppet steered for good. A handler type is reported once per type, since every puppet
+        /// with it is refused alike; a failed install is reported per puppet.
         /// </summary>
         private void RefusePuppetMotion(MeshGhost ghost, MeshPuppetFallback reason, string detail)
         {
@@ -189,13 +185,6 @@ namespace MultiplayerARPG.MMO.Mesh
                 case MeshPuppetFallback.Handler:
                     if (_puppetHandlerRefusalsLogged.Add(detail))
                         Logging.LogWarning("Mesh", $"Puppet motion: {ghost.kind} puppets moved by {detail} stay steered; kinematic motion replaces only the kit's character-controller and NavMesh handlers");
-                    break;
-                case MeshPuppetFallback.Grid:
-                    if (!_puppetGridRefusalLogged)
-                    {
-                        _puppetGridRefusalLogged = true;
-                        Logging.LogWarning("Mesh", "Puppet motion: this cell sends movement on the kit's grid path, which a kinematic body does not feed; every puppet stays steered");
-                    }
                     break;
                 default:
                     BaseCharacterEntity entity = ghost.entity;

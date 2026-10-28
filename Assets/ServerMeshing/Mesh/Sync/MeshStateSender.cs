@@ -29,7 +29,8 @@ namespace MultiplayerARPG.MMO.Mesh.Sync
     /// MeshStateSender is the state sender on the map network manager's GameObject. The manager adds it in Awake when
     /// MESH_SENDER is measure or on, sets Setting, and calls BeforeKitTick before and AfterKitTick after every kit tick.
     /// It configures itself on the first BeforeKitTick after a server start, builds at most once per frame, and never
-    /// lets an error escape into the kit's tick. The sender stays inactive when the kit sends movement on its grid path.
+    /// lets an error escape into the kit's tick. It writes kit records in whichever position format the kit sends (raw or
+    /// quantized, MeshKinematicCharacterBody.QuantizedCellSize), so servers and clients must run the same kit build.
     /// </summary>
     public class MeshStateSender : BaseGameNetworkManagerComponent, IMeshStateRegistry
     {
@@ -86,7 +87,7 @@ namespace MultiplayerARPG.MMO.Mesh.Sync
         /// <summary>Setting is how the sender runs; the manager sets it right after adding the component.</summary>
         public MeshStateSenderSetting Setting { get; set; }
 
-        /// <summary>IsSending is true while the setting is on and the sender is started and configured on a cell off the grid path.</summary>
+        /// <summary>IsSending is true while the setting is on and the sender is started and configured.</summary>
         public bool IsSending => Setting == MeshStateSenderSetting.On && _started && _configured;
 
         /// <summary>Awake is empty on purpose: it runs inside AddComponent, before the manager has set Setting.</summary>
@@ -309,7 +310,7 @@ namespace MultiplayerARPG.MMO.Mesh.Sync
                 throw new ArgumentNullException(nameof(source));
             if (!IsSending)
             {
-                LogRefusalOnce(source, "the state sender is not sending (off, measuring, stopped or on the grid path)");
+                LogRefusalOnce(source, "the state sender is not sending (off, measuring or stopped)");
                 return false;
             }
             if (!_sendDirect)
@@ -457,8 +458,7 @@ namespace MultiplayerARPG.MMO.Mesh.Sync
 
 #if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
         /// <summary>
-        /// OnStartServer starts the sender unless the kit sends movement on its grid path (one warning, inactive): it takes
-        /// the manager's handler slots and listens for spawns, destroys and removed layers. Configuration waits for the
+        /// OnStartServer starts the sender: it takes the manager's handler slots and listens for spawns, destroys and removed layers. Configuration waits for the
         /// first pre-kit tick, after the manager has applied its band override.
         /// </summary>
         public override void OnStartServer(BaseGameNetworkManager networkManager)
@@ -472,11 +472,6 @@ namespace MultiplayerARPG.MMO.Mesh.Sync
             _refusalsLogged.Clear();
             if (networkManager == null)
                 return;
-            if (!IsGridDisabled)
-            {
-                _log.Warning("State sender: this cell sends movement on the kit's grid path, which the state sender does not feed; it stays inactive");
-                return;
-            }
             _slots = MeshMovementHandlerSlots.For(networkManager);
             if (_onSpawn == null)
             {
@@ -534,8 +529,6 @@ namespace MultiplayerARPG.MMO.Mesh.Sync
             MeshWorkProbe.Meter.AddTickWork((System.Diagnostics.Stopwatch.GetTimestamp() - start) * 1000d / System.Diagnostics.Stopwatch.Frequency);
         }
 
-        private static bool IsGridDisabled => DefaultGridManagerComponent.Instance == null || DefaultGridManagerComponent.Instance.IsDisabled;
-
         private void Configure()
         {
             bool measure = Setting == MeshStateSenderSetting.Measure;
@@ -556,7 +549,7 @@ namespace MultiplayerARPG.MMO.Mesh.Sync
             if (!customPolicy)
                 policy = new MeshDistanceSendPolicy(r0, near, mid, far, owner, compactFar ? MeshStateVariant.Compact : MeshStateVariant.Full);
             MeshStateFanout fanout = new MeshStateFanout(new MeshStateSenderTransport(_manager), new MeshStateSenderPositions(_manager), policy, settings, _log, _onDropped);
-            MeshKitWrapQueue queue = new MeshKitWrapQueue(_slots, fanout, _log, !measure, IsGridDisabled, wrapKit);
+            MeshKitWrapQueue queue = new MeshKitWrapQueue(_slots, fanout, _log, !measure, wrapKit);
             for (int i = 0; i < _allowedTypes.Count; ++i)
                 queue.AllowHandlerType(_allowedTypes[i]);
             _fanout = fanout;

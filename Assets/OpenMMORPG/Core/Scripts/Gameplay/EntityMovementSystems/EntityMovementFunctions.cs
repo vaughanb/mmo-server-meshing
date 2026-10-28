@@ -168,10 +168,9 @@ namespace MultiplayerARPG
             extraMovementState = (ExtraMovementState)reader.GetByte();
             if (!DefaultGridManagerComponent.Instance.IsDisabled)
             {
-                byte cellId = reader.GetByte();
-                Vector3 localPosition = reader.GetQuantizedVector3(DefaultGridManagerComponent.Instance.CellSize, out int compressionMode);
-                position = DefaultGridManagerComponent.Instance.GetWorldPosition(cellId, localPosition);
-                // Grid path: angle is byte-compressed by GridUtility.CompressAngle in MovementJob
+                // Quantized path: must mirror DefaultGridManagerComponent.WriteEntityServerState
+                position = reader.GetQuantizedPosition(DefaultGridManagerComponent.Instance.CellSize);
+                // Angle is byte-compressed by GridUtility.CompressAngle in MovementJob
                 yAngle = DecompressAngle(reader.GetByte());
             }
             else

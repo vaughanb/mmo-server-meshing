@@ -30,7 +30,10 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>Handler means the kit movement handler is not one whose bytes the kinematic body reproduces.</summary>
         Handler,
 
-        /// <summary>Grid means the kit's grid send path is enabled, which never asks a handler to write its state.</summary>
+        /// <summary>
+        /// Grid is retired: nothing returns it since the add-on writes the kit's quantized layout (package 0.97.0). It keeps
+        /// its value so Install keeps 5 and the puppets window line keeps its grid count (always 0) for the rig's parsers.
+        /// </summary>
         Grid,
 
         /// <summary>Install means the handler slot refused the kinematic body.</summary>

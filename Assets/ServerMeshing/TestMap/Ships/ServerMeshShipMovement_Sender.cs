@@ -120,7 +120,7 @@ namespace MultiplayerARPG.MMO.Mesh
             return wire == ServerMeshShipWireKind.Compact28 && sequence == acknowledged;
         }
 
-        /// <summary>CreateMovementData is the pose with no force appliers (only the kit's grid path asks, which the rig never enables).</summary>
+        /// <summary>CreateMovementData is the pose with no force appliers (the kit's send loops never ask it: it is not a quantized handler).</summary>
         public MovementData CreateMovementData(out List<EntityMovementForceApplier> forceAppliers)
         {
             forceAppliers = s_noForceAppliers;

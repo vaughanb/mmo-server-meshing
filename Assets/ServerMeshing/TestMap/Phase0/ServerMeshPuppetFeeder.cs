@@ -241,7 +241,6 @@ namespace MultiplayerARPG.MMO.Mesh
             ServerMeshShipSettings settings = ServerMeshShipLoad.Active;
             int seed = settings != null ? settings.Seed : ServerMeshLoadGenerator.DefaultSeed;
             Rect area = ServerMeshShipPilot.InsetRectangle(cellRect, 0.1f);
-            bool gridDisabled = DefaultGridManagerComponent.Instance == null || DefaultGridManagerComponent.Instance.IsDisabled;
             for (int i = 0; i < _count; ++i)
             {
                 Vector3 centre = ServerMeshShipLoad.DrawPoint(new System.Random(ServerMeshShipFlightPath.MixSeed(seed ^ CharacterSalt, i)), area, 0f);
@@ -255,8 +254,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 }
                 if (!_slots.TryGetKitHandler(entity.ObjectId, out IEntityMovementDataHandler kit) || kit == null)
                     error = $"object {entity.ObjectId} has no kit movement handler";
-                else if (MeshKinematicCharacterBody.Refusal(kit, false, false, gridDisabled) != MeshPuppetFallback.None)
-                    error = $"object {entity.ObjectId} cannot move kinematically ({MeshKinematicCharacterBody.Refusal(kit, false, false, gridDisabled)})";
+                else if (MeshKinematicCharacterBody.Refusal(kit, false, false) != MeshPuppetFallback.None)
+                    error = $"object {entity.ObjectId} cannot move kinematically ({MeshKinematicCharacterBody.Refusal(kit, false, false)})";
                 MeshKinematicCharacterBody body = null;
                 if (error == null)
                 {

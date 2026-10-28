@@ -60,6 +60,11 @@ right for a sandbox where towns can appear anywhere.
   74ec05b, on `develop` since 2026-10-07 and in v1.1.4): its attack and skill components, the harvestable and the
   ghost-hit forwarding override and call those signatures. Versions up to 0.94.0 used the damage dictionaries the kit
   replaced, and compile only on `develop` between bb9895f (2026-10-02) and e642000e (2026-10-07) with patch 0008 applied.
+- From 0.97.0 the add-on also needs the kit's signed-cell quantized positions ([open-mmorpg/OpenMMORPG#11](https://github.com/open-mmorpg/OpenMMORPG/pull/11):
+  `QuantizedPosition`, on by default). With it on, clients read every 3D server state as quantized cells and offsets, and
+  the state sender and kinematic puppets write that format (DESIGN.md 1.13); with it off they write raw floats as before.
+  The setting must match on every server and client, so run one kit build everywhere. Versions up to 0.96.13 need it off,
+  and on PR 11's kit, where it is on, their state sender stays inactive and their puppets stay steered.
 - The scripting define `DISABLE_ADDRESSABLES` on every build target the game builds: **Windows/Mac/Linux** (players,
   bots) and **Dedicated Server** (the headless servers), and in any build profile that does not inherit it. Each target
   keeps its own list (Project Settings ▸ Player ▸ the target's tab ▸ Other Settings ▸ Scripting Define Symbols), so a

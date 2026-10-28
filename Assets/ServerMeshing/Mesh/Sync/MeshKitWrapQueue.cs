@@ -19,7 +19,6 @@ namespace MultiplayerARPG.MMO.Mesh.Sync
         private readonly MeshStateFanout _fanout;
         private readonly IMeshLog _log;
         private readonly bool _install;
-        private readonly bool _gridDisabled;
         private readonly bool _wrapKit;
 
         private readonly HashSet<Type> _allowed = new HashSet<Type>();
@@ -34,16 +33,14 @@ namespace MultiplayerARPG.MMO.Mesh.Sync
 
         /// <summary>
         /// MeshKitWrapQueue creates a queue over the manager's slots and the fan-out. <paramref name="install"/> false is
-        /// measure mode; <paramref name="gridDisabled"/> false refuses every object (the kit's grid send path calls handlers
-        /// itself); <paramref name="wrapKit"/> false refuses every object (kit sources are not sent by the sender).
+        /// measure mode; <paramref name="wrapKit"/> false refuses every object (kit sources are not sent by the sender).
         /// </summary>
-        public MeshKitWrapQueue(MeshMovementHandlerSlots slots, MeshStateFanout fanout, IMeshLog log, bool install, bool gridDisabled, bool wrapKit)
+        public MeshKitWrapQueue(MeshMovementHandlerSlots slots, MeshStateFanout fanout, IMeshLog log, bool install, bool wrapKit)
         {
             _slots = slots ?? throw new ArgumentNullException(nameof(slots));
             _fanout = fanout ?? throw new ArgumentNullException(nameof(fanout));
             _log = log ?? throw new ArgumentNullException(nameof(log));
             _install = install;
-            _gridDisabled = gridDisabled;
             _wrapKit = wrapKit;
             _onReplaced = OnReplaced;
         }
@@ -53,7 +50,6 @@ namespace MultiplayerARPG.MMO.Mesh.Sync
         {
             None = 0,
             KitSourcesOff = 1,
-            GridPath = 2,
             DirectSource = 4,
             OtherLayer = 8,
             TypeNotAllowed = 16,
@@ -256,8 +252,6 @@ namespace MultiplayerARPG.MMO.Mesh.Sync
         {
             if (!_wrapKit)
                 return Refusal.KitSourcesOff;
-            if (!_gridDisabled)
-                return Refusal.GridPath;
             if (kit is IMeshStateSource)
                 return Refusal.DirectSource;
             if (_slots.HasLayer(objectId))
@@ -283,7 +277,6 @@ namespace MultiplayerARPG.MMO.Mesh.Sync
             switch (refusal)
             {
                 case Refusal.KitSourcesOff: return "kit sources are not sent by the sender";
-                case Refusal.GridPath: return "the kit's grid send path is enabled";
                 case Refusal.DirectSource: return "its handler is a state source of its own";
                 case Refusal.OtherLayer: return "another Mesh layer holds its slot";
                 case Refusal.TypeNotAllowed: return "its handler type is not allowed";

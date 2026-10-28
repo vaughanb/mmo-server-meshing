@@ -146,22 +146,20 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
 
         private static IEnumerable<TestCaseData> RefusalCases()
         {
-            yield return new TestCaseData("fake", false, false, true, MeshPuppetFallback.Handler).SetName("Refusal_OtherHandler_Handler");
-            yield return new TestCaseData("null", false, false, true, MeshPuppetFallback.Handler).SetName("Refusal_NoHandler_Handler");
-            yield return new TestCaseData("fake", true, true, false, MeshPuppetFallback.Handler).SetName("Refusal_OtherHandlerMountedSummonedGrid_HandlerFirst");
-            yield return new TestCaseData("builtin", false, false, false, MeshPuppetFallback.Grid).SetName("Refusal_GridEnabled_Grid");
-            yield return new TestCaseData("navmesh", true, true, false, MeshPuppetFallback.Grid).SetName("Refusal_GridEnabledMounted_GridBeforeMounted");
-            yield return new TestCaseData("builtin", true, false, true, MeshPuppetFallback.Mounted).SetName("Refusal_Mounted_Mounted");
-            yield return new TestCaseData("navmesh", true, true, true, MeshPuppetFallback.Mounted).SetName("Refusal_MountedSummoned_MountedBeforeSummoned");
-            yield return new TestCaseData("navmesh", false, true, true, MeshPuppetFallback.Summoned).SetName("Refusal_Summoned_Summoned");
-            yield return new TestCaseData("builtin", false, false, true, MeshPuppetFallback.None).SetName("Refusal_PlayerKitHandler_None");
-            yield return new TestCaseData("navmesh", false, false, true, MeshPuppetFallback.None).SetName("Refusal_NavMeshKitHandler_None");
+            yield return new TestCaseData("fake", false, false, MeshPuppetFallback.Handler).SetName("Refusal_OtherHandler_Handler");
+            yield return new TestCaseData("null", false, false, MeshPuppetFallback.Handler).SetName("Refusal_NoHandler_Handler");
+            yield return new TestCaseData("fake", true, true, MeshPuppetFallback.Handler).SetName("Refusal_OtherHandlerMountedSummoned_HandlerFirst");
+            yield return new TestCaseData("builtin", true, false, MeshPuppetFallback.Mounted).SetName("Refusal_Mounted_Mounted");
+            yield return new TestCaseData("navmesh", true, true, MeshPuppetFallback.Mounted).SetName("Refusal_MountedSummoned_MountedBeforeSummoned");
+            yield return new TestCaseData("navmesh", false, true, MeshPuppetFallback.Summoned).SetName("Refusal_Summoned_Summoned");
+            yield return new TestCaseData("builtin", false, false, MeshPuppetFallback.None).SetName("Refusal_PlayerKitHandler_None");
+            yield return new TestCaseData("navmesh", false, false, MeshPuppetFallback.None).SetName("Refusal_NavMeshKitHandler_None");
         }
 
         [TestCaseSource(nameof(RefusalCases))]
-        public void Refusal(string kitKind, bool mounted, bool summoned, bool gridDisabled, MeshPuppetFallback expected)
+        public void Refusal(string kitKind, bool mounted, bool summoned, MeshPuppetFallback expected)
         {
-            MeshPuppetFallback refusal = MeshKinematicCharacterBody.Refusal(KitOfKind(kitKind), mounted, summoned, gridDisabled);
+            MeshPuppetFallback refusal = MeshKinematicCharacterBody.Refusal(KitOfKind(kitKind), mounted, summoned);
 
             Assert.That(refusal, Is.EqualTo(expected));
         }

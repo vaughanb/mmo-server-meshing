@@ -48,11 +48,11 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             _identities.Dispose();
         }
 
-        private void NewQueue(bool install = true, bool gridDisabled = true, bool wrapKit = true)
+        private void NewQueue(bool install = true, bool wrapKit = true)
         {
             MeshStateFanoutSettings settings = new MeshStateFanoutSettings(20, 4, 1020, false, !install, false);
             _fanout = new MeshStateFanout(_transport, new MeshFakeStatePositions(), _policy, settings, _log, (source, reason) => _queue.OnDropped(source, reason));
-            _queue = new MeshKitWrapQueue(_slots, _fanout, _log, install, gridDisabled, wrapKit);
+            _queue = new MeshKitWrapQueue(_slots, _fanout, _log, install, wrapKit);
             _queue.AllowHandlerType(typeof(MeshFakePassKitHandler));
         }
 
@@ -104,7 +104,7 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
                 missing == "slots" ? null : _slots,
                 missing == "fanout" ? null : _fanout,
                 missing == "log" ? null : _log,
-                true, true, true));
+                true, true));
 
             Assert.That(thrown.ParamName, Is.EqualTo(missing));
         }
@@ -117,21 +117,6 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             ArgumentNullException thrown = Assert.Throws<ArgumentNullException>(() => _queue.AllowHandlerType(null));
 
             Assert.That(thrown.ParamName, Is.EqualTo("handlerType"));
-        }
-
-        [Test]
-        public void Drain_GridPathEnabled_RefusesAndLeavesTheSlot()
-        {
-            NewQueue(gridDisabled: false);
-            MeshFakePassKitHandler kit = new MeshFakePassKitHandler(Id);
-
-            Wrap(Spawn(kit, Id, 7));
-
-            Assert.That(_handlers[Id], Is.SameAs(kit));
-            Assert.That(_fanout.IsRegistered(Id), Is.False);
-            Assert.That(_queue.Refusals, Is.EqualTo(1));
-            Assert.That(_log.warnings.Count, Is.EqualTo(1));
-            Assert.That(_log.warnings[0], Does.StartWith($"State sender: object {Id} (MeshFakePassKitHandler) stays on the kit path: "));
         }
 
         [Test]

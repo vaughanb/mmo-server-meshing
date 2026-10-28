@@ -37,9 +37,11 @@ Added lanes, queueing, deferred/throttled saves, and a working in-memory cache.
 Cell-based position quantization dramatically improves network efficiency for entity movement.
 
 - Improved scalability: Lower network traffic supports more concurrent players, higher update rates, and denser entity populations.
-- LOD based compression: Close entities (the ones the player actually interacts with) keep high-precision modes, while distant entities (the majority in large MMO worlds) send position data in as little as 4 bytes.
+- LOD based compression: Close entities (the ones the player actually interacts with) keep high-precision modes, while distant entities (the majority in large MMO worlds) send position data in as little as 7 bytes, against 12 for raw floats.
 
-**World Size Assumptions:** The system uses a fixed square grid centered at the world origin. The maximum supported world size is determined by configurable CellSize. Positions outside the grid are clamped to edge cells.
+**World Size:** The world is cut into cubic cells (128 m by default) that start at the world origin and have no edge. Each position carries its cell as three signed packed integers, one byte each within about 15 km of the origin, so maps of any size, negative coordinates and any height work.
+
+**Compatibility:** Quantization is on by default (`isDisabled` in `DefaultGridManagerComponent`), and every server and client must run the same build. The 2D and simple movement types keep sending their own formats, because their clients can't read quantized states.
 
 ### Jobs Movement Pipeline
 All entity movement data processing converted from monothreaded per-entity updates to Unity Jobs + Burst parallel processing.

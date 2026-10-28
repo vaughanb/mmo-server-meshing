@@ -10,7 +10,7 @@ using UnityEngine.AI;
 namespace MultiplayerARPG
 {
     [RequireComponent(typeof(NavMeshAgent))]
-    public class NavMeshEntityMovement : BaseNetworkedGameEntityComponent<BaseGameEntity>, IEntityMovementComponent, IEntityMovementDataHandler, IEntityMovementServerStateFlags, IManagedUpdate
+    public class NavMeshEntityMovement : BaseNetworkedGameEntityComponent<BaseGameEntity>, IEntityMovementComponent, IEntityMovementDataHandler, IEntityMovementServerStateFlags, IQuantizedEntityMovementDataHandler, IManagedUpdate
     {
         protected const float MIN_MAGNITUDE_TO_DETERMINE_MOVING = 0.01f;
         protected const float MIN_DISTANCE_TO_SIMULATE_MOVEMENT = 0.01f;
@@ -558,6 +558,9 @@ namespace MultiplayerARPG
             }
             return false;
         }
+
+        // IQuantizedEntityMovementDataHandler. Matches WriteServerState, which sends nothing before start.
+        public bool CanWriteQuantizedServerState => _isStarted;
 
         public MovementData CreateMovementData(out List<EntityMovementForceApplier> forceAppliers)
         {
