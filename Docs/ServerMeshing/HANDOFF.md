@@ -1,7 +1,7 @@
 # Handoff — 2026-10-28
 
 Where the work stands, how to get it running on another machine, and what is left. The design record
-([DESIGN.md](DESIGN.md), version 1.03) has the full reasoning and measurements; this note is the short path in.
+([DESIGN.md](DESIGN.md), version 1.04) has the full reasoning and measurements; this note is the short path in.
 
 ## What was done
 
@@ -94,7 +94,30 @@ Where the work stands, how to get it running on another machine, and what is lef
      6.3–8.5 ms against a 3.1–3.4 ms median with no GC in it, the session's first hop 12.6 ms (first-time
      code) — the connect frame is no longer where a hop spends its time; the gap (`playerAdopted`)
      stays 250–360 ms, which is the destination's database load and relates data, the next item.
-5. **Verified on the 8 km demo** (editor client plus headless bots), all seamless, no exceptions:
+5. **Undetectable handoff, step 4: in-memory state transfer (DESIGN 1.04, package 0.96.8).** Two thirds of
+   the 250–360 ms gap was the database: the origin awaited the crossing's save (66 ms) before the warp, the
+   destination validated the token and read the row (133 ms) before promoting its ghost.
+   - Origin (`MeshHandoff`, `inMemoryHandoffState`): sends `HandoffStateMessage` (the character as the row
+     would read, plus the client's user id and token) over the mesh link, warps the client at once, demotes
+     the entity, and writes the row behind the player (`SaveHandoffRowBehind`; a failure is logged, the
+     destination's own saves write the state). Falls back to the save-first path when no link is up.
+   - Destination: `OnHandoffState` keeps the state with the notice; `DeserializeEnterGameData` serves a
+     matching enter-game (same user id and token, within the reservation window) from it with no database
+     round trip (`ServeEnterGameFromHandoffState`), then promotes the ghost as before. A request that arrives
+     before its state (same-frame race with the pre-connected client) waits up to `handoffStateWaitSeconds`
+     when a ghost of that player stands here.
+   - Stamps: `handoff state for … received`, `enter-game served from the handoff state … (no database)`,
+     `enter-game waited N frame(s) for the handoff state`, `Handoff SENT … state in memory`,
+     `Handoff row … written behind the player in N ms`.
+   - Measured (patrol, ten hops a run): the origin's handoff is 6 ms server-side (was 66) with the row
+     written behind in ~90 ms; the destination serves enter-game in 0 ms (was 133); the gap from the warp to
+     the adoption is 112–183 ms, median ~135 (was 250–360), first hop of a session 201 ms; every hop adopted,
+     no jump, longest frames 6–13 ms. What is left of the gap is the cells' frame time at the kit's
+     `serverTargetFrameRate` of 30: enter-game, ready and the spawn's sync tick each cost a frame.
+   - Tests: the enter-game peek's token overload (`MeshMergeMapSideTests`); the full EditMode suite ran clean
+     (3,226: 3,225 passed, 1 skipped by design). The row-behind save and the destination's periodic saves
+     cannot cross: the kit's updater proceeds every 5 s, the behind-save takes ~90 ms and retries for 3 s.
+6. **Verified on the 8 km demo** (editor client plus headless bots), all seamless, no exceptions:
    - a 750 m walk across three cells;
    - 16 quick back-and-forth crossings (adopted after 180–398 ms, none fell back);
    - a second player standing past the line: kept and adopted;
@@ -167,11 +190,12 @@ Where the work stands, how to get it running on another machine, and what is lef
 
 ## Open items, in rough order
 
-1. **The gap, not the frame.** With 1.03 a hop's longest frame is 5–8.5 ms against a 3 ms median, in no
-   particular frame and with no GC in it; the connect is gone from the hop. What is left is the 250–360 ms
-   between the warp and the adoption, which is the destination's database load and relates-data load, and
-   what happens to actions during it. The plan's next steps, in order:
-   - in-memory state transfer instead of the database round trip (the gap becomes a round trip);
+1. **The gap is server frames now.** With 1.04 the gap between the warp and the adoption is 112–183 ms
+   on localhost and nothing in it is the database or the connect: the destination handles enter-game in one
+   frame, the client's ready in the next, and spawns on the sync tick after, each a frame at the kit's
+   `serverTargetFrameRate` of 30 (33 ms). Next steps, in order:
+   - the cells' frame rate (60 would roughly halve the gap; the demo copy can override it on its
+     GameInstance, the rig's load figures were taken at 30);
    - holding actions pressed mid-hop (the arrival's respawn RPC still clears the owner's action states);
    - extrapolating kept entities through the gap.
    On Mono the first hop of a session still compiles the hop's first-time code (12.6 ms, the adoption read

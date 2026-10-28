@@ -47,6 +47,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public const ushort RegistrationState = 130;      // a Dynamic map's cell -> each linked neighbour, every 2 s and on change: whether it is registered with the cluster
         // Slice 4 (buildings across a cut, slices/slice4_design.md decisions 9 and 10):
         public const ushort BuildingTransfer = 131;       // a building tree whose root stands in the receiver's owned rectangle: take it (rows already saved)
+        public const ushort HandoffState = 134;           // origin -> destination: the crossing character's full state (and its client's user id and token), so the arrival needs no database read (DESIGN 1.04)
         public const ushort BuildingTransferReply = 132;  // receiver -> sender: taken (promoted, spawned, owned already), or refused with a reason
         // Slice 7 (on-demand links, slices/slice7_design.md decision 6):
         public const ushort LinkClose = 133;              // sender -> receiver: this link is idle and not needed; the sender stops it next tick
@@ -542,6 +543,33 @@ namespace MultiplayerARPG.MMO.Mesh
     }
 
     /// <summary>
+    /// The handoff notice with the character itself (DESIGN 1.04): the origin's full copy of the crossing character, as the
+    /// row it writes would read, plus the client's user id and access token, so the destination serves the client's
+    /// enter-game from memory and the database write happens behind the player instead of in front of it.
+    /// </summary>
+    public struct HandoffStateMessage : INetSerializable
+    {
+        public string characterId;
+        public string userId;
+        public string accessToken;
+        public PlayerCharacterData data;
+        public void Serialize(NetDataWriter writer)
+        {
+            writer.Put(characterId);
+            writer.Put(userId);
+            writer.Put(accessToken ?? string.Empty);
+            writer.Put(data);
+        }
+        public void Deserialize(NetDataReader reader)
+        {
+            characterId = reader.GetString();
+            userId = reader.GetString();
+            accessToken = reader.GetString();
+            data = reader.Get(() => new PlayerCharacterData());
+        }
+    }
+
+    /// <summary>
     /// Sent by a MeshLinkClient right after connecting so the server knows which zone is talking, and which process
     /// of it: a different incarnation from the same zone means the neighbour restarted and forgot everything it held.
     /// </summary>
@@ -657,6 +685,7 @@ namespace MultiplayerARPG.MMO.Mesh
             RegisterMessageHandler(MeshLinkMessageTypes.GhostSnapshot, HandleGhostSnapshot);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostRemove, HandleGhostRemove);
             RegisterMessageHandler(MeshLinkMessageTypes.HandoffNotice, HandleHandoffNotice);
+            RegisterMessageHandler(MeshLinkMessageTypes.HandoffState, HandleHandoffState);
             RegisterMessageHandler(MeshLinkMessageTypes.HandoffAck, HandleHandoffAck);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostPartyShare, HandleGhostPartyShare);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostReplay, HandleGhostReplay);
@@ -744,6 +773,12 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             HandoffNoticeMessage msg = messageHandler.ReadMessage<HandoffNoticeMessage>();
             _manager.OnHandoffNotice(messageHandler.ConnectionId, msg);
+        }
+
+        private void HandleHandoffState(MessageHandlerData messageHandler)
+        {
+            HandoffStateMessage msg = messageHandler.ReadMessage<HandoffStateMessage>();
+            _manager.OnHandoffState(messageHandler.ConnectionId, msg);
         }
 
         private void HandleHandoffAck(MessageHandlerData messageHandler)
@@ -1046,6 +1081,11 @@ namespace MultiplayerARPG.MMO.Mesh
         public void SendHandoffNotice(string characterId, string userId)
         {
             Send(MeshLinkMessageTypes.HandoffNotice, new HandoffNoticeMessage { characterId = characterId, userId = userId });
+        }
+
+        public void SendHandoffState(HandoffStateMessage msg)
+        {
+            Send(MeshLinkMessageTypes.HandoffState, msg);
         }
 
         public void SendGhostHit(GhostHitMessage msg)

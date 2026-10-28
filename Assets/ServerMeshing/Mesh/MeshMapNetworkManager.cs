@@ -429,8 +429,37 @@ namespace MultiplayerARPG.MMO.Mesh
             System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
             Stamp($"enter-game request from {connectionId}");
             if (RefuseEnterGameWhileDraining(requestId, reader)) return false; // Slice 2c decision 12: before the kit adopts a despawning entity
-            bool ok = await base.DeserializeEnterGameData(requestId, connectionId, request, reader);
-            Stamp($"enter-game validated+loaded ok={ok} in {sw.ElapsedMilliseconds}ms");
+            bool ok;
+            PlayerCharacterData handoffState = null;
+            string stateUserId = null, stateToken = null, stateCharacterId = null;
+            if (IsServer && inMemoryHandoffState
+                && MeshDrainRules.TryPeekEnterGameIds(reader, out stateUserId, out stateToken, out stateCharacterId)
+                && !TryTakeHandoffState(stateCharacterId, stateUserId, stateToken, out handoffState)
+                && handoffStateWaitSeconds > 0f && TryGetPlayerGhost(stateCharacterId, out _))
+            {
+                // The state (mesh link) and the client's enter-game (its pre-connected transport) leave the origin in the
+                // same frame, and this cell can poll the request before the link's message. A player whose ghost stands
+                // here is a crossing, so its state is on the way: wait a few frames before falling back to the database.
+                int waited = 0;
+                float deadline = Time.realtimeSinceStartup + handoffStateWaitSeconds;
+                while (Time.realtimeSinceStartup < deadline && !TryTakeHandoffState(stateCharacterId, stateUserId, stateToken, out handoffState))
+                {
+                    await UniTask.Yield();
+                    waited++;
+                }
+                Stamp($"enter-game waited {waited} frame(s) for the handoff state: {(handoffState != null ? "arrived" : "not arrived; the database serves it")}");
+            }
+            if (handoffState != null)
+            {
+                // DESIGN 1.04: the origin sent this character's state and vouched for this client; no database round trip.
+                ok = ServeEnterGameFromHandoffState(requestId, connectionId, request, reader, stateUserId, stateToken, handoffState);
+                Stamp($"enter-game served from the handoff state ok={ok} in {sw.ElapsedMilliseconds}ms (no database)");
+            }
+            else
+            {
+                ok = await base.DeserializeEnterGameData(requestId, connectionId, request, reader);
+                Stamp($"enter-game validated+loaded ok={ok} in {sw.ElapsedMilliseconds}ms");
+            }
 #if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
             if (ok && ServerUserHandlers.TryGetUserId(connectionId, out string traceUserId) && _pendingSpawnPlayerCharactersByUserId.TryGetValue(traceUserId, out IPlayerCharacterData tracePending))
                 Stamp($"enter-game data for {tracePending.CharacterName}: position {(Vector3)tracePending.CurrentPosition} map {tracePending.CurrentMapName}");
@@ -450,6 +479,69 @@ namespace MultiplayerARPG.MMO.Mesh
 #endif
             return ok;
         }
+
+#if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
+        /// <summary>
+        /// The kit's DeserializeEnterGameData for a client whose character the origin cell just sent us in memory: the
+        /// same checks and registrations, minus the access-token validation (the origin vouched for user id and token,
+        /// and they match the request) and the character row read (the state is the row). Refusals use the kit's codes.
+        /// </summary>
+        private bool ServeEnterGameFromHandoffState(uint requestId, long connectionId, EnterGameRequestMessage request, NetDataReader reader, string userId, string accessToken, PlayerCharacterData state)
+        {
+            if (IsAllocate)
+            {
+                _enterGameRequestResponseMessages[requestId] = UITextKeys.UI_ERROR_APP_NOT_READY;
+                return false;
+            }
+            if (request.packetVersion != PacketVersion())
+            {
+                _enterGameRequestResponseMessages[requestId] = UITextKeys.UI_ERROR_INVALID_PACKET_VERSION;
+                return false;
+            }
+            // The kit reads these three from the request; they were peeked, so consume them the same way.
+            reader.GetString();
+            reader.GetString();
+            reader.GetString();
+            if (!IsServerReadyToInstantiateObjects())
+            {
+                _enterGameRequestResponseMessages[requestId] = UITextKeys.UI_ERROR_APP_NOT_READY;
+                return false;
+            }
+            if (ServerUserHandlers.TryGetConnectionIdByUserId(userId, out _))
+            {
+                Logging.LogWarning("Mesh", $"Handoff arrival {state.CharacterName}: user {userId} already has a connection here; refused");
+                _enterGameRequestResponseMessages[requestId] = UITextKeys.UI_ERROR_USER_IS_ALREADY_ONLINE;
+                return false;
+            }
+            if (ServerUserHandlers.TryGetPlayerCharacter(connectionId, out _))
+            {
+                _enterGameRequestResponseMessages[requestId] = UITextKeys.UI_ERROR_CHARACTER_IS_ALREADY_ONLINE;
+                return false;
+            }
+            if (!state.TryGetEntityPrefab(out _, out _))
+            {
+                Logging.LogError("Mesh", $"Handoff arrival {state.CharacterName}: no player entity prefab for entity id {state.EntityId}");
+                _enterGameRequestResponseMessages[requestId] = UITextKeys.UI_ERROR_INVALID_CHARACTER_ENTITY;
+                return false;
+            }
+            UnregisterPlayerCharacterByUserId(userId);
+            UnregisterUserIdAndAccessTokenByUserId(userId);
+            UnregisterPlayerCharacter(connectionId);
+            UnregisterUserIdAndAccessToken(connectionId);
+            RegisterUserIdAndAccessToken(connectionId, userId, accessToken);
+            if (!IsInstanceMap())
+            {
+                CurrentMapInfo.GetEnterMapPoint(state, out string enterMap, out Vector3 enterPosition, out Vector3 enterRotation);
+                state.CurrentMapName = enterMap;
+                state.CurrentPosition = enterPosition;
+                state.CurrentRotation = enterRotation;
+            }
+            _pendingSpawnPlayerCharactersByUserId[userId] = state;
+            return true;
+        }
+#else
+        private bool ServeEnterGameFromHandoffState(uint requestId, long connectionId, EnterGameRequestMessage request, NetDataReader reader, string userId, string accessToken, PlayerCharacterData state) { return false; }
+#endif
 
         public override UniTask<bool> DeserializeClientReadyData(uint requestId, long connectionId, NetDataReader reader, LiteNetLibIdentity playerIdentity)
         {
@@ -963,6 +1055,34 @@ namespace MultiplayerARPG.MMO.Mesh
                 GhostingOnPlayerHandoffStart(characterId, zone.id);
                 UnregisterPlayerCharacter(connectionId);
                 DataUpdater.PlayerCharacterDataSaved(characterId);
+
+                // DESIGN 1.04: the state goes to the destination in memory, with the client's identity, and the client is
+                // warped at once; the row is written behind the player. The destination serves enter-game from the
+                // state (no token validation round trip, no row read) and promotes its ghost as before.
+                string handoffUserId = ServerUserHandlers.TryGetUserId(connectionId, out string uid) ? uid : entity.UserId;
+                if (inMemoryHandoffState && ServerUserHandlers.TryGetAccessToken(connectionId, out string accessToken) && !string.IsNullOrEmpty(accessToken) && !string.IsNullOrEmpty(handoffUserId))
+                {
+                    PlayerCharacterData snapshot = entity.CloneTo(new PlayerCharacterData());
+                    snapshot.CurrentMapName = mapName;
+                    snapshot.CurrentPosition = savePosition;
+                    snapshot.CurrentRotation = rotation;
+                    if (SendHandoffState(zone.id, new HandoffStateMessage { characterId = characterId, userId = handoffUserId, accessToken = accessToken, data = snapshot }))
+                    {
+                        if (entity.TryGetComponent(out PlayerCharacterDataUpdater stateUpdater))
+                            Destroy(stateUpdater);
+                        if (!demotePlayerOnHandoff)
+                            entity.NetworkDestroy();
+                        ServerSendPacket(connectionId, 0, DeliveryMethod.ReliableOrdered, GameNetworkingConsts.Warp, new MMOWarpMessage { networkAddress = peer.networkAddress, networkPort = peer.networkPort });
+                        if (demotePlayerOnHandoff && entity != null)
+                            DemotePlayerToGhost(entity, zone.id);
+                        RegisterPendingHandoffAck(characterId, entity.CharacterName, zone.id, startTime);
+                        Logging.Log("Mesh", $"Handoff SENT {entity.CharacterName} -> zone {zone.id} state in memory, serverSide={sw.ElapsedMilliseconds}ms demoted={demotePlayerOnHandoff}; the row is written behind the player");
+                        SaveHandoffRowBehind(characterId, entity.CharacterName, zone.id, snapshot, mapName, savePosition, rotation).Forget();
+                        return;
+                    }
+                    Logging.LogWarning("Mesh", $"Handoff {entity.CharacterName} -> zone {zone.id}: no link to send the state on; saving the row first instead");
+                }
+
                 bool saved = false;
                 try
                 {
@@ -1016,6 +1136,35 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 _handoffsInProgress.Remove(characterId);
             }
+        }
+
+        [Tooltip("A handoff sends the character's state to the destination over the mesh link and warps the client at once; the database row is written behind the player (DESIGN 1.04). Off: the row is written first and the destination reads it (the 1.03 path).")]
+        public bool inMemoryHandoffState = true;
+
+        [Tooltip("How long (s) the destination waits for a crossing player's state when its client's enter-game arrives first (the two leave the origin in the same frame), before it reads the database instead.")]
+        public float handoffStateWaitSeconds = 0.15f;
+
+        /// <summary>
+        /// The crossing's row, written after the client was warped. A failure is logged, not acted on: the destination
+        /// holds the state and its own periodic saves write it (the kit's updater proceeds every 5 s, this save takes
+        /// milliseconds and retries for 3 s, so the destination's first save lands after this one).
+        /// </summary>
+        private async UniTaskVoid SaveHandoffRowBehind(string characterId, string name, string zoneId, PlayerCharacterData snapshot, string mapName, Vector3 savePosition, Vector3 rotation)
+        {
+            System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
+            bool saved = false;
+            try
+            {
+                saved = await WaitAndSaveCharacter(TransactionUpdateCharacterState.All, snapshot, true, mapName, savePosition, true, rotation);
+            }
+            catch (System.Exception ex)
+            {
+                Logging.LogException("Mesh", ex);
+            }
+            if (saved)
+                Logging.Log("Mesh", $"Handoff row {name} ({characterId}) -> zone {zoneId} written behind the player in {sw.ElapsedMilliseconds}ms");
+            else
+                Logging.LogError("Mesh", $"Handoff row {name} ({characterId}) -> zone {zoneId} NOT written ({sw.ElapsedMilliseconds}ms); the destination holds the state and its own saves write it");
         }
 
         private struct VelocitySample { public Vector3 pos; public Vector3 vel; public float t; }

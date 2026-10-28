@@ -3368,7 +3368,13 @@ namespace MultiplayerARPG.MMO.Mesh
         // demoted puppet and its pets are exempt from stale expiry, so a slow arrival never blinks them on the cell the
         // player just left; a failed handoff releases them at once.
 
-        private sealed class IncomingHandoff { public string fromZone; public float time; public bool fastSpawned; }
+        private sealed class IncomingHandoff
+        {
+            public string fromZone; public float time; public bool fastSpawned;
+            // DESIGN 1.04: the character as the origin held it at the crossing, and its client's identity, when the origin
+            // sent the state with the notice; the client's enter-game is then served from here, with no database read.
+            public PlayerCharacterData state; public string userId; public string accessToken;
+        }
         private sealed class PendingHandoffAck { public string zone; public string name; public float startTime; public float sentTime; public float linkDownSince = -1f; }
         private readonly Dictionary<string, IncomingHandoff> _incomingHandoffFrom = new Dictionary<string, IncomingHandoff>(); // characterId -> who announced it
         private readonly Dictionary<string, PendingHandoffAck> _pendingHandoffAcks = new Dictionary<string, PendingHandoffAck>(); // characterId -> our handoff awaiting the destination's ack
@@ -3434,6 +3440,42 @@ namespace MultiplayerARPG.MMO.Mesh
                 fromZone = _neighbourZoneByConnection.TryGetValue(connectionId, out string z) ? z : null,
                 time = Time.unscaledTime,
             };
+        }
+
+        /// <summary>The notice with the character in it (DESIGN 1.04): recorded like a notice, and its state kept for the client's enter-game.</summary>
+        internal void OnHandoffState(long connectionId, HandoffStateMessage msg)
+        {
+            MeshFaultOnHandoffNotice(msg.characterId);
+            _incomingHandoffFrom[msg.characterId] = new IncomingHandoff
+            {
+                fromZone = _neighbourZoneByConnection.TryGetValue(connectionId, out string z) ? z : null,
+                time = Time.unscaledTime,
+                state = msg.data,
+                userId = msg.userId,
+                accessToken = msg.accessToken,
+            };
+            Stamp($"handoff state for {msg.data?.CharacterName} ({msg.characterId}) received from {_incomingHandoffFrom[msg.characterId].fromZone}");
+        }
+
+        /// <summary>
+        /// The state an announced arrival carried, when the client asking to enter is the one the origin vouched for
+        /// (same user id and access token) and the notice is still within the reservation window; null otherwise, and the
+        /// kit's database path serves the request.
+        /// </summary>
+        internal bool TryTakeHandoffState(string characterId, string userId, string accessToken, out PlayerCharacterData state)
+        {
+            state = null;
+            if (string.IsNullOrEmpty(characterId) || !_incomingHandoffFrom.TryGetValue(characterId, out IncomingHandoff incoming) || incoming.state == null)
+                return false;
+            if (Time.unscaledTime - incoming.time >= reservedArrivalTimeout)
+                return false;
+            if (!string.Equals(incoming.userId, userId) || string.IsNullOrEmpty(accessToken) || !string.Equals(incoming.accessToken, accessToken))
+            {
+                Logging.LogWarning("Mesh", $"Handoff state for {characterId} is not for the client asking to enter (user match {string.Equals(incoming.userId, userId)}); the database serves it");
+                return false;
+            }
+            state = incoming.state;
+            return true;
         }
 
         /// <summary>Origin side: remember a handoff we sent so the destination's ack can be matched and timed.</summary>
@@ -3672,6 +3714,15 @@ namespace MultiplayerARPG.MMO.Mesh
                 client.SendHandoffNotice(characterId, userId);
         }
 
+        /// <summary>Origin side: the notice with the character in it; false when no link to the zone is up (the caller falls back to the notice and the database).</summary>
+        internal bool SendHandoffState(string zoneId, HandoffStateMessage msg)
+        {
+            if (!_linkClients.TryGetValue(zoneId, out MeshLinkClient client) || !client.IsConnected)
+                return false;
+            client.SendHandoffState(msg);
+            return true;
+        }
+
         /// <summary>An arrival announced by a neighbour within the reservation window whose relates data was not yet fast-spawned.</summary>
         private bool TryClaimIncomingHandoff(string characterId)
         {
@@ -3711,6 +3762,8 @@ namespace MultiplayerARPG.MMO.Mesh
         internal void OnGhostRemove(long connectionId, string characterId) { }
         internal void OnBuildingPlace(long connectionId, BuildingPlaceMessage msg) { }
         internal void OnHandoffNotice(long connectionId, HandoffNoticeMessage msg) { }
+        internal void OnHandoffState(long connectionId, HandoffStateMessage msg) { }
+        internal bool TryTakeHandoffState(string characterId, string userId, string accessToken, out PlayerCharacterData state) { state = null; return false; }
         internal void OnHandoffAck(long connectionId, HandoffAckMessage msg) { }
         internal void OnGhostPartyShare(long connectionId, GhostPartyShareMessage msg) { }
         internal bool TryGetPlayerGhost(string characterId, out BasePlayerCharacterEntity ghost) { ghost = null; return false; }
@@ -3739,6 +3792,7 @@ namespace MultiplayerARPG.MMO.Mesh
         internal bool IsPlayerGhostNear(Vector3 position, float range) { return false; }
         internal void ForwardGhostReward(BasePlayerCharacterEntity ghost, int exp, int gold, IEnumerable<CurrencyAmount> currencies, float multiplier, RewardGivenType givenType, int giverLevel, int sourceLevel) { }
         internal void SendHandoffNotice(string zoneId, string characterId, string userId) { }
+        internal bool SendHandoffState(string zoneId, HandoffStateMessage msg) { return false; }
 #endif
     }
 }

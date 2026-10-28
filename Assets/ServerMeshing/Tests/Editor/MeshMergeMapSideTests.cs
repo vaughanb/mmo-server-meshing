@@ -65,6 +65,8 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             int position = reader.Position;
             Assert.That(MeshDrainRules.TryPeekEnterGameIds(reader, out string userId, out string characterId), Is.True);
             Assert.That((userId, characterId, reader.Position), Is.EqualTo(("user-1", "char-1", position)));
+            Assert.That(MeshDrainRules.TryPeekEnterGameIds(reader, out string user, out string token, out string character), Is.True, "the handoff-state path (DESIGN 1.04) peeks the token too");
+            Assert.That((user, token, character, reader.Position), Is.EqualTo(("user-1", "token", "char-1", position)));
             Assert.That((reader.GetString(), reader.GetString(), reader.GetString(), reader.GetInt()), Is.EqualTo(("user-1", "token", "char-1", 42)), "the kit reads it all as before");
 
             NetDataWriter shortWriter = new NetDataWriter();

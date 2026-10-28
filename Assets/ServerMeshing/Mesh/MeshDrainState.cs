@@ -168,7 +168,17 @@ namespace MultiplayerARPG.MMO.Mesh
         /// </summary>
         public static bool TryPeekEnterGameIds(NetDataReader reader, out string userId, out string characterId)
         {
+            return TryPeekEnterGameIds(reader, out userId, out _, out characterId);
+        }
+
+        /// <summary>
+        /// TryPeekEnterGameIds with the access token too: the handoff state's enter-game (DESIGN 1.04) compares it with the
+        /// token the origin vouched for, which is what stands in for the kit's token validation on that path.
+        /// </summary>
+        public static bool TryPeekEnterGameIds(NetDataReader reader, out string userId, out string accessToken, out string characterId)
+        {
             userId = null;
+            accessToken = null;
             characterId = null;
             if (reader == null || reader.RawData == null)
                 return false;
@@ -176,13 +186,14 @@ namespace MultiplayerARPG.MMO.Mesh
             try
             {
                 userId = copy.GetString();
-                copy.GetString(); // the access token: not ours to look at
+                accessToken = copy.GetString();
                 characterId = copy.GetString();
                 return true;
             }
             catch (System.Exception e) when (e is System.InvalidOperationException || e is System.ArgumentException)
             {
                 userId = null;
+                accessToken = null;
                 characterId = null;
                 return false;
             }
