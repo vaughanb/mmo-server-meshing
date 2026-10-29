@@ -1094,7 +1094,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     snapshot.CurrentPosition = savePosition;
                     snapshot.CurrentRotation = rotation;
                     MeshCarriedAction action = InFlightAction(entity); // DESIGN 1.06: the destination accepts its remaining triggers
-                    if (SendHandoffState(zone.id, new HandoffStateMessage { characterId = characterId, userId = handoffUserId, accessToken = accessToken, data = snapshot, action = action, originObjectId = entity.ObjectId, velocity = velocity }))
+                    if (SendHandoffState(zone.id, new HandoffStateMessage { characterId = characterId, userId = handoffUserId, accessToken = accessToken, data = snapshot, action = action, originObjectId = entity.ObjectId, velocity = velocity, carried = MeshHandoffCarriers.Collect(entity, w => Logging.LogWarning("Mesh", w)) }))
                     {
                         if (entity.TryGetComponent(out PlayerCharacterDataUpdater stateUpdater))
                             Destroy(stateUpdater);

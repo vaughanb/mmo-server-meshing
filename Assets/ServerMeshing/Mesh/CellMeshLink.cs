@@ -557,6 +557,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public MeshCarriedAction action; // the attack or skill in flight at the crossing (DESIGN 1.06), kind None when idle
         public uint originObjectId;      // the character's object id on the origin, which its client names it by until it adopts the new one (DESIGN 1.07)
         public Vector3 velocity;         // the character's velocity at the crossing, as the origin measured it: the destination walks it on at that through its client's gap (DESIGN 1.09)
+        public byte[] carried;           // game state outside the kit's data, by carrier (MeshHandoffCarriers, DESIGN 1.22); null when none; written last
         public void Serialize(NetDataWriter writer)
         {
             writer.Put(characterId);
@@ -566,6 +567,7 @@ namespace MultiplayerARPG.MMO.Mesh
             writer.Put(action);
             writer.Put(originObjectId);
             writer.Put(velocity.x); writer.Put(velocity.y); writer.Put(velocity.z);
+            writer.PutBytesWithLength(carried ?? new byte[0]);
         }
         public void Deserialize(NetDataReader reader)
         {
@@ -576,6 +578,9 @@ namespace MultiplayerARPG.MMO.Mesh
             action = reader.Get<MeshCarriedAction>();
             originObjectId = reader.GetUInt();
             velocity = new Vector3(reader.GetFloat(), reader.GetFloat(), reader.GetFloat());
+            carried = reader.AvailableBytes >= 4 ? reader.GetBytesWithLength() : null;
+            if (carried != null && carried.Length == 0)
+                carried = null;
         }
     }
 

@@ -298,8 +298,9 @@ Where the work stands, how to get it running on another machine, and what is lef
    - ammunition per trigger, a skill item taken after the last trigger and a charge in progress are not
      carried (1.06). A skill cast in the warp's frame runs once on the destination (1.21, 24 of 24), but a skill
      in flight on the origin at the handoff has not run: Cleave roots its caster, so try Charge (a dash) or a
-     channelled skill (patrol `castSkillWhileWalking`). The 8 km demo's warrior has 0 MP after every login (the
-     stored 100 is lost before any crossing; food and water too), so MP skills need a fix there first;
+     channelled skill (patrol `castSkillWhileWalking`). The 8 km demo's warrior MP is rage (empty at login,
+     10 per hit, drains out of combat): build it by swinging before casting. Game state a cell holds outside the
+     kit's data crosses only through an `IMeshHandoffCarrier` (1.22; the demo's combat timer is one);
    - remote motion (1.17–1.20): clients draw other characters from their states' timestamps, an arrival's first
      snapshot carries its crossing velocity, puppets extrapolate stamped snapshots with a two-interval velocity,
      and cells send client-driven players along their clients' stamped trajectories, gliding an arrival from its

@@ -1052,6 +1052,7 @@ namespace MultiplayerARPG.MMO.Mesh
             if (playerCharacter == null)
                 return;
             CarryInFlightAction(playerCharacter); // DESIGN 1.06: before the client's next trigger can arrive
+            ApplyCarriedState(playerCharacter); // DESIGN 1.22: the game's own state about it (MeshHandoffCarrier)
             NoteArrivalObjectId(playerCharacter, connectionId); // DESIGN 1.07: before the parked calls replay (MeshMapNetworkManager_GapCommands)
             RehandoffBackoffOnArrival(playerCharacter); // Slice 2d: no handoff straight after an arrival, longer after a return (Readiness)
             PrewarmConsume(playerCharacter.Id);
@@ -3405,6 +3406,7 @@ namespace MultiplayerARPG.MMO.Mesh
             public uint originObjectId;      // DESIGN 1.07: the id the client names the character by until it adopts ours
             public Vector3 velocity;         // DESIGN 1.09: its velocity at the crossing, to walk it on through its client's gap
             public Vector3 trackOrigin;      // DESIGN 1.09: where it was at the crossing (the state's position, less the origin's lead)
+            public byte[] carried;           // DESIGN 1.22: game state outside the kit's data, read back as it registers
         }
         private sealed class PendingHandoffAck { public string zone; public string name; public float startTime; public float sentTime; public float linkDownSince = -1f; }
         private readonly Dictionary<string, IncomingHandoff> _incomingHandoffFrom = new Dictionary<string, IncomingHandoff>(); // characterId -> who announced it
@@ -3487,6 +3489,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 action = msg.action,
                 originObjectId = msg.originObjectId,
                 velocity = msg.velocity,
+                carried = msg.carried,
                 trackOrigin = msg.data != null ? (Vector3)msg.data.CurrentPosition - msg.velocity * (handoffLeadSeconds - arrivalTrackLeadSeconds) : Vector3.zero,
             };
             SteerArrivingPuppet(msg.characterId, _incomingHandoffFrom[msg.characterId].trackOrigin, msg.velocity); // DESIGN 1.11 (MeshMapNetworkManager_ArrivalWalk)
@@ -3520,6 +3523,18 @@ namespace MultiplayerARPG.MMO.Mesh
             else
                 return;
             Stamp($"arrival {playerCharacter.CharacterName}: carried {action}");
+        }
+
+        /// <summary>Destination (DESIGN 1.22): what the origin's carriers wrote for this arrival, read back by ours, once.</summary>
+        private void ApplyCarriedState(BasePlayerCharacterEntity playerCharacter)
+        {
+            if (!_incomingHandoffFrom.TryGetValue(playerCharacter.Id, out IncomingHandoff incoming) || incoming.carried == null)
+                return;
+            byte[] carried = incoming.carried;
+            incoming.carried = null;
+            string keys = MeshHandoffCarriers.Apply(playerCharacter, carried, w => Logging.LogWarning("Mesh", w));
+            if (keys.Length > 0)
+                Stamp($"arrival {playerCharacter.CharacterName}: carried state {keys}");
         }
 
         /// <summary>
