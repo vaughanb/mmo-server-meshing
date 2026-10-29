@@ -72,6 +72,7 @@ namespace MultiplayerARPG.MMO.Mesh
             public float holdUntil;               // a demoted handoff rolled back: kept (not stale) until then for the client's return
             public float ownMoveSpeedOverride = -1f; // the kit's OverrideMoveSpeed before steering took it over (-1: none)
             public MeshKinematicCharacterBody body;        // kinematic motion in the kit's handler slot (null: steered)
+            public BaseGameEntity bodyHost;                // what the body moves: the puppet, or the vehicle it rides (DESIGN 1.27)
             public IReadOnlyList<string> suppressedExtras; // what Ghostify silenced beyond its deny list, handed back to Unghostify
             public MeshPuppetFallback refusal;             // why this puppet stays steered for good (handler, install), or None
         }
@@ -1644,8 +1645,8 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             if (ghost.reserved)
                 return; // claimed by an arriving client: it sits where the saved data put it until registration
-            if (ghost.body != null && IsMountedPuppet(ghost, msg))
-                EndPuppetMotion(ghost, MeshPuppetFallback.Mounted); // the seat moves a rider; a body would fight it
+            if (ghost.body != null && !BodyFits(ghost, msg))
+                EndPuppetMotion(ghost, MeshPuppetFallback.Mounted); // mounted, dismounted or remounted: the body moved the wrong thing
             SyncGhostMount(ghost, msg);
             SyncGhostSummoner(ghost, msg);
             SyncGhostWeapons(ghost, msg);

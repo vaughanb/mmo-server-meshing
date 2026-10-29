@@ -15,6 +15,18 @@
 // had it) and glides off that over ~70 ms. Only what is sent moves: the kit puts the transform back on its own path
 // every frame, and its checks of the client's movement read its own state. A teleport, a snap, a player that cannot
 // move, or a transform the track's pose is a metre off (the server moved it) start the track again from two states.
+//
+// DESIGN 1.27: a mounted player is moved by its vehicle's seat, and its client drives the vehicle. The layer posed the
+// rider from the rider's own client states anyway, which are not where the seat has it. A passenger is no longer posed
+// (its track waits until it is on foot again), and a client-driven vehicle is layered like a player, so what is sent of a
+// mount follows its client's trajectory. A pose that is not finite is never written.
+//
+// DESIGN 1.27 also: the layer answered the kit's send loop with its kit handler's WriteServerState, the raw layout, while
+// the kit's grid is on (1.13) and clients read every 3D record quantized. Every record of a layered player reached its
+// observers as ~1e11 m, and it vanished for them for up to a few seconds at a time (69 times in the 4 minutes 1.20 was
+// measured in; the stall trace only follows characters within 30 m, so it never saw them). The layer is now a quantized
+// handler, so the kit builds its record from CreateMovementData in the layout clients read, and it passes the kit's
+// one-shot flags (jump, dash, teleport) on to be consumed: the kit consumes only the flags of handlers that expose them.
 using System.Collections.Generic;
 using System.Diagnostics;
 using LiteNetLib.Utils;
@@ -37,7 +49,7 @@ namespace MultiplayerARPG.MMO.Mesh
         private const float SentMotionOffTrack = 1f;
         private const float SentMotionMaxLeadSeconds = 0.25f;
 
-        private sealed class SentMotionLayer : IEntityMovementDataHandler, IMeshReplaceableHandlerLayer
+        private sealed class SentMotionLayer : IEntityMovementDataHandler, IQuantizedEntityMovementDataHandler, IEntityMovementServerStateFlags, IMeshReplaceableHandlerLayer
         {
             public readonly BuiltInEntityMovementFunctions3D inner;
             public readonly MeshRemoteMotionTrack track;
@@ -59,9 +71,18 @@ namespace MultiplayerARPG.MMO.Mesh
             public uint ObjectId => inner.ObjectId;
             public long ConnectionId => inner.ConnectionId;
 
+            /// <summary>As the kit handler's: the kit's quantized send path builds the record from CreateMovementData (DESIGN 1.27).</summary>
+            public bool CanWriteQuantizedServerState => inner.CanWriteQuantizedServerState;
+
             public MovementData CreateMovementData(out List<EntityMovementForceApplier> forceAppliers)
             {
                 return inner.CreateMovementData(out forceAppliers);
+            }
+
+            /// <summary>The kit consumes one-shot flags only through the handler in the slot: pass them on.</summary>
+            public void ConsumeServerStateFlags()
+            {
+                inner.ConsumeServerStateFlags();
             }
 
             /// <summary>Keeps the state's stamp and position, then lets the kit's handler read the same bytes.</summary>
@@ -135,7 +156,7 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 SentMotionLayer layer = kv.Value;
                 BaseGameEntity entity = layer.inner.Entity;
-                if (layer.replaced || entity == null || !slots.Holds(kv.Key, layer) || MeshIdentity.IsGhostEntity(entity))
+                if (layer.replaced || entity == null || !slots.Holds(kv.Key, layer) || !IsSentMotionEntity(entity))
                 {
                     _sentMotionGone.Add(kv.Key);
                     continue;
@@ -143,9 +164,10 @@ namespace MultiplayerARPG.MMO.Mesh
                 float delta = layer.lastPoseAt < 0f ? 0f : now - layer.lastPoseAt;
                 layer.lastPoseAt = now;
                 Transform t = entity.EntityTransform;
-                if (entity is BaseCharacterEntity character && character.IsDead())
+                if (entity is BaseCharacterEntity character && (character.IsDead() || !character.PassengingVehicleEntity.IsNull()))
                 {
-                    layer.track.Reset();
+                    layer.track.Reset(); // dead, or a passenger: the seat moves it, and its own states are not where it is
+                    layer.hasLead = false;
                     continue;
                 }
                 Vector3 from = t.position;
@@ -167,7 +189,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     continue;
                 }
                 layer.hasLead = false;
-                if ((pose - t.position).sqrMagnitude > SentMotionOffTrack * SentMotionOffTrack)
+                if (!IsFinite(pose) || !((pose - t.position).sqrMagnitude <= SentMotionOffTrack * SentMotionOffTrack))
                 {
                     layer.track.Reset(); // the server moved it (a teleport, a respawn): its client's old states are not where it is
                     continue;
@@ -193,7 +215,10 @@ namespace MultiplayerARPG.MMO.Mesh
             Dictionary<uint, LiteNetLibIdentity>.Enumerator it = Assets.GetSpawnedObjects();
             while (it.MoveNext())
             {
-                if (it.Current.Value != null && it.Current.Value.TryGetComponent(out BasePlayerCharacterEntity player) && player.ConnectionId >= 0)
+                LiteNetLibIdentity identity = it.Current.Value;
+                if (identity == null || identity.ConnectionId < 0)
+                    continue;
+                if (identity.TryGetComponent(out BasePlayerCharacterEntity _) || identity.TryGetComponent(out VehicleEntity _))
                     TryLayerSentMotion(it.Current.Key);
             }
         }
@@ -211,7 +236,7 @@ namespace MultiplayerARPG.MMO.Mesh
             MeshMovementHandlerSlots slots = MeshMovementHandlerSlots.For(this);
             if (slots.HasLayer(id) || !slots.TryGetKitHandler(id, out IEntityMovementDataHandler handler) || !(handler is BuiltInEntityMovementFunctions3D functions))
                 return false;
-            if (!(functions.Entity is BasePlayerCharacterEntity player) || MeshIdentity.IsGhostEntity(player) || functions.movementSecure != MovementSecure.NotSecure)
+            if (!IsSentMotionEntity(functions.Entity) || functions.movementSecure != MovementSecure.NotSecure)
                 return false;
             SentMotionLayer layer = new SentMotionLayer(functions, new MeshRemoteMotionTrack(sentMotionDelayIntervals, 10.0, 100.0), _sentMotionClock);
             if (!slots.TryInstall(id, layer, true, out _))
@@ -232,6 +257,24 @@ namespace MultiplayerARPG.MMO.Mesh
             layer.leadPosition = position;
             layer.leadVelocity = velocity;
             layer.leadAt = now;
+        }
+
+        /// <summary>
+        /// IsSentMotionEntity is true for what a client drives on this cell: a player that is not a ghost, or a vehicle whose
+        /// driver is one (DESIGN 1.27). A vehicle without a driver, or driven by a puppet, is the cell's or its body's.
+        /// </summary>
+        private static bool IsSentMotionEntity(BaseGameEntity entity)
+        {
+            if (entity is BasePlayerCharacterEntity player)
+                return !MeshIdentity.IsGhostEntity(player);
+            if (!(entity is VehicleEntity vehicle) || !vehicle.HasDriver)
+                return false;
+            return vehicle.GetPassenger(0) is BasePlayerCharacterEntity driver && !MeshIdentity.IsGhostEntity(driver);
+        }
+
+        private static bool IsFinite(Vector3 v)
+        {
+            return !float.IsNaN(v.x) && !float.IsInfinity(v.x) && !float.IsNaN(v.y) && !float.IsInfinity(v.y) && !float.IsNaN(v.z) && !float.IsInfinity(v.z);
         }
 
         private void ClearSentMotionLayers()

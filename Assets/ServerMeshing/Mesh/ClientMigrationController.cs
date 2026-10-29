@@ -268,20 +268,23 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>
         /// Where the player was walking to by click (the last point of the kit's path, or the NavMesh agent's destination),
         /// or null. The adoption calls the kit's OnSetOwnerClient on the player's own character, which clears that path:
-        /// a player who clicked across the line stopped at it until they clicked again (DESIGN 1.16).
+        /// a player who clicked across the line stopped at it until they clicked again (DESIGN 1.16). A rider's path is its
+        /// vehicle's (the active movement): reading the rider's own found none, and a mounted player stopped ~0.3 s after
+        /// every crossing until the next click (DESIGN 1.27).
         /// </summary>
         private static Vector3? ClickTargetOf(BaseGameEntity entity)
         {
             if (entity == null)
                 return null;
-            if (entity.Movement is CharacterControllerEntityMovement controller && controller.HasNavPaths)
+            IEntityMovementComponent movement = entity.ActiveMovement;
+            if (movement is CharacterControllerEntityMovement controller && controller.HasNavPaths)
             {
                 Vector3 last = default;
                 foreach (Vector3 point in controller.NavPaths)
                     last = point;
                 return last;
             }
-            if (entity.Movement is NavMeshEntityMovement nav && nav.CacheNavMeshAgent != null && nav.CacheNavMeshAgent.isActiveAndEnabled
+            if (movement is NavMeshEntityMovement nav && nav.CacheNavMeshAgent != null && nav.CacheNavMeshAgent.isActiveAndEnabled
                 && nav.CacheNavMeshAgent.hasPath && !nav.CacheNavMeshAgent.isStopped)
                 return nav.CacheNavMeshAgent.destination;
             return null;
@@ -290,9 +293,9 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>After the adoption: the click the owner change cleared, given again. True when it was.</summary>
         private static bool ResumeClickTarget(BaseGameEntity entity, Vector3? target)
         {
-            if (!target.HasValue || entity == null || entity.Movement == null)
+            if (!target.HasValue || entity == null || entity.ActiveMovement.IsNull())
                 return false;
-            if (entity.Movement is CharacterControllerEntityMovement controller && controller.HasNavPaths)
+            if (entity.ActiveMovement is CharacterControllerEntityMovement controller && controller.HasNavPaths)
                 return false; // a path is there already (the player clicked again)
             entity.PointClickMovement(target.Value);
             return true;
@@ -895,6 +898,9 @@ namespace MultiplayerARPG.MMO.Mesh
             // DESIGN 1.16: where a click-to-move player was walking to; the adoption's owner change clears the kit's path.
             Vector3? clickTarget = ClickTargetOf(entity);
             bool clickResumed = false;
+            // DESIGN 1.27: the ridden vehicle is adopted apart from the player, and its owner change clears its path again.
+            VehicleEntity riddenBefore = entity != null ? entity.PassengingVehicleEntity as VehicleEntity : null;
+            LiteNetLibIdentity riddenIdentity = riddenBefore != null ? riddenBefore.Identity : null;
             void CountAdoption(LiteNetLibIdentity adopted, uint previousObjectId)
             {
                 adoptedCount++;
@@ -902,7 +908,11 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (ReferenceEquals(adopted, identity))
                 {
                     playerAdoptionMs = _manager.Assets.LastAdoptionMilliseconds;
-                    clickResumed = ResumeClickTarget(entity, clickTarget);
+                    clickResumed |= ResumeClickTarget(entity, clickTarget);
+                }
+                else if (riddenIdentity != null && ReferenceEquals(adopted, riddenIdentity))
+                {
+                    clickResumed |= ResumeClickTarget(entity, clickTarget);
                 }
             }
             // What the player could notice, frame by frame, from the hop until shortly after it settles.

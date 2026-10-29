@@ -2,8 +2,9 @@
 // ways. Steered (the default) walks it with the kit's own movement component toward each snapshot (SteerGhost). Kinematic
 // hands its transform to a MeshKinematicCharacterBody: the body stands in the kit's movement-handler slot, takes its pose
 // from a MeshKinematicTrack fed by the snapshots, and writes the kit's own movement bytes, so clients read it unchanged.
-// Pets and mounted puppets stay steered. With puppetMotion Steered nothing here changes a puppet: no body, no extra
-// silenced component, no Puppets window line.
+// Pets stay steered. A mounted puppet's body moves the vehicle it rides, placed so that its seat stands where the rider's
+// snapshots say (DESIGN 1.27; kinematicMounts). With puppetMotion Steered nothing here changes a puppet: no body, no
+// extra silenced component, no Puppets window line.
 using System.Collections.Generic;
 using LiteNetLibManager;
 using MultiplayerARPG.MMO.Mesh.Sync;
@@ -51,6 +52,13 @@ namespace MultiplayerARPG.MMO.Mesh
         [Header("Server Meshing — puppet motion")]
         [Tooltip("How a character puppet follows its owner's snapshots. Steered: the kit's movement component walks it toward each snapshot. Kinematic: its pose is set from the snapshots and sent to clients in the kit's own movement bytes; pets and mounted puppets stay steered. MESH_PUPPET_MOTION=steered|kinematic overrides this at server start.")]
         public MeshPuppetMotion puppetMotion = MeshPuppetMotion.Steered;
+
+        /// <summary>
+        /// kinematicMounts gives a mounted puppet a kinematic body on the vehicle it rides while puppet motion is Kinematic
+        /// (DESIGN 1.27): a steered vehicle trailed its rider's snapshots by 1-2 m at a horse's speed.
+        /// </summary>
+        [Tooltip("While puppet motion is Kinematic, a mounted puppet's vehicle takes its pose from the rider's snapshots (the seat stands where the rider is). Off: mounted puppets stay steered and trail their riders by 1-2 m at a horse's speed.")]
+        public bool kinematicMounts = true;
 
 #if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
         // The steer-error histogram holds metres in the histogram's millisecond bins: 400 bins of 0.05 m cover 20 m.
@@ -103,7 +111,7 @@ namespace MultiplayerARPG.MMO.Mesh
             _puppetHandlerRefusalsLogged.Clear();
             ResetPuppetWindow(Time.unscaledTime);
             if (puppetMotion == MeshPuppetMotion.Kinematic)
-                Logging.Log("Mesh", System.FormattableString.Invariant($"Puppet motion kinematic (from {source}): character puppets take their pose from the owner's snapshots and snap past {_puppetSnapDistance:0.0#} m; pets and mounted puppets stay steered"));
+                Logging.Log("Mesh", System.FormattableString.Invariant($"Puppet motion kinematic (from {source}): character puppets take their pose from the owner's snapshots and snap past {_puppetSnapDistance:0.0#} m; {(kinematicMounts ? "a mounted puppet's vehicle is posed from them; pets stay steered" : "pets and mounted puppets stay steered")}"));
         }
 
         /// <summary>PuppetsOnStopServer runs after every puppet was destroyed: the kit clears its handler slots on stop, so the slot records go too.</summary>
@@ -122,10 +130,50 @@ namespace MultiplayerARPG.MMO.Mesh
             return puppetMotion == MeshPuppetMotion.Kinematic && kind == GhostKind.Player ? MeshPuppetMotionSetting.PuppetExtraTypeNames(puppetMotion) : null;
         }
 
-        /// <summary>IsMountedPuppet is true for a puppet that rides, is about to, or is getting off: the seat moves a rider, so it is steered.</summary>
+        /// <summary>IsMountedPuppet is true for a puppet that rides, is about to, or is getting off: the seat moves a rider, so its own body cannot.</summary>
         private static bool IsMountedPuppet(MeshGhost ghost, GhostSnapshotMessage msg)
         {
             return msg.mountEntityId != 0 || ghost.mountPending || ghost.entity.PassengingVehicleEntity != null;
+        }
+
+        /// <summary>
+        /// SeatPositionOf is where a character is now: on a vehicle, its seat's world position (the kit moves a rider onto
+        /// its seat only in its late update, a frame behind a vehicle moved this frame: ~0.13 m at a horse's speed), else
+        /// its own (DESIGN 1.27).
+        /// </summary>
+        private static Vector3 SeatPositionOf(BaseCharacterEntity entity)
+        {
+            if (!(entity.PassengingVehicleEntity is VehicleEntity vehicle))
+                return entity.EntityTransform.position;
+            VehicleSeat seat = entity.PassengingVehicleSeat;
+            return (seat != null && seat.passengingTransform != null ? seat.passengingTransform : vehicle.EntityTransform).position;
+        }
+
+        /// <summary>
+        /// SettledMount is the vehicle a puppet rides when the snapshot agrees with it and no mount change is in flight
+        /// (DESIGN 1.27): the vehicle its body may move. Null for a puppet on foot or mid-change.
+        /// </summary>
+        private static VehicleEntity SettledMount(MeshGhost ghost, GhostSnapshotMessage msg)
+        {
+            if (ghost.mountPending || msg.mountEntityId == 0 || !(ghost.entity.PassengingVehicleEntity is VehicleEntity vehicle))
+                return null;
+            if (vehicle.EntityId != msg.mountEntityId || vehicle.Identity == null || vehicle.Identity.IsDestroyed)
+                return null;
+            return vehicle;
+        }
+
+        /// <summary>
+        /// BodyFits is false when a puppet's body moves the wrong thing for this snapshot: its own transform while it rides,
+        /// or a vehicle it no longer rides (a dismount, another mount, a change in flight).
+        /// </summary>
+        private static bool BodyFits(MeshGhost ghost, GhostSnapshotMessage msg)
+        {
+            if (ghost.body == null)
+                return true;
+            if (ReferenceEquals(ghost.bodyHost, ghost.entity))
+                return !IsMountedPuppet(ghost, msg);
+            VehicleEntity vehicle = SettledMount(ghost, msg);
+            return vehicle != null && ReferenceEquals(vehicle, ghost.bodyHost);
         }
 
         /// <summary>
@@ -137,10 +185,18 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (puppetMotion != MeshPuppetMotion.Kinematic || ghost.body != null || ghost.refusal != MeshPuppetFallback.None || _slots == null)
                 return;
-            if (IsMountedPuppet(ghost, msg) || !string.IsNullOrEmpty(msg.summonerMeshId))
+            if (!string.IsNullOrEmpty(msg.summonerMeshId))
                 return;
             BaseCharacterEntity entity = ghost.entity;
-            uint objectId = entity.ObjectId;
+            BaseGameEntity host = entity;
+            if (IsMountedPuppet(ghost, msg))
+            {
+                VehicleEntity vehicle = kinematicMounts ? SettledMount(ghost, msg) : null;
+                if (vehicle == null)
+                    return; // steered for this snapshot: on foot soon, or the mount is still settling
+                host = vehicle;
+            }
+            uint objectId = host.ObjectId;
             if (!_slots.TryGetKitHandler(objectId, out IEntityMovementDataHandler kit) || kit == null)
             {
                 RefusePuppetMotion(ghost, MeshPuppetFallback.Install, $"the kit's movement-handler slot has no entry for object {objectId}");
@@ -152,24 +208,35 @@ namespace MultiplayerARPG.MMO.Mesh
                 RefusePuppetMotion(ghost, refusal, kit.GetType().Name);
                 return;
             }
-            Transform transform = entity.EntityTransform;
+            Transform transform = entity.EntityTransform; // the rider's pose, on its seat: what the snapshots carry
+            Transform moved = host.EntityTransform;
             float now = Time.unscaledTime;
             MeshKinematicTrack track = new MeshKinematicTrack(snapDistance: _puppetSnapDistance);
-            if (!track.TryAccept(transform.position, Vector3.zero, transform.eulerAngles.y, false, now))
+            if (!track.TryAccept(SeatPositionOf(entity), Vector3.zero, transform.eulerAngles.y, false, now))
             {
                 RefusePuppetMotion(ghost, MeshPuppetFallback.Install, $"object {objectId} does not stand at a finite pose");
                 return;
             }
             EndSteering(ghost);
-            MeshKinematicCharacterBody body = new MeshKinematicCharacterBody(objectId, entity.Identity, transform, kit, kit is NavMeshEntityMovement, track);
-            if (!body.Begin(entity, _slots, out string error))
+            MeshKinematicCharacterBody body = new MeshKinematicCharacterBody(objectId, host.Identity, moved, kit, kit is NavMeshEntityMovement, track);
+            if (!ReferenceEquals(host, entity))
             {
-                RefusePuppetMotion(ghost, MeshPuppetFallback.Install, error);
+                VehicleSeat seat = entity.PassengingVehicleSeat;
+                Transform seatTransform = seat != null && seat.passengingTransform != null ? seat.passengingTransform : moved;
+                body.SetSeat(Quaternion.Inverse(moved.rotation) * (seatTransform.position - moved.position), Mathf.DeltaAngle(moved.eulerAngles.y, seatTransform.eulerAngles.y));
+            }
+            if (!body.Begin(host, _slots, out string error))
+            {
+                if (ReferenceEquals(host, entity))
+                    RefusePuppetMotion(ghost, MeshPuppetFallback.Install, error);
+                else
+                    WarnThrottled($"Puppet motion: the vehicle of {entity.CharacterName} stays steered this snapshot: {error}");
                 return;
             }
             if (_stateSender != null && _stateSender.IsSending && _stateSender.Register(body))
                 body.SentBySender = true;
             ghost.body = body;
+            ghost.bodyHost = host;
             _kinematicGhosts.Add(ghost);
         }
 
@@ -211,11 +278,13 @@ namespace MultiplayerARPG.MMO.Mesh
             MeshKinematicCharacterBody body = ghost.body;
             if (body == null)
                 return;
+            BaseGameEntity host = ghost.bodyHost != null ? ghost.bodyHost : ghost.entity;
             ghost.body = null;
+            ghost.bodyHost = null;
             _kinematicGhosts.Remove(ghost);
             BaseCharacterEntity entity = ghost.entity;
             LeaveStateSender(body);
-            body.End(entity, _slots);
+            body.End(host, _slots);
             if (reason != MeshPuppetFallback.None && traceHandoffTiming && entity != null)
                 Logging.Log("Mesh", $"Puppet motion: {ghost.kind} {(string.IsNullOrEmpty(entity.CharacterName) ? ghost.kind.ToString() : entity.CharacterName)} ({MeshEntityIdOf(entity)}) back to steering ({reason})");
         }
@@ -242,14 +311,17 @@ namespace MultiplayerARPG.MMO.Mesh
                 MeshGhost ghost = _kinematicGhosts[i];
                 MeshKinematicCharacterBody body = ghost.body;
                 BaseCharacterEntity entity = ghost.entity;
-                if (body == null || entity == null || entity.Identity == null || entity.Identity.IsDestroyed)
+                BaseGameEntity host = ghost.bodyHost;
+                if (body == null || entity == null || entity.Identity == null || entity.Identity.IsDestroyed
+                    || host == null || host.Identity == null || host.Identity.IsDestroyed)
                 {
                     if (body != null)
                     {
                         LeaveStateSender(body);
-                        body.End(entity, _slots);
+                        body.End(host != null && host.Identity != null && !host.Identity.IsDestroyed ? host : null, _slots);
                     }
                     ghost.body = null;
+                    ghost.bodyHost = null;
                     _kinematicGhosts.RemoveAt(i);
                 }
             }
@@ -268,7 +340,7 @@ namespace MultiplayerARPG.MMO.Mesh
             for (int i = 0; i < _kinematicGhosts.Count; ++i)
             {
                 MeshGhost ghost = _kinematicGhosts[i];
-                BaseCharacterEntity entity = ghost.entity;
+                BaseGameEntity entity = ghost.bodyHost;
                 if (ghost.body == null || entity == null || entity.Identity == null || entity.Identity.IsDestroyed)
                     continue; // dropped by KinematicPuppetsUpdate
                 if (entity.Identity.CountSubscribers() > 0)
@@ -299,7 +371,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 NoteGhostTeleport(ghost, msg, dist);
                 _puppetSnaps++;
             }
-            if (entity.Identity.CountSubscribers() > 0)
+            BaseGameEntity host = ghost.bodyHost != null ? ghost.bodyHost : entity;
+            if (host.Identity != null && host.Identity.CountSubscribers() > 0)
             {
                 if (entity.Movement is NavMeshEntityMovement)
                     ApplySteerMoveSpeed(entity, msg, dist, moving);

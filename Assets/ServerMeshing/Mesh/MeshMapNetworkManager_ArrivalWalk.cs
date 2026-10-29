@@ -22,6 +22,11 @@
 // once: one tick carried that step, a lunge for everyone watching on this side. The arrival is now layered for sent
 // motion (MeshMapNetworkManager_SentMotion) as it registers, and at the hand-back the walk's path is that layer's lead:
 // it is sent until the client's states can be drawn, and their track starts from it and glides onto them.
+//
+// DESIGN 1.27: a mounted arrival's seat moves the rider and its client drives the vehicle, so the walk moves the vehicle,
+// keeping the seat on the rider's crossing track, and hands the vehicle's path to the vehicle's sent-motion layer. It
+// moved the rider before, the seat put the rider back on the standing vehicle the next frame, and the walk took that
+// for the client's first state: every mounted arrival stood through its client's gap.
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -52,6 +57,9 @@ namespace MultiplayerARPG.MMO.Mesh
             public Vector3 ease;         // the puppet's pose minus the track at the start, eased away
             public float since;
             public Vector3 written;
+            public Transform moved;      // what the walk moves: the character, or the vehicle it rides (DESIGN 1.27)
+            public uint movedId;
+            public Vector3 carry;        // the moved transform's position minus the character's, at the start
         }
 
         private const float ArrivalWalkStill = 0.0005f;
@@ -63,19 +71,28 @@ namespace MultiplayerARPG.MMO.Mesh
         private void BeginArrivalWalk(BasePlayerCharacterEntity entity, Vector3 trackOrigin, float trackTime, Vector3 velocity)
         {
             velocity.y = 0f;
+            VehicleEntity ridden = entity != null ? entity.PassengingVehicleEntity as VehicleEntity : null;
             if (entity != null)
             {
                 _arrivalSnapshotVelocity[OwnedKeyOf(entity)] = velocity;
                 TryLayerSentMotion(entity.ObjectId); // DESIGN 1.20: its client's first states are read from the first one
+                if (ridden != null)
+                    TryLayerSentMotion(ridden.ObjectId); // DESIGN 1.27: its client drives the vehicle
             }
             if (!walkArrivals || entity == null || velocity.magnitude < ArrivalWalkMinSpeed)
                 return;
             float now = Time.unscaledTime;
-            Vector3 position = entity.EntityTransform.position;
+            Vector3 position = SeatPositionOf(entity);
             Vector3 onTrack = TrackAt(trackOrigin, trackTime, velocity, now);
             Vector3 ease = position - onTrack;
             ease.y = 0f;
-            _arrivalWalks.Add(new ArrivalWalk { entity = entity, name = entity.CharacterName, trackOrigin = trackOrigin, trackTime = trackTime, velocity = velocity, ease = ease, since = now, written = position });
+            Transform moved = ridden != null ? ridden.EntityTransform : entity.EntityTransform;
+            Vector3 carry = moved.position - position;
+            _arrivalWalks.Add(new ArrivalWalk
+            {
+                entity = entity, name = entity.CharacterName, trackOrigin = trackOrigin, trackTime = trackTime, velocity = velocity, ease = ease, since = now,
+                written = moved.position, moved = moved, movedId = ridden != null ? ridden.ObjectId : entity.ObjectId, carry = carry,
+            });
         }
 
         /// <summary>
@@ -107,29 +124,29 @@ namespace MultiplayerARPG.MMO.Mesh
             for (int i = _arrivalWalks.Count - 1; i >= 0; --i)
             {
                 ArrivalWalk walk = _arrivalWalks[i];
-                if (walk.entity == null || walk.entity.Identity == null || walk.entity.Identity.IsDestroyed || walk.entity.IsDead())
+                if (walk.entity == null || walk.entity.Identity == null || walk.entity.Identity.IsDestroyed || walk.entity.IsDead() || walk.moved == null)
                 {
                     _arrivalWalks.RemoveAt(i);
                     continue;
                 }
-                Transform t = walk.entity.EntityTransform;
+                Transform t = walk.moved;
                 Vector3 onTrack = TrackAt(walk.trackOrigin, walk.trackTime, walk.velocity, now);
                 Vector3 moved = t.position - walk.written;
                 moved.y = 0f;
                 if (moved.magnitude > ArrivalWalkStill)
                 {
                     // The kit moved it: the client's first state. What it corrected is what an observer sees jump.
-                    Vector3 offTrack = t.position - onTrack;
+                    Vector3 offTrack = t.position - walk.carry - onTrack;
                     offTrack.y = 0f;
                     Vector3 along = walk.velocity.normalized;
                     float ahead = Vector3.Dot(offTrack, along);                                 // + the client is ahead of the track
                     float aside = Vector3.Cross(along, offTrack).y;
                     Stamp($"arrival {walk.name}: walked {(now - walk.since) * 1000f:0} ms at {walk.velocity.magnitude:0.0} m/s, then its client's state moved it {moved.magnitude:0.###} m ({offTrack.magnitude:0.###} m off the crossing track: {ahead:+0.###;-0.###} m along, {aside:+0.###;-0.###} m aside, {(now - walk.trackTime) * 1000f:0} ms after the crossing)");
                     _arrivalWalks.RemoveAt(i);
-                    LeadSentMotion(walk.entity.ObjectId, walk.written, walk.velocity, now); // DESIGN 1.20: glide onto the client's states
+                    LeadSentMotion(walk.movedId, walk.written, walk.velocity, now); // DESIGN 1.20: glide onto the client's states
                     continue;
                 }
-                Vector3 target = onTrack + walk.ease * Mathf.Exp(-(now - walk.since) / Mathf.Max(0.01f, arrivalWalkEaseSeconds));
+                Vector3 target = onTrack + walk.ease * Mathf.Exp(-(now - walk.since) / Mathf.Max(0.01f, arrivalWalkEaseSeconds)) + walk.carry;
                 target.y = t.position.y;
                 t.position = target;
                 walk.written = target;
@@ -178,7 +195,8 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 kind = GhostKind.Player,
                 characterId = entity.Id,
-                position = t.position,
+                mountEntityId = ghost.vehicle != null ? ghost.vehicle.EntityId : 0, // DESIGN 1.27: the kept vehicle carries the body
+                position = SeatPositionOf(entity), // DESIGN 1.27: a rider's own transform is a frame behind its vehicle
                 yaw = t.eulerAngles.y,
                 velocity = velocity,
                 movementState = (byte)entity.MovementState,

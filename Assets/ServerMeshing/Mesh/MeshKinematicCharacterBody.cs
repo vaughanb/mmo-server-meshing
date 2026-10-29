@@ -38,6 +38,9 @@ namespace MultiplayerARPG.MMO.Mesh
         private bool _teleportStamped;
         private long _teleportStamp;
         private bool _isBegun;
+        private bool _carriesSeat;
+        private Vector3 _seatOffset;
+        private float _seatYaw;
 
         /// <summary>
         /// MeshKinematicCharacterBody creates the body of object <paramref name="objectId"/>, which moves
@@ -85,6 +88,30 @@ namespace MultiplayerARPG.MMO.Mesh
 
         /// <summary>IsBegun is true between a successful Begin and End.</summary>
         public bool IsBegun => _isBegun;
+
+        /// <summary>
+        /// CarriesSeat is true for the body of a mounted puppet's vehicle (DESIGN 1.27): its track holds the rider's pose,
+        /// the one its snapshots carry, and the transform it moves is the vehicle's, placed so that the seat stands there.
+        /// </summary>
+        public bool CarriesSeat => _carriesSeat;
+
+        /// <summary>
+        /// SetSeat makes the body carry a seat: <paramref name="localOffset"/> is where the seat stands in the vehicle's frame
+        /// (its position relative to the vehicle's, unrotated by the vehicle's rotation) and <paramref name="yawOffset"/> the
+        /// seat's yaw relative to the vehicle's, in degrees. Snapshots and Pose stay in the rider's coordinates.
+        /// </summary>
+        public void SetSeat(Vector3 localOffset, float yawOffset)
+        {
+            _carriesSeat = true;
+            _seatOffset = localOffset;
+            _seatYaw = yawOffset;
+        }
+
+        /// <summary>SeatOffsetAt is where the seat stands relative to the vehicle, in world axes, when the rider faces <paramref name="riderYaw"/>.</summary>
+        public Vector3 SeatOffsetAt(float riderYaw)
+        {
+            return _carriesSeat ? Quaternion.Euler(0f, riderYaw - _seatYaw, 0f) * _seatOffset : Vector3.zero;
+        }
 
         /// <summary>
         /// SentBySender is true while the body is registered with the state sender, which then writes it once per build
@@ -182,7 +209,7 @@ namespace MultiplayerARPG.MMO.Mesh
         /// component. False, with the reason, when the entity is another object, has no movement component, the body has
         /// already begun, or the slot refuses it; nothing is left changed then except the stopped movement.
         /// </summary>
-        public bool Begin(BaseCharacterEntity entity, MeshMovementHandlerSlots slots, out string error)
+        public bool Begin(BaseGameEntity entity, MeshMovementHandlerSlots slots, out string error)
         {
             if (entity == null)
                 throw new ArgumentNullException(nameof(entity));
@@ -210,16 +237,17 @@ namespace MultiplayerARPG.MMO.Mesh
                 error = installError;
                 return false;
             }
+            BaseCharacterEntity character = entity as BaseCharacterEntity; // a vehicle has no fall damage
             try
             {
                 entity.MovementDisableState.Add(this);
-                entity.FallDamageDisableState.Add(this);
+                character?.FallDamageDisableState.Add(this);
                 movement.enabled = false;
             }
             catch
             {
                 entity.MovementDisableState.Remove(this);
-                entity.FallDamageDisableState.Remove(this);
+                character?.FallDamageDisableState.Remove(this);
                 slots.TryRemove(_objectId, this, out _);
                 throw;
             }
@@ -234,7 +262,7 @@ namespace MultiplayerARPG.MMO.Mesh
         /// look rotation to the current yaw at once, so the kit does not turn the puppet back to its yaw before Begin.
         /// It clears SentBySender first, even on a body that never began.
         /// </summary>
-        public void End(BaseCharacterEntity entity, MeshMovementHandlerSlots slots)
+        public void End(BaseGameEntity entity, MeshMovementHandlerSlots slots)
         {
             SentBySender = false;
             if (slots == null)
@@ -252,7 +280,7 @@ namespace MultiplayerARPG.MMO.Mesh
             if (entity == null)
                 return;
             entity.MovementDisableState.Remove(this);
-            entity.FallDamageDisableState.Remove(this);
+            (entity as BaseCharacterEntity)?.FallDamageDisableState.Remove(this);
             IEntityMovementComponent movement = entity.Movement;
             if (movement.IsNull())
                 return;
@@ -294,7 +322,10 @@ namespace MultiplayerARPG.MMO.Mesh
         /// </summary>
         public Vector3 Pose(float now)
         {
-            return _track.HasSample ? _track.Pose(now, 0f, out _) : _transform.position;
+            if (_track.HasSample)
+                return _track.Pose(now, 0f, out _);
+            float vehicleYaw = _transform.eulerAngles.y;
+            return _transform.position + SeatOffsetAt(vehicleYaw + _seatYaw);
         }
 
         /// <summary>
@@ -306,6 +337,11 @@ namespace MultiplayerARPG.MMO.Mesh
             if (!_track.HasSample)
                 return;
             Vector3 position = _track.Pose(now, 0f, out float yaw);
+            if (_carriesSeat)
+            {
+                position -= SeatOffsetAt(yaw); // the vehicle stands so that its seat is where the rider is
+                yaw -= _seatYaw;
+            }
             _transform.SetPositionAndRotation(position, Quaternion.Euler(0f, yaw, 0f));
         }
 

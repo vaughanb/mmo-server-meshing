@@ -6,6 +6,10 @@
 // it interpolated is drawn over. The buffer stands aside while this client hops (the kept extrapolator walks the kept
 // characters then, DESIGN 1.08), for a teleport, and for a character the kit snaps, and starts again from two states.
 // Only the kit's 3D character controller handler is layered; anything else is drawn by the kit as before.
+// DESIGN 1.27: a remote vehicle is layered too, and a passenger is not drawn (its seat carries it: the buffer drew it from
+// its own states while the kit snapped it to the seat of a vehicle the kit drew, two pictures of one rider). A drawn
+// vehicle's passengers are put on their seats at once: the kit's own seat snap can run before the buffer in the frame,
+// and it left the rider on the kit's picture of the vehicle, up to ~0.4 m off the drawn one and jumping between them.
 //
 // With MESH_TRACE_OBSERVED=1 it also logs (tag MeshRemote) what the observed trace cannot tell apart: a layer put in
 // or lost, a restart and its reason, the first pose after one, a gap in a character's states and a stand in its
@@ -174,6 +178,11 @@ namespace MultiplayerARPG.MMO.Mesh
                     _gone.Add(kv.Key);
                     continue;
                 }
+                if (!entity.PassengingVehicleEntity.IsNull())
+                {
+                    layer.track.Reset(); // the seat carries it
+                    continue;
+                }
                 if (standAside || layer.inner.IsPreparingToTeleport || entity.IsOwnerClient)
                 {
                     if (Trace && layer.track.IsDrawing && !standAside)
@@ -187,6 +196,8 @@ namespace MultiplayerARPG.MMO.Mesh
                     if (Trace && !wasDrawing)
                         Log(entity, "drawn by the buffer", pose);
                     layer.inner.EntityMovement.SetPosition(pose);
+                    if (entity is VehicleEntity vehicle)
+                        SeatPassengers(vehicle);
                     drawn++;
                 }
             }
@@ -212,7 +223,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     continue;
                 if (!_slots.TryGetKitHandler(id, out IEntityMovementDataHandler handler) || !(handler is BuiltInEntityMovementFunctions3D functions))
                     continue;
-                if (!(functions.Entity is BaseCharacterEntity) || functions.Entity.IsOwnerClient || functions.Entity.IsServer)
+                if (!(functions.Entity is BaseCharacterEntity || functions.Entity is VehicleEntity) || functions.Entity.IsOwnerClient || functions.Entity.IsServer)
                     continue;
                 Layer layer = new Layer(functions, id, new MeshRemoteMotionTrack(_delayIntervals, 20.0, _maxExtrapolationMilliseconds), _clock);
                 if (_slots.TryInstall(id, layer, true, out _))
@@ -221,6 +232,23 @@ namespace MultiplayerARPG.MMO.Mesh
                     if (Trace)
                         Log(functions.Entity, "layered", functions.Entity.EntityTransform.position);
                 }
+            }
+        }
+
+        /// <summary>Puts every passenger of a drawn vehicle on its seat, as the kit's late-update seat snap does.</summary>
+        private static void SeatPassengers(VehicleEntity vehicle)
+        {
+            if (vehicle.Seats.Count == 0)
+                return;
+            List<BaseGameEntity> passengers = vehicle.GetAllPassengers();
+            for (int i = 0; i < passengers.Count; ++i)
+            {
+                BaseGameEntity passenger = passengers[i];
+                VehicleSeat seat = passenger.PassengingVehicleSeat;
+                if (seat == null)
+                    continue;
+                Transform from = seat.passengingTransform != null ? seat.passengingTransform : vehicle.EntityTransform;
+                passenger.EntityTransform.SetPositionAndRotation(from.position, from.rotation);
             }
         }
 

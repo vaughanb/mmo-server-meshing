@@ -328,11 +328,16 @@ Where the work stands, how to get it running on another machine, and what is lef
    through the ghost, and is handed over with its target (the 8 km demo, `MESH_TEST_MONSTER=0.5,509,BanditMale,free`,
    player standing at (−5, 513): the fixture spawns facing +z and the demo's monsters see in a 120° cone). Left:
    a pack, a monster's ghost trailing ~0.3 s as it breaks into a run, and measuring its motion at the handoff.
-3. **Mount and pet crossings (1.24):** both run on the 8 km demo (HorseWhistle and PupCollar in MeshTester's bag;
-   patrol `mountUp` / `summonPet`). The pet crosses clean; a mounted rider no longer snaps back ~2 m. Left: the
-   mounted puppet is steered and trails ~1–1.5 m, so observers see a 0.3 m step at the client's first state;
-   a kinematic body for mounts would close it. A character saved mounted logs in mounted (`charactermount`).
-   The `kick silently` warning on hop arrivals was a false alarm and is gone (1.25).
+3. **Mount and pet crossings (1.24, 1.27):** both run on the 8 km demo (HorseWhistle and PupCollar in MeshTester's
+   bag; patrol `mountUp` / `summonPet`). The pet crosses clean; a mounted rider crosses clean for itself and for an
+   observer at the line (1.27: a kinematic body on the puppet's vehicle, the arrival walk on the vehicle, sent motion
+   and the observers' buffer for vehicles, the click-move resume on the vehicle's path). A character saved mounted
+   logs in mounted (`charactermount`). The `kick silently` warning on hop arrivals was a false alarm (1.25).
+   Observer recipe: the editor patrols mounted ±12 m at z 513; a bot from the build stands at (−3, 517) with
+   `MESH_TRACE_OBSERVED=1` (`-meshAutoMode stand -meshWalkX -3 -meshWalkZ 517`). Read its `MeshRemote` lines as well
+   as `MeshObserved`: the stall trace follows only characters within 30 m, so a character sent to a garbage position
+   never shows there (1.27 found 1.20's layer garbling every observed player that way). Left: a pet puppet stays
+   steered, and the kit teleports a pet that falls behind a galloping rider.
 4. **Write the CE-14 upstream patch** into `Docs/ServerMeshing/upstream/` (as 0001–0009 were) and open
    the PR. It now covers `LiteNetLibElement`, `LiteNetLibSyncField` and `LiteNetLibSyncList` too (§17).
 5. **Run the rig regression** (`python Tools/ServerMeshing/regress.py`). Continuity is now the default
