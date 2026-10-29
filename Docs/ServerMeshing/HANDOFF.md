@@ -297,8 +297,10 @@ Where the work stands, how to get it running on another machine, and what is lef
    the connect. Next steps, in order:
    - ammunition per trigger, a skill item taken after the last trigger and a charge in progress are not
      carried (1.06). A skill cast in the warp's frame runs once on the destination (1.21, 24 of 24), but a skill
-     in flight on the origin at the handoff has not run: Cleave roots its caster, so try Charge (a dash) or a
-     channelled skill (patrol `castSkillWhileWalking`). The 8 km demo's warrior MP is rage (empty at login,
+     in flight on the origin at the handoff has not run, and the demo's skills cannot reach it: Cleave roots its
+     caster, and Charge's only trigger lands ~0.1 s after its start, before its dash moves the caster (12
+     charges at a deer across the line, 2026-10-29: all applied once, none in flight at a hop). It needs a
+     skill with a trigger late in a cast that lets its caster move (patrol `castSkillWhileWalking`). The 8 km demo's warrior MP is rage (empty at login,
      10 per hit, drains out of combat): build it by swinging before casting. Game state a cell holds outside the
      kit's data crosses only through an `IMeshHandoffCarrier` (1.22; the demo's combat timer is one);
    - remote motion (1.17–1.20): clients draw other characters from their states' timestamps, an arrival's first
