@@ -25,6 +25,8 @@ namespace MultiplayerARPG.MMO.Mesh
         public float swingFaceRange = 0f;
         [Tooltip("Swing in the frame of each warp, just before the old connection closes: the call is queued on a connection about to stop (DESIGN 1.15).")]
         public bool swingAtWarp = false;
+        [Tooltip("With attackWhileWalking or swingAtWarp: cast this skill (data id; it must be learned) instead of a plain attack, so a skill is in flight at crossings (DESIGN 1.21).")]
+        public int castSkillWhileWalking = 0;
         private int _swings, _gapSwings, _facedSwings, _warpSwings;
 
         /// <summary>Draws the weapon again whenever the demo puts it away, while <paramref name="running"/>.</summary>
@@ -46,7 +48,7 @@ namespace MultiplayerARPG.MMO.Mesh
             if (self == null || self.IsDead())
                 return;
             WeaponHandlingState whs = WeaponHandlingState.None;
-            if (self.Attack(ref whs))
+            if (castSkillWhileWalking != 0 ? CastWhileWalking(self, swingFaceRange > 0f && FaceNearestMonster(self, swingFaceRange)) : self.Attack(ref whs))
             {
                 _swings++;
                 _warpSwings++;
@@ -77,14 +79,14 @@ namespace MultiplayerARPG.MMO.Mesh
                     bool faced = swingFaceRange > 0f && FaceNearestMonster(self, swingFaceRange);
                     bool hopping = IsHopping;
                     WeaponHandlingState whs = WeaponHandlingState.None;
-                    if (self.Attack(ref whs))
+                    if (castSkillWhileWalking != 0 ? CastWhileWalking(self, faced) : self.Attack(ref whs))
                     {
                         _swings++;
                         if (hopping) _gapSwings++;
                         if (faced) _facedSwings++;
                         if (hopping)
                             Log($"swing sent during a hop ({_gapSwings})");
-                        while (running() && GameInstance.PlayingCharacterEntity != null && GameInstance.PlayingCharacterEntity.IsAttacking)
+                        while (running() && GameInstance.PlayingCharacterEntity != null && (GameInstance.PlayingCharacterEntity.IsAttacking || GameInstance.PlayingCharacterEntity.IsUsingSkill))
                             yield return null;
                         float resume = Time.realtimeSinceStartup + 0.6f + (float)random.NextDouble() * 0.8f;
                         bool wasHopping = IsHopping;
@@ -101,6 +103,17 @@ namespace MultiplayerARPG.MMO.Mesh
                 }
                 yield return null;
             }
+        }
+
+        /// <summary>Casts castSkillWhileWalking at the faced monster, or ahead of <paramref name="self"/>; false when the kit refuses it.</summary>
+        private bool CastWhileWalking(BasePlayerCharacterEntity self, bool faced)
+        {
+            BaseGameEntity target = faced ? self.GetTargetEntity() : null;
+            Vector3 aim = target != null ? target.EntityTransform.position : self.EntityTransform.position + self.EntityTransform.forward * 2f;
+            bool sent = self.UseSkill(castSkillWhileWalking, WeaponHandlingState.None, target != null ? target.ObjectId : 0, AimPosition.CreatePosition(aim));
+            if (sent)
+                Log($"cast {castSkillWhileWalking}{(faced ? " at a monster" : string.Empty)}{(IsHopping ? " during a hop" : string.Empty)}");
+            return sent;
         }
 
         /// <summary>Turns <paramref name="self"/> to the nearest live monster within <paramref name="range"/> metres; false when there is none.</summary>

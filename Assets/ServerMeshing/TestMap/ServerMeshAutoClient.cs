@@ -47,6 +47,8 @@ namespace MultiplayerARPG.MMO.Mesh
         public const string ARG_STOP_ON_MIGRATION = "-meshStopOnMigration"; // a walk leg ends when a migration completes (seam tests: the frame changes with the hop)
         /// <summary>ARG_BOT_NET_SECONDS turns the Bot net window on: one line every that many seconds (bots get no environment, so this is an argument).</summary>
         public const string ARG_BOT_NET_SECONDS = "-meshBotNetSeconds";
+        /// <summary>ARG_EXPECTED_MAP names the map the bot's character must be on (without it a bot on another map than the 3x3 rig's makes a new character every run).</summary>
+        public const string ARG_EXPECTED_MAP = "-meshExpectedMap";
 
 #if UNITY_EDITOR
         public const string PREF_ENABLE = "ServerMesh.AutoClient.Enabled";
@@ -170,6 +172,7 @@ namespace MultiplayerARPG.MMO.Mesh
             string seamPreload = ReadArg(args, ARG_SEAM_PRELOAD, null);
             bool stopOnMigration = args.Contains(ARG_STOP_ON_MIGRATION);
             string botNet = ReadArg(args, ARG_BOT_NET_SECONDS, null);
+            string expectedMap = ReadArg(args, ARG_EXPECTED_MAP, null);
 #if UNITY_EDITOR
             if (!enabled && EditorPrefs.GetBool(PREF_ENABLE, false))
             {
@@ -200,6 +203,7 @@ namespace MultiplayerARPG.MMO.Mesh
             if (!string.IsNullOrEmpty(returnX) && float.TryParse(returnX, out float rx)) c.walkReturnX = rx;
             if (!string.IsNullOrEmpty(seamPreload) && float.TryParse(seamPreload, out float sp)) c.seamPreloadOverride = sp;
             if (!string.IsNullOrEmpty(botNet) && float.TryParse(botNet, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float bn) && bn > 0f) c.botNetSeconds = bn;
+            if (!string.IsNullOrEmpty(expectedMap)) c.expectedMapName = expectedMap;
             c.ReadMigrationSettings(args);
         }
 
