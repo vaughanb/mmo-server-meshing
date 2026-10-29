@@ -12,6 +12,11 @@
 // and stopped at the crossing). Capped at arrivalWalkMaxSeconds after the crossing. Origin: the demoted copy's kinematic
 // puppet body starts at the demotion from where the character is and that velocity, instead of standing until the
 // destination's first snapshot (Kinematic puppet motion; a steered puppet keeps waiting for the snapshot).
+//
+// DESIGN 1.18: a snapshot's velocity is the move since the cell's last snapshot of that character, and the destination
+// has none of an arrival, so its first snapshot said 0 m/s. The origin's puppet took it for a stop and drifted back
+// (about 6 cm over the 100 ms to the next snapshot), then lunged after the next one at 8-12 m/s, at every crossing, for
+// everyone on the origin's side. The arrival's first snapshot now carries its crossing velocity instead.
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -47,11 +52,14 @@ namespace MultiplayerARPG.MMO.Mesh
         private const float ArrivalWalkStill = 0.0005f;
         private const float ArrivalWalkMinSpeed = 0.3f;
         private readonly List<ArrivalWalk> _arrivalWalks = new List<ArrivalWalk>();
+        private readonly Dictionary<string, Vector3> _arrivalSnapshotVelocity = new Dictionary<string, Vector3>();
 
         /// <summary>Destination, as the arrival registers (its puppet just promoted): walk it along its crossing track until its client moves it.</summary>
         private void BeginArrivalWalk(BasePlayerCharacterEntity entity, Vector3 trackOrigin, float trackTime, Vector3 velocity)
         {
             velocity.y = 0f;
+            if (entity != null)
+                _arrivalSnapshotVelocity[OwnedKeyOf(entity)] = velocity;
             if (!walkArrivals || entity == null || velocity.magnitude < ArrivalWalkMinSpeed)
                 return;
             float now = Time.unscaledTime;
@@ -60,6 +68,21 @@ namespace MultiplayerARPG.MMO.Mesh
             Vector3 ease = position - onTrack;
             ease.y = 0f;
             _arrivalWalks.Add(new ArrivalWalk { entity = entity, name = entity.CharacterName, trackOrigin = trackOrigin, trackTime = trackTime, velocity = velocity, ease = ease, since = now, written = position });
+        }
+
+        /// <summary>
+        /// The velocity for a character's snapshot when this cell has no earlier snapshot of it to measure from: an arrival's
+        /// crossing velocity, once (DESIGN 1.18). False for anything else.
+        /// </summary>
+        private bool TryTakeArrivalSnapshotVelocity(string meshId, out Vector3 velocity)
+        {
+            if (_arrivalSnapshotVelocity.Count == 0 || !_arrivalSnapshotVelocity.TryGetValue(meshId, out velocity))
+            {
+                velocity = Vector3.zero;
+                return false;
+            }
+            _arrivalSnapshotVelocity.Remove(meshId);
+            return true;
         }
 
         private Vector3 TrackAt(Vector3 origin, float time, Vector3 velocity, float now)

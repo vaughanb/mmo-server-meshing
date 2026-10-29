@@ -297,11 +297,10 @@ Where the work stands, how to get it running on another machine, and what is lef
    the connect. Next steps, in order:
    - ammunition per trigger, a skill item taken after the last trigger and a charge in progress are not
      carried (1.06), and no skill has been cast across a crossing in a run yet;
-   - remote motion at the crossing itself (1.17): the client now draws other characters from their states'
-     timestamps (`MeshRemoteMotionBuffer`), which took a walking character on the observer's own cell from 8
-     stalls to 1, but the stalls at the line (|x| ≤ 2.5, ~7–9 in 150 s, median ~38 ms) did not change. Next:
-     log, per crossing, whether the buffer restarted (a snap, a teleport, a lost slot) or the stamped samples
-     themselves stood, and look at the real-to-puppet handover on the observer's cell if they did;
+   - remote motion (1.17, 1.18): clients draw other characters from their states' timestamps, and an arrival's
+     first snapshot carries its crossing velocity, so the stalls at the line went from 6–9 to 1 in 180 s. Left: a
+     puppet's speed pulses with its 10 Hz snapshots (about 3 to 5.5 m/s in 50 ms windows for a 4 m/s walk), and
+     the 30 Hz puppet stalls of 1.16 were not re-measured;
    - someone else's crossing, after 1.11: the client's first state still moves the arrival about 0.14 m in one
      step for everyone watching. The
      BaseDemo-CE rig's maps are Static and stay steered (they move in bursts across a line);

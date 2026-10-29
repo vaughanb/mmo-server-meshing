@@ -804,14 +804,18 @@ namespace MultiplayerARPG.MMO.Mesh
                 // Velocity over the last snapshot: what the neighbour leads the puppet by. Not after a gap or a teleport.
                 Vector3 velocity = Vector3.zero;
                 float now = Time.unscaledTime;
+                bool measured = false;
                 if (_lastSnapshotPose.TryGetValue(meshId, out SnapshotPose last))
                 {
                     float dt = now - last.time;
                     Vector3 delta = pos - last.position;
                     // Faster than anything walks or rides (20 m/s) is a teleport (a pet catching up, a warp): no lead from it.
-                    if (dt > 0.01f && dt < 1f && delta.sqrMagnitude < 400f * dt * dt)
+                    measured = dt > 0.01f && dt < 1f;
+                    if (measured && delta.sqrMagnitude < 400f * dt * dt)
                         velocity = delta / dt;
                 }
+                if (TryTakeArrivalSnapshotVelocity(meshId, out Vector3 arrivalVelocity) && !measured)
+                    velocity = arrivalVelocity; // DESIGN 1.18: an arrival's first snapshot, nothing to measure from yet
                 _lastSnapshotPose[meshId] = new SnapshotPose { position = pos, time = now };
                 if (mask == 0)
                     continue;
