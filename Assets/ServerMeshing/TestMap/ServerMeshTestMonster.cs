@@ -7,6 +7,9 @@
 // (a hit deer runs all the same), it is healed whenever it drops below a third, and every hit it takes is logged (tag MeshTestMonster) with the attacker's
 // id, so a run can count the hits a crossing's swings landed: once each, on the cell that owns the monster. Rig only:
 // nothing here runs without the environment variable.
+//
+// MESH_TEST_MONSTER=<x>,<z>,<name>,free (DESIGN 1.23) spawns it as the kit would: its AI on, never put back or healed,
+// so an aggressive one chases a player across a line and is handed over like any monster.
 using LiteNetLibManager;
 using UnityEngine;
 
@@ -23,6 +26,7 @@ namespace MultiplayerARPG.MMO.Mesh
         private Vector3 _position;
         private float _nextPin;
         private int _hits;
+        private bool _free;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void AutoStart()
@@ -44,12 +48,15 @@ namespace MultiplayerARPG.MMO.Mesh
             spawner._spot = new Vector2(x, z);
             if (parts.Length > 2 && !string.IsNullOrWhiteSpace(parts[2]))
                 spawner._name = parts[2].Trim();
+            spawner._free = parts.Length > 3 && string.Equals(parts[3].Trim(), "free", System.StringComparison.OrdinalIgnoreCase);
         }
 
         private void Update()
         {
             if (_monster != null)
             {
+                if (_free)
+                    return;
                 if (!_monster.IsDead() && _monster.CurrentHp < _monster.MaxHp / 3)
                     _monster.CurrentHp = _monster.MaxHp;
                 // Switching its activity off does not keep a hit deer from running: put it back where it was put.
@@ -119,14 +126,17 @@ namespace MultiplayerARPG.MMO.Mesh
             entity.Level = 1;
             entity.Teleport(position, Quaternion.identity, false);
             entity.InitStats();
-            foreach (BaseMonsterActivityComponent activity in entity.GetComponents<BaseMonsterActivityComponent>())
-                activity.enabled = false; // a target that stays where it was put
+            if (!_free)
+            {
+                foreach (BaseMonsterActivityComponent activity in entity.GetComponents<BaseMonsterActivityComponent>())
+                    activity.enabled = false; // a target that stays where it was put
+            }
             mesh.Assets.NetworkSpawn(spawnObj);
             entity.CallRpcOnSpawned();
             entity.onReceivedDamage += OnReceivedDamage;
             _monster = entity;
             _position = position;
-            Logging.Log("MeshTestMonster", $"{prefab.name} spawned at {position} on {mesh.OwnZoneId} (object {entity.ObjectId}, hp {entity.CurrentHp}/{entity.MaxHp})");
+            Logging.Log("MeshTestMonster", $"{prefab.name} spawned{(_free ? " free" : string.Empty)} at {position} on {mesh.OwnZoneId} (object {entity.ObjectId}, hp {entity.CurrentHp}/{entity.MaxHp})");
         }
 
         private void OnReceivedDamage(DamageableEntity target, HitBoxPosition position, Vector3 fromPosition, EntityInfo instigator, CombatAmountType combatAmountType, int totalDamage, CharacterItem weapon, BaseSkill skill, int skillLevel, CharacterBuff buff, bool isDamageOverTime)
