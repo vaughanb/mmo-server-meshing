@@ -178,18 +178,14 @@ namespace MultiplayerARPG.MMO.Mesh
         private bool _warmedUp;
 
         private MeshObservedMotionTrace _observed;
+        private MeshRemoteMotionBuffer _remoteMotion;
 
         private void Update()
         {
             if (_manager != null)
                 PollPreconnect();
             if (_running || _manager == null || !_manager.IsClientConnected || _manager.Assets == null)
-            {
-                _observed?.Reset();
                 return;
-            }
-            if (MeshObservedMotionTrace.Enabled)
-                (_observed ?? (_observed = new MeshObservedMotionTrace())).Sample(_manager.Assets, GameInstance.PlayingCharacterEntity); // DESIGN 1.09
             if (!_warmedUp && _manager.warmUpMigrationCode && MeshMigrationWarmup.IsReady(GameInstance.PlayingCharacterEntity))
             {
                 // Once per session, as soon as the character's data is in: the first hop then finds the adoption's
@@ -198,6 +194,33 @@ namespace MultiplayerARPG.MMO.Mesh
                 MeshMigrationWarmup.Run(_manager.Assets, GameInstance.PlayingCharacterEntity);
             }
             TrackVelocities();
+        }
+
+        /// <summary>
+        /// After the kit's update: other characters are drawn from their buffered states (DESIGN 1.17), then the observed
+        /// motion trace samples what is drawn (DESIGN 1.09).
+        /// </summary>
+        private void LateUpdate()
+        {
+            bool connected = _manager != null && _manager.IsClientConnected && !_manager.IsServer && _manager.Assets != null;
+            if (connected && _manager.bufferRemoteMotion && !MeshRemoteMotionBuffer.DisabledByEnvironment)
+            {
+                if (_remoteMotion == null)
+                    _remoteMotion = new MeshRemoteMotionBuffer(_manager, _manager.remoteMotionDelayIntervals, _manager.remoteMotionMaxExtrapolationSeconds * 1000.0);
+                _remoteMotion.Frame(_running);
+            }
+            else if (_remoteMotion != null)
+            {
+                _remoteMotion.Clear();
+                _remoteMotion = null;
+            }
+            if (_running || !connected)
+            {
+                _observed?.Reset();
+                return;
+            }
+            if (MeshObservedMotionTrace.Enabled)
+                (_observed ?? (_observed = new MeshObservedMotionTrace())).Sample(_manager.Assets, GameInstance.PlayingCharacterEntity); // DESIGN 1.09
         }
 
         /// <summary>Sample every spawned entity's velocity each frame so a stand-in can keep moving during the gap.</summary>
