@@ -1247,7 +1247,9 @@ namespace MultiplayerARPG.MMO.Mesh
             // A ghost within arrivalTeleportDistance of the saved position stays where it stands: the teleport's IsTeleport state
             // reaches the arriving client too and snaps its character back to the saved spot, which a client that kept
             // moving through the hop (entity continuity, CE-14) has already walked past. Its own next state moves it on.
-            if (Vector3.Distance(standing, data.CurrentPosition) > arrivalTeleportDistance)
+            // DESIGN 1.24: at least arrivalTeleportSeconds of the crossing speed, so a mount's steered puppet is not "far".
+            float crossingSpeed = _incomingHandoffFrom.TryGetValue(data.Id, out IncomingHandoff crossing) ? crossing.velocity.magnitude : 0f;
+            if (Vector3.Distance(standing, data.CurrentPosition) > Mathf.Max(arrivalTeleportDistance, crossingSpeed * arrivalTeleportSeconds))
                 player.Teleport(data.CurrentPosition, Quaternion.Euler(data.CurrentRotation), true);
             player.ForceMakeCaches();
             player.FillEmptySlots();

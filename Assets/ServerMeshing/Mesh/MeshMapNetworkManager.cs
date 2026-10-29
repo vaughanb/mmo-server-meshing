@@ -83,6 +83,9 @@ namespace MultiplayerARPG.MMO.Mesh
         [Tooltip("An arrival whose ghost already stands within this many metres of the saved position is promoted where it stands, not teleported: a teleport makes the arriving client snap its character to the saved spot, which a client that kept moving through the hop (entity continuity) has already walked past.")]
         public float arrivalTeleportDistance = 2f;
 
+        [Tooltip("The arrival teleport distance is at least this many seconds of the crossing speed (DESIGN 1.24): a mounted player's steered puppet trails it by about a quarter of a second, ~2 m at a horse's 8 m/s, and the teleport snapped the rider back that far on its own screen at every mounted crossing.")]
+        public float arrivalTeleportSeconds = 0.5f;
+
         public bool IsMigrating { get; private set; }
 
         /// <summary>The cell this map server serves (from -zoneId/-zoneX/-zoneY args or from ChannelId == cell id, resolved against the world registry).</summary>
