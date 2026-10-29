@@ -1,7 +1,7 @@
 # Handoff — 2026-10-28
 
 Where the work stands, how to get it running on another machine, and what is left. The design record
-([DESIGN.md](DESIGN.md), version 1.15) has the full reasoning and measurements; this note is the short path in.
+([DESIGN.md](DESIGN.md), version 1.16) has the full reasoning and measurements; this note is the short path in.
 
 ## What was done
 
@@ -204,7 +204,11 @@ Where the work stands, how to get it running on another machine, and what is lef
     the reproduction). Before the kit stops the old connection, the client now wakes its send thread and waits
     (at most 5 ms; 0.0–0.19 ms measured) until the queue is out; the origin forwards it. 19 of 19 reproduced
     swings ran once. Reproduce with the patrol's `swingAtWarp`.
-16. **Verified on the 8 km demo** (editor client plus headless bots), all seamless, no exceptions:
+16. **A click-to-move player keeps walking through a hop (DESIGN 1.16, package 0.97.3).** The adoption's owner
+    change cleared the kit's path, so a player who clicked across the line stopped at it until they clicked
+    again. The client now gives that click again when its character is adopted (`click-move resumed` on the
+    CONTINUITY line). Seen from the line, the crossing's long stalls (median 142 ms) went to ~33 ms.
+17. **Verified on the 8 km demo** (editor client plus headless bots), all seamless, no exceptions:
    - a 750 m walk across three cells;
    - 16 quick back-and-forth crossings (adopted after 180–398 ms, none fell back);
    - a second player standing past the line: kept and adopted;
@@ -293,8 +297,11 @@ Where the work stands, how to get it running on another machine, and what is lef
    the connect. Next steps, in order:
    - ammunition per trigger, a skill item taken after the last trigger and a charge in progress are not
      carried (1.06), and no skill has been cast across a crossing in a run yet;
+   - remote motion's ~30 ms stands and catch-ups (1.16): the kit's remote interpolation spreads each state over
+     one fixed tick, so uneven state timing (a 60 Hz tick on 60 fps processes; at 30 Hz the puppets instead)
+     shows as a stand and a lunge. A time-based interpolation buffer for remote characters is the fix;
    - someone else's crossing, after 1.11: the client's first state still moves the arrival about 0.14 m in one
-     step for everyone watching, and a kinematic puppet across the line still stalls ~50 ms now and then. The
+     step for everyone watching. The
      BaseDemo-CE rig's maps are Static and stay steered (they move in bursts across a line);
    - what is left of the gap after 1.14 (median ~47 ms): the registration to the adoption (the next network
      tick and a client frame), and the session's first hop (~140 ms, first-time code). A destination that sent

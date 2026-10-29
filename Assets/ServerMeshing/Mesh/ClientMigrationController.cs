@@ -242,6 +242,39 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private const float VelocitySmoothingSeconds = 0.1f;
 
+        /// <summary>
+        /// Where the player was walking to by click (the last point of the kit's path, or the NavMesh agent's destination),
+        /// or null. The adoption calls the kit's OnSetOwnerClient on the player's own character, which clears that path:
+        /// a player who clicked across the line stopped at it until they clicked again (DESIGN 1.16).
+        /// </summary>
+        private static Vector3? ClickTargetOf(BaseGameEntity entity)
+        {
+            if (entity == null)
+                return null;
+            if (entity.Movement is CharacterControllerEntityMovement controller && controller.HasNavPaths)
+            {
+                Vector3 last = default;
+                foreach (Vector3 point in controller.NavPaths)
+                    last = point;
+                return last;
+            }
+            if (entity.Movement is NavMeshEntityMovement nav && nav.CacheNavMeshAgent != null && nav.CacheNavMeshAgent.isActiveAndEnabled
+                && nav.CacheNavMeshAgent.hasPath && !nav.CacheNavMeshAgent.isStopped)
+                return nav.CacheNavMeshAgent.destination;
+            return null;
+        }
+
+        /// <summary>After the adoption: the click the owner change cleared, given again. True when it was.</summary>
+        private static bool ResumeClickTarget(BaseGameEntity entity, Vector3? target)
+        {
+            if (!target.HasValue || entity == null || entity.Movement == null)
+                return false;
+            if (entity.Movement is CharacterControllerEntityMovement controller && controller.HasNavPaths)
+                return false; // a path is there already (the player clicked again)
+            entity.PointClickMovement(target.Value);
+            return true;
+        }
+
         private Vector3 VelocityOf(BaseGameEntity entity)
         {
             return entity != null && _tracked.TryGetValue(entity.GetInstanceID(), out Tracked t) ? t.velocity : Vector3.zero;
@@ -836,12 +869,18 @@ namespace MultiplayerARPG.MMO.Mesh
             uint objectIdBefore = identity != null ? identity.ObjectId : 0;
             int adoptedCount = 0;
             double adoptionMs = 0, playerAdoptionMs = -1; // the spawn work of the adoptions (all, and the player's own)
+            // DESIGN 1.16: where a click-to-move player was walking to; the adoption's owner change clears the kit's path.
+            Vector3? clickTarget = ClickTargetOf(entity);
+            bool clickResumed = false;
             void CountAdoption(LiteNetLibIdentity adopted, uint previousObjectId)
             {
                 adoptedCount++;
                 adoptionMs += _manager.Assets.LastAdoptionMilliseconds;
                 if (ReferenceEquals(adopted, identity))
+                {
                     playerAdoptionMs = _manager.Assets.LastAdoptionMilliseconds;
+                    clickResumed = ResumeClickTarget(entity, clickTarget);
+                }
             }
             // What the player could notice, frame by frame, from the hop until shortly after it settles.
             List<float> frameMs = new List<float>(), playerSteps = new List<float>(), cameraSteps = new List<float>();
@@ -998,7 +1037,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 $"Migration to {address}:{port} | CONTINUITY fellBack=False preconnected={preconnected} kept={keptCount} adopted={adoptedCount} unadopted={unadopted} | " +
                 $"connected={tConnected}ms playerAdopted={tAdopted}ms settled={tSettled}ms | player object {objectIdBefore} -> {identity.ObjectId}, " +
                 $"moved {Vector3.Distance(posBefore, posAfter):0.##} m during the hop | frames {Spread(frameMs, "ms")} | player step {Spread(playerSteps, "m")} | camera step {Spread(cameraSteps, "m")} | jumps:{(jumps.Length > 0 ? jumps.ToString() : " none")} | " +
-                $"longest frame {worstFrameMs:0.#}ms at f{worstFrame} (connected f{connectedFrame}, adopted f{adoptedFrame}){(gcInWorstFrame ? " with a GC" : "")} | gcs {System.GC.CollectionCount(0) - gcAtStart} | adoption spawn work {playerAdoptionMs:0.##}ms player, {adoptionMs:0.##}ms all{others?.Summary()}{(keepWalking != null ? $" | kept walking {keepWalking.Walked}, handed back {keepWalking.HandedBack}{keepWalking.CorrectionSummary()}" : " | kept walking off")}");
+                $"longest frame {worstFrameMs:0.#}ms at f{worstFrame} (connected f{connectedFrame}, adopted f{adoptedFrame}){(gcInWorstFrame ? " with a GC" : "")} | gcs {System.GC.CollectionCount(0) - gcAtStart} | adoption spawn work {playerAdoptionMs:0.##}ms player, {adoptionMs:0.##}ms all{(clickTarget.HasValue ? $" | click-move {(clickResumed ? "resumed" : "not resumed")}" : string.Empty)}{others?.Summary()}{(keepWalking != null ? $" | kept walking {keepWalking.Walked}, handed back {keepWalking.HandedBack}{keepWalking.CorrectionSummary()}" : " | kept walking off")}");
         }
 
         #endregion
