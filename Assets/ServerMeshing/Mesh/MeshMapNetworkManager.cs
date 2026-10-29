@@ -633,6 +633,10 @@ namespace MultiplayerARPG.MMO.Mesh
             base.RegisterPlayerCharacter(connectionId, playerCharacter);
             if (IsServer)
                 ReplayParkedRpcs(connectionId, playerCharacter); // DESIGN 1.07: what the client sent inside the gap (MeshMapNetworkManager_GapCommands)
+#if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
+            if (IsServer)
+                SendRegistrationStatesNow(connectionId); // DESIGN 1.26: its spawn now, not on the next tick (MeshMapNetworkManager_RegistrationSend)
+#endif
         }
 
         #endregion

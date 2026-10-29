@@ -317,9 +317,9 @@ Where the work stands, how to get it running on another machine, and what is lef
      copied and a handoff state round-tripped, its caches rebuilt) took the frame only to ~83 ms and the session's
      first hop from 169 to 152 ms, and was not kept. On a long-lived cell it is once per process; on a Dynamic map's
      on-demand cell it is the hop that woke it. The fix for the class is an IL2CPP cell build (no JIT), not measured;
-   - what is left of the gap after 1.14 (median ~47 ms): the registration to the adoption (the next network
-     tick and a client frame), and the session's first hop (~140 ms, first-time code). A destination that sent
-     the spawn at the registration instead of on its next tick would take another ~15 ms.
+   - what is left of the gap after 1.26 (median ~28 ms on one machine): the client's warp and connect, the
+     enter-game, the registration, one transport pass and a client frame; the session's first hop is the cells'
+     first-use compilation (above).
    On Mono the first hop of a session still compiles the hop's first-time code (12.6 ms, the adoption read
    is warmed up); an IL2CPP client has no JIT. Nothing has been measured with real latency yet; pre-connect
    is what keeps the connect out of a laggy hop, the gap will still scale with the round trip until the
