@@ -1185,6 +1185,17 @@ namespace MultiplayerARPG.MMO.Mesh
         // here were already looking at: no swap, no pop.
 
         private sealed class ReservedArrival { public BasePlayerCharacterEntity entity; public string userId; public float time; public float noticeTime; public VehicleEntity mount; public bool keepMount; }
+
+        /// <summary>Whether <paramref name="userId"/>'s character is a handoff arrival promoted here and not yet registered.</summary>
+        private bool IsReservedArrivalUser(string userId)
+        {
+            foreach (ReservedArrival reserved in _reservedArrivals.Values)
+            {
+                if (reserved.userId == userId)
+                    return true;
+            }
+            return false;
+        }
         private readonly Dictionary<string, ReservedArrival> _reservedArrivals = new Dictionary<string, ReservedArrival>();
         [Tooltip("If an arriving client never becomes ready, its promoted ghost is destroyed after this many seconds.")]
         public float reservedArrivalTimeout = 15f;

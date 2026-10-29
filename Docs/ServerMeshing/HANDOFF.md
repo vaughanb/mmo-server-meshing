@@ -325,6 +325,7 @@ Where the work stands, how to get it running on another machine, and what is lef
    patrol `mountUp` / `summonPet`). The pet crosses clean; a mounted rider no longer snaps back ~2 m. Left: the
    mounted puppet is steered and trails ~1–1.5 m, so observers see a 0.3 m step at the client's first state;
    a kinematic body for mounts would close it. A character saved mounted logs in mounted (`charactermount`).
+   The `kick silently` warning on hop arrivals was a false alarm and is gone (1.25).
 4. **Write the CE-14 upstream patch** into `Docs/ServerMeshing/upstream/` (as 0001–0009 were) and open
    the PR. It now covers `LiteNetLibElement`, `LiteNetLibSyncField` and `LiteNetLibSyncList` too (§17).
 5. **Run the rig regression** (`python Tools/ServerMeshing/regress.py`). Continuity is now the default

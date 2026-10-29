@@ -590,8 +590,11 @@ namespace MultiplayerARPG.MMO.Mesh
                 // ("prevent nested login"). ValidatePlayerConnection's failures do log (the prefab's log level is
                 // Info, so LogError is on), and a kick that arrives with nothing in any log is one of these three.
                 // Name them. Do not warn on "the user is already registered in ServerUserHandlers": enter-game
-                // registers that a moment earlier, so it is true on every successful login too (2026-09-17).
-                else
+                // registers that a moment earlier, so it is true on every successful login too (2026-09-17). Nor for a
+                // handoff arrival (DESIGN 1.25): its puppet is promoted in place, not spawned by that routine, and the user
+                // is always in the registry then (the central relays the origin's online users to every cell), so the
+                // warning fired on every hop and no kick ever followed.
+                else if (!IsReservedArrivalUser(readyUserId))
                 {
                     bool social = IsInKitSocialRegistry(readyUserId);
                     bool database = IsDatabaseConnected;
