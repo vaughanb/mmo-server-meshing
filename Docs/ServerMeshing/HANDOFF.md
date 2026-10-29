@@ -310,6 +310,13 @@ Where the work stands, how to get it running on another machine, and what is lef
      sides and just after an arrival. Left: neighbours' snapshots still read the kit's transform; one hop of 107 ms
      in the last run (median unchanged at 52) was not looked into; the 30 Hz puppet stalls of 1.16 were not
      re-measured. The BaseDemo-CE rig's maps are Static and stay steered (they move in bursts across a line);
+   - a cell's first player costs it one 80–95 ms frame (2026-10-29, the 8 km demo): its first registration, login or
+     arrival alike (the promotion 27 ms against 5, the frame ~96 ms against a few), and its first demotion another ~80;
+     after a login the same cell's first arrival costs ~22 ms. It is Mono compiling the kit's registration and spawn
+     code on first use, spread wide: a warm-up over the first player ghost (its whole spawn state written, its data
+     copied and a handoff state round-tripped, its caches rebuilt) took the frame only to ~83 ms and the session's
+     first hop from 169 to 152 ms, and was not kept. On a long-lived cell it is once per process; on a Dynamic map's
+     on-demand cell it is the hop that woke it. The fix for the class is an IL2CPP cell build (no JIT), not measured;
    - what is left of the gap after 1.14 (median ~47 ms): the registration to the adoption (the next network
      tick and a client frame), and the session's first hop (~140 ms, first-time code). A destination that sent
      the spawn at the registration instead of on its next tick would take another ~15 ms.
