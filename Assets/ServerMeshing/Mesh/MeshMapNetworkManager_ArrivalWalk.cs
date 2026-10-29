@@ -17,6 +17,11 @@
 // has none of an arrival, so its first snapshot said 0 m/s. The origin's puppet took it for a stop and drifted back
 // (about 6 cm over the 100 ms to the next snapshot), then lunged after the next one at 8-12 m/s, at every crossing, for
 // everyone on the origin's side. The arrival's first snapshot now carries its crossing velocity instead.
+//
+// DESIGN 1.20: the walk is an estimate, and the client's first state lands 2-14 cm from it, which the kit applies at
+// once: one tick carried that step, a lunge for everyone watching on this side. The arrival is now layered for sent
+// motion (MeshMapNetworkManager_SentMotion) as it registers, and at the hand-back the walk's path is that layer's lead:
+// it is sent until the client's states can be drawn, and their track starts from it and glides onto them.
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -59,7 +64,10 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             velocity.y = 0f;
             if (entity != null)
+            {
                 _arrivalSnapshotVelocity[OwnedKeyOf(entity)] = velocity;
+                TryLayerSentMotion(entity.ObjectId); // DESIGN 1.20: its client's first states are read from the first one
+            }
             if (!walkArrivals || entity == null || velocity.magnitude < ArrivalWalkMinSpeed)
                 return;
             float now = Time.unscaledTime;
@@ -118,6 +126,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     float aside = Vector3.Cross(along, offTrack).y;
                     Stamp($"arrival {walk.name}: walked {(now - walk.since) * 1000f:0} ms at {walk.velocity.magnitude:0.0} m/s, then its client's state moved it {moved.magnitude:0.###} m ({offTrack.magnitude:0.###} m off the crossing track: {ahead:+0.###;-0.###} m along, {aside:+0.###;-0.###} m aside, {(now - walk.trackTime) * 1000f:0} ms after the crossing)");
                     _arrivalWalks.RemoveAt(i);
+                    LeadSentMotion(walk.entity.ObjectId, walk.written, walk.velocity, now); // DESIGN 1.20: glide onto the client's states
                     continue;
                 }
                 Vector3 target = onTrack + walk.ease * Mathf.Exp(-(now - walk.since) / Mathf.Max(0.01f, arrivalWalkEaseSeconds));

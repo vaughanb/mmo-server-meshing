@@ -297,14 +297,13 @@ Where the work stands, how to get it running on another machine, and what is lef
    the connect. Next steps, in order:
    - ammunition per trigger, a skill item taken after the last trigger and a charge in progress are not
      carried (1.06), and no skill has been cast across a crossing in a run yet;
-   - remote motion (1.17–1.19): clients draw other characters from their states' timestamps, an arrival's first
-     snapshot carries its crossing velocity, and puppets extrapolate stamped snapshots with a two-interval velocity:
-     no stall in 120 s, a puppet's 50 ms speeds within 3.3–4.7 m/s for a 4 m/s walk. Left: the real character on
-     its owner's cell has single-tick holds from uneven client states, and the 30 Hz puppet stalls of 1.16 were not
-     re-measured;
-   - someone else's crossing, after 1.11: the client's first state still moves the arrival about 0.14 m in one
-     step for everyone watching. The
-     BaseDemo-CE rig's maps are Static and stay steered (they move in bursts across a line);
+   - remote motion (1.17–1.20): clients draw other characters from their states' timestamps, an arrival's first
+     snapshot carries its crossing velocity, puppets extrapolate stamped snapshots with a two-interval velocity,
+     and cells send client-driven players along their clients' stamped trajectories, gliding an arrival from its
+     walk onto its client's states: no stall in 180 s, 50 ms speeds within ~3.3–4.7 m/s for a 4 m/s walk on both
+     sides and just after an arrival. Left: neighbours' snapshots still read the kit's transform; one hop of 107 ms
+     in the last run (median unchanged at 52) was not looked into; the 30 Hz puppet stalls of 1.16 were not
+     re-measured. The BaseDemo-CE rig's maps are Static and stay steered (they move in bursts across a line);
    - what is left of the gap after 1.14 (median ~47 ms): the registration to the adoption (the next network
      tick and a client frame), and the session's first hop (~140 ms, first-time code). A destination that sent
      the spawn at the registration instead of on its next tick would take another ~15 ms.

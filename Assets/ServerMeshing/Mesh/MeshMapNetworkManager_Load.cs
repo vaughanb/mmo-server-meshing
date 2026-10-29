@@ -63,6 +63,7 @@ namespace MultiplayerARPG.MMO.Mesh
         protected override void OnServerUpdate(LogicUpdater updater)
         {
             PoseKinematicPuppets(); // right before the kit sends movement, so watched kinematic puppets go out current
+            PoseSentPlayerMotion(); // DESIGN 1.20: client-driven players go out along their clients' stamped trajectories
             Sync.MeshStateSender sender = _stateSender;
             if (sender != null)
                 sender.BeforeKitTick(Time.frameCount);
