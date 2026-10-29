@@ -86,8 +86,9 @@ namespace MultiplayerARPG.MMO.Mesh
         /// showing at <paramref name="receivedAt"/> becomes the new offset from the snapshot, unless the snapshot is a
         /// discontinuity or the pose missed it by more than the snap distance: then the pose snaps to it.
         /// <paramref name="sampleAgeSeconds"/> is how old the snapshot already was when it arrived (clamped to [0, maximum
-        /// extrapolation]): it is predicted from then, so a late snapshot is not taken for one that fell behind. A snapshot
-        /// sampled before the last accepted one is refused too.
+        /// extrapolation]): it is predicted from then, so a late snapshot is not taken for one that fell behind. One that
+        /// claims to be sampled before the last accepted one is taken as sampled with it (DESIGN 1.23: a puppet seeded at a
+        /// demotion, stamped then, and its owner's first snapshot a few milliseconds later, aged by its link).
         /// </summary>
         public bool TryAccept(Vector3 position, Vector3 velocity, float yawDegrees, bool discontinuity, float receivedAt, float sampleAgeSeconds = 0f)
         {
@@ -95,8 +96,10 @@ namespace MultiplayerARPG.MMO.Mesh
             if (!IsFinite(position) || !IsFinite(velocity) || !IsFinite(yawDegrees) || !IsFinite(receivedAt) || !IsFinite(sampleAgeSeconds))
                 return false;
             float sampledAt = receivedAt - Mathf.Clamp(sampleAgeSeconds, 0f, _maxExtrapolationSeconds);
-            if (_hasSample && (receivedAt < _receivedAt || sampledAt < _sampledAt))
+            if (_hasSample && receivedAt < _receivedAt)
                 return false;
+            if (_hasSample && sampledAt < _sampledAt)
+                sampledAt = _sampledAt;
             float yaw = Mathf.Repeat(yawDegrees, 360f);
             Vector3 offset = Vector3.zero;
             float yawOffset = 0f;

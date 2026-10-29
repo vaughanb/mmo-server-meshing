@@ -348,7 +348,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     Logging.LogWarning("Mesh", $"Channel {ChannelId} is not a cell of meshed map {OwnMapId}: all {disabled} spawn areas disabled");
             }
             base.OnServerOnlineSceneLoaded();
-            SplitOnSceneLoaded(); // Slice 2b: a Dynamic map registers every spawn area's prefabs
+            SplitOnSceneLoaded(); // Slice 2b, DESIGN 1.23: every spawn area's prefabs, so a neighbour's monster can be a puppet here
             ReadinessOnSceneLoaded(); // Slice 2d, every map since 0.79: the mesh link is read from now (MeshMapNetworkManager_Readiness)
         }
 

@@ -317,14 +317,10 @@ Where the work stands, how to get it running on another machine, and what is lef
    is warmed up); an IL2CPP client has no JIT. Nothing has been measured with real latency yet; pre-connect
    is what keeps the connect out of a laggy hop, the gap will still scale with the round trip until the
    transfer is in memory.
-2. **Monsters at a crossing:** not yet exercised. They use the same nearest-prefab rule as players, but
-   no pack has chased a player over a line yet; the level 1–2 wolves did not aggro. 2026-10-29 on the 8 km
-   demo, with a free test bandit (`MESH_TEST_MONSTER=<x>,<z>,BanditMale,free`): its aggro is 15 m but only in
-   a 120° field of view and the fixture spawns facing +z, it is leashed 50 m (prefab) but walks 2.4 m/s against
-   a patrol's 4, and it never engaged the player at all, on its own cell (a patrol past it, HP untouched) or
-   across the line (standing 6.4 m off, 51° off its nose, in range): no target on the client. Next: trace
-   the monster's enemy search on the cell (`MeshLineOfSightMonsterActivityComponent`, the demo's line-of-sight
-   targeting) to see why a level-1 player is never picked, then chase across.
+2. **Monsters at a crossing (1.23):** a lone monster now chases a player across a Static map's line, hits
+   through the ghost, and is handed over with its target (the 8 km demo, `MESH_TEST_MONSTER=0.5,509,BanditMale,free`,
+   player standing at (−5, 513): the fixture spawns facing +z and the demo's monsters see in a 120° cone). Left:
+   a pack, a monster's ghost trailing ~0.3 s as it breaks into a run, and measuring its motion at the handoff.
 3. **Mount and pet crossings.** Demo characters start with no mount or pet item; add one to the test
    character first.
 4. **Write the CE-14 upstream patch** into `Docs/ServerMeshing/upstream/` (as 0001–0009 were) and open

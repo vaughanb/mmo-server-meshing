@@ -73,12 +73,16 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
         }
 
         [Test]
-        public void Track_ASnapshotSampledBeforeTheLast_IsRefused()
+        public void Track_ASnapshotClaimingASampleBeforeTheLast_IsTakenAsSampledWithIt()
         {
+            // A puppet seeded at a demotion (stamped then), and its owner's first snapshot 10 ms later, aged 50 ms by its link.
             MeshKinematicTrack track = new MeshKinematicTrack(15f, 0.3f, 4f);
-            track.TryAccept(Vector3.zero, Vector3.zero, 0f, false, 1.000f, 0f);
+            track.TryAccept(Vector3.zero, new Vector3(4f, 0f, 0f), 0f, false, 1.000f, 0f);
+            Vector3 shown = track.Pose(1.010f, 0f, out _);
 
-            Assert.That(track.TryAccept(Vector3.one, Vector3.zero, 0f, false, 1.010f, 0.050f), Is.False);
+            Assert.That(track.TryAccept(new Vector3(0.05f, 0f, 0f), new Vector3(4f, 0f, 0f), 0f, false, 1.010f, 0.050f), Is.True);
+            Assert.That(Vector3.Distance(track.Pose(1.010f, 0f, out _), shown), Is.LessThan(1e-4f), "the pose stays continuous");
+            Assert.That(track.Predict(1.110f, 0f).x, Is.EqualTo(0.05f + 4f * 0.110f).Within(1e-4f), "predicted from the seed's sample time");
         }
 
         [Test]

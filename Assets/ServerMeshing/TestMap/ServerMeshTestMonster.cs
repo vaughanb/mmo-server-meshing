@@ -86,14 +86,26 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private void Spawn(MeshMapNetworkManager mesh)
         {
-            BaseMonsterCharacterEntity prefab = null;
-            foreach (BaseMonsterCharacterEntity candidate in GameInstance.MonsterCharacterEntities.Values)
+            // A meshed copy of a monster (one with an add-on component, as the 8 km demo's are) before the kit's own of the
+            // same name: the kit's has no ghost watch, so it never wakes for a player across the line (DESIGN 1.23).
+            // The scene's spawn areas name the copies the map spawns; the game instance may hold only the kit's.
+            System.Collections.Generic.List<BaseMonsterCharacterEntity> candidates = new System.Collections.Generic.List<BaseMonsterCharacterEntity>(GameInstance.MonsterCharacterEntities.Values);
+            foreach (MonsterSpawnArea area in FindObjectsByType<MonsterSpawnArea>(FindObjectsInactive.Include, FindObjectsSortMode.None))
             {
-                if (candidate != null && candidate.name.IndexOf(_name, System.StringComparison.OrdinalIgnoreCase) >= 0)
-                {
+                if (area.prefab != null)
+                    candidates.Add(area.prefab);
+                if (area.spawningPrefabs != null)
+                    foreach (MonsterSpawnArea.SpawnPrefabData data in area.spawningPrefabs)
+                        if (data != null && data.prefab != null)
+                            candidates.Add(data.prefab);
+            }
+            BaseMonsterCharacterEntity prefab = null;
+            foreach (BaseMonsterCharacterEntity candidate in candidates)
+            {
+                if (candidate == null || candidate.name.IndexOf(_name, System.StringComparison.OrdinalIgnoreCase) < 0)
+                    continue;
+                if (prefab == null || (!IsMeshed(prefab) && IsMeshed(candidate)))
                     prefab = candidate;
-                    break;
-                }
             }
             if (prefab == null)
             {
@@ -114,6 +126,7 @@ namespace MultiplayerARPG.MMO.Mesh
             Vector3 position = new Vector3(_spot.x, 0f, _spot.y);
             if (Physics.Raycast(new Vector3(_spot.x, 1000f, _spot.y), Vector3.down, out RaycastHit hit, 2000f, GameInstance.Singleton.GetGameEntityGroundDetectionLayerMask()))
                 position.y = hit.point.y;
+            mesh.Assets.RegisterPrefab(prefab.Identity); // a spawn area's copy is registered only when its area spawns
             LiteNetLibIdentity spawnObj = mesh.Assets.GetObjectInstance(prefab.Identity.HashAssetId, position, Quaternion.identity);
             if (spawnObj == null)
             {
@@ -136,7 +149,17 @@ namespace MultiplayerARPG.MMO.Mesh
             entity.onReceivedDamage += OnReceivedDamage;
             _monster = entity;
             _position = position;
-            Logging.Log("MeshTestMonster", $"{prefab.name} spawned{(_free ? " free" : string.Empty)} at {position} on {mesh.OwnZoneId} (object {entity.ObjectId}, hp {entity.CurrentHp}/{entity.MaxHp})");
+            Logging.Log("MeshTestMonster", $"{prefab.name} ({(IsMeshed(prefab) ? "meshed" : "kit")} prefab) spawned{(_free ? " free" : string.Empty)} at {position} on {mesh.OwnZoneId} (object {entity.ObjectId}, hp {entity.CurrentHp}/{entity.MaxHp})");
+        }
+
+        private static bool IsMeshed(BaseMonsterCharacterEntity prefab)
+        {
+            foreach (MonoBehaviour behaviour in prefab.GetComponents<MonoBehaviour>())
+            {
+                if (behaviour != null && behaviour.GetType().Namespace == typeof(MeshMapNetworkManager).Namespace)
+                    return true;
+            }
+            return false;
         }
 
         private void OnReceivedDamage(DamageableEntity target, HitBoxPosition position, Vector3 fromPosition, EntityInfo instigator, CombatAmountType combatAmountType, int totalDamage, CharacterItem weapon, BaseSkill skill, int skillLevel, CharacterBuff buff, bool isDamageOverTime)

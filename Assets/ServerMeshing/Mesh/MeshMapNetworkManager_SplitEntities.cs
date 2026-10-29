@@ -36,14 +36,18 @@ namespace MultiplayerARPG.MMO.Mesh
                 ServerCharacterTick();
         }
 
-        /// <summary>OnServerOnlineSceneLoaded's hook, after the kit registered the active areas: a Dynamic map registers every area's prefabs.</summary>
+        /// <summary>
+        /// OnServerOnlineSceneLoaded's hook, after the kit registered the active areas: every map registers every area's
+        /// prefabs, the areas this cell does not run included. A Static map registered only its own areas' monsters
+        /// (DESIGN 1.23), so a monster from a neighbour whose kind no area here spawns was unknown here: no puppet of it for
+        /// this cell's players (`Cannot spawn monster ghost: unknown monster entity id`) and no handoff when it chased one
+        /// across the line.
+        /// </summary>
         private void SplitOnSceneLoaded()
         {
+            RegisterSpawnAreaPrefabs();
             if (world != null && world.IsDynamicMap(OwnMapId))
-            {
-                RegisterSpawnAreaPrefabs();
                 LogPlannedMonsters();
-            }
         }
 
         /// <summary>
