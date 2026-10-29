@@ -292,7 +292,7 @@ namespace MultiplayerARPG.MMO.Mesh
             BaseCharacterEntity entity = ghost.entity;
             MeshKinematicCharacterBody body = ghost.body;
             float now = Time.unscaledTime;
-            if (!body.Accept(msg.position, msg.velocity, msg.yaw, msg.movementState, msg.extraMovementState, dist > ghostTeleportDistance, now))
+            if (!body.Accept(msg.position, msg.velocity, msg.yaw, msg.movementState, msg.extraMovementState, dist > ghostTeleportDistance, now, msg.ageSeconds))
                 WarnThrottled($"Puppet motion: the snapshot of {ghost.kind} {msg.characterId} was refused by its track (a value that is not finite); the puppet keeps its last one");
             else if (body.LastAcceptSnapped)
             {

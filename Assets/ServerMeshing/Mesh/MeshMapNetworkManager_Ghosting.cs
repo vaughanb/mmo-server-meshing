@@ -114,7 +114,7 @@ namespace MultiplayerARPG.MMO.Mesh
             float dt = Time.unscaledDeltaTime;
             _frameSamples++; _frameSum += dt; if (dt > _frameMax) _frameMax = dt;
         }
-        private struct SnapshotPose { public Vector3 position; public float time; }
+        private struct SnapshotPose { public Vector3 position; public float time; public Vector3 earlierPosition; public float earlierTime; public bool hasEarlier; }
         private readonly Dictionary<string, SnapshotPose> _lastSnapshotPose = new Dictionary<string, SnapshotPose>();
         private readonly Dictionary<string, long> _statsLinkPrevOut = new Dictionary<string, long>();
 
@@ -805,18 +805,26 @@ namespace MultiplayerARPG.MMO.Mesh
                 Vector3 velocity = Vector3.zero;
                 float now = Time.unscaledTime;
                 bool measured = false;
-                if (_lastSnapshotPose.TryGetValue(meshId, out SnapshotPose last))
+                bool hasLast = _lastSnapshotPose.TryGetValue(meshId, out SnapshotPose last);
+                if (hasLast)
                 {
                     float dt = now - last.time;
                     Vector3 delta = pos - last.position;
                     // Faster than anything walks or rides (20 m/s) is a teleport (a pet catching up, a warp): no lead from it.
                     measured = dt > 0.01f && dt < 1f;
                     if (measured && delta.sqrMagnitude < 400f * dt * dt)
+                    {
                         velocity = delta / dt;
+                        // DESIGN 1.19: over two snapshots when the character kept its pace and heading.
+                        float span = now - last.earlierTime;
+                        Vector3 longDelta = pos - last.earlierPosition;
+                        if (last.hasEarlier && span < 1f && longDelta.sqrMagnitude < 400f * span * span)
+                            velocity = SnapshotVelocity(velocity, longDelta / span);
+                    }
                 }
                 if (TryTakeArrivalSnapshotVelocity(meshId, out Vector3 arrivalVelocity) && !measured)
                     velocity = arrivalVelocity; // DESIGN 1.18: an arrival's first snapshot, nothing to measure from yet
-                _lastSnapshotPose[meshId] = new SnapshotPose { position = pos, time = now };
+                _lastSnapshotPose[meshId] = new SnapshotPose { position = pos, time = now, earlierPosition = last.position, earlierTime = last.time, hasEarlier = measured };
                 if (mask == 0)
                     continue;
                 VehicleEntity mount = entity.PassengingVehicleEntity as VehicleEntity;
@@ -846,6 +854,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     level = entity.Level,
                     position = pos,
                     velocity = velocity,
+                    sampleMs = MeshLinkClock.NowMs, // DESIGN 1.19: the receiver measures how late it arrived
                     yaw = entity.EntityTransform.eulerAngles.y,
                     movementState = (byte)entity.MovementState,
                     extraMovementState = (byte)entity.ExtraMovementState,
@@ -1556,6 +1565,7 @@ namespace MultiplayerARPG.MMO.Mesh
             if (!IsServer || !enableBorderGhosting)
                 return;
             msg.position += OffsetFrom(connectionId);
+            msg.ageSeconds = GhostSnapshotAge(connectionId, msg.sampleMs); // DESIGN 1.19
             if (msg.kind == GhostKind.ItemDrop)
             {
                 OnGhostDropSnapshot(connectionId, msg);

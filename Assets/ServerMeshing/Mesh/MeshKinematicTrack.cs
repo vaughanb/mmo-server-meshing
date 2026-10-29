@@ -14,7 +14,8 @@ namespace MultiplayerARPG.MMO.Mesh
     /// steady velocity with no lag at any frame rate. A snapshot the pose misses by more than the snap distance, or one
     /// accepted as a discontinuity, clears the offset: the pose snaps (LastAcceptSnapped). It is a mutable struct: hold it
     /// in a field that is not readonly, and never mutate a copy read out of a collection. default(MeshKinematicTrack) is not
-    /// configured, and its methods throw.
+    /// configured, and its methods throw. A snapshot may be accepted with its age at arrival (DESIGN 1.19): it is then
+    /// extrapolated from when it was sampled, and its offset still starts from the pose shown at its arrival.
     /// </summary>
     public struct MeshKinematicTrack
     {
@@ -26,6 +27,7 @@ namespace MultiplayerARPG.MMO.Mesh
         private Vector3 _velocity;
         private float _yawDegrees;
         private float _receivedAt;
+        private float _sampledAt;
         private bool _hasSample;
         private Vector3 _offset;
         private float _yawOffset;
@@ -53,6 +55,7 @@ namespace MultiplayerARPG.MMO.Mesh
             _velocity = Vector3.zero;
             _yawDegrees = 0f;
             _receivedAt = 0f;
+            _sampledAt = 0f;
             _hasSample = false;
             _offset = Vector3.zero;
             _yawOffset = 0f;
@@ -82,13 +85,17 @@ namespace MultiplayerARPG.MMO.Mesh
         /// or infinite value anywhere, or a snapshot that arrived before the last accepted one. The pose the track was
         /// showing at <paramref name="receivedAt"/> becomes the new offset from the snapshot, unless the snapshot is a
         /// discontinuity or the pose missed it by more than the snap distance: then the pose snaps to it.
+        /// <paramref name="sampleAgeSeconds"/> is how old the snapshot already was when it arrived (clamped to [0, maximum
+        /// extrapolation]): it is predicted from then, so a late snapshot is not taken for one that fell behind. A snapshot
+        /// sampled before the last accepted one is refused too.
         /// </summary>
-        public bool TryAccept(Vector3 position, Vector3 velocity, float yawDegrees, bool discontinuity, float receivedAt)
+        public bool TryAccept(Vector3 position, Vector3 velocity, float yawDegrees, bool discontinuity, float receivedAt, float sampleAgeSeconds = 0f)
         {
             ThrowIfNotConfigured();
-            if (!IsFinite(position) || !IsFinite(velocity) || !IsFinite(yawDegrees) || !IsFinite(receivedAt))
+            if (!IsFinite(position) || !IsFinite(velocity) || !IsFinite(yawDegrees) || !IsFinite(receivedAt) || !IsFinite(sampleAgeSeconds))
                 return false;
-            if (_hasSample && receivedAt < _receivedAt)
+            float sampledAt = receivedAt - Mathf.Clamp(sampleAgeSeconds, 0f, _maxExtrapolationSeconds);
+            if (_hasSample && (receivedAt < _receivedAt || sampledAt < _sampledAt))
                 return false;
             float yaw = Mathf.Repeat(yawDegrees, 360f);
             Vector3 offset = Vector3.zero;
@@ -97,7 +104,7 @@ namespace MultiplayerARPG.MMO.Mesh
             if (_hasSample)
             {
                 Vector3 shown = Pose(receivedAt, 0f, out float shownYaw);
-                offset = shown - position;
+                offset = shown - (position + velocity * (receivedAt - sampledAt));
                 if (discontinuity || !(offset.sqrMagnitude <= _snapDistance * _snapDistance))
                 {
                     offset = Vector3.zero;
@@ -110,6 +117,7 @@ namespace MultiplayerARPG.MMO.Mesh
             _velocity = velocity;
             _yawDegrees = yaw;
             _receivedAt = receivedAt;
+            _sampledAt = sampledAt;
             _hasSample = true;
             _offset = offset;
             _yawOffset = yawOffset;
@@ -126,7 +134,7 @@ namespace MultiplayerARPG.MMO.Mesh
             ThrowIfNotConfigured();
             if (!_hasSample)
                 throw new InvalidOperationException("MeshKinematicTrack has no sample to predict from: accept a snapshot first");
-            float horizon = now - _receivedAt + leadSeconds;
+            float horizon = now - _sampledAt + leadSeconds;
             if (!(horizon > 0f))
                 horizon = 0f;
             else if (horizon > _maxExtrapolationSeconds)

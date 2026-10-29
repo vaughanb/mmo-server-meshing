@@ -265,10 +265,11 @@ namespace MultiplayerARPG.MMO.Mesh
         /// refuses it. The owner's transient IsJump and IsTeleport bits are masked out of <paramref name="flags"/>. When the
         /// track snaps (a discontinuity, or a miss past its snap distance: LastAcceptSnapped) it raises DiscreteVersion and,
         /// on a NavMesh-kit body that is not known to be unobserved, arms the teleport for the next write timestamp.
+        /// <paramref name="sampleAgeSeconds"/> is how old the snapshot was when it arrived (MeshKinematicTrack.TryAccept).
         /// </summary>
-        public bool Accept(Vector3 position, Vector3 velocity, float yawDegrees, byte flags, byte extra, bool discontinuity, float now)
+        public bool Accept(Vector3 position, Vector3 velocity, float yawDegrees, byte flags, byte extra, bool discontinuity, float now, float sampleAgeSeconds = 0f)
         {
-            if (!_track.TryAccept(position, velocity, yawDegrees, discontinuity, now))
+            if (!_track.TryAccept(position, velocity, yawDegrees, discontinuity, now, sampleAgeSeconds))
                 return false;
             _flags = (byte)(flags & ~OwnerOnlyFlags);
             _extra = extra;

@@ -297,10 +297,11 @@ Where the work stands, how to get it running on another machine, and what is lef
    the connect. Next steps, in order:
    - ammunition per trigger, a skill item taken after the last trigger and a charge in progress are not
      carried (1.06), and no skill has been cast across a crossing in a run yet;
-   - remote motion (1.17, 1.18): clients draw other characters from their states' timestamps, and an arrival's
-     first snapshot carries its crossing velocity, so the stalls at the line went from 6–9 to 1 in 180 s. Left: a
-     puppet's speed pulses with its 10 Hz snapshots (about 3 to 5.5 m/s in 50 ms windows for a 4 m/s walk), and
-     the 30 Hz puppet stalls of 1.16 were not re-measured;
+   - remote motion (1.17–1.19): clients draw other characters from their states' timestamps, an arrival's first
+     snapshot carries its crossing velocity, and puppets extrapolate stamped snapshots with a two-interval velocity:
+     no stall in 120 s, a puppet's 50 ms speeds within 3.3–4.7 m/s for a 4 m/s walk. Left: the real character on
+     its owner's cell has single-tick holds from uneven client states, and the 30 Hz puppet stalls of 1.16 were not
+     re-measured;
    - someone else's crossing, after 1.11: the client's first state still moves the arrival about 0.14 m in one
      step for everyone watching. The
      BaseDemo-CE rig's maps are Static and stay steered (they move in bursts across a line);
