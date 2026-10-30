@@ -324,27 +324,30 @@ Where the work stands, how to get it running on another machine, and what is lef
    is warmed up); an IL2CPP client has no JIT. Nothing has been measured with real latency yet; pre-connect
    is what keeps the connect out of a laggy hop, the gap will still scale with the round trip until the
    transfer is in memory.
-2. **Monsters at a crossing (1.23):** a lone monster now chases a player across a Static map's line, hits
-   through the ghost, and is handed over with its target (the 8 km demo, `MESH_TEST_MONSTER=0.5,509,BanditMale,free`,
-   player standing at (−5, 513): the fixture spawns facing +z and the demo's monsters see in a 120° cone). Left:
-   a pack, a monster's ghost trailing ~0.3 s as it breaks into a run, and measuring its motion at the handoff.
-3. **Mount and pet crossings (1.24, 1.27):** both run on the 8 km demo (HorseWhistle and PupCollar in MeshTester's
-   bag; patrol `mountUp` / `summonPet`). The pet crosses clean; a mounted rider crosses clean for itself and for an
-   observer at the line (1.27: a kinematic body on the puppet's vehicle, the arrival walk on the vehicle, sent motion
-   and the observers' buffer for vehicles, the click-move resume on the vehicle's path). A character saved mounted
-   logs in mounted (`charactermount`). The `kick silently` warning on hop arrivals was a false alarm (1.25).
-   Observer recipe: the editor patrols mounted ±12 m at z 513; a bot from the build stands at (−3, 517) with
-   `MESH_TRACE_OBSERVED=1` (`-meshAutoMode stand -meshWalkX -3 -meshWalkZ 517`). Read its `MeshRemote` lines as well
-   as `MeshObserved`: the stall trace follows only characters within 30 m, so a character sent to a garbage position
-   never shows there (1.27 found 1.20's layer garbling every observed player that way). Left: a pet puppet stays
-   steered, and the kit teleports a pet that falls behind a galloping rider.
-4. **Write the CE-14 upstream patch** into `Docs/ServerMeshing/upstream/` (as 0001–0009 were) and open
-   the PR. It now covers `LiteNetLibElement`, `LiteNetLibSyncField` and `LiteNetLibSyncList` too (§17).
-5. **Run the rig regression** (`python Tools/ServerMeshing/regress.py`). Continuity is now the default
-   on the BaseDemo-CE rig too, and the suite has not been run since. It needs:
-   - `Config/mySqlConfig.json` with MySQL credentials (only the `.example` is here);
-   - Build Settings switched back to BaseDemo-CE;
-   - a `Build/Server` rig build.
+2. **Monsters at a crossing (1.23, 1.28):** a lone monster chases a player across a Static map's line, hits
+   through the ghost, and is handed over with its target; a monster that walks over a line on its own walks on
+   (1.28: the handoff carries its walk and its AI's wander bookkeeping), and monster puppets are led by the NavMesh
+   agent's velocity. Chase (1.28, the user: running should not lose a monster, sprinting should): the demo copy's rule
+   (`DemoMesh8k-GameplayRule.asset`: `chaseSpeedOfTargetRun` 1.1, `chaseLoseRange` 10 m, `chaseLoseSeconds` 2 s)
+   replaces the kit's follow timer; about 7 s of sprinting loses a bandit. Recipes in the 1.28 row (a deer on the line
+   for wandering, a free bandit and auto client mode `flee` for chases). Left: a pack; the kit's 50 m leash still ends
+   any chase; the kit's own demo and the BaseDemo-CE rig keep the kit's timer.
+3. **Mount and pet crossings (1.24, 1.27, 1.28):** both run on the 8 km demo (HorseWhistle and PupCollar in MeshTester's
+   bag; patrol `mountUp` / `summonPet`). A mounted rider crosses clean for itself and for an observer at the line (1.27).
+   Pet puppets have kinematic bodies (1.28, `kinematicPets`); an observer still sees a pet stall about once a second,
+   the kit's stop-and-go pet follow seen through 10 Hz snapshots, on both sides of a line. Observer recipe: the editor
+   patrols ±12 m at z 513; a bot from the build stands at (−3, 517) with `MESH_TRACE_OBSERVED=1`
+   (`-meshAutoMode stand -meshWalkX -3 -meshWalkZ 517`). Read its `MeshRemote` lines as well as `MeshObserved`: the
+   stall trace follows only characters within 30 m, so a character sent to a garbage position never shows there.
+4. **Push the CE-14 upstream patch** (`upstream/0010`, written 2026-10-29): it applies to `develop` at dc025c2 but has
+   not been compiled there (upstream's LiteNetLibManager moved since f43d0c0). Branch off `develop`, `git am`, PR.
+5. **Fix the two rig regressions** (`regress.py`, first run since 1.00, on 2026-10-29: pet, party, harvest, build, seam
+   and sleep pass). Both are continuity's fallback paths: `crash` (the destination dies on the notice: the continuity
+   hop reports "character lost", falls back, and the client then loops between a redirect to the restarted cell and a
+   timeout) and `seamcold` (the kit's scene reload at a cold seam destroys the kept objects, the return hop falls back
+   and the bot never respawns). To run the rig: enable the five BaseDemo and TestMap scenes in Build Settings, open
+   BaseInit-CE, `python -u Tools/ServerMeshing/regress.py --build <scenarios>` (with the scenarios named, or `--build`
+   only builds), then restore Build Settings and DemoMesh8kInit. `Config/mySqlConfig.json` is here and MySQL80 runs.
 6. **Run the full EditMode suite** after any further core edit (3,218 tests; `WebSocketClientSendTests.
    ReusedWriter_SendsOwnedPayloadsInOrder` is timing-flaky and passes alone).
 

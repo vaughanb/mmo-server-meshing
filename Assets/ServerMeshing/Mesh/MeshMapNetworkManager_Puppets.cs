@@ -2,8 +2,9 @@
 // ways. Steered (the default) walks it with the kit's own movement component toward each snapshot (SteerGhost). Kinematic
 // hands its transform to a MeshKinematicCharacterBody: the body stands in the kit's movement-handler slot, takes its pose
 // from a MeshKinematicTrack fed by the snapshots, and writes the kit's own movement bytes, so clients read it unchanged.
-// Pets stay steered. A mounted puppet's body moves the vehicle it rides, placed so that its seat stands where the rider's
-// snapshots say (DESIGN 1.27; kinematicMounts). With puppetMotion Steered nothing here changes a puppet: no body, no
+// A mounted puppet's body moves the vehicle it rides, placed so that its seat stands where the rider's snapshots say
+// (DESIGN 1.27; kinematicMounts). Pets have bodies too since 1.28 (kinematicPets): the kit teleports a pet that falls
+// behind its summoner, which a body snaps past like any discontinuity. With puppetMotion Steered nothing here changes a puppet: no body, no
 // extra silenced component, no Puppets window line.
 using System.Collections.Generic;
 using LiteNetLibManager;
@@ -60,6 +61,13 @@ namespace MultiplayerARPG.MMO.Mesh
         [Tooltip("While puppet motion is Kinematic, a mounted puppet's vehicle takes its pose from the rider's snapshots (the seat stands where the rider is). Off: mounted puppets stay steered and trail their riders by 1-2 m at a horse's speed.")]
         public bool kinematicMounts = true;
 
+        /// <summary>
+        /// kinematicPets gives a pet puppet a kinematic body while puppet motion is Kinematic (DESIGN 1.28): steered, it missed
+        /// its snapshots by 0.15-0.25 m on average (0.6 m at worst), and an observer saw it stall over a hundred times in 100 s.
+        /// </summary>
+        [Tooltip("While puppet motion is Kinematic, a pet puppet takes its pose from its snapshots like other characters (a teleport after its summoner is snapped past). Off: pet puppets stay steered.")]
+        public bool kinematicPets = true;
+
 #if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
         // The steer-error histogram holds metres in the histogram's millisecond bins: 400 bins of 0.05 m cover 20 m.
         private const float PuppetSteerBinMetres = 0.05f;
@@ -111,7 +119,7 @@ namespace MultiplayerARPG.MMO.Mesh
             _puppetHandlerRefusalsLogged.Clear();
             ResetPuppetWindow(Time.unscaledTime);
             if (puppetMotion == MeshPuppetMotion.Kinematic)
-                Logging.Log("Mesh", System.FormattableString.Invariant($"Puppet motion kinematic (from {source}): character puppets take their pose from the owner's snapshots and snap past {_puppetSnapDistance:0.0#} m; {(kinematicMounts ? "a mounted puppet's vehicle is posed from them; pets stay steered" : "pets and mounted puppets stay steered")}"));
+                Logging.Log("Mesh", System.FormattableString.Invariant($"Puppet motion kinematic (from {source}): character puppets take their pose from the owner's snapshots and snap past {_puppetSnapDistance:0.0#} m; {(kinematicMounts ? "a mounted puppet's vehicle is posed from them" : "mounted puppets stay steered")}; {(kinematicPets ? "pets too" : "pets stay steered")}"));
         }
 
         /// <summary>PuppetsOnStopServer runs after every puppet was destroyed: the kit clears its handler slots on stop, so the slot records go too.</summary>
@@ -185,9 +193,10 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (puppetMotion != MeshPuppetMotion.Kinematic || ghost.body != null || ghost.refusal != MeshPuppetFallback.None || _slots == null)
                 return;
-            if (!string.IsNullOrEmpty(msg.summonerMeshId))
-                return;
             BaseCharacterEntity entity = ghost.entity;
+            bool pet = !string.IsNullOrEmpty(msg.summonerMeshId) || !string.IsNullOrEmpty(ghost.summonerMeshId) || (entity is BaseMonsterCharacterEntity monster && monster.IsSummoned);
+            if (pet && !kinematicPets)
+                return;
             BaseGameEntity host = entity;
             if (IsMountedPuppet(ghost, msg))
             {

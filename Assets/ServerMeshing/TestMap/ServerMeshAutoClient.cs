@@ -61,7 +61,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public const string PREF_PET = "ServerMesh.AutoClient.Pet";
 #endif
 
-        public enum Mode { none, walk, self, stand, pace, observe, fight, pvp, harvest, build, buildtree, patrol }
+        public enum Mode { none, walk, self, stand, pace, observe, fight, pvp, harvest, build, buildtree, patrol, flee }
 
         [Header("Session")]
         public string username = "meshtest";
@@ -457,6 +457,9 @@ namespace MultiplayerARPG.MMO.Mesh
                     break;
                 case Mode.patrol:
                     yield return RunPatrol(deadline); // DESIGN 0.91's soak (ServerMeshAutoClient_Patrol)
+                    break;
+                case Mode.flee:
+                    yield return RunFlee(deadline); // DESIGN 1.28 (ServerMeshAutoClient_Flee)
                     break;
                 case Mode.fight:
                     yield return RunFight(deadline);

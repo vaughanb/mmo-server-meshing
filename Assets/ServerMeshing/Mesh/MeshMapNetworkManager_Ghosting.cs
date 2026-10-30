@@ -825,6 +825,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 }
                 if (TryTakeArrivalSnapshotVelocity(meshId, out Vector3 arrivalVelocity) && !measured)
                     velocity = arrivalVelocity; // DESIGN 1.18: an arrival's first snapshot, nothing to measure from yet
+                if (asPlayer == null && MeshMonsterMotion.TryGetAgentVelocity(entity, out Vector3 agentVelocity))
+                    velocity = agentVelocity; // DESIGN 1.28: the server moves a monster; its agent knows its velocity now
                 _lastSnapshotPose[meshId] = new SnapshotPose { position = pos, time = now, earlierPosition = last.position, earlierTime = last.time, hasEarlier = measured };
                 if (mask == 0)
                     continue;
@@ -1380,7 +1382,7 @@ namespace MultiplayerARPG.MMO.Mesh
             entity.AttackComponent?.CancelAttack();
             entity.UseSkillComponent?.CancelSkill();
             MakeGhostInPlace(entity, id, GhostKind.Player, newOwnerZone, riddenMount);
-            SeedDemotedPuppet(entity, velocity); // DESIGN 1.09: walks on until the destination's snapshots (MeshMapNetworkManager_ArrivalWalk)
+            SeedDemotedPuppet(entity, meshId, GhostKind.Player, velocity); // DESIGN 1.09: walks on until the destination's snapshots (MeshMapNetworkManager_ArrivalWalk)
             int pets = DemoteSummonsWith(entity, newOwnerZone);
             Logging.Log("Mesh", $"Player {entity.CharacterName} demoted to ghost (owner {newOwnerZone}, mounted={riddenMount != null}, summons={pets})");
         }
@@ -2638,13 +2640,16 @@ namespace MultiplayerARPG.MMO.Mesh
                 targetMeshId = MeshEntityIdOf(target);
             if (!string.Equals(homeZone, OwnZoneId) && !string.Equals(homeZone, zone.id) && !DeferWhileUnlinked(homeZone, l => l.SendLentMonsterOwner(meshId, zone.id), $"lent monster owner {meshId}") && _linkClients.TryGetValue(homeZone, out MeshLinkClient homeLink) && homeLink.IsConnected) // Slice 7: kept for the link
                 homeLink.SendLentMonsterOwner(meshId, zone.id); // the home's respawn accounting follows the monster
+            bool walking = MeshMonsterMotion.TryGetDestination(monster, out Vector3 destination); // DESIGN 1.28
             link.SendMonsterHandoff(new MonsterHandoffMessage
             {
                 meshId = meshId, entityId = monster.EntityId, dataId = monster.DataId, level = monster.Level, currentHp = monster.CurrentHp,
                 position = pos, yaw = monster.EntityTransform.eulerAngles.y, spawnPosition = monster.SpawnPosition,
                 homeZoneId = homeZone, targetMeshId = targetMeshId,
+                walking = walking, destination = destination, extraMovementState = (byte)monster.ExtraMovementState,
+                ai = MeshMonsterMotion.WriteAi(monster),
             });
-            Logging.Log("Mesh", $"Monster handoff {meshId} {OwnZoneId}->{zone.id} at {pos} hp={monster.CurrentHp}/{monster.MaxHp} home={homeZone} target={targetMeshId}");
+            Logging.Log("Mesh", $"Monster handoff {meshId} {OwnZoneId}->{zone.id} at {pos} hp={monster.CurrentHp}/{monster.MaxHp} home={homeZone} target={targetMeshId}{(walking ? $" walking to {destination}" : string.Empty)}");
             DemoteToGhost(monster, id, zone.id);
         }
 
@@ -2658,7 +2663,10 @@ namespace MultiplayerARPG.MMO.Mesh
                 _borrowedKillHooks.Remove(meshId);
             }
             UnhookKill(monster);
+            bool moving = MeshMonsterMotion.TryGetAgentVelocity(monster, out Vector3 velocity);
             MakeGhostInPlace(monster, id, GhostKind.Monster, newOwnerZone, null);
+            if (moving)
+                SeedDemotedPuppet(monster, meshId, GhostKind.Monster, velocity); // DESIGN 1.28: walks on, as a player's does (1.09)
         }
 
         /// <summary>
@@ -2725,6 +2733,7 @@ namespace MultiplayerARPG.MMO.Mesh
             Vector3 frameOffset = OffsetFrom(connectionId);
             msg.position += frameOffset;
             msg.spawnPosition += frameOffset;
+            msg.destination += frameOffset;
             string fromZone = _neighbourZoneByConnection.TryGetValue(connectionId, out string z) ? z : "?";
             Quaternion rot = Quaternion.Euler(0f, msg.yaw, 0f);
             BaseMonsterCharacterEntity monster = null;
@@ -2805,6 +2814,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 BaseCharacterEntity target = null;
                 if (ServerUserHandlers.TryGetPlayerCharacterById(msg.targetMeshId, out IPlayerCharacterData data) && data is BasePlayerCharacterEntity real)
                     target = real;
+                else if (_ownedCharacters.TryGet(msg.targetMeshId, out BaseCharacterEntity owned) && owned != null)
+                    target = owned; // DESIGN 1.28: a monster or pet this cell owns (it was dropped: "target=none")
                 else if (_ghosts.TryGetValue(msg.targetMeshId, out MeshGhost tg) && tg.entity != null)
                     target = tg.entity;
                 if (target != null)
@@ -2813,7 +2824,16 @@ namespace MultiplayerARPG.MMO.Mesh
                     targetDesc = target.CharacterName;
                 }
             }
-            Logging.Log("Mesh", $"Monster {(promoted ? "promoted" : "spawned")} by handoff {msg.meshId} {fromZone}->{OwnZoneId} at {monster.EntityTransform.position} hp={monster.CurrentHp}/{monster.MaxHp} home={msg.homeZoneId} target={targetDesc}");
+            // DESIGN 1.28: the walk goes on (a chase is the AI's own: it follows the target set above).
+            bool aiCarried = MeshMonsterMotion.ReadAi(monster, msg.ai);
+            string walkDesc = string.Empty;
+            if (msg.walking && targetDesc == "none")
+            {
+                monster.SetExtraMovementState((ExtraMovementState)msg.extraMovementState);
+                monster.PointClickMovement(msg.destination);
+                walkDesc = $" walking on to {msg.destination}";
+            }
+            Logging.Log("Mesh", $"Monster {(promoted ? "promoted" : "spawned")} by handoff {msg.meshId} {fromZone}->{OwnZoneId} at {monster.EntityTransform.position} hp={monster.CurrentHp}/{monster.MaxHp} home={msg.homeZoneId} target={targetDesc}{walkDesc}{(aiCarried ? " ai=carried" : string.Empty)}");
         }
 
         private void OnBorrowedMonsterKilled(string meshId, string homeZone)

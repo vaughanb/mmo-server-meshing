@@ -410,12 +410,21 @@ namespace MultiplayerARPG.MMO.Mesh
         public Vector3 spawnPosition;
         public string homeZoneId;
         public string targetMeshId;
+        // DESIGN 1.28: the walk it was on (MeshMonsterMotionCarry).
+        public bool walking;              // it had a destination it had not reached
+        public Vector3 destination;
+        public byte extraMovementState;   // walking or running, as its AI set it
+        public byte[] ai;                 // IMeshMonsterAiCarrier state, empty when its AI carries none
         public void Serialize(NetDataWriter writer)
         {
             writer.Put(meshId); writer.Put(entityId); writer.Put(dataId); writer.Put(level); writer.Put(currentHp);
             writer.Put(position.x); writer.Put(position.y); writer.Put(position.z); writer.Put(yaw);
             writer.Put(spawnPosition.x); writer.Put(spawnPosition.y); writer.Put(spawnPosition.z);
             writer.Put(homeZoneId); writer.Put(targetMeshId);
+            writer.Put(walking);
+            if (walking) { writer.Put(destination.x); writer.Put(destination.y); writer.Put(destination.z); }
+            writer.Put(extraMovementState);
+            writer.PutBytesWithLength(ai ?? System.Array.Empty<byte>());
         }
         public void Deserialize(NetDataReader reader)
         {
@@ -423,6 +432,10 @@ namespace MultiplayerARPG.MMO.Mesh
             position = new Vector3(reader.GetFloat(), reader.GetFloat(), reader.GetFloat()); yaw = reader.GetFloat();
             spawnPosition = new Vector3(reader.GetFloat(), reader.GetFloat(), reader.GetFloat());
             homeZoneId = reader.GetString(); targetMeshId = reader.GetString();
+            walking = reader.GetBool();
+            destination = walking ? new Vector3(reader.GetFloat(), reader.GetFloat(), reader.GetFloat()) : Vector3.zero;
+            extraMovementState = reader.GetByte();
+            ai = reader.GetBytesWithLength();
         }
     }
 

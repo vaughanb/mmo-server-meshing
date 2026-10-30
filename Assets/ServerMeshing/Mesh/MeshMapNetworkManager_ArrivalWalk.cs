@@ -185,16 +185,16 @@ namespace MultiplayerARPG.MMO.Mesh
         /// Origin, at the demotion: the puppet's kinematic body starts from where the character stands and its crossing
         /// velocity, as a snapshot would start it, so the copy here walks on until the destination's snapshots arrive.
         /// </summary>
-        private void SeedDemotedPuppet(BasePlayerCharacterEntity entity, Vector3 velocity)
+        private void SeedDemotedPuppet(BaseCharacterEntity entity, string meshId, GhostKind kind, Vector3 velocity)
         {
-            if (puppetMotion != MeshPuppetMotion.Kinematic || entity == null || !_ghosts.TryGetValue(entity.Id, out MeshGhost ghost))
+            if (puppetMotion != MeshPuppetMotion.Kinematic || entity == null || string.IsNullOrEmpty(meshId) || !_ghosts.TryGetValue(meshId, out MeshGhost ghost))
                 return;
             velocity.y = 0f;
             Transform t = entity.EntityTransform;
             GhostSnapshotMessage start = new GhostSnapshotMessage
             {
-                kind = GhostKind.Player,
-                characterId = entity.Id,
+                kind = kind,
+                characterId = meshId,
                 mountEntityId = ghost.vehicle != null ? ghost.vehicle.EntityId : 0, // DESIGN 1.27: the kept vehicle carries the body
                 position = SeatPositionOf(entity), // DESIGN 1.27: a rider's own transform is a frame behind its vehicle
                 yaw = t.eulerAngles.y,
@@ -210,7 +210,7 @@ namespace MultiplayerARPG.MMO.Mesh
         private void BeginArrivalWalk(BasePlayerCharacterEntity entity, Vector3 trackOrigin, float trackTime, Vector3 velocity) { }
         private void SteerArrivingPuppet(string characterId, Vector3 trackOrigin, Vector3 velocity) { }
         private void ArrivalWalkUpdate() { }
-        private void SeedDemotedPuppet(BasePlayerCharacterEntity entity, Vector3 velocity) { }
+        private void SeedDemotedPuppet(BaseCharacterEntity entity, string meshId, GhostKind kind, Vector3 velocity) { }
 #endif
     }
 }

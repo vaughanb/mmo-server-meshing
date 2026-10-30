@@ -127,3 +127,7 @@ MonoBehaviour:
   aggroRange: 15
   aggroRangePerLevel: 1
   aggroRangeMin: 4.5
+  aggroFieldOfView: 120
+  chaseSpeedOfTargetRun: 1.1
+  chaseLoseRange: 10
+  chaseLoseSeconds: 2

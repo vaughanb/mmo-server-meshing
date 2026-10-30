@@ -17,6 +17,7 @@ which has all nine upstream.
 | 0007 Read entity states synchronously and resume at each state's length (CE-13) | **bug fix** | `BaseGameNetworkManager.cs`, the five movement readers (`BuiltInEntityMovementFunctions3D.cs`, `NavMeshEntityMovement.cs`, `RigidBodyEntityMovement2D.cs`, `BuiltInSimpleEntityMovementFunctions3D.cs`, `SimpleNavMeshEntityMovement.cs`) |
 | 0008 MapNetworkManager: let subclasses choose the building persistence channel (CE-10) | extension seam | `MMO/Scripts/MMOGame/Networking/Map/MapNetworkManager.cs`, `MapNetworkManager_DatabaseFunction.cs` |
 | 0009 ClusterServer: forget the online users of a map server that disconnects (DESIGN 0.91) | **bug fix** | `Server/Cluster/ClusterServer.cs` |
+| 0010 LiteNetLibManager: move a running client to another server and keep its objects (CE-14, DESIGN 1.01-1.03) | feature (no behaviour change unless called) | `ThirdParty/LiteNetLibManager/Scripts/LiteNetLibManager.cs`, `LiteNetLibClient.cs`, `GameApi/LiteNetLibAssets.cs`, `LiteNetLibGameManager.cs`, `LiteNetLibIdentity.cs`, `LiteNetLibElement.cs`, `LiteNetLibSyncField.cs`, `LiteNetLibSyncList.cs`, two EditMode test files |
 
 0001-0004: 7 files, 30 insertions, 4 deletions, verified against upstream `develop` at `aa8ecf1` (2026-09-15): every
 anchor line is present and unchanged, and the diff contains nothing but these lines (byte-order marks and line
@@ -46,6 +47,15 @@ Compiled against the kit's built `Assembly-CSharp.dll`; not run on the rig. Once
 the add-on's workaround is redundant and can go in its own step. Until then they do not double up: the workaround
 replaces the kit's `UpdateMapUser` handler, so the kit's table stays empty and its disconnect relay sends nothing.
 
+0010 (2026-10-29) is CE-14, the client-side half of the seamless crossing: `MigrateClient` (and its pre-connected
+overload) moves a running client to another server without the client teardown, the client's objects are kept and the
+new server's spawns adopt them, and an adopted object's initial state is applied as a diff. Generated from the kit copy
+(`git diff c417dda HEAD` over `ThirdParty/LiteNetLibManager`, the quantized-grid file of 1.13 left out since upstream
+has it) with the `MESH-EDIT: CE-14` markers and the DESIGN references stripped; 607 insertions, 1 deletion. It applies
+cleanly to `develop` at dc025c2 (2026-10-29, after PR #25), checked with `git apply --cached --check` in a throwaway
+clone. Not compiled against that commit: upstream's LiteNetLibManager moved since f43d0c0 (its PR 54 port and the
+quantized grid), and only the kit copy's build has run it.
+
 ## Status
 
 **0001-0004: merged.** Fast-forwarded onto upstream `master` and `develop` on 2026-09-15 (aa8ecf1 → 98a2d18); [PR #1](https://github.com/open-mmorpg/OpenMMORPG/pull/1) records it. The patches stay here as the record of what changed in the kit and why.
@@ -67,6 +77,8 @@ on 2026-10-24; [PR #9](https://github.com/open-mmorpg/OpenMMORPG/pull/9) merged 
 (2026-10-24 UTC; f43d0c0) after both CI checks passed. The add-on does not rely on it. The kit copy has it since
 DESIGN 0.94 (v1.1.4); the add-on's workaround is still in place (the two do not double up, above) and can go in its own
 step.
+
+**0010: written, not pushed.** Applies to `develop` at dc025c2; no upstream branch or PR yet.
 
 ## Pushing (how it was done; for a re-run)
 

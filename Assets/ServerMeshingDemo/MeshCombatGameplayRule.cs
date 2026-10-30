@@ -17,6 +17,21 @@ namespace MultiplayerARPG.MMO.Mesh
     [CreateAssetMenu(fileName = "MeshCombatGameplayRule", menuName = "Open MMORPG/Server Meshing/Mesh Combat Gameplay Rule")]
     public class MeshCombatGameplayRule : CombatGameplayRule, IMeshHandoffCarrier
     {
+        // DESIGN 1.28, the user: "it is too easy currently to lose a monster's attention. You should be able to run from them
+        // if you sprint, but not lose them as easily as you can now." The kit gives a chase up on a timer that runs whenever
+        // the monster is not next to its target (the demo's bandits 15 s, its wolves 5 s), so a wolf closing in on a running
+        // player gave up just short of it, and a bandit (3.6 m/s against a 4 m/s run) was shaken off by running. Read live by
+        // MeshLineOfSightMonsterActivityComponent.
+        [Header("Demo: monster chase")]
+        [Tooltip("A chasing monster moves at this times its target's normal run speed, never slower than its own run or faster than its own sprint, so a running target is caught and a sprinting one gets away. 0: the kit's speeds.")]
+        public float chaseSpeedOfTargetRun = 1.1f;
+
+        [Tooltip("A monster gives a chase up once its target has stayed farther than this (metres, flat) for chaseLoseSeconds, and walks home; the kit's follow timer no longer ends a chase. 0 for either: the kit's follow timer.")]
+        public float chaseLoseRange = 10f;
+
+        [Tooltip("How long the target must stay beyond chaseLoseRange before the monster gives up (seconds).")]
+        public float chaseLoseSeconds = 2f;
+
         private static readonly FieldInfo s_lastCombatTime = typeof(CombatGameplayRule).GetField("_lastCombatTime", BindingFlags.Instance | BindingFlags.NonPublic);
 
         private Dictionary<uint, float> LastCombatTime => s_lastCombatTime?.GetValue(this) as Dictionary<uint, float>;

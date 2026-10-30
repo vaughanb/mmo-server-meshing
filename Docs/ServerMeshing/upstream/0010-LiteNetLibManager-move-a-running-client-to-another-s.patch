@@ -1,0 +1,862 @@
+From 19e91ac9d8a7f43e582192dad68c891a775e8004 Mon Sep 17 00:00:00 2001
+From: vaughanb <brenden.vaughan@gmail.com>
+Date: Thu, 29 Oct 2026 18:25:14 -0600
+Subject: [PATCH] LiteNetLibManager: move a running client to another server
+ and keep its objects
+
+A client can now reconnect to another server without the client
+teardown, and the objects it had on screen are kept and adopted by the
+new server's spawns of the same objects instead of being destroyed and
+instantiated again. Nothing changes for a game that does not call it.
+
+- LiteNetLibManager.MigrateClient(address, port) reconnects the
+  client's transport while IsClient and the logic updater keep running;
+  the overload taking an ITransport continues on a transport that is
+  connected to the new server already (opened ahead of time), so no
+  connect round trip is spent. EndMigrateClient ends it;
+  IsMigratingClient is true in between. LiteNetLibClient gains
+  AdoptConnectedTransport for the second form.
+- LiteNetLibGameManager keeps the client's spawned objects
+  (LiteNetLibAssets.KeepSpawnedObjects) instead of destroying them, keeps
+  the old connection id until the new server answers so owned objects
+  stay owned and simulated, and rebinds their owner to the new
+  connection id (RebindKeptObjectsOwner).
+- LiteNetLibAssets.NetworkSpawn on a migrating client adopts the kept
+  object a spawn is (ResolveKeptObject: same prefab and ownership, the
+  owned one or the nearest within keptObjectAdoptDistance; or a
+  keptObjectResolver) and raises onObjectAdopted with its previous id.
+  DestroyKeptObjects removes what no spawn adopted. WarmUpAdoption runs
+  the adoption read once ahead of time so it is not compiled in the
+  frame of the first adoption.
+- An adopted object's initial state is applied as a diff: a sync field
+  fires its callbacks only for a value that differs, and a sync list is
+  brought to the state it was sent with Set/Add/RemoveLast operations
+  (entries compared in wire form) instead of Clear plus AddInitial, so
+  listeners only hear about what changed (LiteNetLibElement.IsBeingAdopted,
+  LiteNetLibIdentity.IsKept/IsBeingAdopted/AdoptedFromObjectId).
+- On a client, an owner change for an object not spawned yet logs at
+  dev level instead of warning: the owner message overtakes the spawn,
+  and the spawn carries the owner.
+
+Tests: KeptObjectAdoptionTests, PreconnectedMigrationTests (EditMode).
+
+Used by a server-meshing add-on whose players walk between map-server
+processes of one map with nothing on screen torn down at the crossing.
+---
+ .../Scripts/GameApi/LiteNetLibAssets.cs       | 170 ++++++++++++++++++
+ .../Scripts/GameApi/LiteNetLibElement.cs      |   7 +
+ .../Scripts/GameApi/LiteNetLibGameManager.cs  |  17 +-
+ .../Scripts/GameApi/LiteNetLibIdentity.cs     |  24 +++
+ .../Scripts/GameApi/LiteNetLibSyncField.cs    |   4 +
+ .../Scripts/GameApi/LiteNetLibSyncList.cs     |  42 +++++
+ .../Scripts/LiteNetLibClient.cs               |  22 +++
+ .../Scripts/LiteNetLibManager.cs              |  75 ++++++++
+ .../Tests/Editor/KeptObjectAdoptionTests.cs   | 123 +++++++++++++
+ .../Editor/KeptObjectAdoptionTests.cs.meta    |   2 +
+ .../Editor/PreconnectedMigrationTests.cs      | 120 +++++++++++++
+ .../Editor/PreconnectedMigrationTests.cs.meta |   2 +
+ 12 files changed, 607 insertions(+), 1 deletion(-)
+ create mode 100644 ThirdParty/LiteNetLibManager/Tests/Editor/KeptObjectAdoptionTests.cs
+ create mode 100644 ThirdParty/LiteNetLibManager/Tests/Editor/KeptObjectAdoptionTests.cs.meta
+ create mode 100644 ThirdParty/LiteNetLibManager/Tests/Editor/PreconnectedMigrationTests.cs
+ create mode 100644 ThirdParty/LiteNetLibManager/Tests/Editor/PreconnectedMigrationTests.cs.meta
+
+diff --git a/ThirdParty/LiteNetLibManager/Scripts/GameApi/LiteNetLibAssets.cs b/ThirdParty/LiteNetLibManager/Scripts/GameApi/LiteNetLibAssets.cs
+index 0e23d18d2..44c6a4601 100644
+--- a/ThirdParty/LiteNetLibManager/Scripts/GameApi/LiteNetLibAssets.cs
++++ b/ThirdParty/LiteNetLibManager/Scripts/GameApi/LiteNetLibAssets.cs
+@@ -65,6 +65,21 @@ namespace LiteNetLibManager
+         internal readonly Dictionary<uint, LiteNetLibIdentity> SpawnedObjects = new Dictionary<uint, LiteNetLibIdentity>();
+         internal readonly Dictionary<uint, long> ChangingOwnerObjects = new Dictionary<uint, long>();
+ 
++        // Client migration keeps its objects and adopts them.
++        /// <summary>Picks the kept object a new server's spawn is (or null to instantiate one). Null: the default rule.</summary>
++        public delegate LiteNetLibIdentity KeptObjectResolver(int hashAssetId, Vector3 position, long connectionId, IReadOnlyCollection<LiteNetLibIdentity> keptObjects);
++        /// <summary>Overrides the default rule that matches a spawn to a kept object (see <see cref="ResolveKeptObject"/>).</summary>
++        public KeptObjectResolver keptObjectResolver;
++        /// <summary>The default rule adopts a kept object of the same prefab only within this distance of the spawn.</summary>
++        public float keptObjectAdoptDistance = 10f;
++        /// <summary>Raised when a spawn adopted a kept object (after its spawn callbacks), with the id it had before.</summary>
++        public System.Action<LiteNetLibIdentity, uint> onObjectAdopted;
++        /// <summary>How long the latest adoption's spawn took (its callbacks and initial state), for the adopter to attribute a frame.</summary>
++        public double LastAdoptionMilliseconds { get; private set; }
++        private readonly HashSet<LiteNetLibIdentity> _keptObjects = new HashSet<LiteNetLibIdentity>();
++        /// <summary>The objects a migrating client kept from the server it left and no spawn has adopted yet.</summary>
++        public IReadOnlyCollection<LiteNetLibIdentity> KeptObjects => _keptObjects;
++
+         public LiteNetLibGameManager Manager { get; private set; }
+         public bool IsInitialized { get; private set; } = false;
+ 
+@@ -117,6 +132,7 @@ namespace LiteNetLibManager
+         public void Clear(bool doNotResetObjectId = false)
+         {
+             IsInitialized = false;
++            DestroyKeptObjects();
+             ClearSpawnedObjects();
+             ClearPooledObjects();
+             SpawnPoints.Clear();
+@@ -231,6 +247,126 @@ namespace LiteNetLibManager
+         }
+ #endif
+ 
++        // Client migration keeps its objects and adopts them.
++        /// <summary>
++        /// Moves every spawned object out of the spawned set without destroying it, for a client moving to another
++        /// server: it keeps running and can be adopted by that server's spawn of the same object. Objects the client
++        /// owned (connection id <paramref name="ownerConnectionId"/>) stay owned; the others lose the old server's
++        /// connection id, which could collide with the new server's.
++        /// </summary>
++        public void KeepSpawnedObjects(long ownerConnectionId)
++        {
++            foreach (LiteNetLibIdentity identity in SpawnedObjects.Values)
++            {
++                if (identity == null)
++                    continue;
++                identity.PrepareKeep(ownerConnectionId >= 0 && identity.ConnectionId == ownerConnectionId);
++                _keptObjects.Add(identity);
++            }
++            SpawnedObjects.Clear();
++            ChangingOwnerObjects.Clear();
++        }
++
++        /// <summary>Kept objects owned under <paramref name="oldConnectionId"/> are owned under <paramref name="newConnectionId"/>.</summary>
++        public void RebindKeptObjectsOwner(long oldConnectionId, long newConnectionId)
++        {
++            if (oldConnectionId < 0)
++                return;
++            foreach (LiteNetLibIdentity identity in _keptObjects)
++            {
++                if (identity != null && identity.ConnectionId == oldConnectionId)
++                    identity.ConnectionId = newConnectionId;
++            }
++        }
++
++        private static readonly NetDataWriter s_warmUpWriter = new NetDataWriter();
++
++        /// <summary>
++        /// Runs the adoption's initial-state read once over <paramref name="identity"/>'s own sync lists (the state it
++        /// has, read back as an adoption: nothing differs, so nothing fires), so that code is compiled before the first
++        /// migration instead of in the frame the first adoption happens. Returns how many lists it read; 0 on a server.
++        /// </summary>
++        public int WarmUpAdoption(LiteNetLibIdentity identity)
++        {
++            if (identity == null || !identity.IsSpawned || identity.IsBeingAdopted || Manager == null || Manager.IsServer)
++                return 0;
++            int count = 0;
++            identity.IsBeingAdopted = true;
++            try
++            {
++                foreach (LiteNetLibSyncElement element in identity.SyncElements.Values)
++                {
++                    if (!(element is LiteNetLibSyncList))
++                        continue;
++                    s_warmUpWriter.Reset();
++                    element.WriteSyncData(0, true, s_warmUpWriter);
++                    element.ReadSyncData(0, true, new NetDataReader(s_warmUpWriter.Data, 0, s_warmUpWriter.Length));
++                    count++;
++                }
++            }
++            finally
++            {
++                identity.IsBeingAdopted = false;
++            }
++            return count;
++        }
++
++        /// <summary>Destroys the kept objects no spawn adopted (a kept scene object is deactivated, as on a clear).</summary>
++        public void DestroyKeptObjects()
++        {
++            foreach (LiteNetLibIdentity identity in _keptObjects)
++            {
++                if (identity == null)
++                    continue;
++                identity.IsKept = false;
++                if (identity.IsSceneObject)
++                    identity.gameObject.SetActive(false);
++                else
++                    Destroy(identity.gameObject);
++            }
++            _keptObjects.Clear();
++        }
++
++        /// <summary>
++        /// The kept object a spawn of <paramref name="hashAssetId"/> at <paramref name="position"/> owned by
++        /// <paramref name="connectionId"/> is: <see cref="keptObjectResolver"/> when set, else the kept object of the same
++        /// prefab with the same ownership: the owned one, or the nearest within <see cref="keptObjectAdoptDistance"/>.
++        /// </summary>
++        public LiteNetLibIdentity ResolveKeptObject(int hashAssetId, Vector3 position, long connectionId)
++        {
++            if (keptObjectResolver != null)
++            {
++                LiteNetLibIdentity resolved = keptObjectResolver(hashAssetId, position, connectionId, _keptObjects);
++                return resolved != null && _keptObjects.Contains(resolved) ? resolved : null;
++            }
++            bool owned = connectionId >= 0 && connectionId == Manager.ClientConnectionId;
++            LiteNetLibIdentity best = null;
++            float bestSqr = keptObjectAdoptDistance * keptObjectAdoptDistance;
++            foreach (LiteNetLibIdentity identity in _keptObjects)
++            {
++                if (identity == null || identity.IsSceneObject || identity.HashAssetId != hashAssetId)
++                    continue;
++                bool keptOwned = identity.ConnectionId >= 0 && identity.ConnectionId == Manager.ClientConnectionId;
++                if (owned != keptOwned)
++                    continue;
++                if (owned)
++                    return identity;
++                float sqr = (identity.transform.position - position).sqrMagnitude;
++                if (sqr <= bestSqr)
++                {
++                    bestSqr = sqr;
++                    best = identity;
++                }
++            }
++            return best;
++        }
++
++        private void EndAdoption(LiteNetLibIdentity identity, uint adoptedFrom)
++        {
++            identity.IsBeingAdopted = false;
++            onObjectAdopted?.Invoke(identity, adoptedFrom);
++        }
++
+         public void ClearSpawnedObjects()
+         {
+             List<uint> objectIds = new List<uint>(SpawnedObjects.Keys);
+@@ -378,6 +514,14 @@ namespace LiteNetLibManager
+                         LiteNetLibIdentity sceneObject = sceneObjects[k];
+                         if (sceneObject.ForceNotSceneObject)
+                             continue;
++                        // A kept object stays as it is: a spawned prefab is no scene object, and a
++                        // kept scene object stays active until the new server spawns (adopts) it.
++                        if (_keptObjects.Contains(sceneObject))
++                        {
++                            if (sceneObject.IsSceneObject)
++                                SceneObjects[sceneObject.HashSceneObjectId] = sceneObject;
++                            continue;
++                        }
+                         sceneObject.gameObject.SetActive(false);
+                         SceneObjects[sceneObject.HashSceneObjectId] = sceneObject;
+                     }
+@@ -414,6 +558,10 @@ namespace LiteNetLibManager
+                 return null;
+             }
+ 
++            uint adoptedFrom = identity.ObjectId;
++            bool adopted = _keptObjects.Remove(identity);
++            if (adopted)
++                identity.BeginAdoption(adoptedFrom);
+             identity.gameObject.SetActive(true);
+             identity.Initial(Manager, true, objectId, connectionId);
+             identity.InitTransform(position, rotation);
+@@ -431,6 +579,8 @@ namespace LiteNetLibManager
+                 identity.OnStartOwnerClient();
+             if (onObjectSpawn != null)
+                 onObjectSpawn.Invoke(identity);
++            if (adopted)
++                EndAdoption(identity, adoptedFrom);
+ 
+             return identity;
+         }
+@@ -453,6 +603,20 @@ namespace LiteNetLibManager
+                     Logging.LogWarning(LogTag, $"NetworkSpawn - Asset Id: {hashAssetId} is not registered.");
+                 return null;
+             }
++            // A migrating client adopts the kept object this spawn is, instead of instantiating one.
++            LiteNetLibIdentity kept = Manager.IsServer || _keptObjects.Count == 0 ? null : ResolveKeptObject(hashAssetId, position, connectionId);
++            if (kept != null)
++            {
++                uint adoptedFrom = kept.ObjectId;
++                _keptObjects.Remove(kept);
++                kept.BeginAdoption(adoptedFrom);
++                long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
++                LiteNetLibIdentity spawned = NetworkSpawn(kept, objectId, connectionId, initialReader, initialTick);
++                LastAdoptionMilliseconds = (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
++                if (spawned != null)
++                    EndAdoption(spawned, adoptedFrom);
++                return spawned;
++            }
+             return NetworkSpawn(GetObjectInstance(hashAssetId, position, rotation), objectId, connectionId, initialReader, initialTick);
+         }
+ 
+@@ -608,6 +772,12 @@ namespace LiteNetLibManager
+                     Manager.QueueOwnerOnlyStateOnOwnerChange(spawnedObject, playerA, playerB);
+                 return;
+             }
++            else if (!Manager.IsServer)
++            {
++                // On a client the owner message overtakes the object's spawn (the server sends it at
++                // once, the spawn on its next sync tick) and the spawn carries the owner: nothing is lost.
++                if (Manager.LogDev) Logging.Log(LogTag, $"SetObjectOwner - Object Id: {objectId} is not spawned yet; its spawn carries the owner.");
++            }
+             else if (Manager.LogWarn)
+             {
+                 Logging.LogWarning(LogTag, $"SetObjectOwner - Object Id: {objectId} is not spawned.");
+diff --git a/ThirdParty/LiteNetLibManager/Scripts/GameApi/LiteNetLibElement.cs b/ThirdParty/LiteNetLibManager/Scripts/GameApi/LiteNetLibElement.cs
+index 9fdb31cbc..725e9c7db 100644
+--- a/ThirdParty/LiteNetLibManager/Scripts/GameApi/LiteNetLibElement.cs
++++ b/ThirdParty/LiteNetLibManager/Scripts/GameApi/LiteNetLibElement.cs
+@@ -24,6 +24,13 @@ namespace LiteNetLibManager
+             get { return _isSetup && Identity.IsSpawned; }
+         }
+ 
++        // The element belongs to a kept object a migrating client's new server is adopting (its
++        // initial state is then applied as a diff). False for an element with no behaviour or identity behind it.
++        public bool IsBeingAdopted
++        {
++            get { return _behaviour != null && _behaviour.Identity != null && _behaviour.Identity.IsBeingAdopted; }
++        }
++
+         public bool IsDestroyed
+         {
+             get { return _isSetup && Identity.IsDestroyed; }
+diff --git a/ThirdParty/LiteNetLibManager/Scripts/GameApi/LiteNetLibGameManager.cs b/ThirdParty/LiteNetLibManager/Scripts/GameApi/LiteNetLibGameManager.cs
+index 73019bf0d..57cfc01cd 100644
+--- a/ThirdParty/LiteNetLibManager/Scripts/GameApi/LiteNetLibGameManager.cs
++++ b/ThirdParty/LiteNetLibManager/Scripts/GameApi/LiteNetLibGameManager.cs
+@@ -482,7 +482,10 @@ namespace LiteNetLibManager
+         {
+             base.OnClientConnected();
+             // Reset client connection id, will be received from server later
+-            ClientConnectionId = -1;
++            // A migrating client keeps the old id until the new server answers, so the objects it
++            // owns stay owned (and simulated) across the swap.
++            if (!IsMigratingClient)
++                ClientConnectionId = -1;
+             ClientSyncingStates.Clear();
+             RttCalculator.Reset();
+             _updatingClientSyncElements.Clear();
+@@ -540,6 +543,15 @@ namespace LiteNetLibManager
+             LoadOfflineScene();
+         }
+ 
++        // The client's objects are kept (not destroyed) while it moves to another server.
++        protected override void OnStartMigrateClient()
++        {
++            base.OnStartMigrateClient();
++            ClearPendingRpcs();
++            Players.Clear();
++            Assets.KeepSpawnedObjects(ClientConnectionId);
++        }
++
+         public override void OnStopClient()
+         {
+             base.OnStopClient();
+@@ -707,6 +719,9 @@ namespace LiteNetLibManager
+             ReadExtraEnterGameResponse(responseCode, response, responseHandler.Reader);
+             if (responseCode != AckResponseCode.Success)
+                 return;
++            // The kept objects this client owned are owned under its new connection id.
++            if (IsMigratingClient)
++                Assets.RebindKeptObjectsOwner(ClientConnectionId, response.connectionId);
+             ClientConnectionId = response.connectionId;
+             if (IsClientConnected)
+                 HandleServerSceneChange(response.serverSceneInfo);
+diff --git a/ThirdParty/LiteNetLibManager/Scripts/GameApi/LiteNetLibIdentity.cs b/ThirdParty/LiteNetLibManager/Scripts/GameApi/LiteNetLibIdentity.cs
+index 6099d02b8..7863de7c3 100644
+--- a/ThirdParty/LiteNetLibManager/Scripts/GameApi/LiteNetLibIdentity.cs
++++ b/ThirdParty/LiteNetLibManager/Scripts/GameApi/LiteNetLibIdentity.cs
+@@ -186,6 +186,30 @@ namespace LiteNetLibManager
+         private HashSet<AudioSource> _hiddingAudioSources = new HashSet<AudioSource>();
+ #endif
+         public long ConnectionId { get; internal set; } = -1;
++
++        // Client migration keeps its objects and adopts them.
++        /// <summary>Kept by a migrating client, waiting for the new server to spawn (adopt) it.</summary>
++        public bool IsKept { get; internal set; }
++        /// <summary>True during the spawn callbacks of a spawn that adopted this kept object (it was live before).</summary>
++        public bool IsBeingAdopted { get; internal set; }
++        /// <summary>The object id it had on the server the client left, when it was last adopted (0: never adopted).</summary>
++        public uint AdoptedFromObjectId { get; internal set; }
++
++        internal void PrepareKeep(bool keepOwner)
++        {
++            foreach (LiteNetLibSyncElement syncElement in SyncElements.Values)
++                syncElement.UnregisterUpdating();
++            if (!keepOwner)
++                ConnectionId = -1;
++            IsKept = true;
++        }
++
++        internal void BeginAdoption(uint previousObjectId)
++        {
++            IsKept = false;
++            IsBeingAdopted = true;
++            AdoptedFromObjectId = previousObjectId;
++        }
+         public bool IsPooledInstance { get; internal set; } = false;
+         public LiteNetLibGameManager Manager { get; internal set; }
+ 
+diff --git a/ThirdParty/LiteNetLibManager/Scripts/GameApi/LiteNetLibSyncField.cs b/ThirdParty/LiteNetLibManager/Scripts/GameApi/LiteNetLibSyncField.cs
+index 5cd0f8417..d8bffb621 100644
+--- a/ThirdParty/LiteNetLibManager/Scripts/GameApi/LiteNetLibSyncField.cs
++++ b/ThirdParty/LiteNetLibManager/Scripts/GameApi/LiteNetLibSyncField.cs
+@@ -271,6 +271,10 @@ namespace LiteNetLibManager
+             _latestReceiveTick = tick;
+             if (isDebug)
+                 Logging.Log(LogTag, $"Read sync data, syncMode {syncMode.ToString()}, connectionId {ConnectionId}, isOwnerClient {IsOwnerClient}, objectId {ObjectId}, tick {tick}, initial {initial}, oldValue {oldValue}, newValue {Value}");
++            // A kept object being adopted by the new server's spawn was live a moment ago: its initial
++            // state is applied as a change (callbacks only for values that differ), not as a first load.
++            if (initial && IsBeingAdopted)
++                initial = false;
+             if (initial || IsValueChanged(oldValue, Value))
+                 OnChange(initial, oldValue, Value);
+             if (syncMode == LiteNetLibSyncFieldMode.ClientMulticast && IsServer)
+diff --git a/ThirdParty/LiteNetLibManager/Scripts/GameApi/LiteNetLibSyncList.cs b/ThirdParty/LiteNetLibManager/Scripts/GameApi/LiteNetLibSyncList.cs
+index dc92f4343..0c4567ef3 100644
+--- a/ThirdParty/LiteNetLibManager/Scripts/GameApi/LiteNetLibSyncList.cs
++++ b/ThirdParty/LiteNetLibManager/Scripts/GameApi/LiteNetLibSyncList.cs
+@@ -359,6 +359,11 @@ namespace LiteNetLibManager
+ 
+         internal override void ReadSyncData(uint tick, bool initial, NetDataReader reader)
+         {
++            if (initial && IsBeingAdopted)
++            {
++                ReadInitialAsDiff(reader);
++                return;
++            }
+             if (initial)
+             {
+                 _list.Clear();
+@@ -384,6 +389,43 @@ namespace LiteNetLibManager
+             }
+         }
+ 
++        // A kept object being adopted by the new server's spawn was live a moment ago, with this list
++        // filled. Its initial state is applied as the operations that turn the list it has into the list it was sent
++        // (Set where an entry differs, Add for extra entries, RemoveLast for missing ones) instead of Clear + AddInitial
++        // of every entry, so listeners (appearance, stat caches, UI) only hear about what changed. Entries are compared
++        // in their wire form: the current entry is serialized as the initial state would have been and the bytes compared.
++        private void ReadInitialAsDiff(NetDataReader reader)
++        {
++            int count = reader.GetPackedInt();
++            int common = Math.Min(count, _list.Count);
++            for (int i = 0; i < common; ++i)
++            {
++                int start = reader.Position;
++                TType incoming = DeserializeValue(reader);
++                int length = reader.Position - start;
++                s_Writer.Reset();
++                SerializeValue(s_Writer, _list[i]);
++                if (s_Writer.Length == length && new ReadOnlySpan<byte>(s_Writer.Data, 0, length).SequenceEqual(new ReadOnlySpan<byte>(reader.RawData, start, length)))
++                    continue;
++                TType oldItem = _list[i];
++                _list[i] = incoming;
++                OnOperation(LiteNetLibSyncListOp.Set, i, oldItem, incoming);
++            }
++            for (int i = common; i < count; ++i)
++            {
++                TType incoming = DeserializeValue(reader);
++                _list.Add(incoming);
++                OnOperation(LiteNetLibSyncListOp.Add, i, default, incoming);
++            }
++            while (_list.Count > count)
++            {
++                int index = _list.Count - 1;
++                TType oldItem = _list[index];
++                _list.RemoveAt(index);
++                OnOperation(LiteNetLibSyncListOp.RemoveLast, index, oldItem, default);
++            }
++        }
++
+         protected void SerializeForSendOperations(NetDataWriter writer, List<OperationEntry> operationEntries)
+         {
+             LiteNetLibElementInfo.SerializeInfo(GetInfo(), writer);
+diff --git a/ThirdParty/LiteNetLibManager/Scripts/LiteNetLibClient.cs b/ThirdParty/LiteNetLibManager/Scripts/LiteNetLibClient.cs
+index 34866ddab..8050a1249 100644
+--- a/ThirdParty/LiteNetLibManager/Scripts/LiteNetLibClient.cs
++++ b/ThirdParty/LiteNetLibManager/Scripts/LiteNetLibClient.cs
+@@ -78,6 +78,28 @@ namespace LiteNetLibManager
+ 
+         protected virtual void OnStartClient() { }
+ 
++        // Client migration: continue on a transport that is connected already (the connection was
++        // opened ahead of the hop and its connect event consumed by whoever held it), so no connect round trip is spent.
++        /// <summary>Takes over <paramref name="connectedTransport"/> as the client's transport, without starting it. The caller raises the manager's connected event.</summary>
++        public bool AdoptConnectedTransport(ITransport connectedTransport)
++        {
++            if (IsNetworkActive)
++            {
++                if (Manager == null || Manager.LogWarn) Logging.LogWarning(LogTag, "Cannot adopt a transport, network already active");
++                return false;
++            }
++            if (connectedTransport == null || !connectedTransport.IsClientStarted)
++            {
++                if (Manager == null || Manager.LogWarn) Logging.LogWarning(LogTag, "Cannot adopt a transport that is not started");
++                return false;
++            }
++            _requestCallbacks.Clear();
++            Transport = connectedTransport;
++            _isNetworkActive = true;
++            OnStartClient();
++            return true;
++        }
++
+         public void StopClient()
+         {
+             Transport.StopClient();
+diff --git a/ThirdParty/LiteNetLibManager/Scripts/LiteNetLibManager.cs b/ThirdParty/LiteNetLibManager/Scripts/LiteNetLibManager.cs
+index 3dd1ddf30..7ef4eb5c5 100644
+--- a/ThirdParty/LiteNetLibManager/Scripts/LiteNetLibManager.cs
++++ b/ThirdParty/LiteNetLibManager/Scripts/LiteNetLibManager.cs
+@@ -302,10 +302,85 @@ namespace LiteNetLibManager
+             }
+         }
+ 
++        // Client migration: move a running client to another server without stopping it, so its
++        // spawned objects can be kept and adopted by the new server.
++        /// <summary>True from <see cref="MigrateClient"/> until <see cref="EndMigrateClient"/>.</summary>
++        public bool IsMigratingClient { get; protected set; }
++
++        /// <summary>
++        /// Reconnects the client's transport to another server without the client teardown: IsClient and the logic
++        /// updater keep running and the client's objects are not destroyed (the game manager keeps them for adoption).
++        /// The new connection enters the game as a fresh one. False when not a pure client or the connect fails.
++        /// </summary>
++        public virtual bool MigrateClient(string networkAddress, int networkPort)
++        {
++            if (!IsClient || IsServer || Client == null)
++            {
++                if (LogError) Logging.LogError(LogTag, "Cannot migrate: not a running client.");
++                return false;
++            }
++            if (LogInfo) Logging.Log(LogTag, $"Migrating client to {networkAddress}:{networkPort}.");
++            IsMigratingClient = true;
++            OnStartMigrateClient();
++            Client.StopClient();
++            this.networkAddress = networkAddress;
++            this.networkPort = networkPort;
++            PrepareClientTransport();
++            Client.Transport = ClientTransport;
++            if (!Client.StartClient(networkAddress, networkPort))
++            {
++                if (LogError) Logging.LogError(LogTag, $"Cannot connect to {networkAddress}:{networkPort}.");
++                return false;
++            }
++            return true;
++        }
++
++        /// <summary>
++        /// <see cref="MigrateClient(string, int)"/> on a transport that is connected to the new server already (opened
++        /// ahead of the hop, its connect event consumed by the holder): the client takes it over and enters the game at
++        /// once, with no connect round trip. The transport becomes the client's and is destroyed with it.
++        /// </summary>
++        public virtual bool MigrateClient(string networkAddress, int networkPort, ITransport connectedTransport)
++        {
++            if (!IsClient || IsServer || Client == null)
++            {
++                if (LogError) Logging.LogError(LogTag, "Cannot migrate: not a running client.");
++                return false;
++            }
++            if (connectedTransport == null || !connectedTransport.IsClientStarted)
++            {
++                if (LogError) Logging.LogError(LogTag, "Cannot migrate on a transport that is not connected.");
++                return false;
++            }
++            if (LogInfo) Logging.Log(LogTag, $"Migrating client to {networkAddress}:{networkPort} on a pre-connected transport.");
++            IsMigratingClient = true;
++            OnStartMigrateClient();
++            Client.StopClient();
++            if (_clientTransport != null && !ReferenceEquals(_clientTransport, connectedTransport))
++                _clientTransport.Destroy();
++            this.networkAddress = networkAddress;
++            this.networkPort = networkPort;
++            _clientTransport = connectedTransport;
++            if (!Client.AdoptConnectedTransport(connectedTransport))
++                return false;
++            OnClientConnected();
++            return true;
++        }
++
++        /// <summary>Called by <see cref="MigrateClient"/> before the old connection is closed.</summary>
++        protected virtual void OnStartMigrateClient() { }
++
++        /// <summary>Ends a migration started by <see cref="MigrateClient"/> (the caller decides when it is over).</summary>
++        public virtual void EndMigrateClient()
++        {
++            IsMigratingClient = false;
++        }
++
+         public void StopClient()
+         {
+             if (!IsClient)
+                 return;
++            IsMigratingClient = false;
+ 
+             if (LogInfo) Logging.Log(LogTag, "StopClient");
+             _logicUpdater.OnTick -= OnClientUpdate;
+diff --git a/ThirdParty/LiteNetLibManager/Tests/Editor/KeptObjectAdoptionTests.cs b/ThirdParty/LiteNetLibManager/Tests/Editor/KeptObjectAdoptionTests.cs
+new file mode 100644
+index 000000000..5ba3518d2
+--- /dev/null
++++ b/ThirdParty/LiteNetLibManager/Tests/Editor/KeptObjectAdoptionTests.cs
+@@ -0,0 +1,123 @@
++using System.Collections.Generic;
++using System.Reflection;
++using LiteNetLib.Utils;
++using NUnit.Framework;
++using UnityEngine;
++
++namespace LiteNetLibManager.Tests
++{
++    /// <summary>
++    /// A kept object adopted by the new server's spawn applies its initial state as a diff: a sync
++    /// field fires its change only when its value differs, a sync list fires the operations that turn the list it has
++    /// into the one sent (Set / Add / RemoveLast), and an identical state fires nothing at all.
++    /// </summary>
++    public class KeptObjectAdoptionTests
++    {
++        public class AdoptionBehaviour : LiteNetLibBehaviour
++        {
++            public SyncFieldInt value = new SyncFieldInt();
++            public SyncListInt items = new SyncListInt();
++        }
++
++        private GameObject _managerObject, _entityObject;
++        private GameManagerHarness _manager;
++        private LiteNetLibIdentity _identity;
++        private AdoptionBehaviour _behaviour;
++        private readonly List<string> _events = new List<string>();
++
++        [SetUp]
++        public void SpawnAnObjectWithState()
++        {
++            _managerObject = new GameObject("adoption manager");
++            _entityObject = new GameObject("adoption entity");
++            _manager = _managerObject.AddComponent<GameManagerHarness>();
++            _manager.InitializeForTest();
++            _identity = _entityObject.AddComponent<LiteNetLibIdentity>();
++            _behaviour = _entityObject.AddComponent<AdoptionBehaviour>();
++            typeof(LiteNetLibBehaviour).GetField("_identity", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(_behaviour, _identity);
++            Assert.AreSame(_identity, _manager.Assets.NetworkSpawn(_identity, 42));
++            // The state the object had on the server it left.
++            Assert.IsTrue(_manager.ReadSyncElements(State(17, 1, 2, 3), _identity, 1, true));
++            Assert.AreEqual(17, _behaviour.value.Value);
++            CollectionAssert.AreEqual(new[] { 1, 2, 3 }, _behaviour.items);
++            _events.Clear();
++            _behaviour.value.onChange += (initial, oldValue, newValue) => _events.Add($"value {oldValue}->{newValue} initial={initial}");
++            _behaviour.items.onOperation += (op, index, oldItem, newItem) => _events.Add($"{op}@{index} {oldItem}->{newItem}");
++        }
++
++        [TearDown]
++        public void Destroy()
++        {
++            Object.DestroyImmediate(_entityObject);
++            Object.DestroyImmediate(_managerObject);
++        }
++
++        private NetDataReader State(int value, params int[] items)
++        {
++            var writer = new NetDataWriter();
++            writer.PutPackedInt(2);
++            writer.PutPackedInt(_behaviour.value.ElementId);
++            writer.PutPackedInt(value);
++            writer.PutPackedInt(_behaviour.items.ElementId);
++            writer.PutPackedInt(items.Length);
++            foreach (int item in items)
++                writer.PutPackedInt(item);
++            return new NetDataReader(writer.CopyData());
++        }
++
++        [Test]
++        public void FreshInitialState_FiresEverything()
++        {
++            Assert.IsTrue(_manager.ReadSyncElements(State(17, 1, 2, 3), _identity, 2, true));
++
++            CollectionAssert.AreEqual(new[] { "value 17->17 initial=True", "AddInitial@0 1->1", "AddInitial@1 2->2", "AddInitial@2 3->3" }, _events);
++        }
++
++        [Test]
++        public void AdoptedWithTheSameState_FiresNothing()
++        {
++            _identity.BeginAdoption(42);
++
++            Assert.IsTrue(_manager.ReadSyncElements(State(17, 1, 2, 3), _identity, 2, true));
++
++            CollectionAssert.IsEmpty(_events);
++            Assert.AreEqual(17, _behaviour.value.Value);
++            CollectionAssert.AreEqual(new[] { 1, 2, 3 }, _behaviour.items);
++        }
++
++        [Test]
++        public void AdoptedWithChanges_FiresOnlyTheDifferences()
++        {
++            _identity.BeginAdoption(42);
++
++            Assert.IsTrue(_manager.ReadSyncElements(State(18, 1, 9, 3, 4), _identity, 2, true));
++
++            CollectionAssert.AreEqual(new[] { "value 17->18 initial=False", "Set@1 2->9", "Add@3 0->4" }, _events);
++            Assert.AreEqual(18, _behaviour.value.Value);
++            CollectionAssert.AreEqual(new[] { 1, 9, 3, 4 }, _behaviour.items);
++        }
++
++        [Test]
++        public void AdoptedWithAShorterList_RemovesFromTheEnd()
++        {
++            _identity.BeginAdoption(42);
++
++            Assert.IsTrue(_manager.ReadSyncElements(State(17, 1), _identity, 2, true));
++
++            CollectionAssert.AreEqual(new[] { "RemoveLast@2 3->0", "RemoveLast@1 2->0" }, _events);
++            CollectionAssert.AreEqual(new[] { 1 }, _behaviour.items);
++        }
++
++        [Test]
++        public void AfterTheAdoption_AnInitialStateIsAFirstLoadAgain()
++        {
++            _identity.BeginAdoption(42);
++            _identity.IsBeingAdopted = false;
++
++            Assert.IsTrue(_manager.ReadSyncElements(State(17, 1, 2, 3), _identity, 2, true));
++
++            Assert.AreEqual(4, _events.Count, string.Join(" | ", _events));
++            Assert.AreEqual("value 17->17 initial=True", _events[0]);
++        }
++    }
++}
+diff --git a/ThirdParty/LiteNetLibManager/Tests/Editor/KeptObjectAdoptionTests.cs.meta b/ThirdParty/LiteNetLibManager/Tests/Editor/KeptObjectAdoptionTests.cs.meta
+new file mode 100644
+index 000000000..b6993418b
+--- /dev/null
++++ b/ThirdParty/LiteNetLibManager/Tests/Editor/KeptObjectAdoptionTests.cs.meta
+@@ -0,0 +1,2 @@
++fileFormatVersion: 2
++guid: 1aaba881356cf2549bdc3cfb6a8ff932
+\ No newline at end of file
+diff --git a/ThirdParty/LiteNetLibManager/Tests/Editor/PreconnectedMigrationTests.cs b/ThirdParty/LiteNetLibManager/Tests/Editor/PreconnectedMigrationTests.cs
+new file mode 100644
+index 000000000..979970c53
+--- /dev/null
++++ b/ThirdParty/LiteNetLibManager/Tests/Editor/PreconnectedMigrationTests.cs
+@@ -0,0 +1,120 @@
++using System.Collections.Generic;
++using System.Reflection;
++using LiteNetLib;
++using LiteNetLib.Utils;
++using NUnit.Framework;
++using UnityEngine;
++
++namespace LiteNetLibManager.Tests
++{
++    /// <summary>
++    /// A client migrates onto a transport that is connected already (opened ahead of the hop): the
++    /// client takes it over without starting it, the manager's connected event fires at once, and the old transport
++    /// is destroyed. A transport that is not started is refused.
++    /// </summary>
++    public class PreconnectedMigrationTests
++    {
++        private sealed class ConnectedTransport : ITransport
++        {
++            public bool Started = true;
++            public bool Destroyed;
++            public readonly List<byte[]> Sent = new List<byte[]>();
++            public int ServerPeersCount => 0;
++            public int ServerMaxConnections => 0;
++            public bool IsClientStarted => Started;
++            public bool IsServerStarted => false;
++            public bool HasImplementedPing => false;
++            public bool IsReliableOnly => false;
++            public bool StartClient(string address, int port) { Started = true; return true; }
++            public bool ClientSend(byte dataChannel, DeliveryMethod deliveryMethod, NetDataWriter writer) { Sent.Add(writer.CopyData()); return true; }
++            public bool ClientReceive(out TransportEventData eventData) { eventData = default; return false; }
++            public void StopClient() { Started = false; }
++            public bool StartServer(int port, int maxConnections) => false;
++            public bool ServerSend(long connectionId, byte dataChannel, DeliveryMethod deliveryMethod, NetDataWriter writer) => false;
++            public bool ServerReceive(out TransportEventData eventData) { eventData = default; return false; }
++            public bool ServerDisconnect(long connectionId) => false;
++            public void StopServer() { }
++            public void Destroy() { Destroyed = true; Started = false; }
++            public long GetClientRtt() => 0;
++            public long GetServerRtt(long connectionId) => 0;
++        }
++
++        private sealed class MigratingManager : GameManagerHarness
++        {
++            public int ConnectedEvents;
++            public override void OnClientConnected()
++            {
++                ConnectedEvents++;
++                base.OnClientConnected();
++            }
++        }
++
++        private GameObject _managerObject;
++        private MigratingManager _manager;
++        private ConnectedTransport _old;
++
++        [SetUp]
++        public void StartARunningClient()
++        {
++            _managerObject = new GameObject("preconnect manager");
++            _manager = _managerObject.AddComponent<MigratingManager>();
++            _manager.InitializeForTest();
++            _manager.currentLogLevel = ELogLevel.Fatal; // the kit's logger is not set up in EditMode tests
++            _manager.doNotEnterGameOnConnect = true;    // the harness registers no request handlers; the connected event still pings
++            _old = new ConnectedTransport();
++            var client = new LiteNetLibClient(_manager) { Transport = _old };
++            typeof(LiteNetLibManager).GetProperty("Client").SetValue(_manager, client);
++            typeof(LiteNetLibManager).GetProperty("IsClient").SetValue(_manager, true);
++            typeof(LiteNetLibManager).GetField("_clientTransport", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(_manager, _old);
++            typeof(LiteNetLibClient).GetField("_isNetworkActive", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(client, true);
++        }
++
++        [TearDown]
++        public void Destroy()
++        {
++            Object.DestroyImmediate(_managerObject);
++        }
++
++        [Test]
++        public void MigrateOntoAConnectedTransport_TakesItOverAndEntersTheGameAtOnce()
++        {
++            var warm = new ConnectedTransport();
++
++            Assert.IsTrue(_manager.MigrateClient("10.0.0.2", 8004, warm));
++
++            Assert.IsTrue(_manager.IsMigratingClient);
++            Assert.IsTrue(_manager.IsClient);
++            Assert.AreSame(warm, _manager.Client.Transport);
++            Assert.AreSame(warm, _manager.ClientTransport);
++            Assert.IsTrue(_manager.Client.IsNetworkActive);
++            Assert.AreEqual("10.0.0.2", _manager.networkAddress);
++            Assert.AreEqual(8004, _manager.networkPort);
++            Assert.AreEqual(1, _manager.ConnectedEvents, "the connect event was consumed by the holder, so the manager raises it itself");
++            Assert.IsTrue(_old.Destroyed, "the connection to the cell we left is closed");
++            Assert.IsFalse(warm.Destroyed);
++            Assert.That(warm.Sent.Count, Is.GreaterThanOrEqualTo(1), "what the connected event sends (the ping here, enter-game in the game) goes out on the warm connection");
++        }
++
++        [Test]
++        public void MigrateOntoATransportThatIsNotStarted_IsRefused()
++        {
++            var cold = new ConnectedTransport { Started = false };
++
++            Assert.IsFalse(_manager.MigrateClient("10.0.0.2", 8004, cold));
++
++            Assert.IsFalse(_manager.IsMigratingClient);
++            Assert.AreSame(_old, _manager.Client.Transport);
++            Assert.IsFalse(_old.Destroyed);
++            Assert.AreEqual(0, _manager.ConnectedEvents);
++        }
++
++        [Test]
++        public void AdoptConnectedTransport_WhileActive_IsRefused()
++        {
++            var warm = new ConnectedTransport();
++
++            Assert.IsFalse(_manager.Client.AdoptConnectedTransport(warm));
++            Assert.AreSame(_old, _manager.Client.Transport);
++        }
++    }
++}
+diff --git a/ThirdParty/LiteNetLibManager/Tests/Editor/PreconnectedMigrationTests.cs.meta b/ThirdParty/LiteNetLibManager/Tests/Editor/PreconnectedMigrationTests.cs.meta
+new file mode 100644
+index 000000000..91fe96f69
+--- /dev/null
++++ b/ThirdParty/LiteNetLibManager/Tests/Editor/PreconnectedMigrationTests.cs.meta
+@@ -0,0 +1,2 @@
++fileFormatVersion: 2
++guid: 9bc1b2f38a148c04689d4982a5240389
+\ No newline at end of file
+-- 
+2.55.0.windows.3
+
