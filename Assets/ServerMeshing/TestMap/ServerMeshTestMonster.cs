@@ -10,6 +10,8 @@
 //
 // MESH_TEST_MONSTER=<x>,<z>,<name>,free (DESIGN 1.23) spawns it as the kit would: its AI on, never put back or healed,
 // so an aggressive one chases a player across a line and is handed over like any monster.
+//
+// MESH_TEST_MONSTER=<x>,<z>,<name>,free,<count> (DESIGN 1.30) spawns a pack of <count> of them in a 1.5 m ring around the spot.
 using LiteNetLibManager;
 using UnityEngine;
 
@@ -27,6 +29,7 @@ namespace MultiplayerARPG.MMO.Mesh
         private float _nextPin;
         private int _hits;
         private bool _free;
+        private int _count = 1;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void AutoStart()
@@ -49,6 +52,8 @@ namespace MultiplayerARPG.MMO.Mesh
             if (parts.Length > 2 && !string.IsNullOrWhiteSpace(parts[2]))
                 spawner._name = parts[2].Trim();
             spawner._free = parts.Length > 3 && string.Equals(parts[3].Trim(), "free", System.StringComparison.OrdinalIgnoreCase);
+            if (parts.Length > 4 && int.TryParse(parts[4].Trim(), out int count) && count > 1)
+                spawner._count = count;
         }
 
         private void Update()
@@ -123,10 +128,20 @@ namespace MultiplayerARPG.MMO.Mesh
                     home = area;
                 }
             }
-            Vector3 position = new Vector3(_spot.x, 0f, _spot.y);
-            if (Physics.Raycast(new Vector3(_spot.x, 1000f, _spot.y), Vector3.down, out RaycastHit hit, 2000f, GameInstance.Singleton.GetGameEntityGroundDetectionLayerMask()))
-                position.y = hit.point.y;
             mesh.Assets.RegisterPrefab(prefab.Identity); // a spawn area's copy is registered only when its area spawns
+            for (int i = 0; i < _count; ++i)
+            {
+                float angle = i * Mathf.PI * 2f / _count;
+                Vector2 spot = _count == 1 ? _spot : _spot + new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * 1.5f;
+                SpawnOne(mesh, prefab, home, spot);
+            }
+        }
+
+        private void SpawnOne(MeshMapNetworkManager mesh, BaseMonsterCharacterEntity prefab, MonsterSpawnArea home, Vector2 spot)
+        {
+            Vector3 position = new Vector3(spot.x, 0f, spot.y);
+            if (Physics.Raycast(new Vector3(spot.x, 1000f, spot.y), Vector3.down, out RaycastHit hit, 2000f, GameInstance.Singleton.GetGameEntityGroundDetectionLayerMask()))
+                position.y = hit.point.y;
             LiteNetLibIdentity spawnObj = mesh.Assets.GetObjectInstance(prefab.Identity.HashAssetId, position, Quaternion.identity);
             if (spawnObj == null)
             {

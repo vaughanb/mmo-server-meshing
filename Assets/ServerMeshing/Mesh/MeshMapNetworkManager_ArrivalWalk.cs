@@ -27,6 +27,11 @@
 // keeping the seat on the rider's crossing track, and hands the vehicle's path to the vehicle's sent-motion layer. It
 // moved the rider before, the seat put the rider back on the standing vehicle the next frame, and the walk took that
 // for the client's first state: every mounted arrival stood through its client's gap.
+//
+// DESIGN 1.30: a puppet nobody on this cell watches is posed only when a snapshot arrives, so the one the handoff state
+// steers stands where that put it until the arrival registers: a round trip behind its track, a metre at a horse's speed
+// with 100 ms of latency. The walk then eased off that, and the snapshots the origin's puppet followed ran behind and
+// jumped at the client's first state. With nobody watching it, the walk starts on the track.
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -88,6 +93,14 @@ namespace MultiplayerARPG.MMO.Mesh
             ease.y = 0f;
             Transform moved = ridden != null ? ridden.EntityTransform : entity.EntityTransform;
             Vector3 carry = moved.position - position;
+            LiteNetLibManager.LiteNetLibIdentity watched = ridden != null ? ridden.Identity : entity.Identity;
+            if (watched != null && watched.CountSubscribers() == 0)
+            {
+                Vector3 place = onTrack + carry;
+                place.y = moved.position.y;
+                moved.position = place;
+                ease = Vector3.zero; // nobody here saw where it stood
+            }
             _arrivalWalks.Add(new ArrivalWalk
             {
                 entity = entity, name = entity.CharacterName, trackOrigin = trackOrigin, trackTime = trackTime, velocity = velocity, ease = ease, since = now,

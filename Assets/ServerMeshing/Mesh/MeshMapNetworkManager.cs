@@ -116,8 +116,26 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             world = MeshLayoutOverride.Resolve(world); // rig: MESH_LAYOUT_OVERRIDE re-cuts maps for a test run
             InstallSendMeter();
+            InstallClientLatency();
             InstallStateSender();
             base.Awake();
+        }
+
+        /// <summary>Rig: MESH_CLIENT_LATENCY_MS delays this manager's client traffic each way (MeshLatencyTransport).</summary>
+        private void InstallClientLatency()
+        {
+            if (!MeshLatencyTransportFactory.TryParseSetting(System.Environment.GetEnvironmentVariable(MeshLatencyTransportFactory.EnvironmentKey), out int delayMs))
+                return;
+            BaseTransportFactory kit = TransportFactory;
+            if (kit == null)
+                kit = GetComponent<BaseTransportFactory>();
+            if (kit == null)
+                kit = null; // a missing component is a Unity fake null; the wrapping factory must see a real one
+            MeshLatencyTransportFactory latency = gameObject.AddComponent<MeshLatencyTransportFactory>();
+            latency.Inner = kit;
+            latency.DelayMs = delayMs;
+            TransportFactory = latency;
+            Logging.Log("Mesh", $"{MeshLatencyTransportFactory.EnvironmentKey}={delayMs}: client traffic is delayed {delayMs} ms each way");
         }
 
         /// <summary>

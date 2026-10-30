@@ -898,6 +898,7 @@ namespace MultiplayerARPG.MMO.Mesh
             // DESIGN 1.16: where a click-to-move player was walking to; the adoption's owner change clears the kit's path.
             Vector3? clickTarget = ClickTargetOf(entity);
             bool clickResumed = false;
+            bool playerAdoptedHere = false; // the player's kept object was adopted by a spawn, not merely released by a clear
             // DESIGN 1.27: the ridden vehicle is adopted apart from the player, and its owner change clears its path again.
             VehicleEntity riddenBefore = entity != null ? entity.PassengingVehicleEntity as VehicleEntity : null;
             LiteNetLibIdentity riddenIdentity = riddenBefore != null ? riddenBefore.Identity : null;
@@ -907,6 +908,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 adoptionMs += _manager.Assets.LastAdoptionMilliseconds;
                 if (ReferenceEquals(adopted, identity))
                 {
+                    playerAdoptedHere = true;
                     playerAdoptionMs = _manager.Assets.LastAdoptionMilliseconds;
                     clickResumed |= ResumeClickTarget(entity, clickTarget);
                 }
@@ -1002,24 +1004,41 @@ namespace MultiplayerARPG.MMO.Mesh
                     tConnected = sw.ElapsedMilliseconds;
                     connectedFrame = Time.frameCount;
                 }
-                if (entity == null)
-                    break;
-                if (!identity.IsKept && identity.IsSpawned && entity.IsOwnerClient)
-                {
-                    adoptedPlayer = true;
-                    tAdopted = sw.ElapsedMilliseconds;
-                    adoptedFrame = Time.frameCount;
-                    break;
-                }
                 if (_manager.MigrationRefused || _manager.MigrationDisconnected)
                     break;
+                if (playerAdoptedHere)
+                {
+                    if (!identity.IsKept && identity.IsSpawned && entity.IsOwnerClient)
+                    {
+                        adoptedPlayer = true;
+                        tAdopted = sw.ElapsedMilliseconds;
+                        adoptedFrame = Time.frameCount;
+                        break;
+                    }
+                }
+                else if (entity == null || identity == null || !identity.IsKept)
+                {
+                    // DESIGN 1.29: a seam without a pre-load: the kit's scene load released and destroyed the kept objects, and
+                    // the new cell's spawn is a new character. The hop goes on: the new cell has seated us, and falling back
+                    // to the cell we left would lose the session.
+                    BasePlayerCharacterEntity fresh = FindNewOwnedEntity(entity);
+                    if (fresh != null && fresh.Identity != null && fresh.Identity.IsSpawned)
+                    {
+                        entity = fresh;
+                        identity = fresh.Identity;
+                        adoptedPlayer = true;
+                        tAdopted = sw.ElapsedMilliseconds;
+                        adoptedFrame = Time.frameCount;
+                        break;
+                    }
+                }
                 yield return null;
                 Sample();
             }
 
             if (!adoptedPlayer)
             {
-                string why = entity == null ? "character lost" : _manager.MigrationDisconnected ? _manager.MigrationDisconnectReason.ToString() : _manager.MigrationRefused ? "refused" : "timeout";
+                string why = _manager.MigrationDisconnected ? _manager.MigrationDisconnectReason.ToString() : _manager.MigrationRefused ? "refused" : entity == null ? "character lost" : "timeout";
                 Logging.LogWarning("Spike2", $"Continuity migration to {address}:{port} failed ({why}); falling back to {_prevAddress}:{_prevPort} with the stand-in swap");
                 _manager.Assets.onObjectAdopted -= CountAdoption;
                 _manager.EndMigrateClient();

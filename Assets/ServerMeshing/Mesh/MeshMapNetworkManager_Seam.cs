@@ -186,8 +186,10 @@ namespace MultiplayerARPG.MMO.Mesh
                 swapped = true;
             }
             // A hop between cells of one scene: the scene the kit is about to "load" is the one already active and
-            // registered, so OnClientOnlineSceneLoaded skips the scene-entity registration (and its pool clear).
-            SameSceneHop = !swapped && IsMigrating && !IsServer && string.Equals(SceneManager.GetActiveScene().name, serverSceneInfo.sceneName);
+            // registered, so OnClientOnlineSceneLoaded skips the scene-entity registration (and its pool clear). Only while
+            // the assets are still registered: the stand-in swap's StopClient cleared them (DESIGN 1.29: a dead destination's
+            // fallback skipped the registration too, nothing could spawn, and the client never got its character back).
+            SameSceneHop = !swapped && IsMigrating && !IsServer && Assets.IsInitialized && string.Equals(SceneManager.GetActiveScene().name, serverSceneInfo.sceneName);
             if (SameSceneHop && fastClientReadyOnMigration)
             {
                 // The kit's same-scene branch without Assets.Initialize() and InitPoolingQueues(): the prefabs, spawn

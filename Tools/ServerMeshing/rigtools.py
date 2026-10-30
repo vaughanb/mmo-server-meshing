@@ -427,7 +427,7 @@ LAYOUT_GATE_WARNING = re.compile(r"Layout gate: cell \S+ has had no answer")
 # Case-sensitive on purpose: the work probe's "automatic splits" is not an operation.
 OP_LINE = re.compile(r"\b(Split|Merge|Retire|Retired)\b")
 # The MeshTrace stamp of a player registering on a server ("S"); the client's own lines carry "C".
-PLAYER_REGISTERED = re.compile(r" S player registered ")
+PLAYER_REGISTERED = re.compile(r" S (?:f\d+ )?player registered ")
 REGISTRY_SCRIPT_GUID = "5c1e2a7b9d3f4e6a8b0c1d2e3f4a5b6c"   # MeshWorldRegistry.cs.meta
 CELL_MODES = ("Static", "Dynamic")                            # MeshCellMode, by value
 ALL_MAPS = "all"

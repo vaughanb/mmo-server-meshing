@@ -78,7 +78,7 @@ on 2026-10-24; [PR #9](https://github.com/open-mmorpg/OpenMMORPG/pull/9) merged 
 DESIGN 0.94 (v1.1.4); the add-on's workaround is still in place (the two do not double up, above) and can go in its own
 step.
 
-**0010: written, not pushed.** Applies to `develop` at dc025c2; no upstream branch or PR yet.
+**0010: written, not pushed.** Applies to `develop` at dc025c2; no upstream branch or PR yet. The PR text is `PR-0010.md`.
 
 ## Pushing (how it was done; for a re-run)
 

@@ -569,6 +569,8 @@ class LayoutGradeTests(unittest.TestCase):
         self.assertTrue(rigtools.LAYOUT_APPLIED.search(self.applied("0"))
                         and rigtools.LAYOUT_GATE_WARNING.search("Layout gate: cell C has had no answer to LayoutHello for 10s; ...")
                         and rigtools.PLAYER_REGISTERED.search(self.PLAYER))
+        # The stamps carry a frame number since the hop timing work (" S f240 player registered").
+        self.assertTrue(rigtools.PLAYER_REGISTERED.search(self.PLAYER.replace(" S player", " S f240 player")))
         # Slice 2b decision 14: the Static neighbour's line is distinct from a dynamic cell's apply, and neither an op
         m = rigtools.NEIGHBOURS_APPLIED.search(self.NEIGHBOURS)
         self.assertEqual(m.groups() if m else None, ("1a2b", "3", "C2", "E, E.1"))

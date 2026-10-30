@@ -321,17 +321,19 @@ Where the work stands, how to get it running on another machine, and what is lef
      enter-game, the registration, one transport pass and a client frame; the session's first hop is the cells'
      first-use compilation (above).
    On Mono the first hop of a session still compiles the hop's first-time code (12.6 ms, the adoption read
-   is warmed up); an IL2CPP client has no JIT. Nothing has been measured with real latency yet; pre-connect
-   is what keeps the connect out of a laggy hop, the gap will still scale with the round trip until the
-   transfer is in memory.
+   is warmed up); an IL2CPP client has no JIT (the IL2CPP test needs the Windows SDK installed on this machine).
+   Real latency (1.30, `MESH_CLIENT_LATENCY_MS=<one way>` in the editor's environment before Play): the gap is one round
+   trip plus ~25 ms, on foot and mounted, up to the 200 ms measured. Not measured: latency on the observer's connection,
+   loss, jitter. An observer of a mounted rider still sees a stand or two and ~10 small steps per 100 s, away from the line.
 2. **Monsters at a crossing (1.23, 1.28):** a lone monster chases a player across a Static map's line, hits
    through the ghost, and is handed over with its target; a monster that walks over a line on its own walks on
    (1.28: the handoff carries its walk and its AI's wander bookkeeping), and monster puppets are led by the NavMesh
    agent's velocity. Chase (1.28, the user: running should not lose a monster, sprinting should): the demo copy's rule
    (`DemoMesh8k-GameplayRule.asset`: `chaseSpeedOfTargetRun` 1.1, `chaseLoseRange` 10 m, `chaseLoseSeconds` 2 s)
    replaces the kit's follow timer; about 7 s of sprinting loses a bandit. Recipes in the 1.28 row (a deer on the line
-   for wandering, a free bandit and auto client mode `flee` for chases). Left: a pack; the kit's 50 m leash still ends
-   any chase; the kit's own demo and the BaseDemo-CE rig keep the kit's timer.
+   for wandering, a free bandit and auto client mode `flee` for chases; `MESH_TEST_MONSTER=<x>,<z>,<name>,free,<count>` is
+   a pack, and 4 bandits crossed both ways with their target, 1.30). Left: the kit's 50 m leash still ends any chase; the
+   kit's own demo and the BaseDemo-CE rig keep the kit's timer.
 3. **Mount and pet crossings (1.24, 1.27, 1.28):** both run on the 8 km demo (HorseWhistle and PupCollar in MeshTester's
    bag; patrol `mountUp` / `summonPet`). A mounted rider crosses clean for itself and for an observer at the line (1.27).
    Pet puppets have kinematic bodies (1.28, `kinematicPets`); an observer still sees a pet stall about once a second,
@@ -339,15 +341,15 @@ Where the work stands, how to get it running on another machine, and what is lef
    patrols ±12 m at z 513; a bot from the build stands at (−3, 517) with `MESH_TRACE_OBSERVED=1`
    (`-meshAutoMode stand -meshWalkX -3 -meshWalkZ 517`). Read its `MeshRemote` lines as well as `MeshObserved`: the
    stall trace follows only characters within 30 m, so a character sent to a garbage position never shows there.
-4. **Push the CE-14 upstream patch** (`upstream/0010`, written 2026-10-29): it applies to `develop` at dc025c2 but has
-   not been compiled there (upstream's LiteNetLibManager moved since f43d0c0). Branch off `develop`, `git am`, PR.
-5. **Fix the two rig regressions** (`regress.py`, first run since 1.00, on 2026-10-29: pet, party, harvest, build, seam
-   and sleep pass). Both are continuity's fallback paths: `crash` (the destination dies on the notice: the continuity
-   hop reports "character lost", falls back, and the client then loops between a redirect to the restarted cell and a
-   timeout) and `seamcold` (the kit's scene reload at a cold seam destroys the kept objects, the return hop falls back
-   and the bot never respawns). To run the rig: enable the five BaseDemo and TestMap scenes in Build Settings, open
-   BaseInit-CE, `python -u Tools/ServerMeshing/regress.py --build <scenarios>` (with the scenarios named, or `--build`
-   only builds), then restore Build Settings and DemoMesh8kInit. `Config/mySqlConfig.json` is here and MySQL80 runs.
+4. **Push the CE-14 upstream patch** (`upstream/0010`, with its PR text in `upstream/PR-0010.md`): it applies to `develop`
+   at dc025c2 but has not been compiled there (upstream's LiteNetLibManager moved since f43d0c0), so the PR's CI is its
+   first build. On 2026-10-30 the harness refused the push from a session (a new public branch): it needs the user's own
+   hand or a permission rule. Branch off `develop` as `client-migration-kept-objects`, `git am`, PR into `develop`.
+5. **The rig regression** passed all 34 scenarios on the code of 1.29 and the default eight on 1.30 (2026-10-30; the 3 h
+   `soak` not run). To run it:
+   enable the five BaseDemo and TestMap scenes in Build Settings, open BaseInit-CE, then
+   `python -u Tools/ServerMeshing/regress.py --build <scenarios>` (name the scenarios: `--build` alone only builds), then
+   restore Build Settings and DemoMesh8kInit. `Config/mySqlConfig.json` is here and MySQL80 runs. A full run takes ~3 h.
 6. **Run the full EditMode suite** after any further core edit (3,218 tests; `WebSocketClientSendTests.
    ReusedWriter_SendsOwnedPayloadsInOrder` is timing-flaky and passes alone).
 

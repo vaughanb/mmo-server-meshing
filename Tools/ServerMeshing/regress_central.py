@@ -402,7 +402,7 @@ def flow_base(rep, rig, cr, start, day, bots):
         problems = rigsplitcrash.bot_problems(result, {0, 1}, 1)
         if not rigsplitcrash.routed(lines):
             problems.append("no 'Re-login routed to' line")
-        if not any(f" S player registered {b.character} " in line for line in registered):
+        if not any(f"player registered {b.character} " in line for line in registered):
             problems.append(f"not registered on {spec.base}'s second lifetime")
         rep.check(not problems, f"{user}: re-logged in once and ended on {spec.base}" + (f" ({'; '.join(problems)})" if problems else ""))
     return cr._replace(adopted=adoption["pair"], kill_at=kill_at)
