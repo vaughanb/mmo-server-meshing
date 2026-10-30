@@ -42,7 +42,7 @@ Mesh/Editor/                Tools ▸ Open MMORPG ▸ Server Meshing ▸ Setup
 Documentation/              SETUP.md, DESIGN.md and MULTIHOST.md (in the package only; the source lives in Docs/ServerMeshing)
 TestMap/                    the test rig (in the repository only; not in the package)
 ../ServerMeshingDemo/       the 8 km test map and the kit demo copy that starts on it, Tools ▸ Open MMORPG ▸ Server Meshing ▸ Testing ▸
-                            Build 8 km Test Map / Build 8 km Demo Copy / Build 8 km Demo Player (in the repository only)
+                            Build 8 km Test Map / Build 8 km Demo Copy / Build 8 km Demo Cells and Player (in the repository only)
 Build/Editor/               the package builder, Tools ▸ Open MMORPG ▸ Server Meshing ▸ Build Packages (in the repository only)
 ```
 

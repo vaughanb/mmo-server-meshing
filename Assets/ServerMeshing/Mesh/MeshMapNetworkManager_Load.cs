@@ -424,9 +424,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (st != null)
                     linkBytesOut += st.BytesSent;
             }
-            System.TimeSpan cpu;
-            using (System.Diagnostics.Process process = System.Diagnostics.Process.GetCurrentProcess())
-                cpu = process.TotalProcessorTime;
+            System.TimeSpan cpu = MeshProcessSelf.ProcessorTime();
             if (_loadCountersPrimed)
             {
                 report.clientOutKBps = (clientBytesOut - _loadClientBytesOut) / 1024f / window;

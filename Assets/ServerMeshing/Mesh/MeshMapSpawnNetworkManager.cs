@@ -110,6 +110,14 @@ namespace MultiplayerARPG.MMO.Mesh
             return null;
         }
 
+#if ENABLE_IL2CPP
+        public override void OnStartServer()
+        {
+            Logging.LogError("Mesh", "Map spawner: this is an IL2CPP build, whose class library cannot start, list or kill processes, so no cell will start and the host report is empty. Run the spawner from a Mono build and point spawnExePath at the cells' build (DESIGN 1.31)");
+            base.OnStartServer();
+        }
+#endif
+
         protected override void Initialize()
         {
             base.Initialize();

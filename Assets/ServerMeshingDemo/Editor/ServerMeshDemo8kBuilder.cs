@@ -6,15 +6,16 @@
 //   - the game instance's rule is DemoMesh8k-GameplayRule, a MeshCombatGameplayRule (the demo's combat rules plus kill
 //     credit across a cell edge), copied from the demo's rule, and its day/night clock is DemoMesh8k-Daytime, held at noon;
 //   - the server instance runs sleeping cells (one ring), its map spawner starts only the 8 km map's cells, headless, from
-//     Build/DemoMesh8k, and the database is a file of its own (the demo's characters stay out of it);
+//     Build/DemoMesh8kCells, and the database is a file of its own (the demo's characters stay out of it);
 //   - DemoMesh8kMapInfo registers the 8 km map info at load (the demo's database does not list it);
 //   - DemoMesh8kStartMap, under the server instance's login manager (which creates characters), starts every new
 //     character on the 8 km map.
 // The add-on's subclasses go on the demo prefabs the copy runs (server instance, map network manager, player entities),
 // as Setup's Swap all would; on a map without a layout they behave as the kit's.
 //
-// Map servers boot the build's first scene, so the copy has a build of its own: Build 8 km Demo Player puts
-// DemoMesh8kInit, 01Home and the 8 km map into Build/DemoMesh8k. A rerun refreshes the scene from 00Init in place.
+// Map servers boot the build's first scene, so the copy has builds of its own: Build 8 km Demo Cells and Player puts
+// DemoMesh8kInit, 01Home and the 8 km map into Build/DemoMesh8kCells, a Server build for the map servers, and into
+// Build/DemoMesh8k, a player for headless bots (DESIGN 1.32). A rerun refreshes the scene from 00Init in place.
 //
 // Reached from the menu and from batch mode (-executeMethod MultiplayerARPG.MMO.Mesh.Editor.ServerMeshDemo8kBuilder.BuildFromCommandLine).
 
@@ -23,6 +24,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using UnityEditor;
+using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -50,6 +52,8 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         /// <summary>DbFile is the copy's SQLite file, beside the project in the editor and beside the exe in a build.</summary>
         public const string DbFile = "./mmorpg-demomesh8k.sqlite3";
         public const string BuildFolder = "Build/DemoMesh8k";
+        public const string CellsBuildFolder = "Build/DemoMesh8kCells";
+        public const string Il2cppBuildFolder = "Build/DemoMesh8kIl2cpp";
         /// <summary>AwakeRings: one ring of 1,024 m cells is a full cell ahead of a player in any direction.</summary>
         public const int AwakeRings = 1;
         /// <summary>
@@ -87,17 +91,27 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             Build();
         }
 
-        [MenuItem("Tools/Open MMORPG/Server Meshing/Testing/Build 8 km Demo Player (Build/DemoMesh8k)")]
-        public static void MenuPlayer()
+        [MenuItem("Tools/Open MMORPG/Server Meshing/Testing/Build 8 km Demo Cells and Player")]
+        public static void MenuCellsAndPlayer()
         {
-            string result = BuildPlayer();
+            string result = BuildCellsAndPlayer();
             if (result.StartsWith("ok", StringComparison.Ordinal))
-                Debug.Log("Demo copy: player " + result);
+                Debug.Log("Demo copy: cells and player " + result);
             else
-                Debug.LogError("Demo copy error: player " + result);
+                Debug.LogError("Demo copy error: cells and player " + result);
         }
 
-        /// <summary>BuildFromCommandLine is the batch-mode entry point: the copy, then its player. Exits 0 on success.</summary>
+        [MenuItem("Tools/Open MMORPG/Server Meshing/Testing/Build 8 km Demo IL2CPP Cells (Build/DemoMesh8kIl2cpp)")]
+        public static void MenuIl2cppCells()
+        {
+            string result = BuildIl2cppCells();
+            if (result.StartsWith("ok", StringComparison.Ordinal))
+                Debug.Log("Demo copy: IL2CPP cells " + result);
+            else
+                Debug.LogError("Demo copy error: IL2CPP cells " + result);
+        }
+
+        /// <summary>BuildFromCommandLine is the batch-mode entry point: the copy, then its cells and player. Exits 0 on success.</summary>
         public static void BuildFromCommandLine()
         {
             bool ok;
@@ -106,8 +120,8 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 ok = Build();
                 if (ok)
                 {
-                    string result = BuildPlayer();
-                    Debug.Log("Demo copy: player " + result);
+                    string result = BuildCellsAndPlayer();
+                    Debug.Log("Demo copy: cells and player " + result);
                     ok = result.StartsWith("ok", StringComparison.Ordinal);
                 }
             }
@@ -200,39 +214,90 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             EditorSceneManager.MarkSceneDirty(scene);
             EditorSceneManager.SaveScene(scene);
             Debug.Log($"Demo copy: {InitScene}: rule {RulePath}, new characters start on {ServerMeshLargeMapBuilder.MapId}, " +
-                      $"cells on demand ({AwakeRings} ring) from {ExeRelative()}, database {DbFile}");
+                      $"cells on demand ({AwakeRings} ring) from {CellsExeRelative()}, database {DbFile}");
 
             EnableInBuildSettings(ServerMeshLargeMapBuilder.ScenePath);
             EnableInBuildSettings(HomeScene);
             AssetDatabase.SaveAssets();
-            if (!File.Exists(ExeRelative()))
-                Debug.LogWarning($"Demo copy: no player at {ExeRelative()} yet; run Build 8 km Demo Player before pressing Play");
+            if (!File.Exists(CellsExeRelative()))
+                Debug.LogWarning($"Demo copy: no cells at {CellsExeRelative()} yet; run Build 8 km Demo Cells and Player before pressing Play");
             return true;
         }
 
-        /// <summary>BuildPlayer builds the copy's player (the map servers) into Build/DemoMesh8k; "ok ..." or "error: ...".</summary>
+        /// <summary>BuildCellsAndPlayer builds what a run needs, cells first: "ok ..." or the first "error: ...".</summary>
+        public static string BuildCellsAndPlayer()
+        {
+            string cells = BuildCells();
+            if (!cells.StartsWith("ok", StringComparison.Ordinal))
+                return cells;
+            string player = BuildPlayer();
+            return player.StartsWith("ok", StringComparison.Ordinal) ? cells + "; " + player : player;
+        }
+
+        /// <summary>
+        /// BuildCells builds the map servers into Build/DemoMesh8kCells; "ok ..." or "error: ...". The Server subtarget
+        /// costs a cell about half a player build's CPU (DESIGN 1.31).
+        /// </summary>
+        public static string BuildCells()
+        {
+            return BuildExe(CellsExeRelative(), StandaloneBuildSubtarget.Server);
+        }
+
+        /// <summary>BuildPlayer builds the copy's player, which headless bots run from, into Build/DemoMesh8k; "ok ..." or "error: ...".</summary>
         public static string BuildPlayer()
+        {
+            return BuildExe(ExeRelative(), StandaloneBuildSubtarget.Player); // a bot needs the client code the Server subtarget strips
+        }
+
+        /// <summary>
+        /// BuildIl2cppCells builds the same scenes into Build/DemoMesh8kIl2cpp as map servers with no JIT (DESIGN 1.31):
+        /// "ok ..." or "error: ...". It is the Server subtarget because this Unity install's Windows support has IL2CPP
+        /// only there, so it runs no bot, and it needs Visual Studio's C++ tools and a Windows SDK. Only cells run from
+        /// it: a map spawner needs the Mono build. The Server target's scripting backend goes back to Mono afterwards.
+        /// </summary>
+        public static string BuildIl2cppCells()
+        {
+            NamedBuildTarget server = NamedBuildTarget.Server;
+            ScriptingImplementation backend = PlayerSettings.GetScriptingBackend(server);
+            PlayerSettings.SetScriptingBackend(server, ScriptingImplementation.IL2CPP);
+            try
+            {
+                return BuildExe(Il2cppBuildFolder + "/" + Application.productName + ".exe", StandaloneBuildSubtarget.Server);
+            }
+            finally
+            {
+                PlayerSettings.SetScriptingBackend(server, backend);
+            }
+        }
+
+        private static string BuildExe(string exe, StandaloneBuildSubtarget subtarget)
         {
             if (!File.Exists(InitScene))
                 return "error: no copy yet (Build 8 km Demo Copy first)";
             BuildPlayerOptions options = new BuildPlayerOptions
             {
                 scenes = new[] { InitScene, HomeScene, ServerMeshLargeMapBuilder.ScenePath },
-                locationPathName = Path.GetFullPath(ExeRelative()),
+                locationPathName = Path.GetFullPath(exe),
                 target = BuildTarget.StandaloneWindows64,
-                subtarget = (int)StandaloneBuildSubtarget.Player, // as the rig's: the Server subtarget builds nothing with DISABLE_ADDRESSABLES
+                subtarget = (int)subtarget,
                 options = BuildOptions.None,
             };
             BuildSummary summary = BuildPipeline.BuildPlayer(options).summary;
             if (summary.result != BuildResult.Succeeded)
                 return $"error: build {summary.result} with {summary.totalErrors} error(s)";
-            return $"ok {summary.totalSize / (1024 * 1024)} MB in {summary.totalTime.TotalSeconds:0} s at {ExeRelative()}";
+            return $"ok {summary.totalSize / (1024 * 1024)} MB in {summary.totalTime.TotalSeconds:0} s at {exe}";
         }
 
         /// <summary>ExeRelative is the copy's player, relative to the project (the editor's working directory).</summary>
         public static string ExeRelative()
         {
             return BuildFolder + "/" + Application.productName + ".exe";
+        }
+
+        /// <summary>CellsExeRelative is the copy's map servers, relative to the project (the editor's working directory).</summary>
+        public static string CellsExeRelative()
+        {
+            return CellsBuildFolder + "/" + Application.productName + ".exe";
         }
 
         // ---------------------------------------------------------------- rule and clock
@@ -378,7 +443,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 so.FindProperty("editorNotSpawnInBatchMode").boolValue = false;
                 so.FindProperty("spawnExePath").stringValue = "./" + Application.productName + ".exe";
                 so.FindProperty("isOverrideExePath").boolValue = true;
-                so.FindProperty("overrideExePath").stringValue = "./" + ExeRelative();
+                so.FindProperty("overrideExePath").stringValue = "./" + CellsExeRelative();
                 SerializedProperty maps = so.FindProperty("spawningMaps");
                 maps.arraySize = 1;
                 maps.GetArrayElementAtIndex(0).objectReferenceValue = mapInfo;

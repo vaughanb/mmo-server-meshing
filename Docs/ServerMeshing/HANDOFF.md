@@ -9,7 +9,7 @@ Where the work stands, how to get it running on another machine, and what is lef
    - `DemoMesh8kInit.unity`: a copy of the demo's `00Init` with scene-only overrides. It uses the
      demo's prefabs, database and home scene. Its settings:
      - sleeping cells, one ring;
-     - only the 8 km map's cells are started, headless, from `Build/DemoMesh8k`;
+     - only the 8 km map's cells are started, headless, from `Build/DemoMesh8kCells`;
      - its own SQLite file, `./mmorpg-demomesh8k.sqlite3`;
      - always noon (`DemoMesh8k-Daytime.asset`);
      - the demo's combat rules with mesh kill credit (`MeshCombatGameplayRule`);
@@ -27,7 +27,8 @@ Where the work stands, how to get it running on another machine, and what is lef
    - Menus, under **Tools ▸ Open MMORPG ▸ Server Meshing ▸ Testing**:
      - **Build 8 km Test Map** regenerates the map;
      - **Build 8 km Demo Copy** regenerates `DemoMesh8kInit`;
-     - **Build 8 km Demo Player** builds `Build/DemoMesh8k`, which holds the map servers.
+     - **Build 8 km Demo Cells and Player** builds `Build/DemoMesh8kCells` (the map servers, a Server build)
+       and `Build/DemoMesh8k` (a player, for headless bots).
 2. **Undetectable handoff, step 1: entity continuity (CE-14).**
    - What changed: the client no longer tears everything down at a cell crossing.
      - `LiteNetLibManager.MigrateClient` moves the running client to the new cell.
@@ -232,7 +233,8 @@ Where the work stands, how to get it running on another machine, and what is lef
    - Enabled: the demo's scenes, `01Home` and `ServerMeshingDemo/Scenes/ServerMeshTestMap8k`. The
      editor client loads them by name, so they must be enabled.
    - The BaseDemo-CE rig scenes are disabled on this machine.
-5. **Build the map servers:** **Build 8 km Demo Player** builds `Build/DemoMesh8k/`. `Build/` is
+5. **Build the map servers:** **Build 8 km Demo Cells and Player** builds `Build/DemoMesh8kCells/` and
+   `Build/DemoMesh8k/` (a player, for headless bots). `Build/` is
    git-ignored, so this is required on a new machine, and again after any change to the 8 km scene,
    the registry or runtime code.
 6. **Play** `Assets/ServerMeshingDemo/DemoMesh8kInit.unity`. Register, log in and create a character:
@@ -316,12 +318,13 @@ Where the work stands, how to get it running on another machine, and what is lef
      code on first use, spread wide: a warm-up over the first player ghost (its whole spawn state written, its data
      copied and a handoff state round-tripped, its caches rebuilt) took the frame only to ~83 ms and the session's
      first hop from 169 to 152 ms, and was not kept. On a long-lived cell it is once per process; on a Dynamic map's
-     on-demand cell it is the hop that woke it. The fix for the class is an IL2CPP cell build (no JIT), not measured;
+     on-demand cell it is the hop that woke it. An IL2CPP cell build cuts it (1.31: first hop ~104 to 52 ms, a cell's worst first-window frame ~103 to 38 ms) and leaves later hops alone; the Server
+     subtarget alone halves a cell's CPU, so the demo's cells use it (1.32). A spawner cannot run on IL2CPP (1.31), so IL2CPP cells mean a Mono spawner beside them;
    - what is left of the gap after 1.26 (median ~28 ms on one machine): the client's warp and connect, the
      enter-game, the registration, one transport pass and a client frame; the session's first hop is the cells'
      first-use compilation (above).
    On Mono the first hop of a session still compiles the hop's first-time code (12.6 ms, the adoption read
-   is warmed up); an IL2CPP client has no JIT (the IL2CPP test needs the Windows SDK installed on this machine).
+   is warmed up); an IL2CPP client has no JIT, but this Unity install's Windows support has no IL2CPP player, only the Server subtarget's.
    Real latency (1.30, `MESH_CLIENT_LATENCY_MS=<one way>` in the editor's environment before Play): the gap is one round
    trip plus ~25 ms, on foot and mounted, up to the 200 ms measured. Not measured: latency on the observer's connection,
    loss, jitter. An observer of a mounted rider still sees a stand or two and ~10 small steps per 100 s, away from the line.

@@ -197,7 +197,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 114788248445432888, guid: 8ccaad8ed2e4b4f48a10f0e908a8d39e, type: 3}
       propertyPath: overrideExePath
-      value: ./Build/DemoMesh8k/kit-ce-project.exe
+      value: ./Build/DemoMesh8kCells/kit-ce-project.exe
       objectReference: {fileID: 0}
     - target: {fileID: 114788248445432888, guid: 8ccaad8ed2e4b4f48a10f0e908a8d39e, type: 3}
       propertyPath: spawningMaps.Array.size

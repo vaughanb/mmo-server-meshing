@@ -375,7 +375,7 @@ namespace MultiplayerARPG.MMO.Mesh
             float bound = Mathf.Max(0f, FenceSaveSeconds);
             s_fenceKillTimer?.Dispose();
             if (!Application.isEditor)
-                s_fenceKillTimer = new System.Threading.Timer(_ => System.Diagnostics.Process.GetCurrentProcess().Kill(), null, (int)((bound + 1f) * 1000f), System.Threading.Timeout.Infinite);
+                s_fenceKillTimer = new System.Threading.Timer(_ => MeshProcessSelf.Kill(), null, (int)((bound + 1f) * 1000f), System.Threading.Timeout.Infinite);
             FenceSaveAndExit(cell, players, bound).Forget();
         }
 
@@ -393,7 +393,7 @@ namespace MultiplayerARPG.MMO.Mesh
             await UniTask.Delay(FenceKillDelayMs, true);
             if (Application.isEditor)
                 return; // never kills the editor: an editor-hosted cell stays fenced (no links, no ticks) until Play ends
-            System.Diagnostics.Process.GetCurrentProcess().Kill();
+            MeshProcessSelf.Kill();
         }
 
         private async UniTask FenceSaveOne(string cell, long connectionId)

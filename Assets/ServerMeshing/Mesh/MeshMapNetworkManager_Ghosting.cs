@@ -158,9 +158,7 @@ namespace MultiplayerARPG.MMO.Mesh
             foreach (GhostStatic g in _ghostStatics.Values) { if (g.kind == GhostKind.ItemDrop) ghostDrops++; else ghostStatics++; }
             string handoffs = _statsHandoffs > 0 ? $"{_statsHandoffs} (mean {_statsHandoffSumMs / _statsHandoffs:0} ms, max {_statsHandoffMaxMs:0} ms)" : "0";
             string steer = _steerSamples > 0 ? $"{_steerSamples} samples, mean {_steerErrorSum / _steerSamples:0.00} m, max {_steerErrorMax:0.00} m" : "none";
-            System.TimeSpan cpuTime;
-            using (System.Diagnostics.Process process = System.Diagnostics.Process.GetCurrentProcess())
-                cpuTime = process.TotalProcessorTime;
+            System.TimeSpan cpuTime = MeshProcessSelf.ProcessorTime();
             float wall = Time.realtimeSinceStartup;
             float cpuPercent = _lastCpuWall > 0f && wall > _lastCpuWall ? (float)(cpuTime - _lastCpuTime).TotalSeconds / (wall - _lastCpuWall) * 100f : 0f;
             _lastCpuTime = cpuTime; _lastCpuWall = wall;

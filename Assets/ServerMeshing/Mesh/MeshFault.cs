@@ -111,7 +111,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 // A marker that cannot be written only means the restarted incarnation dies too; the fault still fires.
             }
             LiteNetLibManager.Logging.LogError("Mesh", FaultLine(key, what));
-            System.Diagnostics.Process.GetCurrentProcess().Kill();
+            MeshProcessSelf.Kill();
             return true;
         }
     }
