@@ -69,7 +69,7 @@ Run Tools → Open MMORPG → Install → **Import Project Settings**. It lists 
 
 3. **Choose your render pipeline**
 
-The kit's demo content ships as URP. If the project renders with URP there is nothing to do. If it renders with HDRP, a **Render Pipeline Content** window opens by itself after the import; press **Install HDRP content**. It replaces the demo's pipeline-specific files (shaders, materials, scenes, prefabs with lights or cameras, and a few scripts) with their HDRP versions and removes the URP-only ones, after copying any of those files you had edited to `OpenMMORPG_PipelineBackups` beside `Assets`. Afterwards it offers to remove the URP packages the import added, which HDRP does not need. Tools → Open MMORPG → Install → **Render Pipeline Content** brings the window back, to check what is installed or to switch pipelines later. If your project does not use the demo, press **Don't ask again** and the window stops opening by itself in that project; **Not now**, or closing it, only puts it off until Unity next starts.
+The kit's demo content ships as URP. If the project renders with URP there is nothing to do. If it renders with HDRP, a **Render Pipeline Content** window opens by itself after the import; press **Install HDRP content**. It replaces the demo's pipeline-specific files (shaders, materials, scenes, prefabs with lights or cameras, and a few scripts) with their HDRP versions and removes the URP-only ones, after copying any of those files you had edited to `OpenMMORPG_PipelineBackups` beside `Assets`. Afterwards it lists the URP packages the import added, which HDRP does not need, each with an **Open Package Manager** button; remove them there if you want to (the kit never adds or removes packages itself). Tools → Open MMORPG → Install → **Render Pipeline Content** brings the window back, to check what is installed or to switch pipelines later. If your project does not use the demo, press **Don't ask again** and the window stops opening by itself in that project; **Not now**, or closing it, only puts it off until Unity next starts.
 
 After installation, browse available addons via the Addon Manager window (Tools → Open MMORPG → Develop → **Addon Manager**). Have fun building!
 
@@ -86,7 +86,7 @@ The kit ships with a demo in `Assets/OpenMMORPG/Demo`: a small island with a vil
    - Open File → **Build Profiles**, select **Demo Map Server** (under `Demo/Build Profiles`), press **Switch Profile**, then **Build**, and save it as `builds/OpenMMORPG.exe` in the project folder, beside `Assets`.
    - Switch back to **Demo Client** afterwards. While the server profile is active the editor compiles as a server, and Play does not work.
    - Rebuild it whenever you change a scene, an entity or any game data the server uses. A client that disagrees with a stale server is turned away when it tries to enter the map.
-4. **Play.** Open `Demo/Scenes/00Init` and press Play. The editor runs the login, central, database (SQLite) and map spawn servers and shows the server list; register an account, create a character and start.
+4. **Play.** Open `Demo/Scenes/00Init` and press Play. The editor runs the login, central, database (SQLite) and map spawn servers and shows the server list; register an account, create a character and start. Or open `Demo/Scenes/00Init-Singleplayer` to play locally in singleplayer mode (`00Init-Singleplayer` → `01Home-Singleplayer` → `DemoMap`) without building the map server.
 
 The map server build is Windows only, because the spawner launches `OpenMMORPG.exe`. On other platforms, change the spawn path on `MMOServerInstance` in `00Init` to your own server build.
 
@@ -94,7 +94,15 @@ The map server build is Windows only, because the spawner launches `OpenMMORPG.e
 
 ## Updating Open MMORPG
 
-To update, import the newer version the same way you installed it, from the Asset Store or a GitHub release. Re-run **Import Project Settings** only if the release notes say the settings changed.
+Tools → Open MMORPG → Update → **Check for Updates** updates the kit in place. It downloads only the files that changed since the release you installed, and it never overwrites a kit file you have edited without asking: those are listed with an **Overwrite** box, unticked, and the summary afterwards lists what was kept and links to the upstream changes. Files you deleted stay deleted, nothing is added inside a kit folder you deleted, and files you moved are updated where you put them. Everything the update changes is backed up to `OpenMMORPGBackups` beside `Assets` first, and if the result does not compile it offers to restore the backup; the window can restore the last update at any time. A project switched to the HDRP content counts that content as the kit's own: its HDRP files are not listed as your edits, and they are updated to the new release's HDRP versions, never to its URP ones.
+
+If a release needs a newer version of a Unity package, the window lists it with a button to Package Manager; the updater never adds, upgrades or removes packages itself, and updates once you have.
+
+The kit can also check for new releases by itself: the Check for Updates window asks once, and nothing is checked until you say yes. If you do, then once a day at most, when the editor starts, it asks GitHub's public release list whether a newer version is out, and if one is, says so in the Console and ticks **Check for Updates** in the menu. It never opens a window or downloads anything by itself, and sends nothing about you or your project. **Check for a new release once a day** at the foot of the window changes your answer.
+
+Tools → Open MMORPG → Update → **Changes Since Install** lists the kit files you have edited, moved or deleted since the release you installed. Both compare the kit with the record each release carries in `Tools/Install/KitManifest.json`. A kit installed from a release made before that record existed has none: import the newer version the same way you installed it, from the Asset Store or a GitHub release, once, which overwrites every kit file it ships. In a git checkout of the kit, use git instead.
+
+Re-run **Import Project Settings** only if the release notes say the settings changed.
 
 ## Developing Open MMORPG
 

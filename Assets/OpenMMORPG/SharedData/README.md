@@ -1,3 +1,3 @@
 # UnityMultiplayerARPG_SharedData
 
-Shared data for UnityMultiplayerARPG project (MMORPG KIT), it will be used for web-services development
+Shared data for Open MMORPG, used for web-services development.

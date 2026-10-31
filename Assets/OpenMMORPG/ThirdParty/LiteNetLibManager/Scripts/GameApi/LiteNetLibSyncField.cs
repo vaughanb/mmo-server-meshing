@@ -271,7 +271,7 @@ namespace LiteNetLibManager
             _latestReceiveTick = tick;
             if (isDebug)
                 Logging.Log(LogTag, $"Read sync data, syncMode {syncMode.ToString()}, connectionId {ConnectionId}, isOwnerClient {IsOwnerClient}, objectId {ObjectId}, tick {tick}, initial {initial}, oldValue {oldValue}, newValue {Value}");
-            // MESH-EDIT: CE-14 — a kept object being adopted by the new server's spawn was live a moment ago: its initial
+            // A kept object being adopted by the new server's spawn was live a moment ago: its initial
             // state is applied as a change (callbacks only for values that differ), not as a first load.
             if (initial && IsBeingAdopted)
                 initial = false;

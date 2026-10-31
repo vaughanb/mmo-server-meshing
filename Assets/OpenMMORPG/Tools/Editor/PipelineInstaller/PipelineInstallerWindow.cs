@@ -212,6 +212,7 @@ namespace OpenMMORPG.Setup
             }
         }
 
+        /// <summary>Lists the other pipeline's packages for the user to remove. The kit never removes a package itself.</summary>
         private void UnneededPackagesSection(PipelineManifest manifest)
         {
             List<string> packages = PipelineInstaller.UnneededPackages();
@@ -220,13 +221,18 @@ namespace OpenMMORPG.Setup
             GUILayout.Space(10);
             GUILayout.Label("Packages you no longer need", EditorStyles.boldLabel);
             GUILayout.Label("The kit adds the Universal Render Pipeline to a project so that it compiles before the " +
-                            "installer has run. The HDRP content does not use it: " + string.Join(", ", packages) + ".",
-                            new GUIStyle(EditorStyles.label) { wordWrap = true });
-            if (GUILayout.Button("Remove them", GUILayout.Height(22)) &&
-                EditorUtility.DisplayDialog("Remove packages",
-                    "Removes " + string.Join(", ", packages) + " from the project. Anything of your own that uses URP will stop " +
-                    "compiling. Importing the kit again adds them back.", "Remove", "Cancel"))
-                PipelineInstaller.RemovePackages(packages);
+                            "installer has run. The HDRP content does not use these packages, so you can remove them in " +
+                            "Package Manager. Anything of your own that uses URP stops compiling without them, and importing " +
+                            "the kit again adds them back.", new GUIStyle(EditorStyles.label) { wordWrap = true });
+            foreach (string package in packages)
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUILayout.LabelField(package, EditorStyles.miniLabel);
+                    if (GUILayout.Button("Open Package Manager", EditorStyles.miniButton, GUILayout.Width(150f)))
+                        UnityEditor.PackageManager.UI.Window.Open(package);
+                }
+            }
         }
 
         private void SwitchSection(PipelineManifest manifest, string project, string installed)

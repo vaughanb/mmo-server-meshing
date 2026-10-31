@@ -65,7 +65,7 @@ namespace LiteNetLibManager
         internal readonly Dictionary<uint, LiteNetLibIdentity> SpawnedObjects = new Dictionary<uint, LiteNetLibIdentity>();
         internal readonly Dictionary<uint, long> ChangingOwnerObjects = new Dictionary<uint, long>();
 
-        // MESH-EDIT: CE-14 — client migration keeps its objects and adopts them. See Docs/ServerMeshing/DESIGN.md §17.
+        // Client migration keeps its objects and adopts them.
         /// <summary>Picks the kept object a new server's spawn is (or null to instantiate one). Null: the default rule.</summary>
         public delegate LiteNetLibIdentity KeptObjectResolver(int hashAssetId, Vector3 position, long connectionId, IReadOnlyCollection<LiteNetLibIdentity> keptObjects);
         /// <summary>Overrides the default rule that matches a spawn to a kept object (see <see cref="ResolveKeptObject"/>).</summary>
@@ -132,7 +132,7 @@ namespace LiteNetLibManager
         public void Clear(bool doNotResetObjectId = false)
         {
             IsInitialized = false;
-            DestroyKeptObjects(); // MESH-EDIT: CE-14
+            DestroyKeptObjects();
             ClearSpawnedObjects();
             ClearPooledObjects();
             SpawnPoints.Clear();
@@ -247,7 +247,7 @@ namespace LiteNetLibManager
         }
 #endif
 
-        // MESH-EDIT: CE-14 — client migration keeps its objects and adopts them. See Docs/ServerMeshing/DESIGN.md §17.
+        // Client migration keeps its objects and adopts them.
         /// <summary>
         /// Moves every spawned object out of the spawned set without destroying it, for a client moving to another
         /// server: it keeps running and can be adopted by that server's spawn of the same object. Objects the client
@@ -514,7 +514,7 @@ namespace LiteNetLibManager
                         LiteNetLibIdentity sceneObject = sceneObjects[k];
                         if (sceneObject.ForceNotSceneObject)
                             continue;
-                        // MESH-EDIT: CE-14 — a kept object stays as it is: a spawned prefab is no scene object, and a
+                        // A kept object stays as it is: a spawned prefab is no scene object, and a
                         // kept scene object stays active until the new server spawns (adopts) it.
                         if (_keptObjects.Contains(sceneObject))
                         {
@@ -558,7 +558,7 @@ namespace LiteNetLibManager
                 return null;
             }
 
-            uint adoptedFrom = identity.ObjectId; // MESH-EDIT: CE-14
+            uint adoptedFrom = identity.ObjectId;
             bool adopted = _keptObjects.Remove(identity);
             if (adopted)
                 identity.BeginAdoption(adoptedFrom);
@@ -579,7 +579,7 @@ namespace LiteNetLibManager
                 identity.OnStartOwnerClient();
             if (onObjectSpawn != null)
                 onObjectSpawn.Invoke(identity);
-            if (adopted) // MESH-EDIT: CE-14
+            if (adopted)
                 EndAdoption(identity, adoptedFrom);
 
             return identity;
@@ -603,7 +603,7 @@ namespace LiteNetLibManager
                     Logging.LogWarning(LogTag, $"NetworkSpawn - Asset Id: {hashAssetId} is not registered.");
                 return null;
             }
-            // MESH-EDIT: CE-14 — a migrating client adopts the kept object this spawn is, instead of instantiating one.
+            // A migrating client adopts the kept object this spawn is, instead of instantiating one.
             LiteNetLibIdentity kept = Manager.IsServer || _keptObjects.Count == 0 ? null : ResolveKeptObject(hashAssetId, position, connectionId);
             if (kept != null)
             {
@@ -774,7 +774,7 @@ namespace LiteNetLibManager
             }
             else if (!Manager.IsServer)
             {
-                // MESH-EDIT: CE-14 — on a client the owner message overtakes the object's spawn (the server sends it at
+                // On a client the owner message overtakes the object's spawn (the server sends it at
                 // once, the spawn on its next sync tick) and the spawn carries the owner: nothing is lost.
                 if (Manager.LogDev) Logging.Log(LogTag, $"SetObjectOwner - Object Id: {objectId} is not spawned yet; its spawn carries the owner.");
             }

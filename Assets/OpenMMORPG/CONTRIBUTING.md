@@ -13,6 +13,10 @@ Have questions or want to discuss ideas before contributing? Join our [Discord c
 
 4. When you are done working on the issue, open a Pull Request from your branch into **develop**.
 
+### Tests
+
+A bug fix comes with a test that fails without the fix. Run the tests before opening a pull request, either in the Test Runner window or with `python "Tools~/run_tests.py"`. [Tests/README.md](Tests/README.md) explains where tests go and the helpers that set up a GameInstance or a database.
+
 ### Structure
 
 Open MMORPG is assembled from many source repos. The directory structure is flattened for use with `git subtree`, instead of submodules, and placed into a sensible structure:
@@ -65,6 +69,6 @@ $ git subtree pull --prefix=ThirdParty/AudioManager audm upstream
 
 ### Releasing
 
-1. Merge develop into master and tag the release (for example `v1.0.0`).
+1. Merge develop into master, then tag the release from an up-to-date master with `make -C Tools~ release patch` (or `minor`, `major`), which checks the kit, writes the annotated tag with your changelog and pushes it. See [Tools~/README.md](Tools~/README.md#cutting-a-release).
 2. Pushing the tag runs the [Asset Store package workflow](.github/workflows/asset-store-package.yml), which builds `OpenMMORPG.unitypackage` and attaches it to a GitHub release. Upload that archive to the Asset Store with Unity's Asset Store Tools. See [Tools~/README.md](Tools~/README.md) for details, including rebuilding `OpenMMORPG_Settings.unitypackage` when the project settings change.
 3. Set the same version in **Project Settings > Player > Version**, which is what a build reports as `Application.version`.

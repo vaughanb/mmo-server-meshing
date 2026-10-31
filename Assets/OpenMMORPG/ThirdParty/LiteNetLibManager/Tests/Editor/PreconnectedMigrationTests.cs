@@ -8,7 +8,7 @@ using UnityEngine;
 namespace LiteNetLibManager.Tests
 {
     /// <summary>
-    /// MESH-EDIT: CE-14 — a client migrates onto a transport that is connected already (opened ahead of the hop): the
+    /// A client migrates onto a transport that is connected already (opened ahead of the hop): the
     /// client takes it over without starting it, the manager's connected event fires at once, and the old transport
     /// is destroyed. A transport that is not started is refused.
     /// </summary>

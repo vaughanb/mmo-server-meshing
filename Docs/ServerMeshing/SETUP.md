@@ -47,7 +47,7 @@ right for a sandbox where towns can appear anywhere.
 ## 3. Prerequisites
 
 - The add-on folder `Assets/ServerMeshing/` (it compiles into the game assembly; no asmdef needed).
-- OpenMMORPG v1.1.4 (`master` at 317d2b8, 2026-10-25) or later. It carries all eight kit changes the add-on relies on
+- OpenMMORPG `master` at 05ec55012 (2026-10-30) or later, newer than the v1.2.1 release. It carries all eight kit changes the add-on relies on
   (DESIGN.md §17, [upstream/README.md](upstream/README.md)): patches 0001-0004 (an owner-change movement fix,
   frame-granular request waits, a virtual `IsWatched()` on the monster activity component, a protected pending-spawn
   dictionary on the map manager), 0005 (a cache finalizer that corrupted pooled collections), 0006-0007 (movement flags
@@ -56,6 +56,9 @@ right for a sandbox where towns can appear anywhere.
   The add-on does not compile without 0006 (the state sender calls its `IEntityMovementServerStateFlags`) or without
   0008 (`MeshMapNetworkManager` overrides the property, §6a.8), Dynamic maps or not; `MeshKitEditTests` fails if a kit
   update drops either.
+- The add-on also needs the kit's client migration ([open-mmorpg/OpenMMORPG#28](https://github.com/open-mmorpg/OpenMMORPG/pull/28): `MigrateClient` and kept
+  objects, patch 0010, DESIGN.md 1.01). No release carries it yet: v1.2.1 does not, and `master` does from 05ec55012. 0.97.19
+  was built and tested on `master` at 493df35fc.
 - From 0.95.0 the add-on also needs the kit's slot-indexed damage amounts (`DamageElementMinMaxFloatAmounts`, upstream
   74ec05b, on `develop` since 2026-10-07 and in v1.1.4): its attack and skill components, the harvestable and the
   ghost-hit forwarding override and call those signatures. Versions up to 0.94.0 used the damage dictionaries the kit
@@ -940,7 +943,7 @@ with a hand-written `README.md` and `screenshot.png`; `Addons/README.md` has the
 
 - the add-on (`Assets/ServerMeshing/Mesh`, runtime and Editor) with this guide, DESIGN.md and MULTIHOST.md under
   `Documentation/`, and the top-level README. The spike notes, the upstream patch series and the raw capacity table stay
-  in the repository. Import it into any project that has OpenMMORPG installed (v1.1.4 or later: §3), then follow §4.
+  in the repository. Import it into any project that has OpenMMORPG installed (`master` at 05ec55012 or later: §3), then follow §4.
 
 The test rig is not in the package (since 0.96.0; 0.93.0-0.95.0 carried it): `Assets/ServerMeshing/TestMap` (the two
 test maps, test items, auto client, launcher, play runner, load generator) and the harnesses in `Tools/ServerMeshing/`

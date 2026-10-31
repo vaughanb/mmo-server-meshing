@@ -181,6 +181,12 @@ namespace MultiplayerARPG.MMO
             _characterSaveScheduler.Enqueue(request, forceImmediate);
         }
 
+        public async UniTask CancelCharacterSaveAsync(string characterId)
+        {
+            if (_characterSaveScheduler != null)
+                await _characterSaveScheduler.CancelAsync(characterId);
+        }
+
 
         public async UniTask<bool> InternalPersistCharacterUpdate(UpdateCharacterReq request)
         {

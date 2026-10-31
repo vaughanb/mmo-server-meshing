@@ -17,7 +17,7 @@ namespace MultiplayerARPG.MMO
         private int _port = 5432;
         private string _username = "postgres";
         private string _password = "localdb";
-        private string _dbName = "mmorpg_kit";
+        private string _dbName = "mmorpgtemplate";
         private string _connectionString = "";
         private NpgsqlDataSource _dataSource;
 

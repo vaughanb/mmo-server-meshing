@@ -7,7 +7,7 @@ using UnityEngine;
 namespace LiteNetLibManager.Tests
 {
     /// <summary>
-    /// MESH-EDIT: CE-14 — a kept object adopted by the new server's spawn applies its initial state as a diff: a sync
+    /// A kept object adopted by the new server's spawn applies its initial state as a diff: a sync
     /// field fires its change only when its value differs, a sync list fires the operations that turn the list it has
     /// into the one sent (Set / Add / RemoveLast), and an identical state fires nothing at all.
     /// </summary>

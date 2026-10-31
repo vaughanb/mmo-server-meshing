@@ -243,6 +243,9 @@ namespace MultiplayerARPG.MMO
                 result.InvokeError(EmptyMessage.Value);
                 return;
             }
+            // A deferred save written after the delete would put the character back
+            if (playerCharacter.UserId == request.Data.UserId)
+                await CancelCharacterSaveAsync(request.Data.CharacterId);
             // Delete data from database
             await Database.DeleteCharacter(request.Data.UserId, request.Data.CharacterId);
             RemoveCharacterFromUserIdCache(request.Data.UserId, request.Data.CharacterId);

@@ -302,8 +302,8 @@ namespace LiteNetLibManager
             }
         }
 
-        // MESH-EDIT: CE-14 — client migration: move a running client to another server without stopping it, so its
-        // spawned objects can be kept and adopted by the new server. See Docs/ServerMeshing/DESIGN.md §17.
+        // Client migration: move a running client to another server without stopping it, so its
+        // spawned objects can be kept and adopted by the new server.
         /// <summary>True from <see cref="MigrateClient"/> until <see cref="EndMigrateClient"/>.</summary>
         public bool IsMigratingClient { get; protected set; }
 
@@ -380,7 +380,7 @@ namespace LiteNetLibManager
         {
             if (!IsClient)
                 return;
-            IsMigratingClient = false; // MESH-EDIT: CE-14
+            IsMigratingClient = false;
 
             if (LogInfo) Logging.Log(LogTag, "StopClient");
             _logicUpdater.OnTick -= OnClientUpdate;

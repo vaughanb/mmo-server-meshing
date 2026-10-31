@@ -323,7 +323,7 @@ namespace MultiplayerARPG.MMO
                 });
                 return;
             }
-            if (!_mapServerConnectionIdsBySceneName.TryGetValue(PeerInfoExtensions.GetPeerInfoKey(channelId, character.CurrentMapName), out CentralServerPeerInfo mapServerPeerInfo))
+            if (!TryGetMapServer(channelId, character.CurrentMapName, out CentralServerPeerInfo mapServerPeerInfo))
             {
                 result.InvokeError(new ResponseSelectCharacterMessage()
                 {
@@ -340,5 +340,22 @@ namespace MultiplayerARPG.MMO
             });
 #endif
         }
+
+#if NET || NETCOREAPP || ((UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE)
+        public bool TryGetMapServer(string channelId, string mapName, out CentralServerPeerInfo peerInfo)
+        {
+            string key = PeerInfoExtensions.GetPeerInfoKey(channelId, mapName);
+            // The cluster server announces a map server when it registers but not when it disconnects, so check its live
+            // list - only possible when it runs in this process; a login server of its own keeps the last address it heard
+            ClusterServer clusterServer = ClusterServer;
+            if (clusterServer != null && clusterServer.IsNetworkActive && !clusterServer.MapServerPeersByKey.ContainsKey(key))
+            {
+                _mapServerConnectionIdsBySceneName.TryRemove(key, out _);
+                peerInfo = default;
+                return false;
+            }
+            return _mapServerConnectionIdsBySceneName.TryGetValue(key, out peerInfo);
+        }
+#endif
     }
 }

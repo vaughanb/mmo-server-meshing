@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "kitVersion": "dev",
-  "builtFrom": "06b180a58d63+",
+  "builtFrom": "06f942bd0564+",
   "prefix": "Assets/OpenMMORPG",
   "pipelines": [
     {
@@ -505,8 +505,16 @@
           "hash": "42afafd719ed6d94e13ddd68dd9950efb1f3953d"
         },
         {
+          "path": "Demo/Scenes/00Init-Singleplayer.unity",
+          "hash": "e0abdefd99d8d3ecf364cd7453d6e959be27964f"
+        },
+        {
           "path": "Demo/Scenes/00Init.unity",
           "hash": "0d1402154c5caed6efb8ca1b2a6be92e7c52b08a"
+        },
+        {
+          "path": "Demo/Scenes/01Home-Singleplayer.unity",
+          "hash": "a37d25fa02fe9359fccdca7d16c7431d47bd7724"
         },
         {
           "path": "Demo/Scenes/01Home.unity",
@@ -1207,8 +1215,16 @@
           "hash": "fd206ea22045468a1a4810eb55701a9fb236bb65"
         },
         {
+          "path": "Demo/Scenes/00Init-Singleplayer.unity",
+          "hash": "fba65a7fd0d86b9819bf20571052e2086b8ea74d"
+        },
+        {
           "path": "Demo/Scenes/00Init.unity",
           "hash": "d3b83fa1942b8d6eceaa9e933c740aedeb9520fd"
+        },
+        {
+          "path": "Demo/Scenes/01Home-Singleplayer.unity",
+          "hash": "fe44b91cdd340cf67c9a2d11b0a81b9fcafef59f"
         },
         {
           "path": "Demo/Scenes/01Home.unity",

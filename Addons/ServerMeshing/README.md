@@ -22,7 +22,7 @@ on), and a central that restarts adopts the cut layout the cells hold and finish
 
 The add-on is subclasses on the kit's managers and entity prefabs plus one world-registry asset; the package changes no
 kit file. It does build on **eight small kit changes** (bug fixes and extension seams, DESIGN §17), all of them in
-OpenMMORPG **v1.1.4** (see Requirements).
+OpenMMORPG since **v1.1.4**; the add-on needs a newer kit than that (see Requirements).
 
 - One cell process holds about **270 players at a 60 fps server tick** on a modern core; size cells so no expected crowd
   exceeds 250 (250–300 m suits a sandbox where towns can appear anywhere).
@@ -34,7 +34,8 @@ OpenMMORPG **v1.1.4** (see Requirements).
 
 ## Requirements
 
-- **OpenMMORPG v1.1.4** (`master` at 317d2b8, 2026-10-25) or later. It carries everything the add-on relies on:
+- **OpenMMORPG `master` at 05ec55012** (2026-10-30) or later, newer than the v1.2.1 release: no tagged release carries
+  client migration yet. That kit has everything the add-on relies on:
   - the eight kit changes, upstream patches 0001-0008: an owner-change movement fix, frame-granular request waits, a
     virtual `IsWatched()` on the monster activity component, a protected pending-spawn dictionary on the map manager
     (0001-0004), a cache finalizer that corrupted pooled collections under load (0005), one-shot movement flags sent to
@@ -46,7 +47,10 @@ OpenMMORPG **v1.1.4** (see Requirements).
     `Dictionary<DamageElement, MinMaxFloat>` through its attack, skill and receive-damage paths. 0.95.0 is the port: the
     add-on's attack and skill components, the harvestable and the ghost-hit forwarding use the structs. Versions up to
     0.94.0 used the dictionaries and do not compile on v1.1.4 (`no suitable method found to override` on
-    `ApplyAttack`, `ApplySkillUsing` and `ApplyReceiveDamage`).
+    `ApplyAttack`, `ApplySkillUsing` and `ApplyReceiveDamage`);
+  - client migration ([open-mmorpg/OpenMMORPG#28](https://github.com/open-mmorpg/OpenMMORPG/pull/28)): `MigrateClient` and kept objects in
+    LiteNetLibManager, which every crossing runs on. The add-on does not compile without it. 0.97.19 was built and tested
+    on `master` at 493df35fc.
 - Unity 6000.3 or newer, matching the kit.
 - Your map scenes in the build settings and your map infos in the game database.
 

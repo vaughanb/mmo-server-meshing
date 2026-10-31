@@ -28,6 +28,10 @@ MonoBehaviour:
     m_path: Assets/OpenMMORPG/Demo/Scenes/DemoMap.unity
   - m_enabled: 1
     m_path: Assets/OpenMMORPG/Demo/Scenes/DemoDungeon.unity
+  - m_enabled: 1
+    m_path: Assets/OpenMMORPG/Demo/Scenes/00Init-Singleplayer.unity
+  - m_enabled: 1
+    m_path: Assets/OpenMMORPG/Demo/Scenes/01Home-Singleplayer.unity
   m_HasScriptingDefines: 1
   m_ScriptingDefines:
   - DISABLE_ADDRESSABLES

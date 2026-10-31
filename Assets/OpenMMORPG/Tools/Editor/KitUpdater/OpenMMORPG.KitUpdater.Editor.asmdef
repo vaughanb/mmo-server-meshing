@@ -1,0 +1,16 @@
+{
+    "name": "OpenMMORPG.KitUpdater.Editor",
+    "rootNamespace": "OpenMMORPG.KitUpdater",
+    "references": [],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

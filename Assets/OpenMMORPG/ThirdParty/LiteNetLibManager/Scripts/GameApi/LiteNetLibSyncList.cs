@@ -389,7 +389,7 @@ namespace LiteNetLibManager
             }
         }
 
-        // MESH-EDIT: CE-14 — a kept object being adopted by the new server's spawn was live a moment ago, with this list
+        // A kept object being adopted by the new server's spawn was live a moment ago, with this list
         // filled. Its initial state is applied as the operations that turn the list it has into the list it was sent
         // (Set where an entry differs, Add for extra entries, RemoveLast for missing ones) instead of Clear + AddInitial
         // of every entry, so listeners (appearance, stat caches, UI) only hear about what changed. Entries are compared

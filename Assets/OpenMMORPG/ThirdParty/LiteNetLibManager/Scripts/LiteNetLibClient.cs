@@ -78,7 +78,7 @@ namespace LiteNetLibManager
 
         protected virtual void OnStartClient() { }
 
-        // MESH-EDIT: CE-14 — client migration: continue on a transport that is connected already (the connection was
+        // Client migration: continue on a transport that is connected already (the connection was
         // opened ahead of the hop and its connect event consumed by whoever held it), so no connect round trip is spent.
         /// <summary>Takes over <paramref name="connectedTransport"/> as the client's transport, without starting it. The caller raises the manager's connected event.</summary>
         public bool AdoptConnectedTransport(ITransport connectedTransport)

@@ -3,8 +3,11 @@
 The server-meshing add-on needed a few small changes in the kit itself (DESIGN.md §17: CE-6 to CE-9, CE-11 to CE-13).
 They are kept here as a patch series against the upstream `develop` branch, one commit per change, with upstream-neutral
 wording (no add-on markers). The local copy of the kit in `Assets/OpenMMORPG/` carried the same changes with
-`MESH-EDIT` markers until DESIGN 0.94 (2026-10-27); since then it is OpenMMORPG v1.1.4 (`master` at 317d2b8) unchanged,
-which has all nine upstream.
+`MESH-EDIT` markers until DESIGN 0.94 (2026-10-27), and 0010 until 1.33. Since then it is OpenMMORPG `master` at 493df35fc, which
+has all ten upstream (0010 is PR 28, merged 2026-10-30, on `master` from 05ec55012 and in no release yet: v1.2.1 lacks it). It
+differs from upstream only where the add-on's subclasses sit on demo prefabs and in the build-profile and sky assets. Sync it with a
+three-way merge (base: the last synced commit), not a copy, or those are lost. Upstream's `MessageRoundTripTests` also walks
+the add-on's messages and fails on three by construction (DESIGN 1.33).
 
 | Patch | Kind | Files |
 |---|---|---|
@@ -53,8 +56,8 @@ new server's spawns adopt them, and an adopted object's initial state is applied
 (`git diff c417dda HEAD` over `ThirdParty/LiteNetLibManager`, the quantized-grid file of 1.13 left out since upstream
 has it) with the `MESH-EDIT: CE-14` markers and the DESIGN references stripped; 607 insertions, 1 deletion. It applies
 cleanly to `develop` at dc025c2 (2026-10-29, after PR #25), checked with `git apply --cached --check` in a throwaway
-clone. Not compiled against that commit: upstream's LiteNetLibManager moved since f43d0c0 (its PR 54 port and the
-quantized grid), and only the kit copy's build has run it.
+clone. Merged as PR 28 on 2026-10-30; the kit copy has been upstream's own version of it since DESIGN 1.33, which is
+what the add-on and the rig now build on.
 
 ## Status
 

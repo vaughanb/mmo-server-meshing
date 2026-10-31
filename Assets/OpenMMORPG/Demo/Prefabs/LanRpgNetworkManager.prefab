@@ -1,0 +1,164 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &7528678413458826341
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 5734167206458331254}
+  - component: {fileID: 5658544920496708454}
+  - component: {fileID: 3088080648064664305}
+  - component: {fileID: 455945012008446741}
+  m_Layer: 0
+  m_Name: LanRpgNetworkManager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &5734167206458331254
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7528678413458826341}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 3}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &5658544920496708454
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7528678413458826341}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4884384bff23a9c439e7ce9681ea5724, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  playerSpawnRandomly: 0
+  playerPrefab: {fileID: 0}
+  spawnablePrefabs: []
+  offlineScene:
+    sceneAsset: {fileID: 102900000, guid: ff2e610a4c74d54428ed1db33c251774, type: 3}
+    sceneName: 01Home-Singleplayer
+  onlineScene:
+    sceneAsset: {fileID: 0}
+    sceneName: 
+  onInitializeStart:
+    m_PersistentCalls:
+      m_Calls: []
+  onInitializeFinish:
+    m_PersistentCalls:
+      m_Calls: []
+  onLoadSceneStart:
+    m_PersistentCalls:
+      m_Calls: []
+  onLoadSceneProgress:
+    m_PersistentCalls:
+      m_Calls: []
+  onLoadSceneFinish:
+    m_PersistentCalls:
+      m_Calls: []
+  onLoadSceneFail:
+    m_PersistentCalls:
+      m_Calls: []
+  onSceneFileSizeRetrieving:
+    m_PersistentCalls:
+      m_Calls: []
+  onSceneFileSizeRetrieved:
+    m_PersistentCalls:
+      m_Calls: []
+  onSceneDepsDownloading:
+    m_PersistentCalls:
+      m_Calls: []
+  onSceneDepsFileDownloading:
+    m_PersistentCalls:
+      m_Calls: []
+  onSceneDepsDownloaded:
+    m_PersistentCalls:
+      m_Calls: []
+  onLoadAdditiveSceneStart:
+    m_PersistentCalls:
+      m_Calls: []
+  onLoadAdditiveSceneProgress:
+    m_PersistentCalls:
+      m_Calls: []
+  onLoadAdditiveSceneFinish:
+    m_PersistentCalls:
+      m_Calls: []
+  onObjectSpawn:
+    m_PersistentCalls:
+      m_Calls: []
+  onObjectDestroy:
+    m_PersistentCalls:
+      m_Calls: []
+  disablePooling: 0
+  limitByPoolingSize: 1
+  manuallyApplyOwnerChanges: 0
+--- !u!114 &3088080648064664305
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7528678413458826341}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ee13c7c5631aacf45bcc60e5a5a8939b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  currentLogLevel: 2
+  networkAddress: localhost
+  networkPort: 7770
+  useWebSocket: 0
+  webSocketSecure: 0
+  webSocketCertificateFilePath: 
+  webSocketCertificatePassword: 
+  updateFps: 20
+  maxConnections: 1100
+  transportFactory: {fileID: 0}
+  packetVersion: 1
+  pingDuration: 1
+  doNotEnterGameOnConnect: 0
+  doNotReadyOnSceneLoaded: 0
+  doNotDestroyOnSceneChanges: 0
+  loadOfflineSceneWhenClientStopped: 1
+  baseLineSyncInterval: 1
+  onSpawnEntitiesStart:
+    m_PersistentCalls:
+      m_Calls: []
+  onSpawnEntitiesProgress:
+    m_PersistentCalls:
+      m_Calls: []
+  onSpawnEntitiesFinish:
+    m_PersistentCalls:
+      m_Calls: []
+  autoSaveDuration: 2
+  startType: 2
+  selectedCharacterSummonBuffs: []
+  selectedCharacterStorageItems: []
+  enableGmCommands: 0
+--- !u!114 &455945012008446741
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7528678413458826341}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ea0153bad48b072499e0114b20deb608, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  assets: {fileID: 5658544920496708454}

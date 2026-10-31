@@ -4,8 +4,6 @@ using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using UnityEditor;
-using UnityEditor.PackageManager;
-using UnityEditor.PackageManager.Requests;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -42,7 +40,6 @@ namespace OpenMMORPG.Setup
         private const string StageSettling = "settling";
         private const string StartedKey = "OpenMMORPG.PipelineInstall.Started";
         private const string ImportedKey = "OpenMMORPG.PipelineInstall.Imported";
-        private const string RemovalQueueKey = "OpenMMORPG.PipelineInstall.RemovalQueue";
         private const string DismissedConfigKey = "OpenMMORPG.PipelineInstallerDismissed";
         /// <summary>What "Don't ask again" stores under <see cref="DismissedConfigKey"/>: every pipeline, not only the current one.</summary>
         private const string DismissedForGood = "*";
@@ -536,10 +533,7 @@ namespace OpenMMORPG.Setup
         {
             string pending = PendingInstall;
             if (pending == "")
-            {
-                ContinuePackageRemoval();
                 return;
-            }
             if (EditorApplication.isCompiling || EditorApplication.isUpdating)
                 return;
 
@@ -591,7 +585,11 @@ namespace OpenMMORPG.Setup
 
         // --------------------------------------------------------------------------------- packages no longer needed
 
-        /// <summary>Packages the installed content does not need and that are in the project: the other pipeline's.</summary>
+        /// <summary>
+        /// Packages the installed content does not need and that are in the project: the other pipeline's. The window lists
+        /// them for the user to remove in Package Manager; the kit never adds or removes a package itself (Asset Store
+        /// guideline 2.5.1.e).
+        /// </summary>
         public static List<string> UnneededPackages()
         {
             var result = new List<string>();
@@ -605,35 +603,6 @@ namespace OpenMMORPG.Setup
                     result.Add(name);
             }
             return result;
-        }
-
-        /// <summary>Removes them one at a time (each removal can recompile, and the rest of the queue waits for it).</summary>
-        public static void RemovePackages(List<string> names)
-        {
-            SessionState.SetString(RemovalQueueKey, string.Join(",", names));
-            ContinuePackageRemoval();
-        }
-
-        private static RemoveRequest s_removal;
-
-        private static void ContinuePackageRemoval()
-        {
-            if (s_removal != null)
-            {
-                if (!s_removal.IsCompleted)
-                    return;
-                if (s_removal.Status == StatusCode.Failure)
-                    Debug.LogWarning("[Open MMORPG] Could not remove a package: " + s_removal.Error.message);
-                s_removal = null;
-            }
-            string queue = SessionState.GetString(RemovalQueueKey, "");
-            if (queue == "" || EditorApplication.isCompiling || EditorApplication.isUpdating)
-                return;
-            int comma = queue.IndexOf(',');
-            string next = comma < 0 ? queue : queue.Substring(0, comma);
-            SessionState.SetString(RemovalQueueKey, comma < 0 ? "" : queue.Substring(comma + 1));
-            if (PackageVersion(next) != null)
-                s_removal = Client.Remove(next);
         }
     }
 }

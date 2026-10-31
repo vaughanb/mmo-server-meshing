@@ -1,2 +1,2 @@
 # UnityMultiplayerARPG_Core
-A core codes for MMORPG KIT project :)
+Core code for Open MMORPG.

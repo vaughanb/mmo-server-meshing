@@ -344,16 +344,16 @@ Where the work stands, how to get it running on another machine, and what is lef
    patrols ±12 m at z 513; a bot from the build stands at (−3, 517) with `MESH_TRACE_OBSERVED=1`
    (`-meshAutoMode stand -meshWalkX -3 -meshWalkZ 517`). Read its `MeshRemote` lines as well as `MeshObserved`: the
    stall trace follows only characters within 30 m, so a character sent to a garbage position never shows there.
-4. **Push the CE-14 upstream patch** (`upstream/0010`, with its PR text in `upstream/PR-0010.md`): it applies to `develop`
-   at dc025c2 but has not been compiled there (upstream's LiteNetLibManager moved since f43d0c0), so the PR's CI is its
-   first build. On 2026-10-30 the harness refused the push from a session (a new public branch): it needs the user's own
-   hand or a permission rule. Branch off `develop` as `client-migration-kept-objects`, `git am`, PR into `develop`.
-5. **The rig regression** passed all 34 scenarios on the code of 1.29 and the default eight on 1.30 (2026-10-30; the 3 h
-   `soak` not run). To run it:
+4. **The kit copy is upstream `master` at 493df35fc (1.33).** CE-14 is upstream (PR 28) and no `MESH-EDIT` marker is left. No
+   release has it yet, so the package names `master` at 05ec55012 as its minimum: when a release does, name that. A later
+   sync is a three-way merge, not a copy (`upstream/README.md`).
+5. **The rig regression** passed all 34 scenarios on the code of 1.29 and the default eight on 1.33, on upstream `master`
+   (2026-10-30; `party`'s `hurtTarget` check is flaky, and the other 26 and the 3 h `soak` were not run on this kit). To run it:
    enable the five BaseDemo and TestMap scenes in Build Settings, open BaseInit-CE, then
    `python -u Tools/ServerMeshing/regress.py --build <scenarios>` (name the scenarios: `--build` alone only builds), then
    restore Build Settings and DemoMesh8kInit. `Config/mySqlConfig.json` is here and MySQL80 runs. A full run takes ~3 h.
-6. **Run the full EditMode suite** after any further core edit (3,218 tests; `WebSocketClientSendTests.
+6. **Run the full EditMode suite** after any further core edit (4,403 tests, three of which fail by construction in
+   `MessageRoundTripTests`, DESIGN 1.33; `WebSocketClientSendTests.
    ReusedWriter_SendsOwnedPayloadsInOrder` is timing-flaky and passes alone).
 
 ## Gotchas found on the way

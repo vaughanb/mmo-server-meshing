@@ -1017,6 +1017,10 @@ namespace MultiplayerARPG.MMO.Mesh
                 BasePlayerCharacterEntity entity = data as BasePlayerCharacterEntity;
                 if (entity == null || entity.IsWarping || _handoffsInProgress.Contains(entity.Id))
                     continue;
+                // The kit teleports a respawning player first and restores its HP after, with the connection marked
+                // proceeding throughout: a handoff in between would seat the player dead on the new cell (DESIGN 1.33).
+                if (entity.IsDead() && proceedingConnectionIds.Contains(entity.ConnectionId))
+                    continue;
                 if (_handoffRetryAfter.TryGetValue(entity.Id, out float retryAt))
                 {
                     if (Time.unscaledTime < retryAt)

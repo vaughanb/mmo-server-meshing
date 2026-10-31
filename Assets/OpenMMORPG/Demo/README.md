@@ -1,7 +1,7 @@
 # Open MMORPG Demo
 
 A small island with a village, three enemy families, a rideable horse and a dungeon,
-built to show the kit running end to end: the MMO flow (`Scenes/00Init` -> `01Home` ->
+built to show the kit running end to end: the MMO flow (`Scenes/00Init` -> `01Home` -> `DemoMap`) and singleplayer flow (`Scenes/00Init-Singleplayer` -> `01Home-Singleplayer` ->
 `DemoMap`), character creation with a choice of body, height, skin tone, hairstyle, hair colour and beard,
 three classes with six skills each, looted armour sets, harvesting, quests, an inn and a bank, and a second
 map - the Cultist Crypt (`Scenes/DemoDungeon`), reached through the crypt door in the

@@ -187,7 +187,7 @@ namespace LiteNetLibManager
 #endif
         public long ConnectionId { get; internal set; } = -1;
 
-        // MESH-EDIT: CE-14 — client migration keeps its objects and adopts them. See Docs/ServerMeshing/DESIGN.md §17.
+        // Client migration keeps its objects and adopts them.
         /// <summary>Kept by a migrating client, waiting for the new server to spawn (adopt) it.</summary>
         public bool IsKept { get; internal set; }
         /// <summary>True during the spawn callbacks of a spawn that adopted this kept object (it was live before).</summary>

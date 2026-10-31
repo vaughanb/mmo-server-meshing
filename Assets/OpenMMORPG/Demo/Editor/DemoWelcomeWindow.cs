@@ -65,6 +65,7 @@ namespace MultiplayerARPG.Demo.EditorTools
         private const string ServerProfilePath = DemoDir + "/Build Profiles/Demo Map Server.asset";
         private const string ClientProfilePath = DemoDir + "/Build Profiles/Demo Client.asset";
         private const string FirstScenePath = DemoDir + "/Scenes/00Init.unity";
+        private const string SingleplayerFirstScenePath = DemoDir + "/Scenes/00Init-Singleplayer.unity";
         private const string ReadmePath = "Assets/OpenMMORPG/README.md";
         private const string LogoPath = DemoDir + "/Textures/OpenMMORPG-title.png";
         private const string FallbackLogoPath = "Assets/OpenMMORPG/Resources/OpenMMORPG.png";
@@ -173,14 +174,19 @@ namespace MultiplayerARPG.Demo.EditorTools
             if (GUILayout.Button("Show Client Profile", GUILayout.Height(24)))
                 Reveal(ClientProfilePath);
             EditorGUILayout.EndHorizontal();
-
             Step(heading, wrap, "4. Play",
                 "Open the 00Init scene and press Play. It starts the login, central, database and map " +
                 "spawn servers in the editor and shows the server list; register an account, make a " +
-                "character and start.");
+                "character and start. Or open 00Init-Singleplayer to play locally in singleplayer mode " +
+                "without building the map server.");
+            EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button("Open 00Init", GUILayout.Height(24)) &&
                 EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
                 EditorSceneManager.OpenScene(FirstScenePath);
+            if (GUILayout.Button("Open 00Init-Singleplayer", GUILayout.Height(24)) &&
+                EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
+                EditorSceneManager.OpenScene(SingleplayerFirstScenePath);
+            EditorGUILayout.EndHorizontal();
 
             GUILayout.Space(14);
             GUILayout.Label("More", heading);

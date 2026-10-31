@@ -7,8 +7,10 @@ follow the cut and a central that can restart (`Documentation/SETUP.md` §6a). A
 manager and entity prefabs plus one world-registry asset; the package changes no kit file. It builds on eight small kit
 changes (`Documentation/DESIGN.md` §17) and the kit's slot-indexed damage amounts (upstream 74ec05b), all of them in
 OpenMMORPG v1.1.4 (`master` at 317d2b8, 2026-10-25) or later. Since 0.97.0 it also needs the kit's signed-cell
-quantized positions (open-mmorpg/OpenMMORPG PR 11, `QuantizedPosition`), whose record format it writes; the add-on
-does not compile on an older kit (`Documentation/SETUP.md` §3), and servers and clients must run the same kit build.
+quantized positions (open-mmorpg/OpenMMORPG PR 11, `QuantizedPosition`), whose record format it writes, and the kit's
+client migration (PR 28, `MigrateClient`), on `master` from 05ec55012 (2026-10-30) and in no release yet: v1.2.1 does not
+have it. The add-on does not compile on an older kit (`Documentation/SETUP.md` §3), and servers and clients must run
+the same kit build.
 
 ## Package
 
@@ -22,7 +24,7 @@ Server Meshing ▸ Build Packages** menu. 0.96.1 leaves it out, but an import ne
 
 | Folder | Contents | Needs |
 |---|---|---|
-| `Mesh/`, `Documentation/` | the add-on (runtime + Editor) and its docs (the setup guide, the design record and the two-machine guide) | OpenMMORPG v1.1.4 or later with PR 11's quantized positions (all eight kit changes the add-on relies on, the damage amounts structs and `QuantizedPosition`) |
+| `Mesh/`, `Documentation/` | the add-on (runtime + Editor) and its docs (the setup guide, the design record and the two-machine guide) | OpenMMORPG `master` at 05ec55012 or later (all eight kit changes the add-on relies on, the damage amounts structs, `QuantizedPosition` and client migration) |
 
 ## Start here
 

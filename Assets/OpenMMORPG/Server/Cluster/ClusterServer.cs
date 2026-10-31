@@ -664,7 +664,8 @@ RequestProceedResultDelegate<ResponseChannelsMessage> result)
             if (_centralNetworkManager.Channels.TryGetValue(channelId, out ChannelData channelData))
             {
 
-                if (CountUsers(channelId) >= channelData.maxConnections)
+                int maxConnections = channelData.maxConnections <= 0 ? _centralNetworkManager.defaultChannelMaxConnections : channelData.maxConnections;
+                if (CountUsers(channelId) >= maxConnections)
                 {
                     result.InvokeError(EmptyMessage.Value);
                     return;
