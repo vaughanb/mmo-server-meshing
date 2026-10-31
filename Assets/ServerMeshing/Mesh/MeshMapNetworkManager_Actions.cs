@@ -13,6 +13,7 @@
 // mesh id and is re-resolved on arrival. Damage, buffs and resources are untouched: they happen on the owner.
 using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
+using LiteNetLib;
 using LiteNetLib.Utils;
 using LiteNetLibManager;
 using UnityEngine;
@@ -23,6 +24,7 @@ namespace MultiplayerARPG.MMO.Mesh
     {
         ApplyBuff = 1,
         GiveItems = 2,   // a harvest yield earned by a ghost: item dataId, amount, exp (see MeshHarvestableEntity)
+        Chat = 3,        // a local chat said within range of this cell's player by someone across the line: the ChatMessage (MeshServerChatHandlers)
     }
 
     public enum GhostReplayKind : ushort
@@ -50,6 +52,7 @@ namespace MultiplayerARPG.MMO.Mesh
             _ghostActionHandlers.Clear();
             _ghostActionHandlers[(ushort)GhostActionKind.ApplyBuff] = HandleApplyBuffAction;
             _ghostActionHandlers[(ushort)GhostActionKind.GiveItems] = HandleGiveItemsAction;
+            _ghostActionHandlers[(ushort)GhostActionKind.Chat] = HandleChatAction;
             _ghostReplayHandlers.Clear();
             _ghostReplayHandlers[(ushort)GhostReplayKind.Attack] = HandleAttackReplay;
             _ghostReplayHandlers[(ushort)GhostReplayKind.AttackTrigger] = HandleAttackTriggerReplay;
@@ -307,6 +310,15 @@ namespace MultiplayerARPG.MMO.Mesh
                 target.RewardExp(exp, 1, RewardGivenType.Harvestable, 1, 1);
             if (traceHandoffTiming)
                 Logging.Log("Mesh", $"Ghost action GiveItems applied on {target.CharacterName}: item {dataId} x{amount}, exp {exp}");
+        }
+
+        /// <summary>A local chat said within range of this cell's player by someone standing across the line: delivered to the player's client as the kit would (DESIGN 1.37).</summary>
+        private void HandleChatAction(BaseCharacterEntity target, EntityInfo instigator, NetDataReader payload)
+        {
+            ChatMessage message = payload.Get<ChatMessage>();
+            if (!(target is BasePlayerCharacterEntity player) || player.ConnectionId < 0)
+                return;
+            ServerSendPacket(player.ConnectionId, 0, DeliveryMethod.ReliableUnordered, GameNetworkingConsts.Chat, message);
         }
 
         /// <summary>Entity-side helper: the payload of a GiveItems action.</summary>

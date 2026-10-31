@@ -119,6 +119,7 @@ namespace MultiplayerARPG.MMO.Mesh
             // Load storage
             StorageId storageId = new StorageId(StorageType.Player, userId);
             await LoadStorageRoutine(storageId);
+            MarkArrivalLoaded(playerCharacterEntity); // DESIGN 1.37: a storage it had open on the origin reopens now
         }
 
         /// <summary>Whether this connection still holds this entity: false once the player left or was handed on.</summary>

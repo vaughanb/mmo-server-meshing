@@ -18,7 +18,8 @@
 // ClearRadius around the start stays empty, as around a first town, and the land around that is never quiet. A herd stands
 // in sight across the cell edge and a row of harvestables stands on it, so a new character sees the map's life from where
 // it starts and can harvest across a line within seconds. Mushrooms and iron, which DemoMap spawns none of, join the
-// harvestables. They spawn meshed copies of the demo's prefabs, made
+// harvestables. The demo's banker and merchant stand on that edge too, talked to from either cell (DESIGN 1.37).
+// The areas spawn meshed copies of the demo's prefabs, made
 // under Monsters/ and Harvestables/: the add-on's subclasses swapped in (MeshMonsterCharacterEntity,
 // MeshCharacterAttackComponent, mesh versions of the demo's line-of-sight AI and interrupt-chance skills,
 // MeshHarvestableEntity), each with a network asset id of its own. The demo's prefabs stay as they are. Without the demo
@@ -139,6 +140,13 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         public static readonly Vector3 StartHerdPosition = new Vector3(-50f, GroundHeight, StartPosition.z - 14f);
         public const float StartHerdRadius = 18f;
         public const int StartHerdSize = 6;
+        /// <summary>NPCs on the cell edge beside the start (DESIGN 1.37): the demo's banker, for storage, and its merchant, for a shop, each a step off the patrols' lane, facing the start.</summary>
+        private static readonly (string prefab, string dialog, float north)[] StartNpcs =
+        {
+            ("Assets/OpenMMORPG/Demo/Prefabs/GamePlay/CharacterEntities/DemoKeeper.prefab", "Assets/OpenMMORPG/Demo/GameData/Resources/NpcDialogs/BankerGreeting.asset", 18f),
+            ("Assets/OpenMMORPG/Demo/Prefabs/GamePlay/CharacterEntities/DemoVillager.prefab", "Assets/OpenMMORPG/Demo/GameData/Resources/NpcDialogs/MerchantGreeting.asset", -18f),
+        };
+        public const string NpcRoot = "Npcs";
         public const int Seed = 8192;
 
         /// <summary>SpawnPlan is how one kind of spawn area spreads over the map: a jittered grid of points, each taken by a chance the land sets.</summary>
@@ -252,7 +260,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 return false;
             Scene scene = OpenOrCreateScene();
             foreach (GameObject root in scene.GetRootGameObjects())
-                if (root.name == MonsterPlan.root || root.name == NodePlan.root)
+                if (root.name == MonsterPlan.root || root.name == NodePlan.root || root.name == NpcRoot)
                     UnityEngine.Object.DestroyImmediate(root);
             string spawns = CreateSpawnAreas(mixes);
             EditorSceneManager.MarkSceneDirty(scene);
@@ -488,7 +496,31 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             string monsters = PlaceAreas<MonsterSpawnArea, BaseMonsterCharacterEntity>(MonsterPlan, mixes.monsters);
             string nodes = PlaceAreas<HarvestableSpawnArea, HarvestableEntity>(NodePlan, mixes.harvestables);
             CreateStartSights();
+            CreateStartNpcs();
             return monsters + "; " + nodes;
+        }
+
+        /// <summary>CreateStartNpcs stands the demo's banker and merchant on the cell edge beside the start, on the line itself, facing east into the start cell.</summary>
+        private static void CreateStartNpcs()
+        {
+            GameObject root = new GameObject(NpcRoot);
+            foreach ((string prefabPath, string dialogPath, float north) in StartNpcs)
+            {
+                GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
+                BaseNpcDialog dialog = AssetDatabase.LoadAssetAtPath<BaseNpcDialog>(dialogPath);
+                if (prefab == null || dialog == null || prefab.GetComponent<NpcEntity>() == null)
+                {
+                    Debug.LogWarning($"Large map: no NPC at {prefabPath} or no dialog at {dialogPath}; that NPC is left out");
+                    continue;
+                }
+                GameObject npc = (GameObject)PrefabUtility.InstantiatePrefab(prefab);
+                npc.name = prefab.name;
+                npc.transform.SetParent(root.transform, false);
+                npc.transform.SetPositionAndRotation(new Vector3(0f, GroundHeight, StartPosition.z + north), Quaternion.Euler(0f, 90f, 0f));
+                SerializedObject so = new SerializedObject(npc.GetComponent<NpcEntity>());
+                so.FindProperty("startDialog").objectReferenceValue = dialog;
+                so.ApplyModifiedPropertiesWithoutUndo();
+            }
         }
 
         /// <summary>CreateStartSights stands what a new character sees first, whatever the land around the start came out as.</summary>

@@ -1137,6 +1137,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 // The destination keeps its ghost of this character until the real one registers there (no blink for
                 // its observers): make sure neither the unregister nor the next snapshot tick sends it a GhostRemove.
                 GhostingOnPlayerHandoffStart(characterId, zone.id);
+                BeginStorageHandoff(connectionId); // DESIGN 1.37: what it has open crosses with it instead of closing
                 UnregisterPlayerCharacter(connectionId);
                 DataUpdater.PlayerCharacterDataSaved(characterId);
 

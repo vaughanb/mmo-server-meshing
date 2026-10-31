@@ -57,7 +57,7 @@ right for a sandbox where towns can appear anywhere.
   0008 (`MeshMapNetworkManager` overrides the property, §6a.8), Dynamic maps or not; `MeshKitEditTests` fails if a kit
   update drops either.
 - The add-on also needs the kit's client migration ([open-mmorpg/OpenMMORPG#28](https://github.com/open-mmorpg/OpenMMORPG/pull/28): `MigrateClient` and kept
-  objects, patch 0010, DESIGN.md 1.01). No release carries it yet: v1.2.1 does not, and `master` does from 05ec55012. 0.97.21
+  objects, patch 0010, DESIGN.md 1.01). No release carries it yet: v1.2.1 does not, and `master` does from 05ec55012. 0.97.22
   was built and tested on `master` at 493df35fc.
 - From 0.95.0 the add-on also needs the kit's slot-indexed damage amounts (`DamageElementMinMaxFloatAmounts`, upstream
   74ec05b, on `develop` since 2026-10-07 and in v1.1.4): its attack and skill components, the harvestable and the

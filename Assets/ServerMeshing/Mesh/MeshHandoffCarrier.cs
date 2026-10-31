@@ -39,10 +39,14 @@ namespace MultiplayerARPG.MMO.Mesh
     {
         private static readonly List<IMeshHandoffCarrier> s_found = new List<IMeshHandoffCarrier>();
 
-        /// <summary>The gameplay rule, if it carries, then the player's carrying components.</summary>
+        /// <summary>The carriers the add-on brings for every player (DESIGN 1.37: the NPC dialog and storages a player has open).</summary>
+        public static readonly List<IMeshHandoffCarrier> BuiltIn = new List<IMeshHandoffCarrier> { new MeshInteractionCarrier() };
+
+        /// <summary>The built-in carriers, the gameplay rule if it carries, then the player's carrying components.</summary>
         private static List<IMeshHandoffCarrier> CarriersOf(BasePlayerCharacterEntity player)
         {
             s_found.Clear();
+            s_found.AddRange(BuiltIn);
             if (GameInstance.Singleton != null && GameInstance.Singleton.GameplayRule is IMeshHandoffCarrier rule)
                 s_found.Add(rule);
             if (player != null)

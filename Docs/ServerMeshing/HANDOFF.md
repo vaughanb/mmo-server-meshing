@@ -335,6 +335,11 @@ Where the work stands, how to get it running on another machine, and what is lef
    Compare near with away per metre, and read an arm of 150 s or more: two of 90 s differed by 2x. If a destination dies in the notice's window the crosser stands about 2.4 s and goes back 9.5 m (a crash path).
    Settings (1.34): a new map manager's puppets are kinematic; the demo's 60 fps and 60 Hz stay the project's choice, and Setup warns with the numbers (gap 55 to 29 ms, about
    40 % more cell CPU, traffic not measured). A ~510 ms hop now and then is the editor client's own GC (`with a GC` on the CONTINUITY line), not the crossing.
+   A local chat reaches the players across a line, and an NPC dialog or a player or guild storage open at a hop crosses with it (1.37,
+   `MeshInteractionHandlers.cs`: the kit's chat and storage handlers wrapped in `SetServerHandlersRef`, and the first built-in
+   `IMeshHandoffCarrier`). The 8 km map's banker and merchant stand on the line beside the start to try it: talk to the banker from one
+   side, step over, open the strongbox, step back. A chest's storage still closes at a hop; trades, invitations and duels across a line
+   are still refused with the kit's messages; a shop dialog crosses by the same code but was not run.
 2. **Monsters at a crossing (1.23, 1.28):** a lone monster chases a player across a Static map's line, hits
    through the ghost, and is handed over with its target; a monster that walks over a line on its own walks on
    (1.28: the handoff carries its walk and its AI's wander bookkeeping), and monster puppets are led by the NavMesh

@@ -224,6 +224,8 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private void Start()
         {
+            ClientGenericActions.onClientReceiveChatMessage -= OnChatReceived;
+            ClientGenericActions.onClientReceiveChatMessage += OnChatReceived;
             StartCoroutine(Run());
             StartCoroutine(WatchMoveSpeedOverride());
             if (Application.isBatchMode)
@@ -366,6 +368,12 @@ namespace MultiplayerARPG.MMO.Mesh
                 }
                 yield return null;   // after this frame's Updates: a manager created in it is off before its first Update
             }
+        }
+
+        /// <summary>Every chat this client receives, for the chat-across-a-line check (DESIGN 1.37): `chat <channel> from <name>: <text>`.</summary>
+        private void OnChatReceived(ChatMessage message)
+        {
+            Log($"chat {message.channel} from {message.senderName}: {message.message}");
         }
 
         private void Log(string msg)
