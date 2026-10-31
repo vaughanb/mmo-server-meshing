@@ -1,6 +1,6 @@
 // Server Meshing test rig — builds the 8 km test map, everything of it under ServerMeshingDemo/ (the builder, the scene
-// and its terrain and navmesh, the map info): a flat 8,192 m Unity Terrain with every cell edge painted on it, a 16 x 16 grid of monster spawn areas
-// (one every 512 m, jittered, never within 128 m of a cell edge), a navmesh baked off the terrain collider, its map info,
+// and its terrain and navmesh, the map info): a flat 8,192 m Unity Terrain with every cell edge painted on it, monster and
+// harvestable spawn areas spread as a game's land would be, a navmesh baked off the terrain collider, its map info,
 // and its 8 x 8 layout of 1,024 m cells in the world registry. The layout sits 20 km north of the other test maps in the
 // shared frame, so it touches neither and has no seams.
 //
@@ -11,11 +11,18 @@
 // fog are the kit demo's (DemoMap's directional light, its DayNightSkyCycle and its lighting settings), so the map looks
 // and reads like the demo's; without the demo it gets a plain directional light.
 //
-// Its monsters are the demo's: each spawn area takes one of DemoMap's monster spawn areas (monster, level range, group
-// size, radius), picked by seed. They spawn meshed copies of the demo's monster prefabs, made under Monsters/: the
-// add-on's subclasses swapped in (MeshMonsterCharacterEntity, MeshCharacterAttackComponent, and mesh versions of the
-// demo's line-of-sight AI and interrupt-chance skills), each with a network asset id of its own. The demo's prefabs
-// stay as they are. Without the demo the areas spawn BaseEnemy-CE.
+// Its spawns are the demo's, spread over the map from a seed: each area takes one of DemoMap's spawn areas (what, level
+// range, group size, radius). Slow noise makes stretches of land busy or quiet, so some cells are crowded and some nearly
+// empty, and a busy stretch has more areas and bigger ones. Nothing is kept off a cell edge: camps stand on the lines, as
+// they would in a game whose designers never think about cells. Monsters get harder with distance from the start, and
+// ClearRadius around the start stays empty, as around a first town, and the land around that is never quiet. A herd stands
+// in sight across the cell edge and a row of harvestables stands on it, so a new character sees the map's life from where
+// it starts and can harvest across a line within seconds. Mushrooms and iron, which DemoMap spawns none of, join the
+// harvestables. They spawn meshed copies of the demo's prefabs, made
+// under Monsters/ and Harvestables/: the add-on's subclasses swapped in (MeshMonsterCharacterEntity,
+// MeshCharacterAttackComponent, mesh versions of the demo's line-of-sight AI and interrupt-chance skills,
+// MeshHarvestableEntity), each with a network asset id of its own. The demo's prefabs stay as they are. Without the demo
+// the areas spawn BaseEnemy-CE and there are no harvestables.
 //
 // The scene is generated: every root is rebuilt on each run except one named "Authored", which is kept as it is. Put
 // hand-placed additions under it. The map info, database entry, build-settings entry and registry layout are updated in
@@ -62,6 +69,9 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         public const string MonsterPrefabPath = "Assets/BaseDemo/Prefabs/GamePlay/CharacterEntities/BaseEnemy-CE.prefab";
         /// <summary>MonsterFolder holds the meshed copies of the demo's monster prefabs.</summary>
         public const string MonsterFolder = Folder + "/Monsters";
+        /// <summary>HarvestableFolder holds the meshed copies of the demo's harvestable prefabs.</summary>
+        public const string HarvestableFolder = Folder + "/Harvestables";
+        public const string DemoHarvestableFolder = "Assets/OpenMMORPG/Demo/Prefabs/GamePlay/Harvestables";
         public const string AuthoredRoot = "Authored";
         /// <summary>The kit demo's map, whose light, sky cycle and lighting settings the 8 km map copies.</summary>
         public const string DemoMapScenePath = "Assets/OpenMMORPG/Demo/Scenes/DemoMap.unity";
@@ -102,11 +112,58 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         public const int EdgeAlphamapResolution = 2048;
         public static readonly Color EdgeColor = new Color(0.85f, 0.22f, 0.12f);
 
-        /// <summary>SpawnSpacing is the distance between spawn-area grid points (16 x 16 of them).</summary>
-        public const float SpawnSpacing = 512f;
-        /// <summary>SpawnJitter is how far an area may stray from its grid point on each axis.</summary>
-        public const float SpawnJitter = 128f;
+        /// <summary>ClearRadius keeps the map's spawns this far from the start, as around a first town. It is about the 80 m view, so they come into sight within steps; the crossing rig's patrols run inside it.</summary>
+        public const float ClearRadius = 90f;
+        /// <summary>Land within StarterLandRadius of the start is at least StarterBusy busy at ClearRadius, fading out: a first zone is never empty.</summary>
+        public const float StarterLandRadius = 1200f, StarterBusy = 0.7f;
+        /// <summary>HardestDistance from the start is where the hardest monster mixes begin; the ones between rise with distance.</summary>
+        public const float HardestDistance = 4000f;
+        /// <summary>MixWindow is how many mixes to either side of its distance's own an area may take.</summary>
+        public const int MixWindow = 2;
+        /// <summary>LandScale is the size of the busy and quiet stretches of land in metres, about a cell.</summary>
+        public const float LandScale = 1400f;
+        /// <summary>The noise values at and below which land is quiet, and at and above which it is busy.</summary>
+        public const float QuietNoise = 0.3f, BusyNoise = 0.65f;
+        /// <summary>BusyCampRate is what busy land multiplies an area's group size by: a demo area is a group, a busy one a camp.</summary>
+        public const float BusyCampRate = 2f;
+        /// <summary>The row of harvestables on the cell edge beside the start: on the east cell, its centre a metre over the line, in reach from both cells, north of the patrols' lane. One of each tool's.</summary>
+        private static readonly (string prefab, int amount, float north)[] StartRow =
+        {
+            (HarvestableFolder + "/Harvest_CommonTree_1.prefab", 6, 44f),
+            (HarvestableFolder + "/Harvest_Mushroom_Common.prefab", 6, 64f),
+            (HarvestableFolder + "/Harvest_Rock_Medium_1.prefab", 3, 80f),
+        };
+        public const float StartRowX = 1f, StartRowWidth = 4f, StartRowLength = 16f;
+        /// <summary>A herd across the line from the start, in sight of a new character, south of the patrols' lane. Deer start no fight.</summary>
+        public const string StartHerdPrefab = MonsterFolder + "/DemoDeer.prefab";
+        public static readonly Vector3 StartHerdPosition = new Vector3(-50f, GroundHeight, StartPosition.z - 14f);
+        public const float StartHerdRadius = 18f;
+        public const int StartHerdSize = 6;
         public const int Seed = 8192;
+
+        /// <summary>SpawnPlan is how one kind of spawn area spreads over the map: a jittered grid of points, each taken by a chance the land sets.</summary>
+        private struct SpawnPlan
+        {
+            public string root;
+            public float spacing, jitter;
+            public float quietChance, busyChance;
+            public float landOffset; // its own noise: forests do not follow the camps
+            public bool harderWithDistance;
+            public int seed;
+        }
+
+        private static readonly SpawnPlan MonsterPlan = new SpawnPlan
+        {
+            root = "MonsterSpawns", spacing = 128f, jitter = 56f, quietChance = 0.05f, busyChance = 0.85f,
+            landOffset = 0f, harderWithDistance = true, seed = Seed,
+        };
+
+        /// <summary>A patch of trees or rocks is wider than a camp, so there are fewer of them.</summary>
+        private static readonly SpawnPlan NodePlan = new SpawnPlan
+        {
+            root = "HarvestableSpawns", spacing = 256f, jitter = 112f, quietChance = 0.02f, busyChance = 0.7f,
+            landOffset = 37.3f, harderWithDistance = false, seed = Seed + 2,
+        };
 
         [MenuItem("Tools/Open MMORPG/Server Meshing/Testing/Build 8 km Test Map")]
         public static void Menu()
@@ -114,6 +171,14 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
                 return;
             Build();
+        }
+
+        [MenuItem("Tools/Open MMORPG/Server Meshing/Testing/Build 8 km Test Map Spawns")]
+        public static void SpawnsMenu()
+        {
+            if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
+                return;
+            BuildSpawns();
         }
 
         /// <summary>BuildFromCommandLine is the batch-mode entry point; it exits 0 on success and 1 on failure.</summary>
@@ -142,8 +207,8 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 return false;
             }
             EnsureFolder(AssetFolder);
-            List<SpawnTemplate> templates = SpawnTemplates();
-            if (templates == null)
+            SpawnMixes mixes = LoadSpawnMixes();
+            if (mixes == null)
                 return false;
 
             Scene scene = OpenOrCreateScene();
@@ -158,7 +223,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             // reference loaded before it dead: assigned, it saves as nothing. So everything assigned below is loaded here.
             world = AssetDatabase.LoadAssetAtPath<MeshWorldRegistry>(WorldPath);
             CreateZoneManager(world);
-            int areas = CreateSpawnAreas(templates, out int monsters);
+            string spawns = CreateSpawnAreas(mixes);
             CreateSpawnPoint();
             BakeNavMesh(terrain);
 
@@ -168,7 +233,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 Debug.LogError("Large map error: the scene could not be saved at " + ScenePath);
                 return false;
             }
-            Debug.Log($"Large map: scene {ScenePath}, {MapSize:0} m terrain, {areas} monster spawn areas, about {monsters} monsters");
+            Debug.Log($"Large map: scene {ScenePath}, {MapSize:0} m terrain, {spawns}");
 
             MapInfo mapInfo = EnsureMapInfo();
             AddToDatabase(mapInfo);
@@ -176,6 +241,27 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             AddLayout(world);
             CheckGameplayRule();
             AssetDatabase.SaveAssets();
+            return true;
+        }
+
+        /// <summary>BuildSpawns replaces the map's spawn areas and leaves the rest of the scene as it is: no terrain, no navmesh bake.</summary>
+        public static bool BuildSpawns()
+        {
+            SpawnMixes mixes = LoadSpawnMixes();
+            if (mixes == null)
+                return false;
+            Scene scene = OpenOrCreateScene();
+            foreach (GameObject root in scene.GetRootGameObjects())
+                if (root.name == MonsterPlan.root || root.name == NodePlan.root)
+                    UnityEngine.Object.DestroyImmediate(root);
+            string spawns = CreateSpawnAreas(mixes);
+            EditorSceneManager.MarkSceneDirty(scene);
+            if (!EditorSceneManager.SaveScene(scene, ScenePath))
+            {
+                Debug.LogError("Large map error: the scene could not be saved at " + ScenePath);
+                return false;
+            }
+            Debug.Log($"Large map: {ScenePath}, {spawns}");
             return true;
         }
 
@@ -397,51 +483,126 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             go.AddComponent<ServerMeshZoneBootstrap>();
         }
 
-        private static int CreateSpawnAreas(List<SpawnTemplate> templates, out int monsters)
+        private static string CreateSpawnAreas(SpawnMixes mixes)
         {
-            GameObject root = new GameObject("MonsterSpawns");
-            System.Random random = new System.Random(Seed);
-            System.Random pick = new System.Random(Seed + 1); // its own stream: the areas' places do not depend on the mix
-            Dictionary<string, BaseMonsterCharacterEntity> prefabs = templates.Select(t => t.prefabPath).Distinct()
-                .ToDictionary(p => p, p => AssetDatabase.LoadAssetAtPath<GameObject>(p).GetComponent<BaseMonsterCharacterEntity>());
-            int perSide = Mathf.RoundToInt(MapSize / SpawnSpacing);
-            float first = -MapSize * 0.5f + SpawnSpacing * 0.5f;
+            string monsters = PlaceAreas<MonsterSpawnArea, BaseMonsterCharacterEntity>(MonsterPlan, mixes.monsters);
+            string nodes = PlaceAreas<HarvestableSpawnArea, HarvestableEntity>(NodePlan, mixes.harvestables);
+            CreateStartSights();
+            return monsters + "; " + nodes;
+        }
+
+        /// <summary>CreateStartSights stands what a new character sees first, whatever the land around the start came out as.</summary>
+        private static void CreateStartSights()
+        {
+            GameObject nodes = GameObject.Find(NodePlan.root), monsters = GameObject.Find(MonsterPlan.root);
+            GameObject herd = AssetDatabase.LoadAssetAtPath<GameObject>(StartHerdPrefab);
+            if (monsters != null && herd != null)
+            {
+                SpawnTemplate deer = new SpawnTemplate { minLevel = 1, maxLevel = 2, minAmount = StartHerdSize, maxAmount = StartHerdSize, radius = StartHerdRadius };
+                AddArea<MonsterSpawnArea>(monsters.transform, "Spawn8k_StartHerd", StartHerdPosition, deer, herd.GetComponent<BaseMonsterCharacterEntity>(), MonsterPlan.seed - 1);
+            }
+            if (nodes == null)
+                return;
+            int seed = NodePlan.seed - 1;
+            foreach ((string path, int amount, float north) in StartRow)
+            {
+                GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+                if (prefab == null)
+                    continue;
+                SpawnTemplate row = new SpawnTemplate { minLevel = 1, maxLevel = 1, minAmount = amount, maxAmount = amount };
+                Vector3 position = new Vector3(StartRowX, GroundHeight, StartPosition.z + north);
+                SerializedObject so = AddArea<HarvestableSpawnArea>(nodes.transform, "Spawn8k_StartRow_" + prefab.name, position, row, prefab.GetComponent<HarvestableEntity>(), seed--);
+                so.FindProperty("type").enumValueIndex = (int)GameAreaType.Square;
+                so.FindProperty("squareSizeX").floatValue = StartRowWidth;
+                so.FindProperty("squareSizeZ").floatValue = StartRowLength;
+                so.ApplyModifiedPropertiesWithoutUndo();
+            }
+        }
+
+        /// <summary>AddArea makes one spawn area under the root, a radius one; the caller may change its shape on what it returns.</summary>
+        private static SerializedObject AddArea<TArea>(Transform root, string name, Vector3 position, SpawnTemplate template, Component prefab, int seed) where TArea : GameSpawnArea
+        {
+            GameObject go = new GameObject(name);
+            go.transform.SetParent(root, false);
+            go.transform.position = position;
+            SerializedObject so = new SerializedObject(go.AddComponent<TArea>());
+            so.FindProperty("type").enumValueIndex = (int)GameAreaType.Radius;
+            so.FindProperty("randomRadius").floatValue = template.radius;
+            so.FindProperty("groundFindingType").enumValueIndex = (int)GameAreaGroundFindingType.NavMesh;
+            so.FindProperty("randomPositionSeed").intValue = seed;
+            so.FindProperty("minLevel").intValue = template.minLevel;
+            so.FindProperty("maxLevel").intValue = template.maxLevel;
+            so.FindProperty("minAmount").intValue = template.minAmount;
+            so.FindProperty("maxAmount").intValue = template.maxAmount;
+            so.FindProperty("prefab").objectReferenceValue = prefab;
+            so.ApplyModifiedPropertiesWithoutUndo();
+            return so;
+        }
+
+        /// <summary>PlaceAreas spreads one kind of spawn area over the map and says how it came out.</summary>
+        private static string PlaceAreas<TArea, TEntity>(SpawnPlan plan, List<SpawnTemplate> templates) where TArea : GameSpawnArea where TEntity : Component
+        {
+            if (templates.Count == 0)
+                return plan.root + ": no spawn mixes";
+            GameObject root = new GameObject(plan.root);
+            System.Random random = new System.Random(plan.seed);
+            System.Random pick = new System.Random(plan.seed + 1); // its own stream: the areas' places do not depend on the mix
+            Dictionary<string, TEntity> prefabs = templates.Select(t => t.prefabPath).Distinct()
+                .ToDictionary(p => p, p => AssetDatabase.LoadAssetAtPath<GameObject>(p).GetComponent<TEntity>());
+            Dictionary<Vector2Int, float> perCell = new Dictionary<Vector2Int, float>();
+            int perSide = Mathf.RoundToInt(MapSize / plan.spacing);
+            float first = -MapSize * 0.5f + plan.spacing * 0.5f;
             int count = 0;
             float expected = 0f;
             for (int gy = 0; gy < perSide; gy++)
             {
                 for (int gx = 0; gx < perSide; gx++)
                 {
-                    float x = first + gx * SpawnSpacing + Jitter(random);
-                    float z = first + gy * SpawnSpacing + Jitter(random);
-                    SpawnTemplate template = templates[pick.Next(templates.Count)];
-                    BaseMonsterCharacterEntity prefab = prefabs[template.prefabPath];
-                    GameObject go = new GameObject($"Spawn8k_{gx:00}_{gy:00}_{prefab.name}");
-                    go.transform.SetParent(root.transform, false);
-                    go.transform.position = new Vector3(x, GroundHeight, z);
-                    MonsterSpawnArea area = go.AddComponent<MonsterSpawnArea>();
-                    SerializedObject so = new SerializedObject(area);
-                    so.FindProperty("type").enumValueIndex = (int)GameAreaType.Radius;
-                    so.FindProperty("randomRadius").floatValue = template.radius;
-                    so.FindProperty("groundFindingType").enumValueIndex = (int)GameAreaGroundFindingType.NavMesh;
-                    so.FindProperty("randomPositionSeed").intValue = Seed + count;
-                    so.FindProperty("minLevel").intValue = template.minLevel;
-                    so.FindProperty("maxLevel").intValue = template.maxLevel;
-                    so.FindProperty("minAmount").intValue = template.minAmount;
-                    so.FindProperty("maxAmount").intValue = template.maxAmount;
-                    so.FindProperty("prefab").objectReferenceValue = prefab;
-                    so.ApplyModifiedPropertiesWithoutUndo();
-                    expected += (template.minAmount + template.maxAmount) * 0.5f;
+                    float x = first + gx * plan.spacing + Jitter(random, plan.jitter);
+                    float z = first + gy * plan.spacing + Jitter(random, plan.jitter);
+                    double roll = random.NextDouble();
+                    float fromStart = new Vector2(x - StartPosition.x, z - StartPosition.z).magnitude;
+                    SpawnTemplate template = templates[plan.harderWithDistance ? MixAt(fromStart, templates.Count, pick) : pick.Next(templates.Count)];
+                    float busy = Mathf.Max(Busyness(x, z, plan.landOffset), StarterBusy * Mathf.InverseLerp(StarterLandRadius, ClearRadius, fromStart));
+                    float rate = Mathf.Lerp(1f, BusyCampRate, busy);
+                    float radius = template.radius * Mathf.Sqrt(rate);
+                    if (roll >= Mathf.Lerp(plan.quietChance, plan.busyChance, busy) || fromStart < ClearRadius + radius)
+                        continue;
+                    SpawnTemplate scaled = template;
+                    scaled.radius = radius;
+                    scaled.minAmount = Mathf.Max(1, Mathf.RoundToInt(template.minAmount * rate));
+                    scaled.maxAmount = Mathf.Max(scaled.minAmount, Mathf.RoundToInt(template.maxAmount * rate));
+                    TEntity prefab = prefabs[template.prefabPath];
+                    AddArea<TArea>(root.transform, $"Spawn8k_{gx:00}_{gy:00}_{prefab.name}", new Vector3(x, GroundHeight, z), scaled, prefab, plan.seed + count);
+                    float amount = (scaled.minAmount + scaled.maxAmount) * 0.5f;
+                    expected += amount;
+                    Vector2Int cell = new Vector2Int(Mathf.FloorToInt((x + MapSize * 0.5f) / CellSize), Mathf.FloorToInt((z + MapSize * 0.5f) / CellSize));
+                    perCell.TryGetValue(cell, out float inCell);
+                    perCell[cell] = inCell + amount;
                     count++;
                 }
             }
-            monsters = Mathf.RoundToInt(expected);
-            return count;
+            return $"{plan.root}: {count} areas, about {expected:0} entities ({expected / (MapSize * MapSize / 1000000f):0} per km2), " +
+                   $"cells {perCell.Values.Min():0} to {perCell.Values.Max():0}";
+        }
+
+        /// <summary>Busyness is how busy the land is at a point, 0 quiet to 1 busy. Slow noise, so neighbouring land is alike.</summary>
+        private static float Busyness(float x, float z, float landOffset)
+        {
+            float noise = Mathf.PerlinNoise((x + MapSize) / LandScale + landOffset, (z + MapSize) / LandScale + landOffset);
+            return Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(QuietNoise, BusyNoise, noise));
+        }
+
+        /// <summary>MixAt picks a mix from a list sorted easiest first: near the start the easy ones, from HardestDistance the hardest.</summary>
+        private static int MixAt(float fromStart, int mixes, System.Random pick)
+        {
+            int own = Mathf.RoundToInt(Mathf.Clamp01(fromStart / HardestDistance) * (mixes - 1));
+            return Mathf.Clamp(own + pick.Next(-MixWindow, MixWindow + 1), 0, mixes - 1);
         }
 
         // ---------------------------------------------------------------- monsters
 
-        /// <summary>SpawnTemplate is one spawn area's settings: which monster, how strong, how many, how spread.</summary>
+        /// <summary>SpawnTemplate is one spawn area's settings: what it spawns, how strong, how many, how spread.</summary>
         private struct SpawnTemplate
         {
             public string prefabPath;
@@ -449,8 +610,25 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             public float radius;
         }
 
-        /// <summary>The kit demo's spawn mixes (DemoMap's monster spawn areas, on meshed copies), or BaseEnemy-CE without it.</summary>
-        private static List<SpawnTemplate> SpawnTemplates()
+        /// <summary>Harvestables the demo has prefabs for and DemoMap spawns none of: mushrooms, for any blade or staff, and iron, for a pick.</summary>
+        private static readonly SpawnTemplate[] ExtraNodes =
+        {
+            new SpawnTemplate { prefabPath = DemoHarvestableFolder + "/Harvest_Mushroom_Common.prefab", minLevel = 1, maxLevel = 1, minAmount = 8, maxAmount = 8, radius = 30f },
+            new SpawnTemplate { prefabPath = DemoHarvestableFolder + "/Harvest_Mushroom_Laetiporus.prefab", minLevel = 1, maxLevel = 1, minAmount = 8, maxAmount = 8, radius = 30f },
+            new SpawnTemplate { prefabPath = DemoHarvestableFolder + "/Harvest_IronVein_Rock_Medium_1.prefab", minLevel = 1, maxLevel = 1, minAmount = 4, maxAmount = 4, radius = 24f },
+            new SpawnTemplate { prefabPath = DemoHarvestableFolder + "/Harvest_IronVein_Rock_Medium_2.prefab", minLevel = 1, maxLevel = 1, minAmount = 4, maxAmount = 4, radius = 24f },
+            new SpawnTemplate { prefabPath = DemoHarvestableFolder + "/Harvest_IronVein_Rock_Medium_3.prefab", minLevel = 1, maxLevel = 1, minAmount = 4, maxAmount = 4, radius = 24f },
+        };
+
+        /// <summary>SpawnMixes is what the map's spawn areas draw from: monsters sorted easiest first, and harvestables.</summary>
+        private sealed class SpawnMixes
+        {
+            public List<SpawnTemplate> monsters = new List<SpawnTemplate>();
+            public List<SpawnTemplate> harvestables = new List<SpawnTemplate>();
+        }
+
+        /// <summary>The kit demo's spawn mixes (DemoMap's spawn areas, on meshed copies), or BaseEnemy-CE without it.</summary>
+        private static SpawnMixes LoadSpawnMixes()
         {
             if (!File.Exists(DemoMapScenePath))
             {
@@ -460,43 +638,62 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                     return null;
                 }
                 Debug.Log($"Large map: no {DemoMapScenePath}; the spawn areas spawn {MonsterPrefabPath}");
-                return new List<SpawnTemplate> { new SpawnTemplate { prefabPath = MonsterPrefabPath, minLevel = 1, maxLevel = 3, minAmount = 5, maxAmount = 5, radius = 40f } };
+                SpawnMixes plain = new SpawnMixes();
+                plain.monsters.Add(new SpawnTemplate { prefabPath = MonsterPrefabPath, minLevel = 1, maxLevel = 3, minAmount = 5, maxAmount = 5, radius = 40f });
+                return plain;
             }
-            List<SpawnTemplate> templates = new List<SpawnTemplate>();
+            SpawnMixes mixes = new SpawnMixes();
             Scene demo = EditorSceneManager.OpenScene(DemoMapScenePath, OpenSceneMode.Additive);
             try
             {
                 foreach (GameObject root in demo.GetRootGameObjects())
                 {
-                    foreach (MonsterSpawnArea area in root.GetComponentsInChildren<MonsterSpawnArea>(false))
-                    {
-                        SerializedObject so = new SerializedObject(area);
-                        UnityEngine.Object prefab = so.FindProperty("prefab").objectReferenceValue;
-                        if (prefab == null) continue;
-                        templates.Add(new SpawnTemplate
-                        {
-                            prefabPath = AssetDatabase.GetAssetPath(prefab),
-                            minLevel = area.minLevel, maxLevel = area.maxLevel, minAmount = area.minAmount, maxAmount = area.maxAmount,
-                            radius = so.FindProperty("randomRadius").floatValue,
-                        });
-                    }
+                    AddTemplates<MonsterSpawnArea>(root, mixes.monsters);
+                    AddTemplates<HarvestableSpawnArea>(root, mixes.harvestables);
                 }
             }
             finally
             {
                 EditorSceneManager.CloseScene(demo, true);
             }
-            if (templates.Count == 0)
+            if (mixes.monsters.Count == 0)
             {
                 Debug.LogError($"Large map error: {DemoMapScenePath} has no monster spawn area");
                 return null;
             }
+            mixes.harvestables.AddRange(ExtraNodes.Where(t => File.Exists(t.prefabPath)));
+            if (!UseMeshedCopies(mixes.monsters, MonsterFolder, MonsterSwaps) || !UseMeshedCopies(mixes.harvestables, HarvestableFolder, HarvestableSwaps))
+                return null;
+            mixes.monsters = mixes.monsters.OrderBy(t => t.minLevel + t.maxLevel).ThenBy(t => t.prefabPath, StringComparer.Ordinal).ToList();
+            Debug.Log($"Large map: {mixes.monsters.Count} monster and {mixes.harvestables.Count} harvestable spawn mixes from {DemoMapScenePath}");
+            return mixes;
+        }
+
+        private static void AddTemplates<TArea>(GameObject root, List<SpawnTemplate> templates) where TArea : GameSpawnArea
+        {
+            foreach (TArea area in root.GetComponentsInChildren<TArea>(false))
+            {
+                SerializedObject so = new SerializedObject(area);
+                UnityEngine.Object prefab = so.FindProperty("prefab").objectReferenceValue;
+                if (prefab == null) continue;
+                templates.Add(new SpawnTemplate
+                {
+                    prefabPath = AssetDatabase.GetAssetPath(prefab),
+                    minLevel = area.minLevel, maxLevel = area.maxLevel, minAmount = area.minAmount, maxAmount = area.maxAmount,
+                    radius = so.FindProperty("randomRadius").floatValue,
+                });
+            }
+        }
+
+        /// <summary>UseMeshedCopies points the mixes at meshed copies of their prefabs, made under the folder; false on failure.</summary>
+        private static bool UseMeshedCopies(List<SpawnTemplate> templates, string folder, (Type from, Type to)[] swaps)
+        {
             Dictionary<string, string> copies = new Dictionary<string, string>();
             foreach (string source in templates.Select(t => t.prefabPath).Distinct())
             {
-                string copy = MeshedMonsterCopy(source);
+                string copy = MeshedCopy(source, folder, swaps);
                 if (copy == null)
-                    return null;
+                    return false;
                 copies[source] = copy;
             }
             for (int i = 0; i < templates.Count; i++)
@@ -505,8 +702,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 t.prefabPath = copies[t.prefabPath];
                 templates[i] = t;
             }
-            Debug.Log($"Large map: {templates.Count} spawn mixes from {DemoMapScenePath}, {copies.Count} meshed monster copies in {MonsterFolder}");
-            return templates;
+            return true;
         }
 
         /// <summary>Exact types swapped on a monster copy: each kit or demo component for its meshed version (fields kept).</summary>
@@ -520,11 +716,17 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             (typeof(DefaultCharacterAttackComponent), typeof(MeshCharacterAttackComponent)),
         };
 
-        /// <summary>MeshedMonsterCopy makes or refreshes Monsters/&lt;name&gt; from a demo monster prefab; null on failure.</summary>
-        private static string MeshedMonsterCopy(string source)
+        /// <summary>The same for a harvestable copy: its yield reaches an attacker standing across a line.</summary>
+        private static readonly (Type from, Type to)[] HarvestableSwaps =
         {
-            EnsureFolder(MonsterFolder);
-            string copy = MonsterFolder + "/" + Path.GetFileName(source);
+            (typeof(HarvestableEntity), typeof(MeshHarvestableEntity)),
+        };
+
+        /// <summary>MeshedCopy makes or refreshes &lt;folder&gt;/&lt;name&gt; from a demo prefab; null on failure.</summary>
+        private static string MeshedCopy(string source, string folder, (Type from, Type to)[] swaps)
+        {
+            EnsureFolder(folder);
+            string copy = folder + "/" + Path.GetFileName(source);
             if (File.Exists(copy))
             {
                 File.Copy(source, copy, true); // a rerun keeps the copy's guid
@@ -538,7 +740,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             GameObject contents = PrefabUtility.LoadPrefabContents(copy);
             try
             {
-                foreach ((Type from, Type to) in MonsterSwaps)
+                foreach ((Type from, Type to) in swaps)
                 {
                     MonoScript script = ScriptOf(to);
                     foreach (Component component in contents.GetComponentsInChildren(from, true).Where(c => c != null && c.GetType() == from).ToList())
@@ -559,7 +761,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 PrefabUtility.UnloadPrefabContents(contents);
             }
             GameObject saved = AssetDatabase.LoadAssetAtPath<GameObject>(copy);
-            foreach ((Type from, Type to) in MonsterSwaps)
+            foreach ((Type from, Type to) in swaps)
             {
                 if (saved.GetComponentsInChildren(from, true).Any(c => c != null && c.GetType() == from))
                 {
@@ -590,9 +792,9 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             throw new InvalidOperationException("No MonoScript for " + type.FullName);
         }
 
-        private static float Jitter(System.Random random)
+        private static float Jitter(System.Random random, float jitter)
         {
-            return (float)(random.NextDouble() * 2.0 - 1.0) * SpawnJitter;
+            return (float)(random.NextDouble() * 2.0 - 1.0) * jitter;
         }
 
         private static void CreateSpawnPoint()

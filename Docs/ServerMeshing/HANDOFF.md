@@ -22,10 +22,14 @@ Where the work stands, how to get it running on another machine, and what is lef
      - the demo's grass, with every cell edge painted red under a see-through curtain;
      - the demo's light, sky cycle and fog;
      - no scene camera;
-     - the demo's monsters: meshed copies in `Monsters/`, spawned in the demo map's mixes;
-     - start point (25, 512), 25 m inside cell (4,4), facing the edge with (3,4).
+     - about 10,000 monsters and 5,500 harvestables spread like a game's land (DESIGN 1.36): the demo's, on meshed
+       copies in `Monsters/` and `Harvestables/`, busy and quiet stretches, harder further from the start, camps on the lines;
+     - start point (25, 512), 25 m inside cell (4,4), facing the edge with (3,4): 90 m around it is clear, but for six deer
+       across the line and a row of trees, mushrooms and rocks on it, north of the start. Trees need an axe and rocks a pick:
+       both are in every class's starting bag, to equip. Bots and patrols stay in the clear.
    - Menus, under **Tools ▸ Open MMORPG ▸ Server Meshing ▸ Testing**:
      - **Build 8 km Test Map** regenerates the map;
+     - **Build 8 km Test Map Spawns** replaces only its spawns, without a navmesh bake;
      - **Build 8 km Demo Copy** regenerates `DemoMesh8kInit`;
      - **Build 8 km Demo Cells and Player** builds `Build/DemoMesh8kCells` (the map servers, a Server build)
        and `Build/DemoMesh8k` (a player, for headless bots).

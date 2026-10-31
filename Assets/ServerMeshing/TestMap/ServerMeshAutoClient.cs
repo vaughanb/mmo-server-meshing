@@ -887,6 +887,8 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 self = GameInstance.PlayingCharacterEntity;
                 if (self == null || self.IsDead()) break;
+                if (self.IsWeaponsSheathed && self.IsOwnerClient)
+                    self.IsWeaponsSheathed = false; // the demo starts characters sheathed, and a sheathed character's Attack does nothing
                 HarvestableEntity target = null; float best = float.MaxValue;
                 foreach (HarvestableEntity he in FindObjectsByType<HarvestableEntity>(FindObjectsSortMode.None))
                 {
@@ -921,8 +923,8 @@ namespace MultiplayerARPG.MMO.Mesh
                         bool isLeftHand = false;
                         self.AimPosition = self.GetAttackAimPosition(ref isLeftHand, target.EntityTransform.position + Vector3.up);
                         WeaponHandlingState whs = WeaponHandlingState.None;
-                        self.Attack(ref whs);
-                        attacks++;
+                        if (self.Attack(ref whs))
+                            attacks++;
                     }
                 }
                 if (now >= nextLog)
@@ -942,8 +944,8 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             int expGain = self != null ? (self.Level > levelStart ? self.Exp + 1 : self.Exp - expStart) : 0;
             bool hurt = nodeHpStart > 0 && minNodeHp < nodeHpStart;
-            Log($"RESULT harvest: nodesSeen={nodesSeen} attacks={attacks} nodeHurt={hurt} nodeHp {nodeHpStart}->{minNodeHp} itemsGained=[{string.Join(",", gained)}] exp+{expGain} -> {(nodesSeen > 0 && attacks > 0 ? "PASS" : "FAIL")}");
-            Finished = true; Passed = nodesSeen > 0 && attacks > 0;
+            Log($"RESULT harvest: nodesSeen={nodesSeen} attacks={attacks} nodeHurt={hurt} nodeHp {nodeHpStart}->{minNodeHp} itemsGained=[{string.Join(",", gained)}] exp+{expGain} -> {(nodesSeen > 0 && attacks > 0 && hurt ? "PASS" : "FAIL")}");
+            Finished = true; Passed = nodesSeen > 0 && attacks > 0 && hurt;
         }
 
         /// <summary>
