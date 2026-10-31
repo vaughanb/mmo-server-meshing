@@ -17,8 +17,13 @@ namespace MultiplayerARPG.MMO.Mesh
     public class MeshCharacterUseSkillComponent : DefaultCharacterUseSkillComponent
     {
 #if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
+        private int _triggersPaid;
+
         protected override UniTaskVoid UseSkillRoutine(long peerTimestamp, UseSkillState simulateState)
         {
+            _triggersPaid = 0;
+            OnUseSkillTrigger -= CountTrigger;
+            OnUseSkillTrigger += CountTrigger;
             if (_manager == null)
                 _manager = GetComponent<CharacterActionComponentManager>(); // see MeshCharacterAttackComponent
             if (MeshActionTrace.Enabled)
@@ -52,6 +57,29 @@ namespace MultiplayerARPG.MMO.Mesh
             base.ApplySkillUsing(skill, skillLevel, weaponHandlingState, weapon, simulateSeed, triggerIndex, damageAmounts, targetObjectId, aimPosition);
         }
 
+        private void CountTrigger(int triggerIndex)
+        {
+            _triggersPaid = triggerIndex + 1; // the routine pays for it in the same frame, with no wait between
+        }
+
+        /// <summary>Origin side (DESIGN 1.35): what the routine the demotion cancels has not taken yet: the skill's resources per trigger, and the item that cast it.</summary>
+        public void SettleInFlight()
+        {
+            if (!TryGetInFlight(out MeshCarriedAction action) || !GameInstance.Skills.TryGetValue(action.skillDataId, out BaseSkill skill))
+                return;
+            int left = action.TriggersAfter(_triggersPaid);
+            if (left <= 0)
+                return;
+            if (MeshActionTrace.Enabled)
+                MeshActionTrace.Log(Entity, $"skill settled seed={action.seed} triggers={left}{(action.itemDataId != 0 ? $" item={action.itemDataId}" : string.Empty)}");
+            bool isLeftHand = ((WeaponHandlingState)action.weaponHandlingState).Has(WeaponHandlingState.IsLeftHand);
+            Entity.GetUsingSkillData(skill, ref isLeftHand, out _, out _, out CharacterItem weapon, out _);
+            for (int i = 0; i < left; ++i)
+                skill.DecreaseResources(Entity, weapon, isLeftHand, out _);
+            if (action.itemDataId != 0 && Entity.DecreaseItems(action.itemDataId, 1))
+                Entity.FillEmptySlots();
+        }
+
         /// <summary>Origin side (DESIGN 1.06): the skill in flight at a crossing (see MeshCharacterAttackComponent.TryGetInFlight).</summary>
         public bool TryGetInFlight(out MeshCarriedAction action)
         {
@@ -78,8 +106,7 @@ namespace MultiplayerARPG.MMO.Mesh
 
         /// <summary>
         /// Destination side: mirrors the kit's UseSkillRoutine preparation (see MeshCharacterAttackComponent.PrepareCarried).
-        /// Not carried: a usable item the kit takes after the last trigger. Whether the origin's routine got that far before
-        /// the crossing is not visible from here, so it is left as it was (DESIGN 1.06, open items).
+        /// What the action costs was settled on the origin (DESIGN 1.35).
         /// </summary>
         public void PrepareCarried(MeshCarriedAction action)
         {

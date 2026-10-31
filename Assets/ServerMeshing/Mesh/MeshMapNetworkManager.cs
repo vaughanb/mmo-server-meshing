@@ -117,8 +117,30 @@ namespace MultiplayerARPG.MMO.Mesh
             world = MeshLayoutOverride.Resolve(world); // rig: MESH_LAYOUT_OVERRIDE re-cuts maps for a test run
             InstallSendMeter();
             InstallClientLatency();
+            InstallClientLink();
             InstallStateSender();
             base.Awake();
+        }
+
+        /// <summary>Rig: MESH_CLIENT_NET puts this manager's client connections on a network with loss and jitter (MeshLinkTransport).</summary>
+        private void InstallClientLink()
+        {
+            if (!MeshLinkConditions.TryParse(System.Environment.GetEnvironmentVariable(MeshLinkTransportFactory.EnvironmentKey), out MeshLinkConditions conditions, out string warning))
+            {
+                if (warning != null)
+                    Logging.LogWarning("Mesh", warning);
+                return;
+            }
+            BaseTransportFactory kit = TransportFactory;
+            if (kit == null)
+                kit = GetComponent<BaseTransportFactory>();
+            if (kit == null)
+                kit = null; // a missing component is a Unity fake null; the wrapping factory must see a real one
+            MeshLinkTransportFactory link = gameObject.AddComponent<MeshLinkTransportFactory>();
+            link.Inner = kit;
+            link.Conditions = conditions;
+            TransportFactory = link;
+            Logging.Log("Mesh", $"{MeshLinkTransportFactory.EnvironmentKey}: client connections are on a network of {conditions}");
         }
 
         /// <summary>Rig: MESH_CLIENT_LATENCY_MS delays this manager's client traffic each way (MeshLatencyTransport).</summary>
@@ -1094,8 +1116,11 @@ namespace MultiplayerARPG.MMO.Mesh
             Vector3 rotation = entity.CurrentRotation;
             // Lead the saved position by the expected gap so the neighbour spawns the character where the
             // client's dead-reckoned stand-in will be, instead of ~gap*speed behind it.
-            Vector3 velocity = _velocities.TryGetValue(characterId, out VelocitySample vs) ? vs.vel : Vector3.zero;
+            VehicleEntity riding = entity.PassengingVehicleEntity as VehicleEntity;
+            if (!TryStampedVelocity(riding != null ? riding.ObjectId : entity.ObjectId, out Vector3 velocity))
+                velocity = _velocities.TryGetValue(characterId, out MeshCrossingVelocity vs) ? vs.velocity : Vector3.zero;
             velocity.y = 0f;
+            velocity = MeshCrossingVelocity.Capped(velocity, riding != null ? riding.GetMoveSpeed() : entity.GetMoveSpeed());
             Vector3 savePosition = position + velocity * Mathf.Max(0f, handoffLeadSeconds);
             // The row is read by the destination, in ITS frame (the same frame inside a map; a neighbouring map's frame
             // sits at a fixed offset, so a seam crossing is a frame change and a map change in one hop).
@@ -1121,6 +1146,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 string handoffUserId = ServerUserHandlers.TryGetUserId(connectionId, out string uid) ? uid : entity.UserId;
                 if (inMemoryHandoffState && ServerUserHandlers.TryGetAccessToken(connectionId, out string accessToken) && !string.IsNullOrEmpty(accessToken) && !string.IsNullOrEmpty(handoffUserId))
                 {
+                    SettleInFlightAction(entity); // DESIGN 1.35: before the copy, which is the character from here on
                     PlayerCharacterData snapshot = entity.CloneTo(new PlayerCharacterData());
                     snapshot.CurrentMapName = mapName;
                     snapshot.CurrentPosition = savePosition;
@@ -1227,11 +1253,13 @@ namespace MultiplayerARPG.MMO.Mesh
                 Logging.LogError("Mesh", $"Handoff row {name} ({characterId}) -> zone {zoneId} NOT written ({sw.ElapsedMilliseconds}ms); the destination holds the state and its own saves write it");
         }
 
-        private struct VelocitySample { public Vector3 pos; public Vector3 vel; public float t; }
-        private readonly Dictionary<string, VelocitySample> _velocities = new Dictionary<string, VelocitySample>();
+        private readonly Dictionary<string, MeshCrossingVelocity> _velocities = new Dictionary<string, MeshCrossingVelocity>();
 
         [Tooltip("Velocity samples above this (m/s) are treated as teleports/respawns and ignored for lead prediction.")]
         public float handoffMaxLeadSpeed = 15f;
+
+        [Tooltip("The time constant of the crossing velocity, in seconds: long enough to average over a client's states arriving unevenly (DESIGN 1.35).")]
+        public float handoffVelocitySeconds = 0.15f;
 
         [Tooltip("On handoff, keep the departing player's entity as a ghost puppet (steered by the new owner) instead of destroying it, so other players on this cell see no blink. The destination cell likewise keeps its ghost until the real character registers.")]
         public bool demotePlayerOnHandoff = true;
@@ -1241,15 +1269,9 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private void TrackVelocity(string characterId, Vector3 pos, float now)
         {
-            if (_velocities.TryGetValue(characterId, out VelocitySample s) && now - s.t > 0.0001f)
-            {
-                Vector3 v = (pos - s.pos) / (now - s.t);
-                if (v.magnitude > handoffMaxLeadSpeed)
-                    v = Vector3.zero; // teleport / respawn / spawn: not a walking velocity
-                _velocities[characterId] = new VelocitySample { pos = pos, vel = Vector3.Lerp(s.vel, v, 0.5f), t = now };
-            }
-            else
-                _velocities[characterId] = new VelocitySample { pos = pos, vel = Vector3.zero, t = now };
+            _velocities[characterId] = _velocities.TryGetValue(characterId, out MeshCrossingVelocity s)
+                ? s.Next(pos, now, handoffMaxLeadSpeed, handoffVelocitySeconds) // over the speed: a teleport, respawn or spawn, not a walking velocity
+                : new MeshCrossingVelocity { position = pos, time = now };
         }
 
         private void WarnThrottled(string message)

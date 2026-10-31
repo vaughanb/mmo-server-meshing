@@ -58,6 +58,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             (typeof(MonsterActivityComponent), typeof(MeshMonsterActivityComponent)),
             (typeof(DefaultCharacterAttackComponent), typeof(MeshCharacterAttackComponent)),
             (typeof(DefaultCharacterUseSkillComponent), typeof(MeshCharacterUseSkillComponent)),
+            (typeof(DefaultCharacterChargeComponent), typeof(MeshCharacterChargeComponent)),
             (typeof(HarvestableEntity), typeof(MeshHarvestableEntity)),
         };
 

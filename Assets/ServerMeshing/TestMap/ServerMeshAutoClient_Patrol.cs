@@ -27,6 +27,8 @@ namespace MultiplayerARPG.MMO.Mesh
         public bool swingAtWarp = false;
         [Tooltip("With attackWhileWalking or swingAtWarp: cast this skill (data id; it must be learned) instead of a plain attack, so a skill is in flight at crossings (DESIGN 1.21).")]
         public int castSkillWhileWalking = 0;
+        [Tooltip("Charge the weapon for this many seconds at a time while patrolling, with a second between, so a charge is in progress at crossings (DESIGN 1.35; 0: never).")]
+        public float chargeWhileWalkingSeconds = 0f;
         private int _swings, _gapSwings, _facedSwings, _warpSwings;
 
         /// <summary>Draws the weapon again whenever the demo puts it away, while <paramref name="running"/>.</summary>
@@ -57,6 +59,24 @@ namespace MultiplayerARPG.MMO.Mesh
         }
 
         private static bool IsHopping => BaseGameNetworkManager.Singleton is MeshMapNetworkManager mesh && mesh.IsClientHopping;
+
+        /// <summary>Charges for chargeWhileWalkingSeconds, rests a second, and again, while <paramref name="running"/>.</summary>
+        private IEnumerator ChargeWhile(System.Func<bool> running)
+        {
+            while (running())
+            {
+                BasePlayerCharacterEntity self = GameInstance.PlayingCharacterEntity;
+                if (self != null && !self.IsDead())
+                {
+                    self.ChargeComponent.StartCharge(false);
+                    yield return new WaitForSecondsRealtime(chargeWhileWalkingSeconds);
+                    self = GameInstance.PlayingCharacterEntity;
+                    if (self != null)
+                        self.ChargeComponent.StopCharge();
+                }
+                yield return new WaitForSecondsRealtime(1f);
+            }
+        }
 
         /// <summary>
         /// Swings while <paramref name="running"/>, walking a random 0.6-1.4 s after each swing ends: a swing stops the walk
@@ -171,6 +191,8 @@ namespace MultiplayerARPG.MMO.Mesh
             StartCoroutine(PollMigrationsWhile(() => patrolling));
             if (attackWhileWalking)
                 StartCoroutine(SwingWhile(() => patrolling));
+            if (chargeWhileWalkingSeconds > 0f)
+                StartCoroutine(ChargeWhile(() => patrolling));
             MeshMapNetworkManager warpMesh = swingAtWarp ? BaseGameNetworkManager.Singleton as MeshMapNetworkManager : null;
             if (warpMesh != null)
             {

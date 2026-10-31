@@ -31,6 +31,8 @@ namespace MultiplayerARPG.MMO.Mesh
         AttackTrigger = 2,  // RpcSimulateActionTrigger: SimulateActionTriggerData
         Skill = 3,          // RpcUseSkill / RpcUseSkillItem: peerTimestamp, isItem, dataId, skillLevel, weaponHandlingState, aimPosition
         SkillTrigger = 4,   // RpcSimulateActionTrigger: SimulateActionTriggerData (target re-resolved)
+        ChargeStart = 5,    // RpcStartCharge: isLeftHand
+        ChargeStop = 6,     // RpcStopCharge: nothing
     }
 
     public partial class MeshMapNetworkManager
@@ -53,6 +55,8 @@ namespace MultiplayerARPG.MMO.Mesh
             _ghostReplayHandlers[(ushort)GhostReplayKind.AttackTrigger] = HandleAttackTriggerReplay;
             _ghostReplayHandlers[(ushort)GhostReplayKind.Skill] = HandleSkillReplay;
             _ghostReplayHandlers[(ushort)GhostReplayKind.SkillTrigger] = HandleSkillTriggerReplay;
+            _ghostReplayHandlers[(ushort)GhostReplayKind.ChargeStart] = HandleChargeStartReplay;
+            _ghostReplayHandlers[(ushort)GhostReplayKind.ChargeStop] = HandleChargeStopReplay;
         }
 
         /// <summary>
@@ -132,18 +136,57 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>Owner side: replay something on every puppet of an owned character (a no-op when nobody streams it).</summary>
         internal void ForwardGhostReplay(BaseCharacterEntity actor, GhostReplayKind kind, uint targetObjectId, System.Action<NetDataWriter> writePayload)
         {
-            if (!IsServer || actor == null || _streamedToZone.Count == 0)
+            if (!IsServer || actor == null)
                 return;
             string meshId = MeshEntityIdOf(actor);
+            string arrivedFrom = RecentOriginNotStreaming(meshId);
+            if (_streamedToZone.Count == 0 && arrivedFrom == null)
+                return;
             _actionWriter.Reset();
             writePayload?.Invoke(_actionWriter);
-            SendToZonesStreaming(meshId, MeshLinkMessageTypes.GhostReplay, new GhostReplayMessage
+            GhostReplayMessage replay = new GhostReplayMessage
             {
                 actorMeshId = meshId,
                 kind = (ushort)kind,
                 targetMeshId = MeshIdOfObject(targetObjectId),
                 payload = _actionWriter.CopyData(),
-            });
+            };
+            SendToZonesStreaming(meshId, MeshLinkMessageTypes.GhostReplay, replay);
+            if (arrivedFrom != null && _linkClients.TryGetValue(arrivedFrom, out MeshLinkClient origin) && origin.IsConnected)
+                origin.Send(MeshLinkMessageTypes.GhostReplay, replay);
+        }
+
+        private const float RecentOriginSeconds = 1f;
+        private readonly Dictionary<string, KeyValuePair<string, float>> _recentOrigins = new Dictionary<string, KeyValuePair<string, float>>();
+        private readonly List<string> _recentOriginsGone = new List<string>();
+
+        /// <summary>An arrival from <paramref name="zone"/>, and the ones whose second is up forgotten: most never replay anything.</summary>
+        private void NoteRecentOrigin(string meshId, string zone)
+        {
+            float now = Time.unscaledTime;
+            _recentOriginsGone.Clear();
+            foreach (KeyValuePair<string, KeyValuePair<string, float>> kv in _recentOrigins)
+                if (now >= kv.Value.Value)
+                    _recentOriginsGone.Add(kv.Key);
+            for (int i = 0; i < _recentOriginsGone.Count; ++i)
+                _recentOrigins.Remove(_recentOriginsGone[i]);
+            _recentOrigins[meshId] = new KeyValuePair<string, float>(zone, now + RecentOriginSeconds);
+        }
+
+        /// <summary>
+        /// The cell an arrival just left, while this cell is not streaming it there yet (DESIGN 1.35). Its puppet there still
+        /// shows the character, and a replay sent to nobody left a charge's stop unheard: it stayed in the charge pose.
+        /// </summary>
+        private string RecentOriginNotStreaming(string meshId)
+        {
+            if (!_recentOrigins.TryGetValue(meshId, out KeyValuePair<string, float> origin))
+                return null;
+            if (Time.unscaledTime >= origin.Value)
+            {
+                _recentOrigins.Remove(meshId);
+                return null;
+            }
+            return _streamedToZone.TryGetValue(origin.Key, out HashSet<string> streamed) && streamed.Contains(meshId) ? null : origin.Key;
         }
 
         private Vector3 _replayFrameOffset; // the sender's frame relative to ours, for the replay being handled
@@ -217,6 +260,18 @@ namespace MultiplayerARPG.MMO.Mesh
             SimulateActionTriggerData data = TranslateTrigger(payload.Get<SimulateActionTriggerData>());
             data.targetObjectId = targetObjectId;
             skill.ReplayTrigger(data);
+        }
+
+        private void HandleChargeStartReplay(BaseCharacterEntity puppet, uint targetObjectId, NetDataReader payload)
+        {
+            if (puppet.TryGetComponent(out MeshCharacterChargeComponent charge))
+                charge.ReplayStart(payload.GetBool());
+        }
+
+        private void HandleChargeStopReplay(BaseCharacterEntity puppet, uint targetObjectId, NetDataReader payload)
+        {
+            if (puppet.TryGetComponent(out MeshCharacterChargeComponent charge))
+                charge.ReplayStop();
         }
 
         // ---- action handlers: puppet to owner ----

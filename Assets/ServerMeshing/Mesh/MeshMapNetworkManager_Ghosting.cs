@@ -269,6 +269,8 @@ namespace MultiplayerARPG.MMO.Mesh
             _killHooks.Clear();
             _reservedArrivals.Clear();
             _incomingHandoffFrom.Clear();
+            _crossingCoasts.Clear();
+            _recentOrigins.Clear();
             _pendingHandoffAcks.Clear();
             _rolledBackHandoffs.Clear();
         }
@@ -1260,8 +1262,11 @@ namespace MultiplayerARPG.MMO.Mesh
             // reaches the arriving client too and snaps its character back to the saved spot, which a client that kept
             // moving through the hop (entity continuity, CE-14) has already walked past. Its own next state moves it on.
             // DESIGN 1.24: at least arrivalTeleportSeconds of the crossing speed, so a mount's steered puppet is not "far".
+            // DESIGN 1.35: the puppet coasts on along the crossing track through a slow hop, so it is judged from where the track is now.
             float crossingSpeed = _incomingHandoffFrom.TryGetValue(data.Id, out IncomingHandoff crossing) ? crossing.velocity.magnitude : 0f;
-            if (Vector3.Distance(standing, data.CurrentPosition) > Mathf.Max(arrivalTeleportDistance, crossingSpeed * arrivalTeleportSeconds))
+            Vector3 expected = crossingSpeed >= ArrivalWalkMinSpeed ? TrackAt(crossing.trackOrigin, crossing.time, crossing.velocity, Time.unscaledTime) : (Vector3)data.CurrentPosition;
+            expected.y = standing.y;
+            if (Vector3.Distance(standing, expected) > Mathf.Max(arrivalTeleportDistance, crossingSpeed * arrivalTeleportSeconds))
                 player.Teleport(data.CurrentPosition, Quaternion.Euler(data.CurrentRotation), true);
             player.ForceMakeCaches();
             player.FillEmptySlots();
@@ -1379,6 +1384,7 @@ namespace MultiplayerARPG.MMO.Mesh
             // run on, owned by the server now, and apply its triggers here. The observers' clients play their own copy.
             entity.AttackComponent?.CancelAttack();
             entity.UseSkillComponent?.CancelSkill();
+            entity.ChargeComponent?.ClearChargeStates(); // the destination holds it now, and tells this cell's observers when it stops (DESIGN 1.35)
             MakeGhostInPlace(entity, id, GhostKind.Player, newOwnerZone, riddenMount);
             SeedDemotedPuppet(entity, meshId, GhostKind.Player, velocity); // DESIGN 1.09: walks on until the destination's snapshots (MeshMapNetworkManager_ArrivalWalk)
             int pets = DemoteSummonsWith(entity, newOwnerZone);
@@ -1601,6 +1607,8 @@ namespace MultiplayerARPG.MMO.Mesh
             // A ghost already promoted for an arriving client: the departing cell's last snapshots are in flight; ignore.
             if (_reservedArrivals.ContainsKey(msg.characterId))
                 return;
+            if (_crossingCoasts.TryGetValue(msg.characterId, out MeshCrossingCoast coast) && coast.EndsOnSnapshot)
+                _crossingCoasts.Remove(msg.characterId); // the destination's first snapshot (DESIGN 1.35)
 
             if (!_ghosts.TryGetValue(msg.characterId, out MeshGhost ghost) || ghost.entity == null)
             {
@@ -3535,7 +3543,18 @@ namespace MultiplayerARPG.MMO.Mesh
                 return swing;
             if (entity.UseSkillComponent is MeshCharacterUseSkillComponent skill && skill.TryGetInFlight(out MeshCarriedAction cast))
                 return cast;
+            if (entity.ChargeComponent is MeshCharacterChargeComponent charge && charge.TryGetInFlight(out MeshCarriedAction charging))
+                return charging; // DESIGN 1.35
             return default;
+        }
+
+        /// <summary>Origin side (DESIGN 1.35), before the state is copied: the crossing character's action pays for what the demotion is about to cancel.</summary>
+        internal static void SettleInFlightAction(BaseCharacterEntity entity)
+        {
+            if (entity.AttackComponent is MeshCharacterAttackComponent attack)
+                attack.SettleInFlight();
+            if (entity.UseSkillComponent is MeshCharacterUseSkillComponent skill)
+                skill.SettleInFlight();
         }
 
         /// <summary>
@@ -3544,7 +3563,11 @@ namespace MultiplayerARPG.MMO.Mesh
         /// </summary>
         private void CarryInFlightAction(BasePlayerCharacterEntity playerCharacter)
         {
-            if (!_incomingHandoffFrom.TryGetValue(playerCharacter.Id, out IncomingHandoff incoming) || !incoming.action.IsSet)
+            if (!_incomingHandoffFrom.TryGetValue(playerCharacter.Id, out IncomingHandoff incoming))
+                return;
+            if (!string.IsNullOrEmpty(incoming.fromZone))
+                NoteRecentOrigin(playerCharacter.Id, incoming.fromZone);
+            if (!incoming.action.IsSet)
                 return;
             MeshCarriedAction action = incoming.action;
             incoming.action = default;
@@ -3552,6 +3575,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 attack.PrepareCarried(action);
             else if (action.kind == MeshCarriedActionKind.Skill && playerCharacter.UseSkillComponent is MeshCharacterUseSkillComponent skill)
                 skill.PrepareCarried(action);
+            else if (action.kind == MeshCarriedActionKind.Charge && playerCharacter.ChargeComponent is MeshCharacterChargeComponent charge)
+                charge.PrepareCarried(action);
             else
                 return;
             Stamp($"arrival {playerCharacter.CharacterName}: carried {action}");

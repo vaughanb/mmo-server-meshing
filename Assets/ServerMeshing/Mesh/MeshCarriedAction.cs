@@ -8,11 +8,17 @@
 // the handoff state; the destination prepares the same validation for the arriving character, and the origin cancels
 // its ghost's routine. Damage amounts are recomputed on the destination from the handed-off character, which is the
 // one the origin computed them from.
+//
+// DESIGN 1.35: on a client-owned character the server's own routine pays for an action trigger by trigger (ammunition, a
+// skill's resources) and takes a skill item after the last, and the demotion cancels that routine, so what it had not
+// reached was never paid: a skill item cast across a line was free. The origin now settles the rest as the state is
+// copied. A charge in progress crosses too (MeshCharacterChargeComponent). Not settled: a skill's OnAttack that overrides
+// the default attack, in which case the kit takes no ammunition and this does.
 using LiteNetLib.Utils;
 
 namespace MultiplayerARPG.MMO.Mesh
 {
-    public enum MeshCarriedActionKind : byte { None = 0, Attack = 1, Skill = 2 }
+    public enum MeshCarriedActionKind : byte { None = 0, Attack = 1, Skill = 2, Charge = 3 }
 
     public struct MeshCarriedAction : INetSerializable
     {
@@ -25,7 +31,13 @@ namespace MultiplayerARPG.MMO.Mesh
         public int skillLevel;
         public int itemDataId;
 
-        public bool IsSet => kind != MeshCarriedActionKind.None && triggerDurations != null && triggerDurations.Length > 0;
+        public bool IsSet => kind == MeshCarriedActionKind.Charge || (kind != MeshCarriedActionKind.None && triggerDurations != null && triggerDurations.Length > 0);
+
+        /// <summary>TriggersAfter is how many of the action's triggers come after the first <paramref name="paid"/>: what the origin still owes for.</summary>
+        public int TriggersAfter(int paid)
+        {
+            return System.Math.Max(0, (triggerDurations?.Length ?? 0) - paid);
+        }
 
         public void Serialize(NetDataWriter writer)
         {

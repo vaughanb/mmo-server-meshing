@@ -311,6 +311,8 @@ namespace MultiplayerARPG.MMO.Mesh
         private Vector3 _frameShift; // a seam crossing re-bases the world during the hop: old-frame samples are compared in the new frame
         internal void NoteFrameShift(Vector3 shift) { _frameShift += shift; }
 
+        private Vector3 _fallbackFrom;
+
         private IEnumerator MigrateSeamlessRoutine(string address, int port, bool isFallback = false)
         {
             _running = true;
@@ -318,7 +320,7 @@ namespace MultiplayerARPG.MMO.Mesh
             _inputUsedDuringGap = false;
             System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
             BasePlayerCharacterEntity prevEntity = GameInstance.PlayingCharacterEntity;
-            Vector3 posBefore = prevEntity != null ? prevEntity.EntityTransform.position : Vector3.zero;
+            Vector3 posBefore = prevEntity != null ? prevEntity.EntityTransform.position : isFallback ? _fallbackFrom : Vector3.zero;
             BasePlayerCharacterController controller = BasePlayerCharacterController.Singleton;
 
             if (_manager.debugCaptureMigrationFrames)
@@ -1045,6 +1047,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 _manager.EndMigration();
                 _running = false;
                 FallbackCount++;
+                _fallbackFrom = lastPlayer; // the character is gone by the time the routine starts, and a jump measured from nothing read 512 m (DESIGN 1.35)
                 StartCoroutine(MigrateSeamlessRoutine(_prevAddress, _prevPort, true));
                 yield break;
             }

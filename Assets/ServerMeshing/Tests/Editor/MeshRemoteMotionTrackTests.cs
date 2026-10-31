@@ -21,6 +21,43 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
         }
 
         [Test]
+        public void TryGetVelocity_BeforeTwoSamples_IsFalse()
+        {
+            MeshRemoteMotionTrack track = new MeshRemoteMotionTrack();
+            track.Add(1000, 1005, Vector3.zero, false);
+
+            Assert.That(track.TryGetVelocity(out _), Is.False);
+        }
+
+        [TestCase(0.0, 0.0)]
+        [TestCase(40.0, 0.0)]
+        [TestCase(40.0, 300.0)]
+        public void TryGetVelocity_ReadsTheStampsNotTheArrivals(double jitterMs, double holeMs)
+        {
+            MeshRemoteMotionTrack track = new MeshRemoteMotionTrack();
+            System.Random random = new System.Random(5);
+            double stamp = 1000.0;
+            for (int i = 0; i < 20; ++i)
+            {
+                stamp += Tick * 2.0;
+                if (i == 10)
+                    stamp += holeMs;
+                track.Add(stamp, stamp + 100.0 + random.NextDouble() * jitterMs, new Vector3((float)((stamp - 1000.0) / 1000.0) * Speed, 0f, 0f), false);
+                Assert.That(i == 0 || track.TryGetVelocity(out Vector3 velocity) && Mathf.Abs(velocity.x - Speed) < 0.01f, Is.True, $"sample {i}");
+            }
+        }
+
+        [Test]
+        public void NewestArrivalMs_IsTheLastAdd()
+        {
+            MeshRemoteMotionTrack track = new MeshRemoteMotionTrack();
+            track.Add(1000, 1005, Vector3.zero, false);
+            track.Add(1020, 1040, Vector3.right, false);
+
+            Assert.That(track.NewestArrivalMs, Is.EqualTo(1040.0));
+        }
+
+        [Test]
         public void TryPose_BeforeTwoSamples_IsFalse_AndLeavesTheCurrentPosition()
         {
             MeshRemoteMotionTrack track = new MeshRemoteMotionTrack();

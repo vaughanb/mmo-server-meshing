@@ -297,7 +297,7 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 BasePlayerCharacterEntity entity = candidates[i];
                 Vector3 world = OwnCell.SceneToWorld(entity.EntityTransform.position);
-                float speed = _velocities.TryGetValue(entity.Id, out VelocitySample sample) ? new Vector2(sample.vel.x, sample.vel.z).magnitude : 0f;
+                float speed = _velocities.TryGetValue(entity.Id, out MeshCrossingVelocity sample) ? new Vector2(sample.velocity.x, sample.velocity.z).magnitude : 0f;
                 if (!MeshHandoffPacer.IsDrain(_splitPrevOwned, world.x, world.z, speed))
                     continue;
                 candidates.RemoveAt(i);

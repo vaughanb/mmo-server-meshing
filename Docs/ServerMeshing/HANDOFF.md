@@ -297,12 +297,11 @@ Where the work stands, how to get it running on another machine, and what is lef
    localhost (median ~92) and all of it is server frames at 60 fps: enter-game in one, the client's ready in
    the next, the spawn on the sync tick after, plus the client's own frames. Nothing in it is the database or
    the connect. Next steps, in order:
-   - ammunition per trigger, a skill item taken after the last trigger and a charge in progress are not
-     carried (1.06). A skill cast in the warp's frame runs once on the destination (1.21, 24 of 24), but a skill
-     in flight on the origin at the handoff has not run, and the demo's skills cannot reach it: Cleave roots its
-     caster, and Charge's only trigger lands ~0.1 s after its start, before its dash moves the caster (12
-     charges at a deer across the line, 2026-10-29: all applied once, none in flight at a hop). It needs a
-     skill with a trigger late in a cast that lets its caster move (patrol `castSkillWhileWalking`). The 8 km demo's warrior MP is rage (empty at login,
+   - an action in flight at a crossing is carried and paid for (1.35): the origin settles the triggers its cancelled
+     routine had not reached, and takes a skill item; a charge crosses and shows across a line. A skill in flight has run
+     twice in 11 casts of a Cleave made walkable for the test (its stock asset roots the caster): edit `moveSpeedRateWhileUsingSkill`
+     and `requireItems`, build, patrol `castSkillWhileWalking`, and restore the asset. Patrol `chargeWhileWalkingSeconds` charges. A skill whose `OnAttack`
+     overrides the default attack pays ammunition at a crossing that the kit would not take. The 8 km demo's warrior MP is rage (empty at login,
      10 per hit, drains out of combat): build it by swinging before casting. Game state a cell holds outside the
      kit's data crosses only through an `IMeshHandoffCarrier` (1.22; the demo's combat timer is one);
    - remote motion (1.17–1.20): clients draw other characters from their states' timestamps, an arrival's first
@@ -326,8 +325,10 @@ Where the work stands, how to get it running on another machine, and what is lef
    On Mono the first hop of a session still compiles the hop's first-time code (12.6 ms, the adoption read
    is warmed up); an IL2CPP client has no JIT, but this Unity install's Windows support has no IL2CPP player, only the Server subtarget's.
    Real latency (1.30, `MESH_CLIENT_LATENCY_MS=<one way>` in the editor's environment before Play): the gap is one round
-   trip plus ~25 ms, on foot and mounted, up to the 200 ms measured. Not measured: latency on the observer's connection,
-   loss, jitter. An observer of a mounted rider still sees a stand or two and ~10 small steps per 100 s, away from the line.
+   trip plus ~25 ms, on foot and mounted, up to the 200 ms measured. An observer of a mounted rider still sees a stand or two and ~10 small steps per 100 s, away from the line.
+   A real network (1.35, `MESH_CLIENT_NET=<one way>,<jitter>,<loss %>[,<outage ms>]` for the crosser in the editor's environment and for a bot in its own, a UDP relay under LiteNetLib):
+   on 30/8/1 % the gap is 110 ms and an arrival steps at most 0.19 m; on 100/40/5 % it is 284 ms, max ~1.3 s, and stalls and lunges near the line are close to those away from it, in about 150 s a run.
+   Compare near with away per metre, and read an arm of 150 s or more: two of 90 s differed by 2x. If a destination dies in the notice's window the crosser stands about 2.4 s and goes back 9.5 m (a crash path).
    Settings (1.34): a new map manager's puppets are kinematic; the demo's 60 fps and 60 Hz stay the project's choice, and Setup warns with the numbers (gap 55 to 29 ms, about
    40 % more cell CPU, traffic not measured). A ~510 ms hop now and then is the editor client's own GC (`with a GC` on the CONTINUITY line), not the crossing.
 2. **Monsters at a crossing (1.23, 1.28):** a lone monster chases a player across a Static map's line, hits
@@ -349,14 +350,14 @@ Where the work stands, how to get it running on another machine, and what is lef
 4. **The kit copy is upstream `master` at 493df35fc (1.33).** CE-14 is upstream (PR 28) and no `MESH-EDIT` marker is left. No
    release has it yet, so the package names `master` at 05ec55012 as its minimum: when a release does, name that. A later
    sync is a three-way merge, not a copy (`upstream/README.md`).
-5. **The rig regression** passed all 34 scenarios on the code of 1.29 and the default eight on 1.33, on upstream `master`
-   (2026-10-30; `party`'s `hurtTarget` check is flaky, and the other 26 and the 3 h `soak` were not run on this kit). To run it:
+5. **The rig regression** passed all 34 scenarios on upstream `master` with kinematic puppets on the code of 1.35 (2026-10-31, 3,178 checks,
+   189 min; `party`'s `hurtTarget` check is flaky, and passed), and the 3 h `soak` 95 of 95 on the same code. To run it:
    enable the five BaseDemo and TestMap scenes in Build Settings, open BaseInit-CE, then
    `python -u Tools/ServerMeshing/regress.py --build <scenarios>` (name the scenarios: `--build` alone only builds), then
    restore Build Settings and DemoMesh8kInit. `Config/mySqlConfig.json` is here and MySQL80 runs. A full run takes ~3 h.
    To change a setting for a run pass `--env KEY=VALUE`: a variable set in the editor did not reach the cells (1.34). Confirm it in the cell logs before trusting a pass
    (`Puppet motion kinematic (from ...)`, `Puppets window`).
-6. **Run the full EditMode suite** after any further core edit (4,413 tests, three of which fail by construction in
+6. **Run the full EditMode suite** after any further core edit (4,476 tests, three of which fail by construction in
    `MessageRoundTripTests`, DESIGN 1.33; `WebSocketClientSendTests.
    ReusedWriter_SendsOwnedPayloadsInOrder` is timing-flaky and passes alone).
 

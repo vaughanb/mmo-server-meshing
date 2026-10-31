@@ -246,6 +246,19 @@ namespace MultiplayerARPG.MMO.Mesh
         }
 
         /// <summary>
+        /// The velocity of client-driven object <paramref name="id"/> from its client's stamped states (DESIGN 1.35): what
+        /// the client did, not when its states happened to arrive. False without a layer, or when its client has been quiet
+        /// long enough that it may have stopped.
+        /// </summary>
+        private bool TryStampedVelocity(uint id, out Vector3 velocity)
+        {
+            velocity = Vector3.zero;
+            return _sentMotionLayers.TryGetValue(id, out SentMotionLayer layer)
+                && _sentMotionClock.Elapsed.TotalMilliseconds - layer.track.NewestArrivalMs < MeshCrossingVelocity.StandSeconds * 1000f
+                && layer.track.TryGetVelocity(out velocity);
+        }
+
+        /// <summary>
         /// The arrival walk handed player <paramref name="id"/> back at <paramref name="position"/>, walking at
         /// <paramref name="velocity"/>: that path is sent until its client's states can be drawn, and their track starts from it.
         /// </summary>
@@ -288,6 +301,7 @@ namespace MultiplayerARPG.MMO.Mesh
 #else
         private void PoseSentPlayerMotion() { }
         private bool TryLayerSentMotion(uint id) { return false; }
+        private bool TryStampedVelocity(uint id, out Vector3 velocity) { velocity = Vector3.zero; return false; }
         private void LeadSentMotion(uint id, Vector3 position, Vector3 velocity, float now) { }
 #endif
     }

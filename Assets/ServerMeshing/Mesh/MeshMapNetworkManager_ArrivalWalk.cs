@@ -32,6 +32,12 @@
 // steers stands where that put it until the arrival registers: a round trip behind its track, a metre at a horse's speed
 // with 100 ms of latency. The walk then eased off that, and the snapshots the origin's puppet followed ran behind and
 // jumped at the client's first state. With nobody watching it, the walk starts on the track.
+//
+// DESIGN 1.35: the cap was half a second, and a client on a 200 ms round trip reaches that on a normal hop, a lost packet
+// well past it (a reliable resend is 25 ms plus 2.1 round trips). The character held at the cap and the client's first
+// state moved it the rest of the way in one frame: for anyone watching, a stand of up to 1.3 s and then 5.5 m in a frame.
+// The cap is 2 s now. That is far enough for a slope to show, so the walk follows the ground instead of keeping its height.
+// Before the walk starts, and until the origin hears from the destination, MeshCrossingCoast keeps both puppets on the track.
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -43,7 +49,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public bool walkArrivals = true;
 
         [Tooltip("Destination: the longest after the crossing an arriving character is walked on without its client's state, in seconds; past it, it holds.")]
-        public float arrivalWalkMaxSeconds = 0.5f;
+        public float arrivalWalkMaxSeconds = 2f;
 
         [Tooltip("Destination: how fast an arriving character's puppet pose eases onto its crossing track (the time constant, seconds).")]
         public float arrivalWalkEaseSeconds = 0.1f;
@@ -63,13 +69,19 @@ namespace MultiplayerARPG.MMO.Mesh
             public float since;
             public Vector3 written;
             public Transform moved;      // what the walk moves: the character, or the vehicle it rides (DESIGN 1.27)
+            public BaseGameEntity mover; // the entity of that transform, which finds the ground under it (DESIGN 1.35)
+            public bool onGround;
+            public float aboveGround;    // its height over what the kit's ground query answers, at the start
             public uint movedId;
             public Vector3 carry;        // the moved transform's position minus the character's, at the start
         }
 
         private const float ArrivalWalkStill = 0.0005f;
         private const float ArrivalWalkMinSpeed = 0.3f;
+        private const float ArrivalWalkGroundFind = 2f;
         private readonly List<ArrivalWalk> _arrivalWalks = new List<ArrivalWalk>();
+        private readonly Dictionary<string, MeshCrossingCoast> _crossingCoasts = new Dictionary<string, MeshCrossingCoast>();
+        private readonly List<string> _crossingCoastsDone = new List<string>();
         private readonly Dictionary<string, Vector3> _arrivalSnapshotVelocity = new Dictionary<string, Vector3>();
 
         /// <summary>Destination, as the arrival registers (its puppet just promoted): walk it along its crossing track until its client moves it.</summary>
@@ -79,6 +91,7 @@ namespace MultiplayerARPG.MMO.Mesh
             VehicleEntity ridden = entity != null ? entity.PassengingVehicleEntity as VehicleEntity : null;
             if (entity != null)
             {
+                _crossingCoasts.Remove(entity.Id);
                 _arrivalSnapshotVelocity[OwnedKeyOf(entity)] = velocity;
                 TryLayerSentMotion(entity.ObjectId); // DESIGN 1.20: its client's first states are read from the first one
                 if (ridden != null)
@@ -93,6 +106,8 @@ namespace MultiplayerARPG.MMO.Mesh
             ease.y = 0f;
             Transform moved = ridden != null ? ridden.EntityTransform : entity.EntityTransform;
             Vector3 carry = moved.position - position;
+            BaseGameEntity mover = ridden != null ? ridden : entity;
+            bool onGround = mover.FindGroundedPosition(moved.position, ArrivalWalkGroundFind, out Vector3 ground);
             LiteNetLibManager.LiteNetLibIdentity watched = ridden != null ? ridden.Identity : entity.Identity;
             if (watched != null && watched.CountSubscribers() == 0)
             {
@@ -104,7 +119,7 @@ namespace MultiplayerARPG.MMO.Mesh
             _arrivalWalks.Add(new ArrivalWalk
             {
                 entity = entity, name = entity.CharacterName, trackOrigin = trackOrigin, trackTime = trackTime, velocity = velocity, ease = ease, since = now,
-                written = moved.position, moved = moved, movedId = ridden != null ? ridden.ObjectId : entity.ObjectId, carry = carry,
+                written = moved.position, moved = moved, mover = mover, onGround = onGround, aboveGround = moved.position.y - ground.y, movedId = ridden != null ? ridden.ObjectId : entity.ObjectId, carry = carry,
             });
         }
 
@@ -131,6 +146,7 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>Every server frame, after the frame's network input: carry each arrival on, or hand it back to the kit.</summary>
         private void ArrivalWalkUpdate()
         {
+            CrossingCoastUpdate();
             if (_arrivalWalks.Count == 0)
                 return;
             float now = Time.unscaledTime;
@@ -161,6 +177,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 }
                 Vector3 target = onTrack + walk.ease * Mathf.Exp(-(now - walk.since) / Mathf.Max(0.01f, arrivalWalkEaseSeconds)) + walk.carry;
                 target.y = t.position.y;
+                if (walk.onGround && walk.mover.FindGroundedPosition(target, ArrivalWalkGroundFind, out Vector3 ground))
+                    target.y = ground.y + walk.aboveGround;
                 t.position = target;
                 walk.written = target;
             }
@@ -180,18 +198,56 @@ namespace MultiplayerARPG.MMO.Mesh
             velocity.y = 0f;
             if (velocity.magnitude < ArrivalWalkMinSpeed)
                 return;
+            FeedKinematicPuppet(ghost, CrossingSample(ghost, GhostKind.Player, characterId, trackOrigin, velocity), Vector3.Distance(ghost.body.Pose(Time.unscaledTime), trackOrigin), true);
+            BeginCrossingCoast(ghost, characterId, trackOrigin, velocity, false); // the walk takes over; the origin's last snapshots may still come
+        }
+
+        /// <summary>The sample a crossing puppet is fed in the place of a snapshot.</summary>
+        private static GhostSnapshotMessage CrossingSample(MeshGhost ghost, GhostKind kind, string meshId, Vector3 position, Vector3 velocity)
+        {
             BaseCharacterEntity entity = ghost.entity;
-            GhostSnapshotMessage track = new GhostSnapshotMessage
+            return new GhostSnapshotMessage
             {
-                kind = GhostKind.Player,
-                characterId = characterId,
-                position = trackOrigin,
+                kind = kind,
+                characterId = meshId,
+                mountEntityId = ghost.vehicle != null ? ghost.vehicle.EntityId : 0, // DESIGN 1.27: the kept vehicle carries the body
+                position = position,
                 yaw = entity.EntityTransform.eulerAngles.y,
                 velocity = velocity,
                 movementState = (byte)entity.MovementState,
                 extraMovementState = (byte)entity.ExtraMovementState,
             };
-            FeedKinematicPuppet(ghost, track, Vector3.Distance(ghost.body.Pose(Time.unscaledTime), trackOrigin), true);
+        }
+
+        private void BeginCrossingCoast(MeshGhost ghost, string meshId, Vector3 position, Vector3 velocity, bool endsOnSnapshot)
+        {
+            MeshCrossingCoast coast = new MeshCrossingCoast(position, velocity, Time.unscaledTime, arrivalWalkMaxSeconds, ghostSnapshotInterval, endsOnSnapshot);
+            coast.OnGround = ghost.entity.FindGroundedPosition(position, ArrivalWalkGroundFind, out Vector3 ground);
+            coast.AboveGround = position.y - ground.y;
+            _crossingCoasts[meshId] = coast;
+        }
+
+        /// <summary>Every server frame: each crossing puppet with nothing feeding it gets the crossing track at the snapshot rate, along the ground.</summary>
+        private void CrossingCoastUpdate()
+        {
+            if (_crossingCoasts.Count == 0)
+                return;
+            float now = Time.unscaledTime;
+            _crossingCoastsDone.Clear();
+            foreach (KeyValuePair<string, MeshCrossingCoast> kv in _crossingCoasts)
+            {
+                if (kv.Value.Ended(now) || !_ghosts.TryGetValue(kv.Key, out MeshGhost ghost) || ghost.body == null || ghost.entity == null)
+                    _crossingCoastsDone.Add(kv.Key);
+                else if (kv.Value.TryFeed(now, out Vector3 position))
+                {
+                    position.y = SeatPositionOf(ghost.entity).y;
+                    if (kv.Value.OnGround && ghost.entity.FindGroundedPosition(position, ArrivalWalkGroundFind, out Vector3 ground))
+                        position.y = ground.y + kv.Value.AboveGround;
+                    FeedKinematicPuppet(ghost, CrossingSample(ghost, GhostKind.Player, kv.Key, position, kv.Value.Velocity), 0f, true);
+                }
+            }
+            for (int i = 0; i < _crossingCoastsDone.Count; ++i)
+                _crossingCoasts.Remove(_crossingCoastsDone[i]);
         }
 
         /// <summary>
@@ -203,21 +259,14 @@ namespace MultiplayerARPG.MMO.Mesh
             if (puppetMotion != MeshPuppetMotion.Kinematic || entity == null || string.IsNullOrEmpty(meshId) || !_ghosts.TryGetValue(meshId, out MeshGhost ghost))
                 return;
             velocity.y = 0f;
-            Transform t = entity.EntityTransform;
-            GhostSnapshotMessage start = new GhostSnapshotMessage
-            {
-                kind = kind,
-                characterId = meshId,
-                mountEntityId = ghost.vehicle != null ? ghost.vehicle.EntityId : 0, // DESIGN 1.27: the kept vehicle carries the body
-                position = SeatPositionOf(entity), // DESIGN 1.27: a rider's own transform is a frame behind its vehicle
-                yaw = t.eulerAngles.y,
-                velocity = velocity,
-                movementState = (byte)entity.MovementState,
-                extraMovementState = (byte)entity.ExtraMovementState,
-            };
+            Vector3 position = SeatPositionOf(entity); // DESIGN 1.27: a rider's own transform is a frame behind its vehicle
+            GhostSnapshotMessage start = CrossingSample(ghost, kind, meshId, position, velocity);
             EnsurePuppetMotion(ghost, start);
-            if (ghost.body != null)
-                FeedKinematicPuppet(ghost, start, 0f, velocity.sqrMagnitude > 0.04f);
+            if (ghost.body == null)
+                return;
+            FeedKinematicPuppet(ghost, start, 0f, velocity.sqrMagnitude > 0.04f);
+            if (velocity.magnitude >= ArrivalWalkMinSpeed)
+                BeginCrossingCoast(ghost, meshId, position, velocity, true);
         }
 #else
         private void BeginArrivalWalk(BasePlayerCharacterEntity entity, Vector3 trackOrigin, float trackTime, Vector3 velocity) { }

@@ -49,7 +49,7 @@ OpenMMORPG since **v1.1.4**; the add-on needs a newer kit than that (see Require
     0.94.0 used the dictionaries and do not compile on v1.1.4 (`no suitable method found to override` on
     `ApplyAttack`, `ApplySkillUsing` and `ApplyReceiveDamage`);
   - client migration ([open-mmorpg/OpenMMORPG#28](https://github.com/open-mmorpg/OpenMMORPG/pull/28)): `MigrateClient` and kept objects in
-    LiteNetLibManager, which every crossing runs on. The add-on does not compile without it. 0.97.20 was built and tested
+    LiteNetLibManager, which every crossing runs on. The add-on does not compile without it. 0.97.21 was built and tested
     on `master` at 493df35fc.
 - Unity 6000.3 or newer, matching the kit.
 - Your map scenes in the build settings and your map infos in the game database.

@@ -81,6 +81,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             (typeof(PlayerCharacterEntity), typeof(MeshPlayerCharacterEntity)),
             (typeof(DefaultCharacterAttackComponent), typeof(MeshCharacterAttackComponent)),
             (typeof(DefaultCharacterUseSkillComponent), typeof(MeshCharacterUseSkillComponent)),
+            (typeof(DefaultCharacterChargeComponent), typeof(MeshCharacterChargeComponent)),
         };
 
         [MenuItem("Tools/Open MMORPG/Server Meshing/Testing/Build 8 km Demo Copy")]

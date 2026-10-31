@@ -48,6 +48,7 @@ namespace MultiplayerARPG.MMO.Mesh
         private double _render;
         private bool _rendering;
         private Vector3 _offset;
+        private double _newestArrival;
 
         public MeshRemoteMotionTrack(double delayIntervals = 1.5, double minDelayMilliseconds = 20.0, double maxExtrapolationMilliseconds = 100.0, float correctionRate = 15f)
         {
@@ -73,6 +74,28 @@ namespace MultiplayerARPG.MMO.Mesh
 
         /// <summary>Interval is the smoothed spacing of samples, in ms (0 before the second sample).</summary>
         public double Interval => _interval;
+
+        /// <summary>NewestArrivalMs is when the newest sample arrived, on the clock Add was given.</summary>
+        public double NewestArrivalMs => _newestArrival;
+
+        /// <summary>
+        /// TryGetVelocity is the velocity between the newest sample and the oldest kept, by their stamps: what the sender
+        /// did, whatever the network did to when its states arrived (DESIGN 1.35). False with fewer than two samples.
+        /// </summary>
+        public bool TryGetVelocity(out Vector3 velocity)
+        {
+            velocity = Vector3.zero;
+            int count = _samples.Count;
+            if (count < 2)
+                return false;
+            Sample newest = _samples[count - 1];
+            Sample oldest = _samples[0];
+            double spanSeconds = (newest.stamp - oldest.stamp) / 1000.0;
+            if (!(spanSeconds > 0.0))
+                return false;
+            velocity = (newest.position - oldest.position) / (float)spanSeconds;
+            return true;
+        }
 
         /// <summary>Delay is how far behind the newest sample's clock the render time aims, in ms.</summary>
         public double Delay => Math.Max(_minDelayMilliseconds, _interval * _delayIntervals);
@@ -100,6 +123,7 @@ namespace MultiplayerARPG.MMO.Mesh
             if (count > 0 && stampMs < _samples[count - 1].stamp)
                 return false;
             Vector3 before = _rendering ? Raw(_render) : Vector3.zero;
+            _newestArrival = arrivalMs;
 
             double transit = arrivalMs - stampMs;
             if (!_hasBase || transit < _base)

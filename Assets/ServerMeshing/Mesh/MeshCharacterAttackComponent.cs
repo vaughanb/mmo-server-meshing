@@ -17,8 +17,13 @@ namespace MultiplayerARPG.MMO.Mesh
     public class MeshCharacterAttackComponent : DefaultCharacterAttackComponent
     {
 #if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
+        private int _triggersPaid;
+
         protected override UniTaskVoid AttackRoutine(long peerTimestamp, AttackState simulateState)
         {
+            _triggersPaid = 0;
+            OnAttackTrigger -= CountTrigger;
+            OnAttackTrigger += CountTrigger;
             // A replayed attack can reach a client's freshly spawned puppet before this component's Start ran (the
             // kit's action manager is fetched there): resolve it now (it is a required component) and play the swing.
             if (_manager == null)
@@ -45,6 +50,35 @@ namespace MultiplayerARPG.MMO.Mesh
                 mesh.ForwardGhostReplay(Entity, GhostReplayKind.AttackTrigger, 0, w => w.Put(data));
             }
             base.ApplyAttack(entityCaches, weaponHandlingState, weapon, simulateSeed, triggerIndex, damageInfo, damageAmounts, aimPosition);
+        }
+
+        private void CountTrigger(int triggerIndex)
+        {
+            _triggersPaid = triggerIndex + 1; // the routine pays for it in the same frame, with no wait between
+        }
+
+        /// <summary>Origin side (DESIGN 1.35): what the routine the demotion cancels has not taken yet: a shot per trigger, and a weapon spent by firing.</summary>
+        public void SettleInFlight()
+        {
+            if (!TryGetInFlight(out MeshCarriedAction action))
+                return;
+            int left = action.TriggersAfter(_triggersPaid);
+            if (left <= 0)
+                return;
+            if (MeshActionTrace.Enabled)
+                MeshActionTrace.Log(Entity, $"attack settled seed={action.seed} triggers={left}");
+            bool isLeftHand = ((WeaponHandlingState)action.weaponHandlingState).Has(WeaponHandlingState.IsLeftHand);
+            for (int i = 0; i < left; ++i)
+                Entity.DecreaseAmmos(isLeftHand, 1, out _);
+            IWeaponItem weaponItem = Entity.GetAvailableWeapon(ref isLeftHand).GetWeaponItem();
+            if (weaponItem == null || !weaponItem.DestroyImmediatelyAfterFired)
+                return;
+            EquipWeapons equipWeapons = Entity.EquipWeapons;
+            if (isLeftHand)
+                equipWeapons.leftHand = CharacterItem.Empty;
+            else
+                equipWeapons.rightHand = CharacterItem.Empty;
+            Entity.EquipWeapons = equipWeapons;
         }
 
         /// <summary>Origin side (DESIGN 1.06): the swing in flight at a crossing, as its start prepared it for the client's triggers.</summary>
