@@ -544,6 +544,8 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             if (realModel != null) realModel.SetActive(true);
             if (realVehicleModel != null) realVehicleModel.SetActive(true);
+            if (playerReady && newEntity != null && newEntity.PassengingVehicleEntity != null && newEntity.PassengingVehicleSeatIndex != 0)
+                StartCoroutine(ReleaseDroppedSeatRoutine(newEntity)); // DESIGN 1.39
             if (localStandIn != null && localStandIn.go != null)
             {
                 Destroy(localStandIn.go);
@@ -593,6 +595,30 @@ namespace MultiplayerARPG.MMO.Mesh
                 $"standIns={tCapture}ms stop={tStop}ms connected={tConnected}ms playerReady={tPlayerReady}ms settled={tSettled}ms retired={tFaded}ms | " +
                 $"pos {posBefore} -> {posAfter} (jump={LastResult.positionJump:0.##}m, resync={resyncJump:0.##}m) | " +
                 $"standIns={standIns.Count} framesWithoutCamera={framesWithoutCamera} mounted={(mountedBefore ? (mountedAfterMs >= 0 ? mountedAfterMs + "ms" : "LOST") : "no")}");
+        }
+
+        /// <summary>How long after a hop a passenger's seat is checked against the vehicle's passenger list (DESIGN 1.39).</summary>
+        public const float DroppedSeatWatchSeconds = 8f;
+
+        /// <summary>
+        /// DESIGN 1.39: the kit binds a passenger to its seat only through the vehicle's passenger list, and clears the passenger
+        /// only on the exit RPC. A kept entity that rode behind a driver keeps its seat across the hop even when the new cell's
+        /// list says the seat is empty (the new cell could not seat it, and no exit RPC was ever sent for it): for a while after
+        /// a hop, a seat the vehicle shows free is let go, so the character does not keep riding a horse the server put it off.
+        /// </summary>
+        private IEnumerator ReleaseDroppedSeatRoutine(BasePlayerCharacterEntity entity)
+        {
+            float deadline = Time.realtimeSinceStartup + DroppedSeatWatchSeconds;
+            while (Time.realtimeSinceStartup < deadline && entity != null && entity.PassengingVehicleEntity != null)
+            {
+                if (entity.PassengingVehicleEntity is VehicleEntity vehicle && vehicle.Identity != null && !vehicle.Identity.IsDestroyed && vehicle.IsSeatAvailable(entity.PassengingVehicleSeatIndex))
+                {
+                    Logging.Log("Spike2", $"Seat {entity.PassengingVehicleSeatIndex} on {vehicle.name} is free on the new cell: {entity.CharacterName} gets off it here");
+                    entity.ClearPassengingVehicle();
+                    yield break;
+                }
+                yield return null;
+            }
         }
 
         /// <summary>

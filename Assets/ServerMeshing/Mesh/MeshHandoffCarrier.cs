@@ -39,8 +39,8 @@ namespace MultiplayerARPG.MMO.Mesh
     {
         private static readonly List<IMeshHandoffCarrier> s_found = new List<IMeshHandoffCarrier>();
 
-        /// <summary>The carriers the add-on brings for every player (DESIGN 1.37: the NPC dialog and storages a player has open).</summary>
-        public static readonly List<IMeshHandoffCarrier> BuiltIn = new List<IMeshHandoffCarrier> { new MeshInteractionCarrier() };
+        /// <summary>The carriers the add-on brings for every player (DESIGN 1.37: the NPC dialog and storages a player has open; 1.39: the seat a passenger holds).</summary>
+        public static readonly List<IMeshHandoffCarrier> BuiltIn = new List<IMeshHandoffCarrier> { new MeshInteractionCarrier(), new MeshPassengerCarrier() };
 
         /// <summary>The built-in carriers, the gameplay rule if it carries, then the player's carrying components.</summary>
         private static List<IMeshHandoffCarrier> CarriersOf(BasePlayerCharacterEntity player)

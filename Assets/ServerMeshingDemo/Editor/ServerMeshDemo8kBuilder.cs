@@ -202,10 +202,12 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             instance.FindProperty("dayNightTimeUpdater").objectReferenceValue = EnsureDaytime();
             instance.FindProperty("serverTargetFrameRate").intValue = ServerFrameRate;
             instance.ApplyModifiedPropertiesWithoutUndo();
-            ConfigureServer(central.transform.root.gameObject, mapInfo);
+            ConfigureServer(scene, mapInfo);
 
             GameObject mapInfoGo = new GameObject(MapInfoObject);
             mapInfoGo.AddComponent<DemoMesh8kMapInfo>().mapInfos = new BaseMapInfo[] { mapInfo };
+            BaseItem twoSeatWhistle = AssetDatabase.LoadAssetAtPath<BaseItem>(ServerMeshLargeMapBuilder.TwoSeatWhistlePath); // DESIGN 1.39: the test content the database does not list
+            mapInfoGo.AddComponent<DemoMesh8kItems>().items = twoSeatWhistle != null ? new BaseItem[] { twoSeatWhistle } : new BaseItem[0];
             SceneManager.MoveGameObjectToScene(mapInfoGo, scene);
             GameObject startMapGo = new GameObject(StartMapObject);
             // The login server creates characters and takes the first data manager among its children.
@@ -347,6 +349,11 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             return scene.GetRootGameObjects().Select(r => r.GetComponentInChildren<T>(true)).FirstOrDefault(c => c != null);
         }
 
+        private static IEnumerable<T> FindAll<T>(Scene scene) where T : Component
+        {
+            return scene.GetRootGameObjects().SelectMany(r => r.GetComponentsInChildren<T>(true));
+        }
+
         private static void Edit(string prefabPath, Func<GameObject, bool> edit)
         {
             GameObject contents = PrefabUtility.LoadPrefabContents(prefabPath);
@@ -414,27 +421,30 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             return ok;
         }
 
-        /// <summary>The server instance's settings, as overrides on the scene's instance (SerializedObject records them).</summary>
-        private static void ConfigureServer(GameObject root, MapInfo mapInfo)
+        /// <summary>
+        /// The server settings, as overrides on the scene's instances (SerializedObject records them). The whole scene: the
+        /// map network manager is its own root beside the server instance in 00Init, not a child of it.
+        /// </summary>
+        private static void ConfigureServer(Scene scene, MapInfo mapInfo)
         {
             // Character puppets take their pose from the snapshots (DESIGN 1.09): a steered one dashed to each snapshot and
             // stood until the next, so a character just across a line moved in stop-go bursts. Dynamic maps already default
             // to it; the 8 km map is Static, so the copy sets it.
-            foreach (MeshMapNetworkManager map in root.GetComponentsInChildren<MeshMapNetworkManager>(true))
+            foreach (MeshMapNetworkManager map in FindAll<MeshMapNetworkManager>(scene))
             {
                 SerializedObject so = new SerializedObject(map);
                 so.FindProperty("puppetMotion").enumValueIndex = (int)MeshPuppetMotion.Kinematic;
                 so.FindProperty("updateFps").intValue = NetworkUpdateFps;
                 so.ApplyModifiedPropertiesWithoutUndo();
             }
-            foreach (MeshCentralNetworkManager central in root.GetComponentsInChildren<MeshCentralNetworkManager>(true))
+            foreach (MeshCentralNetworkManager central in FindAll<MeshCentralNetworkManager>(scene))
             {
                 SerializedObject so = new SerializedObject(central);
                 so.FindProperty("sleepCells").boolValue = true;
                 so.FindProperty("awakeRings").intValue = AwakeRings;
                 so.ApplyModifiedPropertiesWithoutUndo();
             }
-            foreach (MeshMapSpawnNetworkManager spawner in root.GetComponentsInChildren<MeshMapSpawnNetworkManager>(true))
+            foreach (MeshMapSpawnNetworkManager spawner in FindAll<MeshMapSpawnNetworkManager>(scene))
             {
                 SerializedObject so = new SerializedObject(spawner);
                 so.FindProperty("sleepCells").boolValue = true;
@@ -451,7 +461,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 so.ApplyModifiedPropertiesWithoutUndo();
             }
             // The SQLite database by its type name: SQLiteDatabase compiles only for standalone targets.
-            foreach (MonoBehaviour behaviour in root.GetComponentsInChildren<MonoBehaviour>(true))
+            foreach (MonoBehaviour behaviour in FindAll<MonoBehaviour>(scene))
             {
                 if (behaviour == null || behaviour.GetType().Name != "SQLiteDatabase") continue;
                 SerializedObject so = new SerializedObject(behaviour);

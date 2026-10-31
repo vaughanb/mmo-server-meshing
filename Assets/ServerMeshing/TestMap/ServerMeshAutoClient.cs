@@ -204,6 +204,8 @@ namespace MultiplayerARPG.MMO.Mesh
             if (!string.IsNullOrEmpty(seamPreload) && float.TryParse(seamPreload, out float sp)) c.seamPreloadOverride = sp;
             if (!string.IsNullOrEmpty(botNet) && float.TryParse(botNet, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float bn) && bn > 0f) c.botNetSeconds = bn;
             if (!string.IsNullOrEmpty(expectedMap)) c.expectedMapName = expectedMap;
+            string boardSeat = ReadArg(args, ARG_BOARD_SEAT, null);
+            if (!string.IsNullOrEmpty(boardSeat) && byte.TryParse(boardSeat, out byte seat)) c.boardSeat = seat; // DESIGN 1.39
             c.ReadMigrationSettings(args);
         }
 
@@ -605,6 +607,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     Log($"stand: level={self.Level} exp={self.Exp} gold={self.Gold} questKills={CountQuestKills(self)} hp={self.CurrentHp}/{self.MaxHp} buffs={self.Buffs.Count}");
                 }
                 PollStandMigrations();
+                PollPassengerBoarding(self); // DESIGN 1.39: a stand with boardSeat set rides as a passenger
                 yield return null;
             }
             self = GameInstance.PlayingCharacterEntity;

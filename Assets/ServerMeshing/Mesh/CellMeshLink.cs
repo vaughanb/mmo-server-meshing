@@ -654,6 +654,8 @@ namespace MultiplayerARPG.MMO.Mesh
         public int maxHp;
         public int mountEntityId;   // vehicle prefab entity id the owner is riding (0 = on foot)
         public int mountLevel;
+        public byte mountSeat;      // the seat it holds on that vehicle (DESIGN 1.39): 0 drives, anything else rides behind a driver
+        public string driverMeshId; // a passenger: mesh id of the character driving (empty for a driver, or on foot)
         public string summonerMeshId; // a summoned monster: mesh id of its summoner (empty for anything else)
         public string summonId;       // ... and which CharacterSummon entry it is on that summoner (re-linked on arrival)
         public byte summonType;       // SummonType of the summon
@@ -688,6 +690,8 @@ namespace MultiplayerARPG.MMO.Mesh
             writer.Put(maxHp);
             writer.Put(mountEntityId);
             writer.Put(mountLevel);
+            writer.Put(mountSeat);
+            writer.Put(driverMeshId ?? string.Empty);
             writer.Put(summonerMeshId ?? string.Empty);
             writer.Put(summonId ?? string.Empty);
             writer.Put(summonType);
@@ -717,6 +721,8 @@ namespace MultiplayerARPG.MMO.Mesh
             maxHp = reader.GetInt();
             mountEntityId = reader.GetInt();
             mountLevel = reader.GetInt();
+            mountSeat = reader.GetByte();
+            driverMeshId = reader.GetString();
             summonerMeshId = reader.GetString();
             summonId = reader.GetString();
             summonType = reader.GetByte();

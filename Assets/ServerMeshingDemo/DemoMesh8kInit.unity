@@ -224,7 +224,7 @@ PrefabInstance:
     m_AddedGameObjects:
     - targetCorrespondingSourceObject: {fileID: 976896942459451648, guid: 8ccaad8ed2e4b4f48a10f0e908a8d39e, type: 3}
       insertIndex: -1
-      addedObject: {fileID: 2054770053}
+      addedObject: {fileID: 1903032916}
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: 8ccaad8ed2e4b4f48a10f0e908a8d39e, type: 3}
 --- !u!4 &259555352 stripped
@@ -540,52 +540,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: dfc19a1e2d10e4944bc3a692126aeedb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
---- !u!1 &1183426550
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 1183426552}
-  - component: {fileID: 1183426551}
-  m_Layer: 0
-  m_Name: '[Mesh] 8 km map info'
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!114 &1183426551
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1183426550}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 2938101f37520ea4cbfb050fbc127f04, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.MMO.Mesh.DemoMesh8kMapInfo
-  mapInfos:
-  - {fileID: 11400000, guid: 39a270043806f6c4089a45ddaa6ab478, type: 2}
---- !u!4 &1183426552
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1183426550}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1232480984
 GameObject:
   m_ObjectHideFlags: 0
@@ -732,6 +686,67 @@ MonoBehaviour:
     m_VarianceClampScale: 0.9
     m_ContrastAdaptiveSharpening: 0
   m_Version: 2
+--- !u!1 &1571157534
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1571157537}
+  - component: {fileID: 1571157536}
+  - component: {fileID: 1571157535}
+  m_Layer: 0
+  m_Name: '[Mesh] 8 km map info'
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1571157535
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1571157534}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5dc6f771f8fe1b347b5d63ba5040fba5, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.MMO.Mesh.DemoMesh8kItems
+  items:
+  - {fileID: 11400000, guid: 8836b1cbe55f0ab44b542af47438189f, type: 2}
+--- !u!114 &1571157536
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1571157534}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2938101f37520ea4cbfb050fbc127f04, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.MMO.Mesh.DemoMesh8kMapInfo
+  mapInfos:
+  - {fileID: 11400000, guid: 39a270043806f6c4089a45ddaa6ab478, type: 2}
+--- !u!4 &1571157537
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1571157534}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &1650493581 stripped
 MonoBehaviour:
   m_CorrespondingSourceObject: {fileID: 114462229916829746, guid: c47cc4ef8f369584db7fea27b2fdbd73, type: 3}
@@ -743,7 +758,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f4a337e47669c9e46b404eafabe7ba0a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
---- !u!1 &2054770052
+--- !u!1 &1903032915
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -751,8 +766,8 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 2054770053}
-  - component: {fileID: 2054770054}
+  - component: {fileID: 1903032916}
+  - component: {fileID: 1903032917}
   m_Layer: 0
   m_Name: '[Mesh] 8 km start map'
   m_TagString: Untagged
@@ -760,13 +775,13 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!4 &2054770053
+--- !u!4 &1903032916
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2054770052}
+  m_GameObject: {fileID: 1903032915}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
@@ -775,13 +790,13 @@ Transform:
   m_Children: []
   m_Father: {fileID: 259555352}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &2054770054
+--- !u!114 &1903032917
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2054770052}
+  m_GameObject: {fileID: 1903032915}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 59102717965d05c4f9d771fc5cbf618b, type: 3}
@@ -945,4 +960,4 @@ SceneRoots:
   - {fileID: 657742876}
   - {fileID: 3472249309801433388}
   - {fileID: 3891596336184503898}
-  - {fileID: 1183426552}
+  - {fileID: 1571157537}

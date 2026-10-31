@@ -355,6 +355,10 @@ Where the work stands, how to get it running on another machine, and what is lef
    kit's own demo and the BaseDemo-CE rig keep the kit's timer.
 3. **Mount and pet crossings (1.24, 1.27, 1.28):** both run on the 8 km demo (HorseWhistle and PupCollar in MeshTester's
    bag; patrol `mountUp` / `summonPet`). A mounted rider crosses clean for itself and for an observer at the line (1.27).
+   A passenger behind a driver crosses too (1.39): the demo copy's two-seat `DemoHorse2` and `HorseWhistle2` (made by
+   `CreateTwoSeatHorse`, in bot7Char's bag), the driver on `patrol -meshMount` across the line, the editor's `stand` client
+   at (12, 512) with `boardSeat` 1; read its `passenger:` lines, the cells' `Arrival ... mount=passenger` and `seated behind`
+   lines, and the database position against the client's. A seat the new cell shows free is let go by the client within 8 s.
    Pet puppets have kinematic bodies (1.28, `kinematicPets`); an observer still sees a pet stall about once a second,
    the kit's stop-and-go pet follow seen through 10 Hz snapshots, on both sides of a line. Observer recipe: the editor
    patrols ±12 m at z 513; a bot from the build stands at (−3, 517) with `MESH_TRACE_OBSERVED=1`

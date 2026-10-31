@@ -147,6 +147,13 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             ("Assets/OpenMMORPG/Demo/Prefabs/GamePlay/CharacterEntities/DemoVillager.prefab", "Assets/OpenMMORPG/Demo/GameData/Resources/NpcDialogs/MerchantGreeting.asset", -18f),
         };
         public const string NpcRoot = "Npcs";
+        /// <summary>The two-seat horse (DESIGN 1.39): the demo's horse with a second seat behind the first, and a whistle that summons it, for crossing a line with a passenger aboard.</summary>
+        public const string VehicleFolder = Folder + "/Vehicles";
+        public const string DemoHorsePath = "Assets/OpenMMORPG/Demo/Prefabs/GamePlay/Vehicles/DemoHorse.prefab";
+        public const string DemoWhistlePath = "Assets/OpenMMORPG/Demo/GameData/Resources/Items/HorseWhistle.asset";
+        public const string TwoSeatHorsePath = VehicleFolder + "/DemoHorse2.prefab";
+        public const string TwoSeatWhistlePath = Folder + "/GameData/HorseWhistle2.asset";
+        public static readonly Vector3 SecondSeatOffset = new Vector3(0f, 0f, -0.7f);
         public const int Seed = 8192;
 
         /// <summary>SpawnPlan is how one kind of spawn area spreads over the map: a jittered grid of points, each taken by a chance the land sets.</summary>
@@ -497,7 +504,83 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             string nodes = PlaceAreas<HarvestableSpawnArea, HarvestableEntity>(NodePlan, mixes.harvestables);
             CreateStartSights();
             CreateStartNpcs();
+            CreateTwoSeatHorse();
             return monsters + "; " + nodes;
+        }
+
+        /// <summary>
+        /// CreateTwoSeatHorse makes or refreshes Vehicles/DemoHorse2 (the demo's horse with a second seat, its own network asset id)
+        /// and GameData/HorseWhistle2 (the demo's whistle summoning it). DemoMesh8kItems registers the whistle at load.
+        /// </summary>
+        public static void CreateTwoSeatHorse()
+        {
+            if (!File.Exists(DemoHorsePath) || !File.Exists(DemoWhistlePath))
+            {
+                Debug.LogWarning($"Large map: no {DemoHorsePath} or {DemoWhistlePath}; no two-seat horse");
+                return;
+            }
+            EnsureFolder(VehicleFolder);
+            string copy = TwoSeatHorsePath;
+            if (File.Exists(copy))
+            {
+                File.Copy(DemoHorsePath, copy, true); // a rerun keeps the copy's guid, which the whistle points at
+                AssetDatabase.ImportAsset(copy, ImportAssetOptions.ForceUpdate);
+            }
+            else if (!AssetDatabase.CopyAsset(DemoHorsePath, copy))
+            {
+                Debug.LogError($"Large map error: could not copy {DemoHorsePath} to {copy}");
+                return;
+            }
+            GameObject contents = PrefabUtility.LoadPrefabContents(copy);
+            try
+            {
+                // Its own network asset id: the copy's guid, not the demo horse's (the two would collide when both are registered).
+                SerializedObject identity = new SerializedObject(contents.GetComponent<LiteNetLibManager.LiteNetLibIdentity>());
+                identity.FindProperty("assetId").stringValue = AssetDatabase.AssetPathToGUID(copy);
+                identity.ApplyModifiedPropertiesWithoutUndo();
+                VehicleEntity vehicle = contents.GetComponent<VehicleEntity>();
+                SerializedObject so = new SerializedObject(vehicle);
+                SerializedProperty seats = so.FindProperty("seats");
+                if (seats.arraySize == 1)
+                {
+                    SerializedProperty first = seats.GetArrayElementAtIndex(0);
+                    Transform seat = first.FindPropertyRelative("passengingTransform").objectReferenceValue as Transform;
+                    Transform exit = first.FindPropertyRelative("exitTransform").objectReferenceValue as Transform;
+                    GameObject second = new GameObject("Seat2");
+                    second.transform.SetParent(seat != null ? seat.parent : contents.transform, false);
+                    second.transform.localPosition = (seat != null ? seat.localPosition : Vector3.zero) + SecondSeatOffset;
+                    second.transform.localRotation = seat != null ? seat.localRotation : Quaternion.identity;
+                    seats.arraySize = 2;
+                    SerializedProperty added = seats.GetArrayElementAtIndex(1);
+                    added.FindPropertyRelative("passengingTransform").objectReferenceValue = second.transform;
+                    added.FindPropertyRelative("exitTransform").objectReferenceValue = exit;
+                    added.FindPropertyRelative("meleeDamageTransform").objectReferenceValue = null;
+                    added.FindPropertyRelative("missileDamageTransform").objectReferenceValue = null;
+                    added.FindPropertyRelative("canAttack").boolValue = false;
+                    added.FindPropertyRelative("canUseSkill").boolValue = false;
+                    added.FindPropertyRelative("hidePassenger").boolValue = false;
+                    added.FindPropertyRelative("overridePassengerActionAnimations").boolValue = false;
+                    added.FindPropertyRelative("overridePassengerHitBoxes").boolValue = false;
+                    so.ApplyModifiedPropertiesWithoutUndo();
+                }
+                PrefabUtility.SaveAsPrefabAsset(contents, copy);
+            }
+            finally
+            {
+                PrefabUtility.UnloadPrefabContents(contents);
+            }
+            if (!File.Exists(TwoSeatWhistlePath) && !AssetDatabase.CopyAsset(DemoWhistlePath, TwoSeatWhistlePath))
+            {
+                Debug.LogError($"Large map error: could not copy {DemoWhistlePath} to {TwoSeatWhistlePath}");
+                return;
+            }
+            BaseItem whistle = AssetDatabase.LoadAssetAtPath<BaseItem>(TwoSeatWhistlePath);
+            VehicleEntity horse = AssetDatabase.LoadAssetAtPath<GameObject>(copy).GetComponent<VehicleEntity>();
+            SerializedObject item = new SerializedObject(whistle);
+            item.FindProperty("mountEntity").objectReferenceValue = horse;
+            item.ApplyModifiedPropertiesWithoutUndo();
+            EditorUtility.SetDirty(whistle);
+            Debug.Log($"Large map: two-seat horse {copy} ({horse.Seats.Count} seats), whistle {TwoSeatWhistlePath} (data id {whistle.DataId})");
         }
 
         /// <summary>CreateStartNpcs stands the demo's banker and merchant on the cell edge beside the start, on the line itself, facing east into the start cell.</summary>

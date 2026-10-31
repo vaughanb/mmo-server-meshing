@@ -146,6 +146,18 @@ namespace MultiplayerARPG.MMO.Mesh
         }
 
         /// <summary>
+        /// IsPassengerPuppet is true for a puppet behind a driver, by this snapshot or by the seat it still holds here (DESIGN 1.39):
+        /// the kit's seat snap moves it, and anything that steered it (a body on its vehicle, a PointClickMovement, a Teleport)
+        /// would drive its driver's vehicle.
+        /// </summary>
+        private static bool IsPassengerPuppet(MeshGhost ghost, GhostSnapshotMessage msg)
+        {
+            if (msg.mountEntityId != 0 && msg.mountSeat != 0)
+                return true;
+            return ghost.entity != null && ghost.entity.PassengingVehicleEntity != null && ghost.entity.PassengingVehicleSeatIndex != 0;
+        }
+
+        /// <summary>
         /// SeatPositionOf is where a character is now: on a vehicle, its seat's world position (the kit moves a rider onto
         /// its seat only in its late update, a frame behind a vehicle moved this frame: ~0.13 m at a horse's speed), else
         /// its own (DESIGN 1.27).
@@ -194,6 +206,8 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (puppetMotion != MeshPuppetMotion.Kinematic || ghost.body != null || ghost.refusal != MeshPuppetFallback.None || _slots == null)
                 return;
+            if (IsPassengerPuppet(ghost, msg))
+                return; // DESIGN 1.39: its seat moves it, and a body here would move its driver's vehicle
             BaseCharacterEntity entity = ghost.entity;
             bool pet = !string.IsNullOrEmpty(msg.summonerMeshId) || !string.IsNullOrEmpty(ghost.summonerMeshId) || (entity is BaseMonsterCharacterEntity monster && monster.IsSummoned);
             if (pet && !kinematicPets)

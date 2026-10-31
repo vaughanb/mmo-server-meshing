@@ -397,6 +397,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 ExpireGhosts();
                 ExpireGhostStatics(); // drops too
                 ExpireReservedArrivals();
+                RetryPendingSeats(); // DESIGN 1.39: an arrival whose driver's vehicle was not here yet
             }
         }
 
@@ -867,6 +868,8 @@ namespace MultiplayerARPG.MMO.Mesh
                     summonType = (byte)summonType,
                     mountEntityId = mount != null ? mount.EntityId : 0,
                     mountLevel = mount != null ? mount.Level : 0,
+                    mountSeat = mount != null ? entity.PassengingVehicleSeatIndex : (byte)0, // DESIGN 1.39: a passenger names its driver
+                    driverMeshId = mount != null && entity.PassengingVehicleSeatIndex != 0 ? DriverMeshIdOf(mount) : string.Empty,
                     kind = asPlayer != null ? GhostKind.Player : GhostKind.Monster,
                     characterId = meshId,
                     entityId = entity.EntityId,
@@ -1077,7 +1080,12 @@ namespace MultiplayerARPG.MMO.Mesh
                 Logging.Log("Mesh", $"Ghost destroyed {ghost.kind} {ghost.entity.CharacterName} ({meshId}) reason={reason}");
                 _playerGhosts.Remove(ghost.entity);
                 if (ghost.entity.PassengingVehicleEntity is VehicleEntity ridden)
-                    mount = ridden;
+                {
+                    if (ghost.entity.PassengingVehicleSeatIndex == 0)
+                        mount = ridden;
+                    else if (ridden.Identity != null && !ridden.Identity.IsDestroyed)
+                        ridden.RemovePassenger(ghost.entity.PassengingVehicleSeatIndex); // DESIGN 1.39: a passenger's seat is its driver's vehicle's: freed, not destroyed
+                }
                 // Nothing of the puppet survives into a pooled reuse of the instance: the hit hook and the identity.
                 if (ghost.hitHook != null)
                     ghost.entity.onReceiveDamage -= ghost.hitHook;
@@ -1088,7 +1096,10 @@ namespace MultiplayerARPG.MMO.Mesh
                 ghost.entity.NetworkDestroy();
             }
             if (mount != null && mount.Identity != null && !mount.Identity.IsDestroyed)
+            {
+                mount.RemoveAllPassengers(); // DESIGN 1.39: a passenger puppet behind this ghost is set down, not left holding a destroyed vehicle
                 mount.NetworkDestroy();
+            }
         }
 
         /// <summary>Remove the runtime identity so a pooled instance never comes back flagged as someone's ghost.</summary>
@@ -1169,7 +1180,14 @@ namespace MultiplayerARPG.MMO.Mesh
                     InterestManager.NotifyNewObject(playerCharacter.Identity);
                 // The mount: the kept vehicle is re-owned by the driver the same way; otherwise re-summon from the
                 // saved data (what the kit's fresh-spawn path does). Summons likewise.
-                if (reserved.keepMount && reserved.mount != null && reserved.mount.Identity != null && !reserved.mount.Identity.IsDestroyed)
+                if (reserved.passenger)
+                {
+                    // DESIGN 1.39: the vehicle is the driver's (owned by the driver, or by nobody while the driver's puppet rides
+                    // it): not re-owned, not re-summoned. The seat itself came with the puppet, or MeshPassengerCarrier takes it.
+                    if (reserved.mount != null && reserved.mount.Identity != null && !reserved.mount.Identity.IsDestroyed && InterestManager != null)
+                        InterestManager.NotifyNewObject(reserved.mount.Identity);
+                }
+                else if (reserved.keepMount && reserved.mount != null && reserved.mount.Identity != null && !reserved.mount.Identity.IsDestroyed)
                 {
                     Assets.SetObjectOwnerImmediately(reserved.mount.ObjectId, connectionId);
                     if (InterestManager != null)
@@ -1250,7 +1268,7 @@ namespace MultiplayerARPG.MMO.Mesh
         // Register, respawn RPC). Handing it the ghost entity means the arriving character IS the entity observers
         // here were already looking at: no swap, no pop.
 
-        private sealed class ReservedArrival { public BasePlayerCharacterEntity entity; public string userId; public float time; public float noticeTime; public VehicleEntity mount; public bool keepMount; }
+        private sealed class ReservedArrival { public BasePlayerCharacterEntity entity; public string userId; public float time; public float noticeTime; public VehicleEntity mount; public bool keepMount; public bool passenger; }
 
         /// <summary>Whether <paramref name="userId"/>'s character is a handoff arrival promoted here and not yet registered.</summary>
         private bool IsReservedArrivalUser(string userId)
@@ -1297,8 +1315,10 @@ namespace MultiplayerARPG.MMO.Mesh
             // The mount: keep the vehicle the ghost is riding when it is the one the saved data says (the usual case),
             // otherwise drop it and let the registration re-summon from the saved data like a fresh spawn would.
             VehicleEntity ridden = player.PassengingVehicleEntity as VehicleEntity;
-            bool keepMount = false;
-            if (ridden != null)
+            // DESIGN 1.39: a passenger keeps its seat; the vehicle is its driver's, and the driver's own hop keeps or drops it.
+            bool passenger = ridden != null && player.PassengingVehicleSeatIndex != 0;
+            bool keepMount = passenger;
+            if (ridden != null && !passenger)
             {
                 VehicleEntity wanted = null;
                 if (data.Mount.type != MountType.None)
@@ -1329,13 +1349,13 @@ namespace MultiplayerARPG.MMO.Mesh
             float crossingSpeed = _incomingHandoffFrom.TryGetValue(data.Id, out IncomingHandoff crossing) ? crossing.velocity.magnitude : 0f;
             Vector3 expected = crossingSpeed >= ArrivalWalkMinSpeed ? TrackAt(crossing.trackOrigin, crossing.time, crossing.velocity, Time.unscaledTime) : (Vector3)data.CurrentPosition;
             expected.y = standing.y;
-            if (Vector3.Distance(standing, expected) > Mathf.Max(arrivalTeleportDistance, crossingSpeed * arrivalTeleportSeconds))
-                player.Teleport(data.CurrentPosition, Quaternion.Euler(data.CurrentRotation), true);
+            if (!passenger && Vector3.Distance(standing, expected) > Mathf.Max(arrivalTeleportDistance, crossingSpeed * arrivalTeleportSeconds))
+                player.Teleport(data.CurrentPosition, Quaternion.Euler(data.CurrentRotation), true); // a passenger's teleport would move its driver's vehicle: its seat places it
             player.ForceMakeCaches();
             player.FillEmptySlots();
             player.Identity.DoNotDestroyWhenDisconnect = true;
-            _reservedArrivals[data.Id] = new ReservedArrival { entity = player, userId = userId, time = Time.unscaledTime, noticeTime = _incomingHandoffFrom.TryGetValue(data.Id, out IncomingHandoff notice) ? notice.time : -1f, mount = ridden, keepMount = keepMount };
-            Logging.Log("Mesh", $"Arrival {data.CharacterName} ({data.Id}) conn={connectionId}: ghost promoted in place at {player.EntityTransform.position} mount={(keepMount ? "kept" : data.Mount.type != MountType.None ? "re-summon" : "none")}");
+            _reservedArrivals[data.Id] = new ReservedArrival { entity = player, userId = userId, time = Time.unscaledTime, noticeTime = _incomingHandoffFrom.TryGetValue(data.Id, out IncomingHandoff notice) ? notice.time : -1f, mount = ridden, keepMount = keepMount, passenger = passenger };
+            Logging.Log("Mesh", $"Arrival {data.CharacterName} ({data.Id}) conn={connectionId}: ghost promoted in place at {player.EntityTransform.position} mount={(passenger ? "passenger" : keepMount ? "kept" : data.Mount.type != MountType.None ? "re-summon" : "none")}");
             entity = player;
             return true;
         }
@@ -1439,7 +1459,8 @@ namespace MultiplayerARPG.MMO.Mesh
             string meshId = entity.Id;
             Assets.SetObjectOwnerImmediately(entity.ObjectId, -1);
             VehicleEntity riddenMount = entity.PassengingVehicleEntity as VehicleEntity;
-            if (riddenMount != null && riddenMount.Identity != null)
+            bool passenger = riddenMount != null && entity.PassengingVehicleSeatIndex != 0; // DESIGN 1.39: the vehicle is its driver's, and stays the driver's
+            if (riddenMount != null && !passenger && riddenMount.Identity != null)
                 Assets.SetObjectOwnerImmediately(riddenMount.ObjectId, -1); // the mount survives the disconnect too
             MeshIdentity id = MeshIdentity.GetOrAdd(entity);
             id.MeshEntityId = meshId;
@@ -1448,10 +1469,10 @@ namespace MultiplayerARPG.MMO.Mesh
             entity.AttackComponent?.CancelAttack();
             entity.UseSkillComponent?.CancelSkill();
             entity.ChargeComponent?.ClearChargeStates(); // the destination holds it now, and tells this cell's observers when it stops (DESIGN 1.35)
-            MakeGhostInPlace(entity, id, GhostKind.Player, newOwnerZone, riddenMount);
+            MakeGhostInPlace(entity, id, GhostKind.Player, newOwnerZone, passenger ? null : riddenMount);
             SeedDemotedPuppet(entity, meshId, GhostKind.Player, velocity); // DESIGN 1.09: walks on until the destination's snapshots (MeshMapNetworkManager_ArrivalWalk)
             int pets = DemoteSummonsWith(entity, newOwnerZone);
-            Logging.Log("Mesh", $"Player {entity.CharacterName} demoted to ghost (owner {newOwnerZone}, mounted={riddenMount != null}, summons={pets})");
+            Logging.Log("Mesh", $"Player {entity.CharacterName} demoted to ghost (owner {newOwnerZone}, mounted={riddenMount != null}{(passenger ? " as passenger" : string.Empty)}, summons={pets})");
         }
 
         internal void OnMeshNeighbourHello(long connectionId, string zoneId, string incarnation)
@@ -1727,6 +1748,11 @@ namespace MultiplayerARPG.MMO.Mesh
             SyncGhostSummoner(ghost, msg);
             SyncGhostWeapons(ghost, msg);
             SyncGhostAffiliation(ghost, msg);
+            if (IsPassengerPuppet(ghost, msg))
+            {
+                SyncGhostHp(ghost, msg); // DESIGN 1.39: its seat moves it; steering it would drive its driver's vehicle
+                return;
+            }
             if (puppetMotion == MeshPuppetMotion.Kinematic && ghost.body == null)
                 EnsurePuppetMotion(ghost, msg);
             SteerGhost(ghost, msg);
@@ -1964,9 +1990,34 @@ namespace MultiplayerARPG.MMO.Mesh
             if (ghost.entity == null || ghost.mountPending)
                 return;
             VehicleEntity current = ghost.entity.PassengingVehicleEntity as VehicleEntity;
+            if (msg.mountEntityId != 0 && msg.mountSeat != 0)
+            {
+                // DESIGN 1.39: a passenger rides its driver's vehicle here as well (the driver's puppet's, or the real driver's
+                // once it crossed), never one of its own. Tried again at every snapshot while that vehicle is not here yet.
+                VehicleEntity driven = DriverVehicleOf(msg.driverMeshId);
+                if (current != null && ReferenceEquals(current, driven) && ghost.entity.PassengingVehicleSeatIndex == msg.mountSeat)
+                    return;
+                if (current != null)
+                {
+                    DismountGhost(ghost).Forget(); // off whatever it sat on (a vehicle of its own goes with it); seated at the next snapshot
+                    return;
+                }
+                if (driven == null)
+                {
+                    WarnThrottled($"Ghost {msg.characterName} rides behind {(string.IsNullOrEmpty(msg.driverMeshId) ? "nobody" : msg.driverMeshId)}, whose vehicle is not here; shown on foot until it is");
+                    return;
+                }
+                if (driven.EntityId != msg.mountEntityId)
+                {
+                    WarnThrottled($"Ghost {msg.characterName} rides vehicle entity id {msg.mountEntityId}, but its driver {msg.driverMeshId} drives entity id {driven.EntityId} here; shown on foot");
+                    return;
+                }
+                SeatGhost(ghost, driven, msg.mountSeat).Forget();
+                return;
+            }
             if (msg.mountEntityId != 0)
             {
-                if (current != null && current.EntityId == msg.mountEntityId)
+                if (current != null && current.EntityId == msg.mountEntityId && ghost.entity.PassengingVehicleSeatIndex == 0)
                     return;
                 if (!GameInstance.VehicleEntities.TryGetValue(msg.mountEntityId, out VehicleEntity prefab) || prefab == null)
                 {
@@ -1992,8 +2043,9 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (entity.PassengingVehicleEntity != null)
                 {
                     VehicleEntity old = entity.PassengingVehicleEntity as VehicleEntity;
+                    bool drove = entity.PassengingVehicleSeatIndex == 0; // DESIGN 1.39: a passenger's old vehicle is its driver's
                     await entity.ExitVehicle();
-                    if (old != null && old.Identity != null && !old.Identity.IsDestroyed)
+                    if (drove && old != null && old.Identity != null && !old.Identity.IsDestroyed)
                         old.NetworkDestroy();
                 }
                 LiteNetLibIdentity identity = Assets.NetworkSpawn(prefab.Identity.HashAssetId, position, Quaternion.Euler(0f, yaw, 0f));
@@ -2029,18 +2081,158 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 BaseCharacterEntity entity = ghost.entity;
                 VehicleEntity vehicle = entity != null ? entity.PassengingVehicleEntity as VehicleEntity : null;
+                bool drove = entity != null && entity.PassengingVehicleSeatIndex == 0; // DESIGN 1.39: a passenger leaves its driver's vehicle standing
                 if (entity != null)
                     await entity.ExitVehicle();
-                if (vehicle != null && vehicle.Identity != null && !vehicle.Identity.IsDestroyed)
+                if (drove && vehicle != null && vehicle.Identity != null && !vehicle.Identity.IsDestroyed)
                     vehicle.NetworkDestroy();
                 ghost.vehicle = null;
                 if (traceHandoffTiming && entity != null)
-                    Logging.Log("Mesh", $"Ghost {entity.CharacterName} dismounted");
+                    Logging.Log("Mesh", $"Ghost {entity.CharacterName} dismounted{(drove ? string.Empty : " (passenger)")}");
             }
             finally
             {
                 ghost.mountPending = false;
             }
+        }
+
+        /// <summary>DESIGN 1.39: a passenger puppet takes seat <paramref name="seat"/> on its driver's vehicle here; the seat moves it from then on.</summary>
+        private async UniTaskVoid SeatGhost(MeshGhost ghost, VehicleEntity vehicle, byte seat)
+        {
+            ghost.mountPending = true;
+            try
+            {
+                BaseCharacterEntity entity = ghost.entity;
+                if (entity == null || entity.Identity == null || entity.Identity.IsDestroyed || vehicle == null || vehicle.Identity == null || vehicle.Identity.IsDestroyed)
+                    return;
+                if (!vehicle.IsSeatAvailable(seat))
+                {
+                    WarnThrottled($"Ghost {entity.CharacterName}: seat {seat} on its driver's vehicle is taken here (object {ObjectIdOf(vehicle.GetPassenger(seat))}); shown on foot");
+                    return;
+                }
+                StopPuppetMotion(ghost);
+                bool seated = await entity.EnterVehicle(vehicle, seat);
+                if (traceHandoffTiming || !seated)
+                    Logging.Log("Mesh", $"Ghost {entity.CharacterName} {(seated ? "seated" : "NOT seated")} behind its driver (seat {seat})");
+            }
+            finally
+            {
+                ghost.mountPending = false;
+            }
+        }
+
+        private static string ObjectIdOf(BaseGameEntity entity)
+        {
+            return entity != null && entity.Identity != null ? entity.ObjectId.ToString() : "none";
+        }
+
+        /// <summary>DESIGN 1.39: the mesh id of the character driving <paramref name="vehicle"/>; empty when nobody does.</summary>
+        private string DriverMeshIdOf(VehicleEntity vehicle)
+        {
+            return vehicle != null && vehicle.HasDriver && vehicle.GetPassenger(0) is BaseCharacterEntity driver ? MeshEntityIdOf(driver) : string.Empty;
+        }
+
+        /// <summary>
+        /// DESIGN 1.39: the vehicle the character <paramref name="driverMeshId"/> drives on this cell, whether it is here as a puppet,
+        /// as an arrival waiting for its client or as a real player; null when it is not here, is on foot, or only rides behind someone.
+        /// </summary>
+        private VehicleEntity DriverVehicleOf(string driverMeshId)
+        {
+            if (string.IsNullOrEmpty(driverMeshId))
+                return null;
+            BaseCharacterEntity driver = null;
+            if (_ghosts.TryGetValue(driverMeshId, out MeshGhost ghost) && ghost.entity != null)
+                driver = ghost.entity;
+            else if (_reservedArrivals.TryGetValue(driverMeshId, out ReservedArrival reserved) && reserved.entity != null)
+                driver = reserved.entity;
+            else if (ServerUserHandlers.TryGetPlayerCharacterById(driverMeshId, out IPlayerCharacterData real))
+                driver = real as BaseCharacterEntity;
+            if (driver == null || driver.Identity == null || driver.Identity.IsDestroyed || driver.PassengingVehicleSeatIndex != 0)
+                return null;
+            VehicleEntity vehicle = driver.PassengingVehicleEntity as VehicleEntity;
+            return vehicle != null && vehicle.Identity != null && !vehicle.Identity.IsDestroyed ? vehicle : null;
+        }
+
+        // ---- Passengers across a hop (DESIGN 1.39) ----
+        // The kit binds a passenger to its seat only through the vehicle's passengerIds list, and a character's data says
+        // nothing about a vehicle it does not drive. MeshPassengerCarrier carries "behind driver X, seat N" with the handoff;
+        // the arrival is seated on that driver's vehicle here (the driver's puppet's, or the real driver's), or waits for it.
+
+        private sealed class PendingSeat { public BasePlayerCharacterEntity entity; public string driverMeshId; public byte seat; public float time; }
+        private readonly Dictionary<string, PendingSeat> _pendingSeats = new Dictionary<string, PendingSeat>();
+        private readonly List<string> _pendingSeatsDone = new List<string>();
+        /// <summary>How long an arrival waits for its driver's vehicle to be on this cell before it stays on foot.</summary>
+        public const float PendingSeatSeconds = 5f;
+
+        /// <summary>Destination: seat <paramref name="player"/> behind its driver as the carried state says, now or as soon as the driver's vehicle is here.</summary>
+        internal void SeatArrival(BasePlayerCharacterEntity player, string driverMeshId, byte seat)
+        {
+            if (player == null || seat == 0 || string.IsNullOrEmpty(driverMeshId))
+                return;
+            if (player.PassengingVehicleEntity is VehicleEntity ridden && player.PassengingVehicleSeatIndex == seat && ReferenceEquals(ridden, DriverVehicleOf(driverMeshId)))
+            {
+                Stamp($"arrival {player.CharacterName}: seated behind {driverMeshId} (seat {seat}) as its puppet was");
+                return;
+            }
+            if (TrySeat(player, driverMeshId, seat, "at registration"))
+                return;
+            _pendingSeats[player.Id] = new PendingSeat { entity = player, driverMeshId = driverMeshId, seat = seat, time = Time.unscaledTime };
+            Logging.Log("Mesh", $"Arrival {player.CharacterName}: the vehicle of its driver {driverMeshId} is not here yet; seat {seat} is tried again for {PendingSeatSeconds:0} s");
+        }
+
+        /// <summary>True when the seat was taken, or can never be (someone else sits there); false while the driver's vehicle is not here.</summary>
+        private bool TrySeat(BasePlayerCharacterEntity player, string driverMeshId, byte seat, string when)
+        {
+            VehicleEntity vehicle = DriverVehicleOf(driverMeshId);
+            if (vehicle == null)
+                return false;
+            if (!vehicle.IsSeatAvailable(seat))
+            {
+                if (!ReferenceEquals(vehicle.GetPassenger(seat), player))
+                    Logging.LogWarning("Mesh", $"Arrival {player.CharacterName}: seat {seat} on the vehicle of {driverMeshId} is taken here (object {ObjectIdOf(vehicle.GetPassenger(seat))}); it stays on foot");
+                return true;
+            }
+            SeatPlayer(player, vehicle, seat, driverMeshId, when).Forget();
+            return true;
+        }
+
+        private async UniTaskVoid SeatPlayer(BasePlayerCharacterEntity player, VehicleEntity vehicle, byte seat, string driverMeshId, string when)
+        {
+            if (player.PassengingVehicleEntity != null)
+                await player.ExitVehicle(); // off whatever it holds (a stale seat elsewhere); the kit's EnterVehicle does not check
+            if (player.Identity == null || player.Identity.IsDestroyed || vehicle.Identity == null || vehicle.Identity.IsDestroyed)
+                return;
+            bool seated = await player.EnterVehicle(vehicle, seat);
+            Logging.Log("Mesh", $"Arrival {player.CharacterName}: {(seated ? "seated" : "NOT seated")} behind {driverMeshId} (seat {seat}, {when})");
+        }
+
+        private void RetryPendingSeats()
+        {
+            if (_pendingSeats.Count == 0)
+                return;
+            _pendingSeatsDone.Clear();
+            foreach (KeyValuePair<string, PendingSeat> kv in _pendingSeats)
+            {
+                PendingSeat pending = kv.Value;
+                if (pending.entity == null || pending.entity.Identity == null || pending.entity.Identity.IsDestroyed
+                    || !ServerUserHandlers.TryGetPlayerCharacterById(kv.Key, out IPlayerCharacterData still) || !ReferenceEquals(still, pending.entity))
+                {
+                    _pendingSeatsDone.Add(kv.Key); // left this cell
+                    continue;
+                }
+                if (TrySeat(pending.entity, pending.driverMeshId, pending.seat, $"after {Time.unscaledTime - pending.time:0.0} s"))
+                {
+                    _pendingSeatsDone.Add(kv.Key);
+                    continue;
+                }
+                if (Time.unscaledTime - pending.time > PendingSeatSeconds)
+                {
+                    Logging.LogWarning("Mesh", $"Arrival {pending.entity.CharacterName}: the vehicle of its driver {pending.driverMeshId} never came within {PendingSeatSeconds:0} s; it stays on foot");
+                    _pendingSeatsDone.Add(kv.Key);
+                }
+            }
+            for (int i = 0; i < _pendingSeatsDone.Count; ++i)
+                _pendingSeats.Remove(_pendingSeatsDone[i]);
         }
 
         private BaseCharacterEntity SpawnGhostEntity(GhostSnapshotMessage msg)
@@ -2914,7 +3106,8 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             string meshId = id.MeshEntityId;
             entity.SetTargetEntity(null);
-            entity.StopMove();
+            if (entity.PassengingVehicleEntity == null || entity.PassengingVehicleSeatIndex == 0)
+                entity.StopMove(); // a passenger's active movement is its driver's vehicle (DESIGN 1.39)
             id.IsGhost = true;
             id.OwnerZoneId = newOwnerZone;
             id.LastHandoffTime = Time.unscaledTime;
