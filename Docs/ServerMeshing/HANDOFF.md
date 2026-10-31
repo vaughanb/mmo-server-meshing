@@ -327,7 +327,7 @@ Where the work stands, how to get it running on another machine, and what is lef
    Real latency (1.30, `MESH_CLIENT_LATENCY_MS=<one way>` in the editor's environment before Play): the gap is one round
    trip plus ~25 ms, on foot and mounted, up to the 200 ms measured. An observer of a mounted rider still sees a stand or two and ~10 small steps per 100 s, away from the line.
    A real network (1.35, `MESH_CLIENT_NET=<one way>,<jitter>,<loss %>[,<outage ms>]` for the crosser in the editor's environment and for a bot in its own, a UDP relay under LiteNetLib):
-   on 30/8/1 % the gap is 110 ms and an arrival steps at most 0.19 m; on 100/40/5 % it is 284 ms, max ~1.3 s, and stalls and lunges near the line are close to those away from it, in about 150 s a run.
+   on 30/8/1 % the gap is 110 ms (the session's first hop 161) and an arrival steps at most 0.19 m; on 100/40/5 % it is 284 ms (first hop 309), max ~1.3 s, and stalls and lunges near the line are close to those away from it, in about 150 s a run.
    Compare near with away per metre, and read an arm of 150 s or more: two of 90 s differed by 2x. If a destination dies in the notice's window the crosser stands about 2.4 s and goes back 9.5 m (a crash path).
    Settings (1.34): a new map manager's puppets are kinematic; the demo's 60 fps and 60 Hz stay the project's choice, and Setup warns with the numbers (gap 55 to 29 ms, about
    40 % more cell CPU, traffic not measured). A ~510 ms hop now and then is the editor client's own GC (`with a GC` on the CONTINUITY line), not the crossing.
