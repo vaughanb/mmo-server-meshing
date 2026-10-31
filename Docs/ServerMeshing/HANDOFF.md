@@ -311,7 +311,7 @@ Where the work stands, how to get it running on another machine, and what is lef
      walk onto its client's states: no stall in 180 s, 50 ms speeds within ~3.3–4.7 m/s for a 4 m/s walk on both
      sides and just after an arrival. Left: neighbours' snapshots still read the kit's transform; one hop of 107 ms
      in the last run (median unchanged at 52) was not looked into; the 30 Hz puppet stalls of 1.16 were not
-     re-measured. The BaseDemo-CE rig's maps are Static and stay steered (they move in bursts across a line);
+     re-measured. The BaseDemo-CE rig's maps are Static and stay steered on purpose (its prefab saves Steered, as the measurement baseline), so they move in bursts across a line;
    - a cell's first player costs it one 80–95 ms frame (2026-10-29, the 8 km demo): its first registration, login or
      arrival alike (the promotion 27 ms against 5, the frame ~96 ms against a few), and its first demotion another ~80;
      after a login the same cell's first arrival costs ~22 ms. It is Mono compiling the kit's registration and spawn
@@ -328,6 +328,8 @@ Where the work stands, how to get it running on another machine, and what is lef
    Real latency (1.30, `MESH_CLIENT_LATENCY_MS=<one way>` in the editor's environment before Play): the gap is one round
    trip plus ~25 ms, on foot and mounted, up to the 200 ms measured. Not measured: latency on the observer's connection,
    loss, jitter. An observer of a mounted rider still sees a stand or two and ~10 small steps per 100 s, away from the line.
+   Settings (1.34): a new map manager's puppets are kinematic; the demo's 60 fps and 60 Hz stay the project's choice, and Setup warns with the numbers (gap 55 to 29 ms, about
+   40 % more cell CPU, traffic not measured). A ~510 ms hop now and then is the editor client's own GC (`with a GC` on the CONTINUITY line), not the crossing.
 2. **Monsters at a crossing (1.23, 1.28):** a lone monster chases a player across a Static map's line, hits
    through the ghost, and is handed over with its target; a monster that walks over a line on its own walks on
    (1.28: the handoff carries its walk and its AI's wander bookkeeping), and monster puppets are led by the NavMesh
@@ -352,7 +354,9 @@ Where the work stands, how to get it running on another machine, and what is lef
    enable the five BaseDemo and TestMap scenes in Build Settings, open BaseInit-CE, then
    `python -u Tools/ServerMeshing/regress.py --build <scenarios>` (name the scenarios: `--build` alone only builds), then
    restore Build Settings and DemoMesh8kInit. `Config/mySqlConfig.json` is here and MySQL80 runs. A full run takes ~3 h.
-6. **Run the full EditMode suite** after any further core edit (4,403 tests, three of which fail by construction in
+   To change a setting for a run pass `--env KEY=VALUE`: a variable set in the editor did not reach the cells (1.34). Confirm it in the cell logs before trusting a pass
+   (`Puppet motion kinematic (from ...)`, `Puppets window`).
+6. **Run the full EditMode suite** after any further core edit (4,413 tests, three of which fail by construction in
    `MessageRoundTripTests`, DESIGN 1.33; `WebSocketClientSendTests.
    ReusedWriter_SendsOwnedPayloadsInOrder` is timing-flaky and passes alone).
 

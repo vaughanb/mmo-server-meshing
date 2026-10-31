@@ -467,6 +467,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                         fix = () => SetBool(capturedPath, typeof(MeshMapSpawnNetworkManager), "sleepCells", wanted),
                     });
                 }
+                AddCrossingChecks(path, prefab);
                 // The game instance: gameplay rule and server tick.
                 foreach (GameInstance instance in prefab.GetComponentsInChildren<GameInstance>(true))
                 {
@@ -485,11 +486,13 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                     SerializedProperty tick = so.FindProperty("serverTargetFrameRate");
                     if (tick != null)
                     {
-                        bool tickOk = tick.intValue <= 60;
+                        bool low = MeshCrossingSetupChecks.RateIsLow(tick.intValue);
+                        bool tickOk = !low && tick.intValue <= 60;
                         _checks.Add(new Check
                         {
                             ok = tickOk,
-                            text = $"{ShortPath(path)}: server target frame rate {tick.intValue}" + (tickOk ? "." : " — 60 is the measured sweet spot (about 270 players per cell process; 120 halves that)."),
+                            warning = low,
+                            text = low ? $"{ShortPath(path)}: {MeshCrossingSetupChecks.LowFrameRateText(tick.intValue)}" : $"{ShortPath(path)}: server target frame rate {tick.intValue}" + (tickOk ? "." : " — 60 is the measured sweet spot (about 270 players per cell process; 120 halves that)."),
                             fixLabel = "Set 60",
                             fix = () => SetInt(capturedPath, typeof(GameInstance), "serverTargetFrameRate", 60),
                         });

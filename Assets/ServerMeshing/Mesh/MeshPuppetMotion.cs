@@ -8,10 +8,10 @@ namespace MultiplayerARPG.MMO.Mesh
     /// <summary>MeshPuppetMotion is how a character puppet follows its owner's snapshots.</summary>
     public enum MeshPuppetMotion : byte
     {
-        /// <summary>Steered walks the puppet with the kit's movement component toward each snapshot (the default).</summary>
+        /// <summary>Steered walks the puppet with the kit's movement component toward each snapshot.</summary>
         Steered = 0,
 
-        /// <summary>Kinematic disables the kit's movement component and places the puppet from a track of the snapshots.</summary>
+        /// <summary>Kinematic disables the kit's movement component and places the puppet from a track of the snapshots (the default of a new map manager, DESIGN 1.34).</summary>
         Kinematic = 1,
     }
 

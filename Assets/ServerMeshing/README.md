@@ -31,7 +31,7 @@ Server Meshing ▸ Build Packages** menu. 0.96.1 leaves it out, but an import ne
 1. Import the add-on package into a project that has OpenMMORPG installed.
 2. Open **Tools ▸ Open MMORPG ▸ Server Meshing ▸ Setup** and follow `Documentation/SETUP.md`: create the world registry, add your map's layout
    from the open scene, press **Validate** and use the **Fix** buttons to put the add-on's subclasses on your manager
-   and entity prefabs and to assign the registry, gameplay rule and server tick.
+   and entity prefabs and to assign the registry, gameplay rule and server tick. It also warns, with a Fix, about settings that make a crossing visible: Steered puppets, a low frame rate or network tick.
 3. Run. The kit's server instance starts one process per cell; with sleeping cells on, cells start on demand.
 
 `Documentation/DESIGN.md` is the design record with every decision, measurement and open question.

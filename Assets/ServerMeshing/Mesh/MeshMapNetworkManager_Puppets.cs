@@ -1,5 +1,5 @@
 // Server Meshing add-on — puppet motion (Phase 0 step 3). A character puppet follows its owner's snapshots in one of two
-// ways. Steered (the default) walks it with the kit's own movement component toward each snapshot (SteerGhost). Kinematic
+// ways. Steered walks it with the kit's own movement component toward each snapshot (SteerGhost). Kinematic, the default,
 // hands its transform to a MeshKinematicCharacterBody: the body stands in the kit's movement-handler slot, takes its pose
 // from a MeshKinematicTrack fed by the snapshots, and writes the kit's own movement bytes, so clients read it unchanged.
 // A mounted puppet's body moves the vehicle it rides, placed so that its seat stands where the rider's snapshots say
@@ -48,11 +48,12 @@ namespace MultiplayerARPG.MMO.Mesh
     {
         /// <summary>
         /// puppetMotion is how a character puppet follows its owner's snapshots: Steered walks it with the kit's movement
-        /// component (the default), Kinematic sets its pose from the snapshots. MESH_PUPPET_MOTION overrides it at server start.
+        /// component, in bursts a watcher can see across a cell line, Kinematic sets its pose from the snapshots (DESIGN 1.34).
+        /// A prefab that saved Steered keeps it, and Setup says so. MESH_PUPPET_MOTION overrides it at server start.
         /// </summary>
         [Header("Server Meshing — puppet motion")]
-        [Tooltip("How a character puppet follows its owner's snapshots. Steered: the kit's movement component walks it toward each snapshot. Kinematic: its pose is set from the snapshots and sent to clients in the kit's own movement bytes; pets and mounted puppets stay steered. MESH_PUPPET_MOTION=steered|kinematic overrides this at server start.")]
-        public MeshPuppetMotion puppetMotion = MeshPuppetMotion.Steered;
+        [Tooltip("How a character puppet follows its owner's snapshots. Steered: the kit's movement component walks it toward each snapshot. Kinematic: its pose is set from the snapshots and sent to clients in the kit's own movement bytes, so a watcher sees no bursts across a cell line. MESH_PUPPET_MOTION=steered|kinematic overrides this at server start.")]
+        public MeshPuppetMotion puppetMotion = MeshPuppetMotion.Kinematic;
 
         /// <summary>
         /// kinematicMounts gives a mounted puppet a kinematic body on the vehicle it rides while puppet motion is Kinematic

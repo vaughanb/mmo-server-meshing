@@ -49,7 +49,7 @@ OpenMMORPG since **v1.1.4**; the add-on needs a newer kit than that (see Require
     0.94.0 used the dictionaries and do not compile on v1.1.4 (`no suitable method found to override` on
     `ApplyAttack`, `ApplySkillUsing` and `ApplyReceiveDamage`);
   - client migration ([open-mmorpg/OpenMMORPG#28](https://github.com/open-mmorpg/OpenMMORPG/pull/28)): `MigrateClient` and kept objects in
-    LiteNetLibManager, which every crossing runs on. The add-on does not compile without it. 0.97.19 was built and tested
+    LiteNetLibManager, which every crossing runs on. The add-on does not compile without it. 0.97.20 was built and tested
     on `master` at 493df35fc.
 - Unity 6000.3 or newer, matching the kit.
 - Your map scenes in the build settings and your map infos in the game database.
@@ -61,7 +61,7 @@ OpenMMORPG since **v1.1.4**; the add-on needs a newer kit than that (see Require
 3. **Cut a map into cells**: add your map's layout from the open scene, either as a uniform grid or as explicit
    rectangles. Cell ids are channel ids and must be unique across the world.
 4. Press **Validate** and use the **Fix** buttons to put the add-on's subclasses onto your manager and entity prefabs
-   and to assign the registry, the gameplay rule and the server tick. For a map set Dynamic it also says, before
+   and to assign the registry, the gameplay rule and the server tick. It also warns, with a Fix, about settings that make a crossing visible: Steered puppets, a low frame rate or network tick. For a map set Dynamic it also says, before
    anything starts, which base cells could never split, whether a fully cut world would pass the 32 band neighbours or
    the 64 links a cell takes when every cell links to every other (a map with `onDemandLinks` links each cell only to
    the cells it needs, and has no such ceiling), and whether the hosts' served cells keep each family on its base's host.

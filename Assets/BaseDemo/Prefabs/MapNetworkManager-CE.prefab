@@ -137,6 +137,7 @@ MonoBehaviour:
   webSocketCertificateFilePath: 
   webSocketCertificatePassword: 
   updateFps: 20
+  puppetMotion: 0
   maxConnections: 1100
   transportFactory: {fileID: 0}
   packetVersion: 1

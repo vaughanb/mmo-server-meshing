@@ -57,7 +57,7 @@ right for a sandbox where towns can appear anywhere.
   0008 (`MeshMapNetworkManager` overrides the property, §6a.8), Dynamic maps or not; `MeshKitEditTests` fails if a kit
   update drops either.
 - The add-on also needs the kit's client migration ([open-mmorpg/OpenMMORPG#28](https://github.com/open-mmorpg/OpenMMORPG/pull/28): `MigrateClient` and kept
-  objects, patch 0010, DESIGN.md 1.01). No release carries it yet: v1.2.1 does not, and `master` does from 05ec55012. 0.97.19
+  objects, patch 0010, DESIGN.md 1.01). No release carries it yet: v1.2.1 does not, and `master` does from 05ec55012. 0.97.20
   was built and tested on `master` at 493df35fc.
 - From 0.95.0 the add-on also needs the kit's slot-indexed damage amounts (`DamageElementMinMaxFloatAmounts`, upstream
   74ec05b, on `develop` since 2026-10-07 and in v1.1.4): its attack and skill components, the harvestable and the
@@ -217,7 +217,7 @@ All on `MeshMapNetworkManager` (the map-manager prefab). Defaults are the values
 | `ghostSnapshotInterval` | 0.1 s | Snapshot rate for characters; `staticSnapshotInterval` (1 s) for drops, harvestables, buildings. |
 | `ghostLeadSeconds` | 0.1 s | Puppets are steered ahead by the owner's velocity so they do not trail by a snapshot. |
 | `ghostTeleportDistance`, `ghostStaleSeconds` | 4 m, 2 s | A puppet further off than this is teleported; one without snapshots is removed. |
-| `puppetMotion` | Steered | How a character puppet follows its owner. Steered: the kit's movement component walks it toward each snapshot (today's behaviour). Kinematic (measurement, Phase 0): its pose is set from the snapshots, extrapolated to now, and sent to clients in the kit's own movement bytes, and an unobserved puppet moves only when a snapshot arrives; pets and mounted puppets stay steered. `MESH_PUPPET_MOTION=steered\|kinematic` overrides it at server start. |
+| `puppetMotion` | Kinematic | How a character puppet follows its owner. Kinematic: its pose is set from the snapshots, extrapolated to now, and sent to clients in the kit's own movement bytes, and an unobserved puppet moves only when a snapshot arrives. Steered: the kit's movement component walks it toward each snapshot, so anyone watching a character across a cell line sees it move in bursts (DESIGN.md 1.34). A prefab that saved Steered keeps it, and Setup warns; a Dynamic map's cells are Kinematic whatever it says. `MESH_PUPPET_MOTION=steered\|kinematic` overrides it at server start. |
 | `ghostMonsters`, `ghostHarvestables`, `ghostBuildings`, `forwardGhostHits`, `handoffMonsters`, `ownSpawnAreasByZone` | on | What crosses the edge. Monsters chasing across the line are handed over by position; a spawn area only spawns inside its own cell. |
 | `partyMemberOnlineWindowSeconds` | 5 s | A party member on another cell counts as online when the kit's online table saw it within this long (the cluster relays every online player once a second). |
 | `linkAllZones` | on | Link to every cell of the map, not only neighbours (party shares and such reach any cell). A cell's link server takes 64 connections, so a map with more than about 64 live cells needs on-demand links instead (the map's `onDemandLinks` in the world registry, which overrides this for its cells). |
