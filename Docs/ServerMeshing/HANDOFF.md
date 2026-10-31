@@ -340,6 +340,9 @@ Where the work stands, how to get it running on another machine, and what is lef
    `IMeshHandoffCarrier`). The 8 km map's banker and merchant stand on the line beside the start to try it: talk to the banker from one
    side, step over, open the strongbox, step back. A chest's storage still closes at a hop; trades, invitations and duels across a line
    are still refused with the kit's messages; a shop dialog crosses by the same code but was not run.
+   A corpse in the band is a puppet with its items since 1.38 (`GhostKind.Container`), and a loot on it goes to its owner; a
+   PK kill across a line credits the killer on its own cell (`GhostAction.PkKill`). The loot through a puppet corpse was not
+   run live: it needs a monster that dies on the far side within reach, and a pulled bandit dies where it stands.
 2. **Monsters at a crossing (1.23, 1.28):** a lone monster chases a player across a Static map's line, hits
    through the ghost, and is handed over with its target; a monster that walks over a line on its own walks on
    (1.28: the handoff carries its walk and its AI's wander bookkeeping), and monster puppets are led by the NavMesh

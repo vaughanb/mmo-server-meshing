@@ -66,6 +66,46 @@ namespace MultiplayerARPG.MMO.Mesh
             base.ApplyBuff(dataId, type, level, buffApplier, buffApplierWeapon);
         }
 
+        /// <summary>A loot on a corpse that is a puppet here goes to its owner (DESIGN 1.38); false when the corpse is ours and the kit's path applies.</summary>
+        private bool TryForwardContainerLoot(uint objectId, int itemIndex, int amount)
+        {
+#if UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES
+            if (!Manager.TryGetEntityByObjectId(objectId, out ItemsContainerEntity container) || !MeshIdentity.IsGhostEntity(container))
+                return false;
+            if (!CanPickup())
+                return true;
+            if (!IsGameEntityInDistance(container))
+            {
+                GameInstance.ServerGameMessageHandlers.SendGameMessage(ConnectionId, UITextKeys.UI_ERROR_CHARACTER_IS_TOO_FAR);
+                return true;
+            }
+            MeshMapNetworkManager mesh = BaseGameNetworkManager.Singleton as MeshMapNetworkManager;
+            if (mesh != null)
+                mesh.RequestGhostContainerLoot(this, container, itemIndex, amount);
+            else
+                GameInstance.ServerGameMessageHandlers.SendGameMessage(ConnectionId, UITextKeys.UI_ERROR_NOT_ABLE_TO_LOOT);
+            return true;
+#else
+            return false;
+#endif
+        }
+
+        [ServerRpc]
+        protected override void CmdPickupItemFromContainer(uint objectId, int itemsContainerIndex, int amount)
+        {
+            if (TryForwardContainerLoot(objectId, itemsContainerIndex, amount))
+                return;
+            base.CmdPickupItemFromContainer(objectId, itemsContainerIndex, amount);
+        }
+
+        [ServerRpc]
+        protected override void CmdPickupAllItemsFromContainer(uint objectId)
+        {
+            if (TryForwardContainerLoot(objectId, -1, 0))
+                return;
+            base.CmdPickupAllItemsFromContainer(objectId);
+        }
+
         [ServerRpc]
         protected override void CmdPickup(uint objectId)
         {

@@ -25,6 +25,26 @@ namespace MultiplayerARPG.MMO.Mesh
         ApplyBuff = 1,
         GiveItems = 2,   // a harvest yield earned by a ghost: item dataId, amount, exp (see MeshHarvestableEntity)
         Chat = 3,        // a local chat said within range of this cell's player by someone across the line: the ChatMessage (MeshServerChatHandlers)
+        PkKill = 4,      // this cell's player killed a player across the line: the PK points and consecutive kills the kit credited to its puppet there
+    }
+
+    /// <summary>What the kit writes on an attacker for a PK kill, read off a puppet before and after the killing hit (DESIGN 1.38).</summary>
+    public struct PkCredit
+    {
+        public int pkPoint, consecutiveKills, highestPkPoint, highestConsecutiveKills;
+
+        public static PkCredit Of(BasePlayerCharacterEntity player)
+        {
+            return new PkCredit { pkPoint = player.PkPoint, consecutiveKills = player.ConsecutivePkKills, highestPkPoint = player.HighestPkPoint, highestConsecutiveKills = player.HighestConsecutivePkKills };
+        }
+
+        public void Restore(BasePlayerCharacterEntity player)
+        {
+            player.PkPoint = pkPoint;
+            player.ConsecutivePkKills = consecutiveKills;
+            player.HighestPkPoint = highestPkPoint;
+            player.HighestConsecutivePkKills = highestConsecutiveKills;
+        }
     }
 
     public enum GhostReplayKind : ushort
@@ -53,6 +73,7 @@ namespace MultiplayerARPG.MMO.Mesh
             _ghostActionHandlers[(ushort)GhostActionKind.ApplyBuff] = HandleApplyBuffAction;
             _ghostActionHandlers[(ushort)GhostActionKind.GiveItems] = HandleGiveItemsAction;
             _ghostActionHandlers[(ushort)GhostActionKind.Chat] = HandleChatAction;
+            _ghostActionHandlers[(ushort)GhostActionKind.PkKill] = HandlePkKillAction;
             _ghostReplayHandlers.Clear();
             _ghostReplayHandlers[(ushort)GhostReplayKind.Attack] = HandleAttackReplay;
             _ghostReplayHandlers[(ushort)GhostReplayKind.AttackTrigger] = HandleAttackTriggerReplay;
@@ -319,6 +340,36 @@ namespace MultiplayerARPG.MMO.Mesh
             if (!(target is BasePlayerCharacterEntity player) || player.ConnectionId < 0)
                 return;
             ServerSendPacket(player.ConnectionId, 0, DeliveryMethod.ReliableUnordered, GameNetworkingConsts.Chat, message);
+        }
+
+        /// <summary>
+        /// The victim's cell, after a killing hit from across the line: what the kit just credited to the attacker's puppet goes to
+        /// the attacker's owner, and the puppet is put back as it was (the owner's state reaches it with the next snapshot anyway).
+        /// </summary>
+        private void ForwardPkCredit(BasePlayerCharacterEntity attackerPuppet, BaseCharacterEntity victim, PkCredit before)
+        {
+            PkCredit after = PkCredit.Of(attackerPuppet);
+            int pkDelta = after.pkPoint - before.pkPoint, killsDelta = after.consecutiveKills - before.consecutiveKills;
+            before.Restore(attackerPuppet);
+            if (pkDelta == 0 && killsDelta == 0)
+                return;
+            if (ForwardGhostAction(attackerPuppet, GhostActionKind.PkKill, victim.GetInfo(), writer => { writer.Put(pkDelta); writer.Put(killsDelta); }))
+                Logging.Log("Mesh", $"PK credit for {attackerPuppet.CharacterName}: +{pkDelta} point(s), +{killsDelta} kill(s) for killing {victim.CharacterName} across a line, sent to its owner");
+        }
+
+        /// <summary>The attacker's cell: the kit's PK credit for a kill across the line, as Killed would have written it here.</summary>
+        private void HandlePkKillAction(BaseCharacterEntity target, EntityInfo instigator, NetDataReader payload)
+        {
+            int pkDelta = payload.GetInt(), killsDelta = payload.GetInt();
+            if (!(target is BasePlayerCharacterEntity player))
+                return;
+            player.PkPoint += pkDelta;
+            player.ConsecutivePkKills += killsDelta;
+            if (player.PkPoint > player.HighestPkPoint)
+                player.HighestPkPoint = player.PkPoint;
+            if (player.ConsecutivePkKills > player.HighestConsecutivePkKills)
+                player.HighestConsecutivePkKills = player.ConsecutivePkKills;
+            Logging.Log("Mesh", $"PK credit applied on {player.CharacterName}: {player.PkPoint} point(s), {player.ConsecutivePkKills} consecutive kill(s)");
         }
 
         /// <summary>Entity-side helper: the payload of a GiveItems action.</summary>

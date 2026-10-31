@@ -1141,6 +1141,8 @@ namespace MultiplayerARPG.MMO.Mesh
                         bool isLeftHand = false;
                         self.AimPosition = self.GetAttackAimPosition(ref isLeftHand, target.EntityTransform.position);
                         WeaponHandlingState whs = WeaponHandlingState.None;
+                        if (self.IsWeaponsSheathed && self.IsOwnerClient)
+                            self.IsWeaponsSheathed = false; // the demo starts characters sheathed, and a sheathed character's Attack does nothing (DESIGN 1.38)
                         // A cast is refused while another action plays (or on cooldown): latch a target only when accepted.
                         // The skill item goes first (its skill may share a cooldown with the direct cast), a few tries at most.
                         if (skillItemIndex >= 0 && lastItemCastTarget != target.ObjectId && itemTries < 5)

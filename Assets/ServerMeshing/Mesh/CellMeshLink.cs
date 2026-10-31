@@ -51,6 +51,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public const ushort BuildingTransferReply = 132;  // receiver -> sender: taken (promoted, spawned, owned already), or refused with a reason
         // Slice 7 (on-demand links, slices/slice7_design.md decision 6):
         public const ushort LinkClose = 133;              // sender -> receiver: this link is idle and not needed; the sender stops it next tick
+        public const ushort GhostContainerLoot = 136;     // puppet -> owner: a player here loots a corpse that stands over there (DESIGN 1.38); the owner answers with GhostLoot
         public const ushort HandoffLateRpc = 135;         // origin -> destination: a client call for a character the origin just demoted, sent before its client read the warp (DESIGN 1.07)
 
         /// <summary>Counts as traffic for an on-demand link's idle time: everything but the hello, the 2 s registration state and the close notice.</summary>
@@ -372,6 +373,17 @@ namespace MultiplayerARPG.MMO.Mesh
         public void Deserialize(NetDataReader reader) { characterId = reader.GetString(); dropMeshId = reader.GetString(); }
     }
 
+    /// <summary>A player loots a corpse (ItemsContainerEntity) that is a puppet here: one item by index, or every item (index -1). The owner answers with GhostLoot.</summary>
+    public struct GhostContainerLootMessage : INetSerializable
+    {
+        public string characterId;     // the requester (its ghost stands on the owner cell)
+        public string containerMeshId;
+        public int itemIndex;          // -1: all of them
+        public int amount;
+        public void Serialize(NetDataWriter writer) { writer.Put(characterId); writer.Put(containerMeshId); writer.Put(itemIndex); writer.Put(amount); }
+        public void Deserialize(NetDataReader reader) { characterId = reader.GetString(); containerMeshId = reader.GetString(); itemIndex = reader.GetInt(); amount = reader.GetInt(); }
+    }
+
     /// <summary>The owner resolved a ghost pickup: the items go to the requester's real character (or a message why not).</summary>
     public struct GhostLootMessage : INetSerializable
     {
@@ -623,7 +635,7 @@ namespace MultiplayerARPG.MMO.Mesh
     }
 
     /// <summary>One authoritative snapshot of an entity that lives in the sender's border band.</summary>
-    public enum GhostKind : byte { Player = 0, Monster = 1, ItemDrop = 2, Harvestable = 3, Building = 4 }
+    public enum GhostKind : byte { Player = 0, Monster = 1, ItemDrop = 2, Harvestable = 3, Building = 4, Container = 5 }
 
     public struct GhostSnapshotMessage : INetSerializable
     {
@@ -655,6 +667,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public int factionId;
         public bool isPkOn;
         public bool isWeaponsSheathed; // players: the kit does not save it, so a puppet (and the character it is promoted to) kept a stale one (DESIGN 1.06)
+        public CharacterItem[] items;  // containers only (DESIGN 1.38): what the corpse holds, written after everything else when kind == Container
         public double sampleMs;        // the sender's MeshLinkClock when it sampled the position, ms (0: not stamped); written last (DESIGN 1.19)
         public float ageSeconds;       // receiver only, never on the wire: how late the snapshot arrived against its link's fastest (DESIGN 1.19)
 
@@ -680,6 +693,11 @@ namespace MultiplayerARPG.MMO.Mesh
             writer.Put(summonType);
             writer.Put(rightWeaponDataId); writer.Put(rightWeaponLevel); writer.Put(leftWeaponDataId); writer.Put(leftWeaponLevel); writer.Put(partyId); writer.Put(guildId); writer.Put(factionId); writer.Put(isPkOn); writer.Put(isWeaponsSheathed); if (kind == GhostKind.Building) { writer.Put(fullRotation.x); writer.Put(fullRotation.y); writer.Put(fullRotation.z); }
             writer.Put(sampleMs);
+            if (kind == GhostKind.Container)
+            {
+                writer.Put(items != null ? items.Length : 0);
+                if (items != null) for (int i = 0; i < items.Length; ++i) writer.Put(items[i]);
+            }
         }
 
         public void Deserialize(NetDataReader reader)
@@ -704,6 +722,13 @@ namespace MultiplayerARPG.MMO.Mesh
             summonType = reader.GetByte();
             rightWeaponDataId = reader.GetInt(); rightWeaponLevel = reader.GetInt(); leftWeaponDataId = reader.GetInt(); leftWeaponLevel = reader.GetInt(); partyId = reader.GetInt(); guildId = reader.GetInt(); factionId = reader.GetInt(); isPkOn = reader.GetBool(); isWeaponsSheathed = reader.GetBool(); if (kind == GhostKind.Building) fullRotation = new Vector3(reader.GetFloat(), reader.GetFloat(), reader.GetFloat());
             sampleMs = reader.AvailableBytes >= 8 ? reader.GetDouble() : 0.0;
+            items = null;
+            if (kind == GhostKind.Container && reader.AvailableBytes >= 4)
+            {
+                int n = reader.GetInt();
+                items = new CharacterItem[n];
+                for (int i = 0; i < n; ++i) items[i] = reader.Get<CharacterItem>();
+            }
             ageSeconds = 0f;
         }
     }
@@ -745,6 +770,7 @@ namespace MultiplayerARPG.MMO.Mesh
             RegisterMessageHandler(MeshLinkMessageTypes.MonsterGone, HandleMonsterGone);
             RegisterMessageHandler(MeshLinkMessageTypes.LentMonsterOwner, HandleLentMonsterOwner);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostPickup, HandleGhostPickup);
+            RegisterMessageHandler(MeshLinkMessageTypes.GhostContainerLoot, HandleGhostContainerLoot);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostLoot, HandleGhostLoot);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostKill, HandleGhostKill);
             RegisterMessageHandler(MeshLinkMessageTypes.GhostAction, HandleGhostAction);
@@ -899,6 +925,12 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             GhostPickupMessage msg = messageHandler.ReadMessage<GhostPickupMessage>();
             _manager.OnGhostPickup(messageHandler.ConnectionId, msg);
+        }
+
+        private void HandleGhostContainerLoot(MessageHandlerData messageHandler)
+        {
+            GhostContainerLootMessage msg = messageHandler.ReadMessage<GhostContainerLootMessage>();
+            _manager.OnGhostContainerLoot(messageHandler.ConnectionId, msg);
         }
 
         private void HandleGhostLoot(MessageHandlerData messageHandler)
@@ -1170,6 +1202,11 @@ namespace MultiplayerARPG.MMO.Mesh
         public void SendGhostPickup(GhostPickupMessage msg)
         {
             Send(MeshLinkMessageTypes.GhostPickup, msg);
+        }
+
+        public void SendGhostContainerLoot(GhostContainerLootMessage msg)
+        {
+            Send(MeshLinkMessageTypes.GhostContainerLoot, msg);
         }
 
         public void SendGhostLoot(GhostLootMessage msg)

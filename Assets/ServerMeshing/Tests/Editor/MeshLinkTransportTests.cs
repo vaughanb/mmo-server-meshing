@@ -192,13 +192,13 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
                 loop.near.Send(Datagram(1), 1);
                 IPEndPoint relayEnd = null;
                 Assert.That(loop.far.Receive(ref relayEnd), Is.EqualTo(Datagram(1)));
-                Assert.That(clock.ElapsedMilliseconds, Is.GreaterThanOrEqualTo(30));
+                Assert.That(clock.Elapsed.TotalMilliseconds, Is.GreaterThanOrEqualTo(29.0)); // the relay's own clock and this one are a millisecond apart at worst
 
                 clock.Restart();
                 loop.far.Send(Datagram(2), 1, relayEnd);
                 IPEndPoint back = null;
                 Assert.That(loop.near.Receive(ref back), Is.EqualTo(Datagram(2)));
-                Assert.That(clock.ElapsedMilliseconds, Is.GreaterThanOrEqualTo(30));
+                Assert.That(clock.Elapsed.TotalMilliseconds, Is.GreaterThanOrEqualTo(29.0)); // the relay's own clock and this one are a millisecond apart at worst
             }
         }
 
