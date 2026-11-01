@@ -916,6 +916,7 @@ namespace MultiplayerARPG.MMO.Mesh
         private IEnumerator MigrateContinuousRoutine(string address, int port)
         {
             _running = true;
+            _frameShift = Vector3.zero; // this hop's seam swap alone (a return across the same seam would otherwise cancel it to zero)
             System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
             BasePlayerCharacterEntity entity = GameInstance.PlayingCharacterEntity;
             LiteNetLibIdentity identity = entity != null ? entity.Identity : null;
@@ -956,6 +957,7 @@ namespace MultiplayerARPG.MMO.Mesh
             MeshKeptExtrapolator keepWalking = null;
             Vector3 lastPlayer = posBefore;
             Vector3 lastCamera = Camera.main != null ? Camera.main.transform.position : Vector3.zero;
+            Vector3 sampledShift = _frameShift; // a seam swap re-bases everything mid-hop: the last samples move with it, so the step across the swap is the character's own
             // Garbage collections during the hop, and whether one fell in the longest frame (Mono's collector stops the world).
             int gcAtStart = System.GC.CollectionCount(0), gcLastSample = gcAtStart;
             bool gcInWorstFrame = false;
@@ -973,6 +975,12 @@ namespace MultiplayerARPG.MMO.Mesh
                     gcInWorstFrame = gcNow != gcLastSample;
                 }
                 gcLastSample = gcNow;
+                if (_frameShift != sampledShift)
+                {
+                    lastPlayer += _frameShift - sampledShift;
+                    lastCamera += _frameShift - sampledShift;
+                    sampledShift = _frameShift;
+                }
                 if (entity != null)
                 {
                     Vector3 p = entity.EntityTransform.position;
@@ -1117,7 +1125,7 @@ namespace MultiplayerARPG.MMO.Mesh
             Logging.Log("Spike2",
                 $"Migration to {address}:{port} | CONTINUITY fellBack=False preconnected={preconnected} kept={keptCount} adopted={adoptedCount} unadopted={unadopted} | " +
                 $"connected={tConnected}ms playerAdopted={tAdopted}ms settled={tSettled}ms | player object {objectIdBefore} -> {identity.ObjectId}, " +
-                $"moved {Vector3.Distance(posBefore, posAfter):0.##} m during the hop | frames {Spread(frameMs, "ms")} | player step {Spread(playerSteps, "m")} | camera step {Spread(cameraSteps, "m")} | jumps:{(jumps.Length > 0 ? jumps.ToString() : " none")} | " +
+                $"moved {Vector3.Distance(posBefore + _frameShift, posAfter):0.##} m during the hop{(_frameShift != Vector3.zero ? $" (frame shift {_frameShift})" : "")} | frames {Spread(frameMs, "ms")} | player step {Spread(playerSteps, "m")} | camera step {Spread(cameraSteps, "m")} | jumps:{(jumps.Length > 0 ? jumps.ToString() : " none")} | " +
                 $"longest frame {worstFrameMs:0.#}ms at f{worstFrame} (connected f{connectedFrame}, adopted f{adoptedFrame}){(gcInWorstFrame ? " with a GC" : "")} | gcs {System.GC.CollectionCount(0) - gcAtStart} | adoption spawn work {playerAdoptionMs:0.##}ms player, {adoptionMs:0.##}ms all{(clickTarget.HasValue ? $" | click-move {(clickResumed ? "resumed" : "not resumed")}" : string.Empty)}{others?.Summary()}{(keepWalking != null ? $" | kept walking {keepWalking.Walked}, handed back {keepWalking.HandedBack}{keepWalking.CorrectionSummary()}" : " | kept walking off")}");
         }
 

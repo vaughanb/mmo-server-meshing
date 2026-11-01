@@ -202,12 +202,28 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             instance.FindProperty("dayNightTimeUpdater").objectReferenceValue = EnsureDaytime();
             instance.FindProperty("serverTargetFrameRate").intValue = ServerFrameRate;
             instance.ApplyModifiedPropertiesWithoutUndo();
-            ConfigureServer(scene, mapInfo);
+            // Every 8 km map there is (DESIGN 1.40: the east map across the seam too), so every process knows them all; the
+            // spawner serves each one's cells, and a client at the seam finds the neighbour's scene by its map info.
+            List<BaseMapInfo> mapInfos = new List<BaseMapInfo>();
+            foreach (ServerMeshLargeMapBuilder.MapSpec map in ServerMeshLargeMapBuilder.Maps)
+            {
+                BaseMapInfo info = AssetDatabase.LoadAssetAtPath<BaseMapInfo>(map.MapInfoPath);
+                if (info != null)
+                    mapInfos.Add(info);
+                else if (map != ServerMeshLargeMapBuilder.West)
+                    Debug.LogWarning($"Demo copy: no map info at {map.MapInfoPath} (Build 8 km Test Map {map.MapId} first); the copy runs without that map");
+            }
+            ConfigureServer(scene, mapInfos);
 
             GameObject mapInfoGo = new GameObject(MapInfoObject);
-            mapInfoGo.AddComponent<DemoMesh8kMapInfo>().mapInfos = new BaseMapInfo[] { mapInfo };
+            mapInfoGo.AddComponent<DemoMesh8kMapInfo>().mapInfos = mapInfos.ToArray();
             BaseItem twoSeatWhistle = AssetDatabase.LoadAssetAtPath<BaseItem>(ServerMeshLargeMapBuilder.TwoSeatWhistlePath); // DESIGN 1.39: the test content the database does not list
             mapInfoGo.AddComponent<DemoMesh8kItems>().items = twoSeatWhistle != null ? new BaseItem[] { twoSeatWhistle } : new BaseItem[0];
+            // Every meshed monster and harvestable prefab, known to every process (DESIGN 1.40): a cell registers only what its
+            // own scene's spawn areas use, and a monster of a kind the other map never spawns crosses the seam all the same.
+            DemoMesh8kEntities entities = mapInfoGo.AddComponent<DemoMesh8kEntities>();
+            entities.monsters = PrefabsIn<BaseMonsterCharacterEntity>(ServerMeshLargeMapBuilder.MonsterFolder);
+            entities.harvestables = PrefabsIn<HarvestableEntity>(ServerMeshLargeMapBuilder.HarvestableFolder);
             SceneManager.MoveGameObjectToScene(mapInfoGo, scene);
             GameObject startMapGo = new GameObject(StartMapObject);
             // The login server creates characters and takes the first data manager among its children.
@@ -216,10 +232,11 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
 
             EditorSceneManager.MarkSceneDirty(scene);
             EditorSceneManager.SaveScene(scene);
-            Debug.Log($"Demo copy: {InitScene}: rule {RulePath}, new characters start on {ServerMeshLargeMapBuilder.MapId}, " +
+            Debug.Log($"Demo copy: {InitScene}: rule {RulePath}, maps {string.Join(", ", mapInfos.Select(i => i.Id))}, new characters start on {ServerMeshLargeMapBuilder.MapId}, " +
                       $"cells on demand ({AwakeRings} ring) from {CellsExeRelative()}, database {DbFile}");
 
-            EnableInBuildSettings(ServerMeshLargeMapBuilder.ScenePath);
+            foreach (string mapScene in MapScenes())
+                EnableInBuildSettings(mapScene);
             EnableInBuildSettings(HomeScene);
             AssetDatabase.SaveAssets();
             if (!File.Exists(CellsExeRelative()))
@@ -277,9 +294,11 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         {
             if (!File.Exists(InitScene))
                 return "error: no copy yet (Build 8 km Demo Copy first)";
+            List<string> scenes = new List<string> { InitScene, HomeScene };
+            scenes.AddRange(MapScenes());
             BuildPlayerOptions options = new BuildPlayerOptions
             {
-                scenes = new[] { InitScene, HomeScene, ServerMeshLargeMapBuilder.ScenePath },
+                scenes = scenes.ToArray(),
                 locationPathName = Path.GetFullPath(exe),
                 target = BuildTarget.StandaloneWindows64,
                 subtarget = (int)subtarget,
@@ -289,6 +308,27 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             if (summary.result != BuildResult.Succeeded)
                 return $"error: build {summary.result} with {summary.totalErrors} error(s)";
             return $"ok {summary.totalSize / (1024 * 1024)} MB in {summary.totalTime.TotalSeconds:0} s at {exe}";
+        }
+
+        /// <summary>PrefabsIn: the component of type T on every prefab under the folder, sorted by path (none when the folder is missing).</summary>
+        private static T[] PrefabsIn<T>(string folder) where T : Component
+        {
+            if (!AssetDatabase.IsValidFolder(folder))
+                return new T[0];
+            return AssetDatabase.FindAssets("t:Prefab", new[] { folder })
+                .Select(AssetDatabase.GUIDToAssetPath)
+                .OrderBy(p => p, StringComparer.Ordinal)
+                .Select(p => AssetDatabase.LoadAssetAtPath<GameObject>(p))
+                .Where(go => go != null)
+                .Select(go => go.GetComponent<T>())
+                .Where(c => c != null)
+                .ToArray();
+        }
+
+        /// <summary>MapScenes is every 8 km map scene that has been built, in the builder's order: what the copy's builds and build settings carry.</summary>
+        public static IEnumerable<string> MapScenes()
+        {
+            return ServerMeshLargeMapBuilder.Maps.Select(m => m.ScenePath).Where(File.Exists);
         }
 
         /// <summary>ExeRelative is the copy's player, relative to the project (the editor's working directory).</summary>
@@ -328,10 +368,18 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 return false;
             }
             string sourceScript = AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(MonoScript.FromScriptableObject(source)));
-            if (File.Exists(RulePath))
-                File.Copy(SourceRule, RulePath, true);
-            else
-                AssetDatabase.CopyAsset(SourceRule, RulePath);
+            MeshCombatGameplayRule existing = AssetDatabase.LoadAssetAtPath<MeshCombatGameplayRule>(RulePath);
+            if (existing != null)
+            {
+                // A rerun refreshes the demo's values and keeps the copy's own (the chase and aggro settings of DESIGN 1.28,
+                // which the demo's rule does not have): the demo rule's fields are written over the existing copy, nothing else.
+                // A file copy reset those to the class defaults (1.40).
+                EditorJsonUtility.FromJsonOverwrite(EditorJsonUtility.ToJson(source), existing);
+                EditorUtility.SetDirty(existing);
+                AssetDatabase.SaveAssets();
+                return true;
+            }
+            AssetDatabase.CopyAsset(SourceRule, RulePath);
             File.WriteAllText(RulePath, File.ReadAllText(RulePath).Replace("guid: " + sourceScript, "guid: " + RuleScriptGuid));
             AssetDatabase.ImportAsset(RulePath, ImportAssetOptions.ForceUpdate);
             if (AssetDatabase.LoadAssetAtPath<MeshCombatGameplayRule>(RulePath) == null)
@@ -425,7 +473,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         /// The server settings, as overrides on the scene's instances (SerializedObject records them). The whole scene: the
         /// map network manager is its own root beside the server instance in 00Init, not a child of it.
         /// </summary>
-        private static void ConfigureServer(Scene scene, MapInfo mapInfo)
+        private static void ConfigureServer(Scene scene, List<BaseMapInfo> mapInfos)
         {
             // Character puppets take their pose from the snapshots (DESIGN 1.09): a steered one dashed to each snapshot and
             // stood until the next, so a character just across a line moved in stop-go bursts. Dynamic maps already default
@@ -455,9 +503,11 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 so.FindProperty("spawnExePath").stringValue = "./" + Application.productName + ".exe";
                 so.FindProperty("isOverrideExePath").boolValue = true;
                 so.FindProperty("overrideExePath").stringValue = "./" + CellsExeRelative();
+                // The spawner serves every 8 km map's cells (the kit's list, which the mesh spawner reads map by map).
                 SerializedProperty maps = so.FindProperty("spawningMaps");
-                maps.arraySize = 1;
-                maps.GetArrayElementAtIndex(0).objectReferenceValue = mapInfo;
+                maps.arraySize = mapInfos.Count;
+                for (int i = 0; i < mapInfos.Count; ++i)
+                    maps.GetArrayElementAtIndex(i).objectReferenceValue = mapInfos[i];
                 so.ApplyModifiedPropertiesWithoutUndo();
             }
             // The SQLite database by its type name: SQLiteDatabase compiles only for standalone targets.

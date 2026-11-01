@@ -18,7 +18,8 @@ crashes and central restarts included (§6a). Version 0.83.
   buildings), so players see and fight across it; hits, kills, loot, party and guild rewards, quest counters, buildings
   and pickups all resolve on the owning side.
 - Maps can be placed next to each other in one world; a **seam** between two maps is crossed the same way, the
-  client pre-loading the neighbouring scene behind the player's back.
+  client pre-loading the neighbouring scene behind the player's back and swapping into it at the line. Run on two
+  8 km maps side by side, each cut 8 × 8 (DESIGN 1.40; the demo copy's `ServerMeshTestMap8k` and `ServerMeshTestMap8kEast`).
 - **Sleeping cells:** with nobody near it a cell does not run at all; it starts a few seconds ahead of the first
   player who approaches and exits again later. Empty land costs nothing.
 - **Dynamic cells:** a map set Dynamic has a busy cell split into more cells at runtime and merged back when it quiets,
@@ -94,7 +95,21 @@ Open the map's scene. In panel 2:
 1. Pick the **map info**.
 2. Set the **cell size** in metres (300 is a good default; see §2).
 3. Leave **world origin** at zero for your first map. For a second map that should touch the first, set its origin so
-   the two maps' cell rectangles meet in the shared frame (e.g. a 10 km map to the east gets x = 10 000).
+   the two maps' cell rectangles meet in the shared frame (e.g. a 10 km map to the east gets x = 10 000). Two more
+   things a seam needs of the maps themselves (DESIGN 1.40):
+   - **Ground past the line.** A map's own ground ends at the seam, but what stands past it still belongs to this
+     server until the next boundary tick hands it over, and a monster chases through the band on this server's navmesh:
+     without ground there a character falls and a NavMesh agent stops at the edge. Give each scene an **apron** past
+     every seam edge — an invisible collider strip at ground height, at least as wide as the band (the demo uses 100 m),
+     baked into the navmesh. On a client it lies under the neighbour's pre-loaded terrain, unseen. The 8 km builder
+     makes them (`SeamAprons` in the scene).
+   - **Entities known on both sides.** A cell registers the entity prefabs its own scene uses, so a monster kind one map
+     spawns and the other never does reaches a cell that has never heard of it, and its handoff is refused
+     (`unknown monster entity id`, the monster lost). Anything that can cross a seam — handed over, or as a puppet in the
+     band — must be registered in every process: list it in the game database (the usual way), or add it at load as
+     the demo copy does (`DemoMesh8kEntities`).
+   The demo's two maps are the worked example: **Tools ▸ Open MMORPG ▸ Server Meshing ▸ Testing ▸ Build 8 km Test Map**
+   and **… East** make the scenes with their aprons, map infos and layouts; **Build 8 km Demo Copy** registers both.
 4. **Measure open scene** — the grid is fitted to everything with a renderer, collider or terrain.
 5. **Add / replace layout**. Cells are named `<prefix>-<x>-<y>`; the prefix defaults to the map id.
 
@@ -239,7 +254,8 @@ All on `MeshMapNetworkManager` (the map-manager prefab). Defaults are the values
 | `useVisualStandIns`, `standInBlendSeconds`, `standInMaxLifetimeSeconds`, `standInMatchDistance` | on, 0.3 s, 1.5 s, 2.5 m | The seamless swap: clones of everything visible cover the reconnect, then blend onto the real entities. |
 | `fastClientReadyOnMigration` | on | Skip the kit's post-load settle and GC on a hop. |
 | `migrationReadyTimeoutSeconds`, `useMaskedMigration`, `migrationMaskFadeSeconds` | 10 s, on, 0.25 s | Fallback mask if the destination is silent. |
-| `seamPreloadDistance`, `seamUnloadHysteresis` | 80 m, 40 m | Pre-load a neighbouring *map's* scene this close to the seam; drop it that much further away. 0 disables (the kit then reloads the scene with a loading screen). |
+| `seamPreloadDistance`, `seamUnloadHysteresis` | 80 m, 40 m | Pre-load a neighbouring *map's* scene this close to the seam; drop it that much further away. 0 disables (the kit then reloads the scene with a loading screen). While pre-loaded the scene is scenery: its cameras, listeners, event systems, lights and own scripts are off until the swap (DESIGN 1.40). |
+| `seamPreloadPriority` | Low | Unity's background loading priority while a neighbour scene pre-loads: how much of a frame its asset integration may take (Low about 2 ms). The scene's own objects are still made in one frame (§8). |
 | `heldRpcTimeoutSeconds` | 15 s | RPCs that arrive before the character exists are held, then replayed. |
 | `entityDataWaitSeconds` | 1 s | After the blend, wait up to this long for the new entity's stats before re-binding the HUD, so it never shows 0/0. |
 | `debugCaptureMigrationFrames` | off | Editor only: save a screenshot every few frames during a seamless swap to `Logs/MigrationFrames`. |
@@ -902,7 +918,14 @@ This chapter runs the test rig, which lives in the source repository
 - **Frames are per map.** A 10 km map keeps one scene at its own origin (the kit's quantized movement grid is off by
   default; float precision at 5 km is 0.5 mm). Only a seam between maps changes frames.
 - **A seam pre-load** moves the neighbour scene's roots; its light and reflection probes and static batching stay at
-  the authored origin until the swap, so lighting in the pre-loaded strip can differ briefly.
+  the authored origin until the swap, so lighting in the pre-loaded strip can differ briefly. Its lights and own scripts
+  are off until the swap. The scene's objects are made in one frame when it loads (Unity integrates a scene's objects at
+  once; the loading priority spreads only assets): on the 8 km demo, whose maps hold 2,300 spawn-area objects a client
+  never needs, that frame is 87–101 ms, 80 m before the line (DESIGN 1.40). Keep a map's client-side object count in
+  mind, or put server-only content in a scene the cells alone load.
+- **A seam needs the maps' cooperation:** ground past the line (an apron) and every crossing entity known on both sides
+  (§4.2). The pre-load holds one neighbour map at a time, so a corner where three maps meet is not pre-loaded for the
+  third.
 - **Crowds** are bounded by one process and by the kit's own AOI send cost (0.29 kB/s per visible entity per client),
   not by the mesh: 500 people in one place is a kit AOI/update-rate question.
 - **Warp portals or spawn points exactly on a login position** do what they do in the kit: a character that stands up

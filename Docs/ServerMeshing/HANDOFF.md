@@ -221,6 +221,17 @@ Where the work stands, how to get it running on another machine, and what is lef
    - Per-frame check: since the arrival fix, no step is longer than twice the move speed allows.
    - EditMode tests: 3,218 ran; the one failure, `WebSocketClientSendTests.ReusedWriter_SendsOwnedPayloadsInOrder`,
      passes on its own (timing-flaky, unrelated).
+18. **A second 8 km map across a seam (DESIGN 1.40, package 0.97.25).** `ServerMeshTestMap8kEast` sits one map east of
+    the first in the registry (world x 8,192), cut 8 × 8 like it; the demo copy registers both maps, so the spawner
+    serves 128 on-demand cells. The client pre-loads the other map's scene within 80 m of the seam and swaps into it
+    at the hop; the hop itself is the usual one into the other map's cell. Each scene carries a 100 m collider apron
+    past its seam edge, baked into the navmesh, and every meshed monster and harvestable prefab is registered in every
+    process. Found and fixed on the way: the kit rode the swap's 8,192 m shift of the ground as a moving platform and
+    put the player a map too far (`ForgetPlatforms`); the migration metrics read the frame shift as a jump; a second
+    hop across the same seam cancelled the recorded shift; the pre-loaded scene's lights and scripts ran beside the
+    active scene's. Verified: round trips in both directions (positions right, adopted in 230–420 ms), an observer on
+    the east map seeing the crosser as a translated ghost, a bandit chasing a player over the seam and handed over
+    with its target.
 
 ## Setting up on another machine
 
@@ -292,6 +303,20 @@ Where the work stands, how to get it running on another machine, and what is lef
   ```
 
   Stop it afterwards: it outlives Play.
+- **A seam crossing (DESIGN 1.40).** The seam is at x = 4,096 of `ServerMeshTestMap8k`, which is x = −4,096 of
+  `ServerMeshTestMap8kEast` (its frame sits 8,192 m east). Save the character beside it in the database while Play is
+  stopped (`characters`: `currentMapName`, `currentPositionX/Y/Z`; the lane is z = 512, the ground y = 21), e.g.
+  (4081, 21, 512) on the west map facing east (`currentRotationY` 90). Auto client `walk` with
+  `stopWalkOnMigration = true`, `expectedMapName = ""` (any map: the character's map changes with the hop) and the legs
+  each in the frame they end in: `walkTargetX = 4111` (15 m past the seam, west frame), `walkReturnX = −4111` (15 m
+  back, east frame), `walkTargetZ = 0` (keep the lane). Read `Seam:` lines (`pre-loaded … in N ms over M frames`,
+  `swapped … N runtime roots carried`), the `seam:` hop stamps (the own player before and after the carry, the swap's
+  timings) and the CONTINUITY line's `moved … (frame shift …)`. An observer: a bot `stand` on the east map at
+  (−4093, 517) with `-meshExpectedMap ServerMeshTestMap8kEast` and `MESH_TRACE_OBSERVED=1`; its `MeshRemote` lines show
+  the crosser as a ghost at x ≈ −4111 before the line. `patrol` and `flee` keep their targets in one frame, so across a
+  seam they stop after the hop (a target 8 km off has no navmesh): walk legs only. `MESH_TEST_MONSTER=4091,509,BanditMale,free`
+  puts a bandit 5 m west of the seam (the spot is each cell's own scene frame, so the east map's cell (7,4) spawns one
+  too, 8 km away); `flee` from (4084, 520) to a bait within 3 m of it (`walkTargetX 4093, walkTargetZ 511`) makes it chase.
 - **Local test accounts:** meshtest, meshtest2, bot1, bot2 exist only in this machine's
   `mmorpg-demomesh8k.sqlite3`.
 
@@ -344,6 +369,11 @@ Where the work stands, how to get it running on another machine, and what is lef
    PK kill across a line credits the killer on its own cell (`GhostAction.PkKill`). Both measured, the loot with a pinned test
    deer (`MESH_TEST_MONSTER=-1.3,540,Deer` on the cell start) killed from across the line. A shop dialog crosses a hop and a
    purchase on the new cell is served. Passengers on a vehicle have no content: the demo's horse has one seat.
+   - A seam between the two 8 km maps (1.40): the hop is the usual one (adopted 227–419 ms, the character 0.9–1.6 m on);
+     the swap frame is 25–45 ms, and the pre-load of the neighbour's scene costs one 87–101 ms frame 80 m before the line
+     (its 2,300 spawn-area objects integrated at once). The lever is a server-only companion scene for the spawn areas
+     (the cells load it additively, a client never does), which would leave ~10 objects to integrate; not built. The
+     session's first hop still has its 117–134 ms connect frame (first-use compilation).
 2. **Monsters at a crossing (1.23, 1.28):** a lone monster chases a player across a Static map's line, hits
    through the ghost, and is handed over with its target; a monster that walks over a line on its own walks on
    (1.28: the handoff carries its walk and its AI's wander bookkeeping), and monster puppets are led by the NavMesh

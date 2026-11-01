@@ -35,6 +35,9 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/ServerMeshingDemo/Scenes/ServerMeshTestMap8k.unity
     guid: 519a505d1f8435d44855e9183b85fcea
+  - enabled: 1
+    path: Assets/ServerMeshingDemo/Scenes/ServerMeshTestMap8kEast.unity
+    guid: 1aa5f9cba4ba8344fb4a688ad1787bf0
   m_configObjects:
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: b7b0acfa1d32d3f4fb4dd990fef8568c, type: 3}
   m_UseUCBPForAssetBundles: 0

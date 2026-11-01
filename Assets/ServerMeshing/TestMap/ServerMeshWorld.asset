@@ -71,6 +71,21 @@ MonoBehaviour:
     autoSplit: 0
     autoMerge: 0
     onDemandLinks: 0
+  - mapId: ServerMeshTestMap8kEast
+    worldOrigin: {x: 8192, y: 0, z: 20000}
+    gridOrigin: {x: -4096, y: 0, z: -4096}
+    cellSize: 1024
+    columns: 8
+    rows: 8
+    cellIdFormat: '{map}-{x}-{y}'
+    cellIds: []
+    cellRects: []
+    cellMode: 0
+    minCellSize: 0
+    maxCellsPerBase: 0
+    autoSplit: 0
+    autoMerge: 0
+    onDemandLinks: 0
   touchTolerance: 0.5
   dynamicSettings:
     bandWidth: 80

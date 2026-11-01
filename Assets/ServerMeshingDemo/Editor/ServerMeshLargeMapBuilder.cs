@@ -1,8 +1,18 @@
-// Server Meshing test rig — builds the 8 km test map, everything of it under ServerMeshingDemo/ (the builder, the scene
-// and its terrain and navmesh, the map info): a flat 8,192 m Unity Terrain with every cell edge painted on it, monster and
-// harvestable spawn areas spread as a game's land would be, a navmesh baked off the terrain collider, its map info,
-// and its 8 x 8 layout of 1,024 m cells in the world registry. The layout sits 20 km north of the other test maps in the
-// shared frame, so it touches neither and has no seams.
+// Server Meshing test rig — builds the 8 km test maps, everything of them under ServerMeshingDemo/ (the builder, the scenes
+// and their terrain and navmeshes, the map infos): each a flat 8,192 m Unity Terrain with every cell edge painted on it,
+// monster and harvestable spawn areas spread as a game's land would be, a navmesh baked off the terrain collider, its map
+// info, and its 8 x 8 layout of 1,024 m cells in the world registry. The first map (ServerMeshTestMap8k) sits 20 km north
+// of the small test maps in the shared frame; the second (ServerMeshTestMap8kEast, DESIGN 1.40) sits 8,192 m east of it,
+// so the two meet along a seam: crossing it is a map change, a scene change and a cell change in one hop, and a client
+// standing within the pre-load distance of the seam loads the other map's scene additively at the frame offset
+// (MeshMapNetworkManager_Seam). The maps share one TerrainData (the same flat ground and painted cell edges; the terrain
+// is what a game authors differently) and each has its own navmesh, spawns and curtain colour (red west, blue east).
+//
+// Past every edge that touches another map, a scene carries a seam apron: an invisible ground collider, ApronWidth wide,
+// baked into the navmesh. The map's own terrain ends at the line, but what stands past the line still belongs to this
+// server until the next boundary tick hands it over, and a monster chases through the band on this server's navmesh:
+// without ground past the line a character falls and a NavMesh agent stops at the edge. On a client the apron lies under
+// the neighbour's pre-loaded terrain, unseen.
 //
 // New characters start StartEdgeDistance inside cell (4,4), facing its edge with cell (3,4). A see-through curtain in the
 // edge colour stands over every painted cell edge, so the borders read from afar.
@@ -29,7 +39,8 @@
 // hand-placed additions under it. The map info, database entry, build-settings entry and registry layout are updated in
 // place, so a rerun is safe.
 //
-// Reached from the menu and from batch mode (-executeMethod MultiplayerARPG.MMO.Mesh.Editor.ServerMeshLargeMapBuilder.BuildFromCommandLine).
+// Reached from the menu (one entry per map) and from batch mode, which builds both
+// (-executeMethod MultiplayerARPG.MMO.Mesh.Editor.ServerMeshLargeMapBuilder.BuildFromCommandLine).
 
 using System;
 using System.Collections.Generic;
@@ -45,14 +56,41 @@ using UnityEngine.SceneManagement;
 
 namespace MultiplayerARPG.MMO.Mesh.Editor
 {
-    /// <summary>ServerMeshLargeMapBuilder builds the ServerMeshTestMap8k scene, its assets and its registrations.</summary>
+    /// <summary>ServerMeshLargeMapBuilder builds the ServerMeshTestMap8k and ServerMeshTestMap8kEast scenes, their assets and their registrations.</summary>
     public static class ServerMeshLargeMapBuilder
     {
+        /// <summary>MapSpec is one of the maps the builder makes: where it sits in the world, what its files are called, what is only on the start map.</summary>
+        public sealed class MapSpec
+        {
+            /// <summary>The map info id, the scene name and the stem of every file of the map.</summary>
+            public string MapId;
+            /// <summary>Where the map's scene origin sits in the registry's shared frame; two maps whose rectangles meet there share a seam.</summary>
+            public Vector3 WorldOrigin;
+            /// <summary>The spawn plans' seed: the maps' land differs.</summary>
+            public int Seed;
+            /// <summary>Whether the map carries what a new character sees first (the herd, the harvestable row, the NPCs, the two-seat horse): the start map only.</summary>
+            public bool StartSights;
+            /// <summary>The colour of the map's cell-edge curtains: each map its own, so a player at the seam knows which side they are on.</summary>
+            public Color CurtainColor;
+
+            public string ScenePath => SceneFolder + "/" + MapId + ".unity";
+            public string AssetFolder => SceneFolder + "/" + MapId;
+            public string NavMeshPath => AssetFolder + "/NavMesh.asset";
+            public string MapInfoPath => Folder + "/GameData/" + MapId + "-MapInfo.asset";
+            public string CurtainMeshPath => AssetFolder + "/CellEdgeCurtain.asset";
+            public string CurtainMaterialPath => AssetFolder + "/CellEdgeCurtain.mat";
+            /// <summary>The map's world rectangle (x, z), the terrain's footprint.</summary>
+            public Rect WorldRect => new Rect(WorldOrigin.x - MapSize * 0.5f, WorldOrigin.z - MapSize * 0.5f, MapSize, MapSize);
+            public override string ToString() => MapId;
+        }
+
         public const string MapId = "ServerMeshTestMap8k";
+        public const string EastMapId = "ServerMeshTestMap8kEast";
         public const string Folder = "Assets/ServerMeshingDemo";
         public const string SceneFolder = Folder + "/Scenes";
         public const string ScenePath = SceneFolder + "/" + MapId + ".unity";
         public const string AssetFolder = SceneFolder + "/" + MapId;
+        /// <summary>TerrainDataPath is the one TerrainData both maps' terrains draw and collide with (the same flat ground, the same painted cell edges).</summary>
         public const string TerrainDataPath = AssetFolder + "/Terrain.asset";
         public const string TerrainLayerPath = AssetFolder + "/Ground.terrainlayer";
         public const string GroundTexturePath = AssetFolder + "/Ground.png";
@@ -85,8 +123,16 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         public const float MapSize = 8192f;
         /// <summary>CellSize is the registry cell edge; 8 x 8 cells cover the map.</summary>
         public const float CellSize = 1024f;
-        /// <summary>WorldOrigin places the map in the shared frame, clear of ServerMeshTestMap and ServerMeshTestMap2.</summary>
+        /// <summary>WorldOrigin places the first map in the shared frame, clear of ServerMeshTestMap and ServerMeshTestMap2.</summary>
         public static readonly Vector3 WorldOrigin = new Vector3(0f, 0f, 20000f);
+        /// <summary>EastWorldOrigin places the second map one map east of the first: their rectangles meet at world x = 4,096, the seam.</summary>
+        public static readonly Vector3 EastWorldOrigin = new Vector3(MapSize, 0f, 20000f);
+        /// <summary>
+        /// ApronWidth is how far past a seam a scene's ground collider and navmesh reach (DESIGN 1.40). Wider than the 80 m
+        /// band: a monster chasing through the band stays on this server's navmesh until the line hands it over, and a
+        /// character a boundary tick past the line stands on something.
+        /// </summary>
+        public const float ApronWidth = 100f;
         /// <summary>
         /// GroundHeight is the flat ground's world height. Not 0: the demo player's FootstepEffects takes anything below its
         /// sea level (0 m, plus up to 18 cm of swell) as sea, and splashes on every step.
@@ -103,8 +149,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         public const float CurtainHeight = 15f;
         /// <summary>CurtainAlpha is the curtain's opacity at the ground; it fades to nothing at the top.</summary>
         public const float CurtainAlpha = 0.7f;
-        public const string CurtainMeshPath = AssetFolder + "/CellEdgeCurtain.asset";
-        public const string CurtainMaterialPath = AssetFolder + "/CellEdgeCurtain.mat";
+        /// <summary>CurtainTexturePath is the fade both maps' curtain materials share (the mesh and material are per map: MapSpec).</summary>
         public const string CurtainTexturePath = AssetFolder + "/CellEdgeCurtain.png";
 
         /// <summary>EdgeWidth is how wide the painted cell-edge lines are, in metres.</summary>
@@ -112,6 +157,15 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         /// <summary>EdgeAlphamapResolution: 4 m per splat texel, fine enough for the edge lines.</summary>
         public const int EdgeAlphamapResolution = 2048;
         public static readonly Color EdgeColor = new Color(0.85f, 0.22f, 0.12f);
+        /// <summary>EastCurtainColor is the east map's curtain colour; the painted ground lines stay red on both (one TerrainData).</summary>
+        public static readonly Color EastCurtainColor = new Color(0.15f, 0.38f, 0.9f);
+
+        /// <summary>West is the first map, where new characters start: everything the demo copy ran before 1.40.</summary>
+        public static readonly MapSpec West = new MapSpec { MapId = MapId, WorldOrigin = WorldOrigin, Seed = Seed, StartSights = true, CurtainColor = EdgeColor };
+        /// <summary>East is the second map, across the seam at world x = 4,096; its land is all far from the start, so its monsters are the hardest mixes.</summary>
+        public static readonly MapSpec East = new MapSpec { MapId = EastMapId, WorldOrigin = EastWorldOrigin, Seed = Seed + 1000, StartSights = false, CurtainColor = EastCurtainColor };
+        /// <summary>Maps is every map the builder makes, in build order.</summary>
+        public static readonly MapSpec[] Maps = { West, East };
 
         /// <summary>ClearRadius keeps the map's spawns this far from the start, as around a first town. It is about the 80 m view, so they come into sight within steps; the crossing rig's patrols run inside it.</summary>
         public const float ClearRadius = 90f;
@@ -164,20 +218,20 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             public float quietChance, busyChance;
             public float landOffset; // its own noise: forests do not follow the camps
             public bool harderWithDistance;
-            public int seed;
+            public int seedOffset; // added to the map's seed
         }
 
         private static readonly SpawnPlan MonsterPlan = new SpawnPlan
         {
             root = "MonsterSpawns", spacing = 128f, jitter = 56f, quietChance = 0.05f, busyChance = 0.85f,
-            landOffset = 0f, harderWithDistance = true, seed = Seed,
+            landOffset = 0f, harderWithDistance = true, seedOffset = 0,
         };
 
         /// <summary>A patch of trees or rocks is wider than a camp, so there are fewer of them.</summary>
         private static readonly SpawnPlan NodePlan = new SpawnPlan
         {
             root = "HarvestableSpawns", spacing = 256f, jitter = 112f, quietChance = 0.02f, busyChance = 0.7f,
-            landOffset = 37.3f, harderWithDistance = false, seed = Seed + 2,
+            landOffset = 37.3f, harderWithDistance = false, seedOffset = 2,
         };
 
         [MenuItem("Tools/Open MMORPG/Server Meshing/Testing/Build 8 km Test Map")]
@@ -185,7 +239,15 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         {
             if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
                 return;
-            Build();
+            Build(West);
+        }
+
+        [MenuItem("Tools/Open MMORPG/Server Meshing/Testing/Build 8 km Test Map East")]
+        public static void MenuEast()
+        {
+            if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
+                return;
+            Build(East);
         }
 
         [MenuItem("Tools/Open MMORPG/Server Meshing/Testing/Build 8 km Test Map Spawns")]
@@ -193,16 +255,26 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         {
             if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
                 return;
-            BuildSpawns();
+            BuildSpawns(West);
         }
 
-        /// <summary>BuildFromCommandLine is the batch-mode entry point; it exits 0 on success and 1 on failure.</summary>
+        [MenuItem("Tools/Open MMORPG/Server Meshing/Testing/Build 8 km Test Map East Spawns")]
+        public static void SpawnsMenuEast()
+        {
+            if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
+                return;
+            BuildSpawns(East);
+        }
+
+        /// <summary>BuildFromCommandLine is the batch-mode entry point: both maps; it exits 0 on success and 1 on failure.</summary>
         public static void BuildFromCommandLine()
         {
             bool ok;
             try
             {
-                ok = Build();
+                ok = true;
+                foreach (MapSpec map in Maps)
+                    ok &= Build(map);
             }
             catch (Exception ex)
             {
@@ -212,8 +284,14 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             EditorApplication.Exit(ok ? 0 : 1);
         }
 
-        /// <summary>Build generates the scene and registers the map. It logs one Large map line per step.</summary>
+        /// <summary>Build generates the first map's scene and registers it (the menu's first entry; batch mode builds both).</summary>
         public static bool Build()
+        {
+            return Build(West);
+        }
+
+        /// <summary>Build generates one map's scene and registers the map. It logs one Large map line per step.</summary>
+        public static bool Build(MapSpec spec)
         {
             MeshWorldRegistry world = AssetDatabase.LoadAssetAtPath<MeshWorldRegistry>(WorldPath);
             if (world == null)
@@ -221,74 +299,168 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 Debug.LogError($"Large map error: missing {WorldPath}");
                 return false;
             }
-            EnsureFolder(AssetFolder);
+            EnsureFolder(AssetFolder); // the shared terrain data and layers
+            EnsureFolder(spec.AssetFolder);
+            // Every map's layout first: a seam apron goes where another map's layout touches this one, whichever is built first.
+            foreach (MapSpec map in Maps)
+                AddLayout(world, map);
             SpawnMixes mixes = LoadSpawnMixes();
             if (mixes == null)
                 return false;
 
-            Scene scene = OpenOrCreateScene();
+            Scene scene = OpenOrCreateScene(spec);
             foreach (GameObject root in scene.GetRootGameObjects())
                 if (root.name != AuthoredRoot)
                     UnityEngine.Object.DestroyImmediate(root);
 
             CreateLightAndSky(scene);
             Terrain terrain = CreateTerrain();
-            CreateCellEdgeCurtains();
             // Opening a scene (this one, and the demo map for its sky) unloads unreferenced assets, which leaves a
             // reference loaded before it dead: assigned, it saves as nothing. So everything assigned below is loaded here.
             world = AssetDatabase.LoadAssetAtPath<MeshWorldRegistry>(WorldPath);
-            CreateZoneManager(world);
-            string spawns = CreateSpawnAreas(mixes);
+            List<Side> seams = CreateSeamAprons(world, spec);
+            CreateCellEdgeCurtains(spec, seams);
+            CreateZoneManager(world, spec);
+            string spawns = CreateSpawnAreas(mixes, spec);
             CreateSpawnPoint();
-            BakeNavMesh(terrain);
+            BakeNavMesh(terrain, spec);
 
             EditorSceneManager.MarkSceneDirty(scene);
-            if (!EditorSceneManager.SaveScene(scene, ScenePath))
+            if (!EditorSceneManager.SaveScene(scene, spec.ScenePath))
             {
-                Debug.LogError("Large map error: the scene could not be saved at " + ScenePath);
+                Debug.LogError("Large map error: the scene could not be saved at " + spec.ScenePath);
                 return false;
             }
-            Debug.Log($"Large map: scene {ScenePath}, {MapSize:0} m terrain, {spawns}");
+            Debug.Log($"Large map: scene {spec.ScenePath}, {MapSize:0} m terrain, seams {(seams.Count > 0 ? string.Join(", ", seams) : "none")}, {spawns}");
 
-            MapInfo mapInfo = EnsureMapInfo();
+            MapInfo mapInfo = EnsureMapInfo(spec);
             AddToDatabase(mapInfo);
-            AddToBuildSettings();
-            AddLayout(world);
+            AddToBuildSettings(spec);
+            AddLayout(world, spec);
             CheckGameplayRule();
             AssetDatabase.SaveAssets();
             return true;
         }
 
-        /// <summary>BuildSpawns replaces the map's spawn areas and leaves the rest of the scene as it is: no terrain, no navmesh bake.</summary>
-        public static bool BuildSpawns()
+        /// <summary>BuildSpawns replaces a map's spawn areas and leaves the rest of the scene as it is: no terrain, no navmesh bake.</summary>
+        public static bool BuildSpawns(MapSpec spec)
         {
             SpawnMixes mixes = LoadSpawnMixes();
             if (mixes == null)
                 return false;
-            Scene scene = OpenOrCreateScene();
+            Scene scene = OpenOrCreateScene(spec);
             foreach (GameObject root in scene.GetRootGameObjects())
                 if (root.name == MonsterPlan.root || root.name == NodePlan.root || root.name == NpcRoot)
                     UnityEngine.Object.DestroyImmediate(root);
-            string spawns = CreateSpawnAreas(mixes);
+            string spawns = CreateSpawnAreas(mixes, spec);
             EditorSceneManager.MarkSceneDirty(scene);
-            if (!EditorSceneManager.SaveScene(scene, ScenePath))
+            if (!EditorSceneManager.SaveScene(scene, spec.ScenePath))
             {
-                Debug.LogError("Large map error: the scene could not be saved at " + ScenePath);
+                Debug.LogError("Large map error: the scene could not be saved at " + spec.ScenePath);
                 return false;
             }
-            Debug.Log($"Large map: {ScenePath}, {spawns}");
+            Debug.Log($"Large map: {spec.ScenePath}, {spawns}");
             return true;
         }
 
         // ---------------------------------------------------------------- scene
 
-        private static Scene OpenOrCreateScene()
+        private static Scene OpenOrCreateScene(MapSpec spec)
         {
-            if (File.Exists(ScenePath))
-                return EditorSceneManager.OpenScene(ScenePath, OpenSceneMode.Single);
+            if (File.Exists(spec.ScenePath))
+                return EditorSceneManager.OpenScene(spec.ScenePath, OpenSceneMode.Single);
             Scene scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
-            EditorSceneManager.SaveScene(scene, ScenePath);
+            EditorSceneManager.SaveScene(scene, spec.ScenePath);
             return scene;
+        }
+
+        /// <summary>Side is one edge of a map's rectangle.</summary>
+        public enum Side { East, West, North, South }
+
+        /// <summary>LayoutWorldRect is a layout's footprint in the shared frame: its grid, or the bounds of its explicit cells.</summary>
+        private static Rect LayoutWorldRect(MeshMapLayout layout)
+        {
+            float minX, minZ, maxX, maxZ;
+            if (layout.IsExplicit)
+            {
+                minX = minZ = float.MaxValue;
+                maxX = maxZ = float.MinValue;
+                foreach (MeshCellRect cell in layout.cellRects)
+                {
+                    minX = Mathf.Min(minX, cell.min.x);
+                    minZ = Mathf.Min(minZ, cell.min.y);
+                    maxX = Mathf.Max(maxX, cell.min.x + cell.size.x);
+                    maxZ = Mathf.Max(maxZ, cell.min.y + cell.size.y);
+                }
+            }
+            else
+            {
+                minX = layout.gridOrigin.x;
+                minZ = layout.gridOrigin.z;
+                maxX = minX + layout.columns * layout.cellSize;
+                maxZ = minZ + layout.rows * layout.cellSize;
+            }
+            return new Rect(minX + layout.worldOrigin.x, minZ + layout.worldOrigin.z, maxX - minX, maxZ - minZ);
+        }
+
+        /// <summary>SeamSides: the sides of this map along which another layout of the registry lies within reach of an apron.</summary>
+        private static List<Side> SeamSides(MeshWorldRegistry world, MapSpec spec)
+        {
+            List<Side> sides = new List<Side>();
+            Rect map = spec.WorldRect;
+            foreach (Side side in new[] { Side.East, Side.West, Side.North, Side.South })
+            {
+                Rect strip = ApronWorldRect(map, side);
+                foreach (MeshMapLayout layout in world.maps)
+                {
+                    if (layout == null || string.IsNullOrEmpty(layout.mapId) || string.Equals(layout.mapId, spec.MapId))
+                        continue;
+                    if (strip.Overlaps(LayoutWorldRect(layout)))
+                    {
+                        sides.Add(side);
+                        break;
+                    }
+                }
+            }
+            return sides;
+        }
+
+        /// <summary>ApronWorldRect is the apron's footprint past one side of a map rectangle: ApronWidth deep, and ApronWidth past both ends, so a corner is covered too.</summary>
+        private static Rect ApronWorldRect(Rect map, Side side)
+        {
+            switch (side)
+            {
+                case Side.East: return new Rect(map.xMax, map.yMin - ApronWidth, ApronWidth, map.height + 2f * ApronWidth);
+                case Side.West: return new Rect(map.xMin - ApronWidth, map.yMin - ApronWidth, ApronWidth, map.height + 2f * ApronWidth);
+                case Side.North: return new Rect(map.xMin - ApronWidth, map.yMax, map.width + 2f * ApronWidth, ApronWidth);
+                default: return new Rect(map.xMin - ApronWidth, map.yMin - ApronWidth, map.width + 2f * ApronWidth, ApronWidth);
+            }
+        }
+
+        /// <summary>
+        /// CreateSeamAprons stands an invisible ground collider past every side of the map that meets another map (see the
+        /// header): a box whose top is the ground, on the Default layer the navmesh bake collects. Returns the sides.
+        /// </summary>
+        private static List<Side> CreateSeamAprons(MeshWorldRegistry world, MapSpec spec)
+        {
+            List<Side> sides = SeamSides(world, spec);
+            if (sides.Count == 0)
+                return sides;
+            GameObject root = new GameObject("SeamAprons");
+            Rect map = spec.WorldRect;
+            foreach (Side side in sides)
+            {
+                Rect strip = ApronWorldRect(map, side);
+                GameObject apron = new GameObject("SeamApron_" + side);
+                apron.transform.SetParent(root.transform, false);
+                apron.layer = 0; // Default: what BakeNavMesh collects
+                // The strip in the scene frame, its top at the ground.
+                apron.transform.position = new Vector3(strip.center.x - spec.WorldOrigin.x, GroundHeight - 0.5f, strip.center.y - spec.WorldOrigin.z);
+                BoxCollider box = apron.AddComponent<BoxCollider>();
+                box.size = new Vector3(strip.width, 1f, strip.height);
+            }
+            Debug.Log($"Large map: seam aprons {ApronWidth:0} m past the {string.Join(" and ", sides)} edge(s)");
+            return sides;
         }
 
         private static void CreateLightAndSky(Scene scene)
@@ -486,25 +658,28 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             Debug.Log($"Large map: cell edges painted every {CellSize:0} m, {EdgeWidth:0} m wide");
         }
 
-        private static void CreateZoneManager(MeshWorldRegistry world)
+        private static void CreateZoneManager(MeshWorldRegistry world, MapSpec spec)
         {
             GameObject go = new GameObject("ZoneManager");
             ZoneBoundaryDetector detector = go.AddComponent<ZoneBoundaryDetector>();
             detector.world = world;
             ZoneDebugVisualizer visualizer = go.AddComponent<ZoneDebugVisualizer>();
             visualizer.world = world;
-            visualizer.mapId = MapId;
+            visualizer.mapId = spec.MapId;
             visualizer.lineHeight = 200f;
             go.AddComponent<ServerMeshZoneBootstrap>();
         }
 
-        private static string CreateSpawnAreas(SpawnMixes mixes)
+        private static string CreateSpawnAreas(SpawnMixes mixes, MapSpec spec)
         {
-            string monsters = PlaceAreas<MonsterSpawnArea, BaseMonsterCharacterEntity>(MonsterPlan, mixes.monsters);
-            string nodes = PlaceAreas<HarvestableSpawnArea, HarvestableEntity>(NodePlan, mixes.harvestables);
-            CreateStartSights();
-            CreateStartNpcs();
-            CreateTwoSeatHorse();
+            string monsters = PlaceAreas<MonsterSpawnArea, BaseMonsterCharacterEntity>(spec, MonsterPlan, mixes.monsters);
+            string nodes = PlaceAreas<HarvestableSpawnArea, HarvestableEntity>(spec, NodePlan, mixes.harvestables);
+            if (spec.StartSights)
+            {
+                CreateStartSights();
+                CreateStartNpcs();
+                CreateTwoSeatHorse();
+            }
             return monsters + "; " + nodes;
         }
 
@@ -614,11 +789,11 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             if (monsters != null && herd != null)
             {
                 SpawnTemplate deer = new SpawnTemplate { minLevel = 1, maxLevel = 2, minAmount = StartHerdSize, maxAmount = StartHerdSize, radius = StartHerdRadius };
-                AddArea<MonsterSpawnArea>(monsters.transform, "Spawn8k_StartHerd", StartHerdPosition, deer, herd.GetComponent<BaseMonsterCharacterEntity>(), MonsterPlan.seed - 1);
+                AddArea<MonsterSpawnArea>(monsters.transform, "Spawn8k_StartHerd", StartHerdPosition, deer, herd.GetComponent<BaseMonsterCharacterEntity>(), West.Seed + MonsterPlan.seedOffset - 1);
             }
             if (nodes == null)
                 return;
-            int seed = NodePlan.seed - 1;
+            int seed = West.Seed + NodePlan.seedOffset - 1;
             foreach ((string path, int amount, float north) in StartRow)
             {
                 GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(path);
@@ -654,19 +829,23 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             return so;
         }
 
-        /// <summary>PlaceAreas spreads one kind of spawn area over the map and says how it came out.</summary>
-        private static string PlaceAreas<TArea, TEntity>(SpawnPlan plan, List<SpawnTemplate> templates) where TArea : GameSpawnArea where TEntity : Component
+        /// <summary>PlaceAreas spreads one kind of spawn area over a map and says how it came out.</summary>
+        private static string PlaceAreas<TArea, TEntity>(MapSpec spec, SpawnPlan plan, List<SpawnTemplate> templates) where TArea : GameSpawnArea where TEntity : Component
         {
             if (templates.Count == 0)
                 return plan.root + ": no spawn mixes";
             GameObject root = new GameObject(plan.root);
-            System.Random random = new System.Random(plan.seed);
-            System.Random pick = new System.Random(plan.seed + 1); // its own stream: the areas' places do not depend on the mix
+            int seed = spec.Seed + plan.seedOffset;
+            System.Random random = new System.Random(seed);
+            System.Random pick = new System.Random(seed + 1); // its own stream: the areas' places do not depend on the mix
             Dictionary<string, TEntity> prefabs = templates.Select(t => t.prefabPath).Distinct()
                 .ToDictionary(p => p, p => AssetDatabase.LoadAssetAtPath<GameObject>(p).GetComponent<TEntity>());
             Dictionary<Vector2Int, float> perCell = new Dictionary<Vector2Int, float>();
             int perSide = Mathf.RoundToInt(MapSize / plan.spacing);
             float first = -MapSize * 0.5f + plan.spacing * 0.5f;
+            // Distance from the start and the land's noise are read in the start map's frame, so the land runs on across a
+            // seam (a second map is all far from the start: its mixes are the hardest) and the start map's spawns are what they were.
+            Vector3 toStartFrame = spec.WorldOrigin - West.WorldOrigin;
             int count = 0;
             float expected = 0f;
             for (int gy = 0; gy < perSide; gy++)
@@ -676,9 +855,10 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                     float x = first + gx * plan.spacing + Jitter(random, plan.jitter);
                     float z = first + gy * plan.spacing + Jitter(random, plan.jitter);
                     double roll = random.NextDouble();
-                    float fromStart = new Vector2(x - StartPosition.x, z - StartPosition.z).magnitude;
+                    float sx = x + toStartFrame.x, sz = z + toStartFrame.z;
+                    float fromStart = new Vector2(sx - StartPosition.x, sz - StartPosition.z).magnitude;
                     SpawnTemplate template = templates[plan.harderWithDistance ? MixAt(fromStart, templates.Count, pick) : pick.Next(templates.Count)];
-                    float busy = Mathf.Max(Busyness(x, z, plan.landOffset), StarterBusy * Mathf.InverseLerp(StarterLandRadius, ClearRadius, fromStart));
+                    float busy = Mathf.Max(Busyness(sx, sz, plan.landOffset), StarterBusy * Mathf.InverseLerp(StarterLandRadius, ClearRadius, fromStart));
                     float rate = Mathf.Lerp(1f, BusyCampRate, busy);
                     float radius = template.radius * Mathf.Sqrt(rate);
                     if (roll >= Mathf.Lerp(plan.quietChance, plan.busyChance, busy) || fromStart < ClearRadius + radius)
@@ -688,7 +868,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                     scaled.minAmount = Mathf.Max(1, Mathf.RoundToInt(template.minAmount * rate));
                     scaled.maxAmount = Mathf.Max(scaled.minAmount, Mathf.RoundToInt(template.maxAmount * rate));
                     TEntity prefab = prefabs[template.prefabPath];
-                    AddArea<TArea>(root.transform, $"Spawn8k_{gx:00}_{gy:00}_{prefab.name}", new Vector3(x, GroundHeight, z), scaled, prefab, plan.seed + count);
+                    AddArea<TArea>(root.transform, $"Spawn8k_{gx:00}_{gy:00}_{prefab.name}", new Vector3(x, GroundHeight, z), scaled, prefab, seed + count);
                     float amount = (scaled.minAmount + scaled.maxAmount) * 0.5f;
                     expected += amount;
                     Vector2Int cell = new Vector2Int(Mathf.FloorToInt((x + MapSize * 0.5f) / CellSize), Mathf.FloorToInt((z + MapSize * 0.5f) / CellSize));
@@ -921,11 +1101,12 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         }
 
         /// <summary>
-        /// CreateCellEdgeCurtains stands a see-through curtain, in the edge colour, on every line between two cells (the
-        /// same grid PaintCellEdges paints), so a border reads from afar and from any angle. Drawn only: no collider, so
-        /// nothing walks into it and the navmesh bake does not see it.
+        /// CreateCellEdgeCurtains stands a see-through curtain, in the map's curtain colour, on every line between two cells
+        /// (the same grid PaintCellEdges paints) and along every seam (half a metre inside the map, so the two maps' seam
+        /// curtains stand apart), so a border reads from afar and from any angle. Drawn only: no collider, so nothing walks
+        /// into it and the navmesh bake does not see it.
         /// </summary>
-        private static void CreateCellEdgeCurtains()
+        private static void CreateCellEdgeCurtains(MapSpec spec, List<Side> seams)
         {
             List<Vector3> vertices = new List<Vector3>();
             List<Vector2> uvs = new List<Vector2>();
@@ -939,11 +1120,22 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 AddQuad(vertices, uvs, triangles, new Vector3(at, bottom, -half), new Vector3(at, bottom, half), top - bottom); // x = at, runs along z
                 AddQuad(vertices, uvs, triangles, new Vector3(-half, bottom, at), new Vector3(half, bottom, at), top - bottom); // z = at, runs along x
             }
-            UnityEngine.Mesh mesh = AssetDatabase.LoadAssetAtPath<UnityEngine.Mesh>(CurtainMeshPath);
+            const float inset = 0.5f;
+            foreach (Side side in seams)
+            {
+                switch (side)
+                {
+                    case Side.East: AddQuad(vertices, uvs, triangles, new Vector3(half - inset, bottom, -half), new Vector3(half - inset, bottom, half), top - bottom); break;
+                    case Side.West: AddQuad(vertices, uvs, triangles, new Vector3(-half + inset, bottom, -half), new Vector3(-half + inset, bottom, half), top - bottom); break;
+                    case Side.North: AddQuad(vertices, uvs, triangles, new Vector3(-half, bottom, half - inset), new Vector3(half, bottom, half - inset), top - bottom); break;
+                    default: AddQuad(vertices, uvs, triangles, new Vector3(-half, bottom, -half + inset), new Vector3(half, bottom, -half + inset), top - bottom); break;
+                }
+            }
+            UnityEngine.Mesh mesh = AssetDatabase.LoadAssetAtPath<UnityEngine.Mesh>(spec.CurtainMeshPath);
             if (mesh == null)
             {
                 mesh = new UnityEngine.Mesh { name = "CellEdgeCurtain" };
-                AssetDatabase.CreateAsset(mesh, CurtainMeshPath);
+                AssetDatabase.CreateAsset(mesh, spec.CurtainMeshPath);
             }
             mesh.Clear();
             mesh.SetVertices(vertices);
@@ -955,10 +1147,10 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             GameObject go = new GameObject("CellEdgeCurtains");
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
             MeshRenderer renderer = go.AddComponent<MeshRenderer>();
-            renderer.sharedMaterial = EnsureCurtainMaterial();
+            renderer.sharedMaterial = EnsureCurtainMaterial(spec);
             renderer.shadowCastingMode = ShadowCastingMode.Off;
             renderer.receiveShadows = false;
-            Debug.Log($"Large map: {2 * (lines - 1)} cell-edge curtains, {CurtainHeight:0} m tall");
+            Debug.Log($"Large map: {2 * (lines - 1)} cell-edge curtains and {seams.Count} seam curtain(s), {CurtainHeight:0} m tall");
         }
 
         private static void AddQuad(List<Vector3> vertices, List<Vector2> uvs, List<int> triangles, Vector3 from, Vector3 to, float height)
@@ -976,8 +1168,8 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             triangles.AddRange(new[] { i, i + 1, i + 2, i, i + 2, i + 3 });
         }
 
-        /// <summary>URP Unlit, transparent, both faces, tinted the edge colour, over a texture that fades out upward.</summary>
-        private static Material EnsureCurtainMaterial()
+        /// <summary>URP Unlit, transparent, both faces, tinted the map's curtain colour, over a texture that fades out upward.</summary>
+        private static Material EnsureCurtainMaterial(MapSpec spec)
         {
             const int height = 64;
             Texture2D tex = new Texture2D(1, height, TextureFormat.RGBA32, false);
@@ -997,15 +1189,15 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             importer.mipmapEnabled = false;
             importer.SaveAndReimport();
 
-            Material material = AssetDatabase.LoadAssetAtPath<Material>(CurtainMaterialPath);
+            Material material = AssetDatabase.LoadAssetAtPath<Material>(spec.CurtainMaterialPath);
             if (material == null)
             {
                 material = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
-                AssetDatabase.CreateAsset(material, CurtainMaterialPath);
+                AssetDatabase.CreateAsset(material, spec.CurtainMaterialPath);
             }
             material.shader = Shader.Find("Universal Render Pipeline/Unlit");
             material.SetTexture("_BaseMap", AssetDatabase.LoadAssetAtPath<Texture2D>(CurtainTexturePath));
-            material.SetColor("_BaseColor", EdgeColor);
+            material.SetColor("_BaseColor", spec.CurtainColor);
             material.SetFloat("_Surface", 1f); // transparent
             material.SetFloat("_Blend", 0f);   // alpha
             material.SetFloat("_Cull", (float)CullMode.Off);
@@ -1021,7 +1213,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             return material;
         }
 
-        private static void BakeNavMesh(Terrain terrain)
+        private static void BakeNavMesh(Terrain terrain, MapSpec spec)
         {
             NavMeshSurface surface = terrain.gameObject.AddComponent<NavMeshSurface>();
             surface.collectObjects = CollectObjects.All;
@@ -1040,33 +1232,33 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 Debug.LogError("Large map error: the navmesh bake produced nothing");
                 return;
             }
-            if (AssetDatabase.LoadAssetAtPath<NavMeshData>(NavMeshPath) != null)
-                AssetDatabase.DeleteAsset(NavMeshPath);
-            AssetDatabase.CreateAsset(data, NavMeshPath);
+            if (AssetDatabase.LoadAssetAtPath<NavMeshData>(spec.NavMeshPath) != null)
+                AssetDatabase.DeleteAsset(spec.NavMeshPath);
+            AssetDatabase.CreateAsset(data, spec.NavMeshPath);
             surface.navMeshData = data;
-            Debug.Log($"Large map: navmesh baked into {NavMeshPath}");
+            Debug.Log($"Large map: navmesh baked into {spec.NavMeshPath}");
         }
 
         // ---------------------------------------------------------------- registrations
 
-        private static MapInfo EnsureMapInfo()
+        private static MapInfo EnsureMapInfo(MapSpec spec)
         {
-            MapInfo mapInfo = AssetDatabase.LoadAssetAtPath<MapInfo>(MapInfoPath);
+            MapInfo mapInfo = AssetDatabase.LoadAssetAtPath<MapInfo>(spec.MapInfoPath);
             if (mapInfo == null)
             {
                 // A copy of map 2's info keeps the rig's map settings (no PK, no drops on death).
-                AssetDatabase.CopyAsset(TemplateMapInfoPath, MapInfoPath);
-                mapInfo = AssetDatabase.LoadAssetAtPath<MapInfo>(MapInfoPath);
+                AssetDatabase.CopyAsset(TemplateMapInfoPath, spec.MapInfoPath);
+                mapInfo = AssetDatabase.LoadAssetAtPath<MapInfo>(spec.MapInfoPath);
             }
             SerializedObject so = new SerializedObject(mapInfo);
-            so.FindProperty("id").stringValue = MapId;
-            so.FindProperty("scene").FindPropertyRelative("sceneAsset").objectReferenceValue = AssetDatabase.LoadAssetAtPath<SceneAsset>(ScenePath);
-            so.FindProperty("scene").FindPropertyRelative("sceneName").stringValue = MapId;
+            so.FindProperty("id").stringValue = spec.MapId;
+            so.FindProperty("scene").FindPropertyRelative("sceneAsset").objectReferenceValue = AssetDatabase.LoadAssetAtPath<SceneAsset>(spec.ScenePath);
+            so.FindProperty("scene").FindPropertyRelative("sceneName").stringValue = spec.MapId;
             so.FindProperty("startPosition").vector3Value = StartPosition;
             so.FindProperty("startRotation").vector3Value = StartRotation;
             so.ApplyModifiedPropertiesWithoutUndo();
             EditorUtility.SetDirty(mapInfo);
-            Debug.Log($"Large map: map info {MapInfoPath}");
+            Debug.Log($"Large map: map info {spec.MapInfoPath}");
             return mapInfo;
         }
 
@@ -1087,35 +1279,36 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             Debug.Log("Large map: map info added to " + DatabasePath);
         }
 
-        private static void AddToBuildSettings()
+        private static void AddToBuildSettings(MapSpec spec)
         {
+            string scenePath = spec.ScenePath;
             List<EditorBuildSettingsScene> scenes = EditorBuildSettings.scenes.ToList();
-            if (scenes.Any(s => s.path == ScenePath))
+            if (scenes.Any(s => s.path == scenePath))
                 return;
-            scenes.Add(new EditorBuildSettingsScene(ScenePath, true));
+            scenes.Add(new EditorBuildSettingsScene(scenePath, true));
             EditorBuildSettings.scenes = scenes.ToArray();
             // Batch mode's EditorApplication.Exit does not flush dirty project settings, so the entry is also written
             // into the file itself when it is missing there.
             const string settingsPath = "ProjectSettings/EditorBuildSettings.asset";
             string text = File.ReadAllText(settingsPath);
             int at = text.IndexOf("  m_configObjects:", StringComparison.Ordinal);
-            if (!text.Contains(ScenePath) && at >= 0)
+            if (!text.Contains(scenePath) && at >= 0)
             {
-                string entry = $"  - enabled: 1\n    path: {ScenePath}\n    guid: {AssetDatabase.AssetPathToGUID(ScenePath)}\n";
+                string entry = $"  - enabled: 1\n    path: {scenePath}\n    guid: {AssetDatabase.AssetPathToGUID(scenePath)}\n";
                 File.WriteAllText(settingsPath, text.Insert(at, entry));
             }
             Debug.Log("Large map: scene added to the build settings");
         }
 
-        private static void AddLayout(MeshWorldRegistry world)
+        private static void AddLayout(MeshWorldRegistry world, MapSpec spec)
         {
             int perSide = Mathf.RoundToInt(MapSize / CellSize);
             MeshMapLayout layout = new MeshMapLayout
             {
-                mapId = MapId, worldOrigin = WorldOrigin, gridOrigin = new Vector3(-MapSize * 0.5f, 0f, -MapSize * 0.5f),
+                mapId = spec.MapId, worldOrigin = spec.WorldOrigin, gridOrigin = new Vector3(-MapSize * 0.5f, 0f, -MapSize * 0.5f),
                 cellSize = CellSize, columns = perSide, rows = perSide, cellIdFormat = "{map}-{x}-{y}", cellIds = null, cellRects = null,
             };
-            int existing = world.maps.FindIndex(l => l != null && string.Equals(l.mapId, MapId));
+            int existing = world.maps.FindIndex(l => l != null && string.Equals(l.mapId, spec.MapId));
             if (existing >= 0)
             {
                 layout.CopyModeFrom(world.maps[existing]); // a rerun keeps the map's cell mode
@@ -1125,7 +1318,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 world.maps.Add(layout);
             EditorUtility.SetDirty(world);
             world.Rebuild();
-            Debug.Log($"Large map: registry layout {perSide} x {perSide} = {world.CellsOf(MapId).Count} cells of {CellSize:0} m, world origin {WorldOrigin}");
+            Debug.Log($"Large map: registry layout {perSide} x {perSide} = {world.CellsOf(spec.MapId).Count} cells of {CellSize:0} m, world origin {spec.WorldOrigin} ({spec.MapId})");
         }
 
         private static void CheckGameplayRule()
