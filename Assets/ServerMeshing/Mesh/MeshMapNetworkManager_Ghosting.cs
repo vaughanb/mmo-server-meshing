@@ -1285,6 +1285,22 @@ namespace MultiplayerARPG.MMO.Mesh
         [Tooltip("If an arriving client never becomes ready, its promoted ghost is destroyed after this many seconds.")]
         public float reservedArrivalTimeout = 15f;
 
+        /// <summary>A bag in one phrase for the arrival and handoff lines: entries, filled slots and the sum of their amounts (a bag doubled across a re-login's handoff once, 2026-11-01).</summary>
+        internal static string BagSummary(IList<CharacterItem> items)
+        {
+            if (items == null)
+                return "null";
+            int filled = 0, amount = 0;
+            for (int i = 0; i < items.Count; ++i)
+            {
+                if (items[i].IsEmptySlot())
+                    continue;
+                filled++;
+                amount += items[i].amount;
+            }
+            return $"{items.Count} entries, {filled} filled, amount {amount}";
+        }
+
         private bool TryPromoteGhostForArrival(long connectionId, string userId, PlayerCharacterData data, out BasePlayerCharacterEntity entity)
         {
             entity = null;
@@ -1337,6 +1353,7 @@ namespace MultiplayerARPG.MMO.Mesh
             GameInstance.GetPlayerCharacterEntityHashAssetId(data.EntityId, out int metaDataId);
             GameInstance.SetupByMetaData(player, metaDataId);
             Vector3 standing = player.EntityTransform.position; // before CloneTo, which carries the saved position
+            string ghostBag = BagSummary(player.NonEquipItems);
             data.CloneTo(player);
             // stillMoveAfterTeleport keeps the puppet's movement state: a plain teleport REPLACES it with IsTeleport alone,
             // the flag is cleared at the next send, and the re-owned entity is not simulated here again until the new
@@ -1354,6 +1371,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 player.Teleport(data.CurrentPosition, Quaternion.Euler(data.CurrentRotation), true); // a passenger's teleport would move its driver's vehicle: its seat places it
             player.ForceMakeCaches();
             player.FillEmptySlots();
+            Logging.Log("Mesh", $"Arrival bag {data.CharacterName}: state {BagSummary(data.NonEquipItems)}; the ghost had {ghostBag}; the entity now {BagSummary(player.NonEquipItems)}");
             player.Identity.DoNotDestroyWhenDisconnect = true;
             _reservedArrivals[data.Id] = new ReservedArrival { entity = player, userId = userId, time = Time.unscaledTime, noticeTime = _incomingHandoffFrom.TryGetValue(data.Id, out IncomingHandoff notice) ? notice.time : -1f, mount = ridden, keepMount = keepMount, passenger = passenger };
             Logging.Log("Mesh", $"Arrival {data.CharacterName} ({data.Id}) conn={connectionId}: ghost promoted in place at {player.EntityTransform.position} mount={(passenger ? "passenger" : keepMount ? "kept" : data.Mount.type != MountType.None ? "re-summon" : "none")}");
@@ -4291,6 +4309,7 @@ namespace MultiplayerARPG.MMO.Mesh
             return base.LoadPlayerCharacterEntityRelatesData(connectionId, playerCharacterEntity, userId, accessToken);
         }
 #else
+        internal static string BagSummary(System.Collections.Generic.IList<CharacterItem> items) => items == null ? "null" : items.Count + " entries";
         private void GhostingOnStartServer() { }
         private void GhostingOnStopServer() { }
         private void GhostingUpdate() { }

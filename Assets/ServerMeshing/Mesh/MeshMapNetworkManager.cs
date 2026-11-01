@@ -666,6 +666,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public override void RegisterPlayerCharacter(long connectionId, BasePlayerCharacterEntity playerCharacter)
         {
             Stamp($"player registered {playerCharacter.CharacterName} conn={connectionId} at {playerCharacter.EntityTransform.position} (data {(Vector3)playerCharacter.CurrentPosition})");
+            Stamp($"player registered {playerCharacter.CharacterName}: bag {BagSummary(playerCharacter.NonEquipItems)}");
 #if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
             if (IsServer)
                 GhostingOnRealPlayerRegistered(playerCharacter, connectionId);
@@ -1163,7 +1164,7 @@ namespace MultiplayerARPG.MMO.Mesh
                         if (demotePlayerOnHandoff && entity != null)
                             DemotePlayerToGhost(entity, zone.id, velocity);
                         RegisterPendingHandoffAck(characterId, entity.CharacterName, zone.id, startTime);
-                        Logging.Log("Mesh", $"Handoff SENT {entity.CharacterName} -> zone {zone.id} state in memory, serverSide={sw.ElapsedMilliseconds}ms demoted={demotePlayerOnHandoff}{(action.IsSet ? $" carrying {action}" : string.Empty)}; the row is written behind the player");
+                        Logging.Log("Mesh", $"Handoff SENT {entity.CharacterName} -> zone {zone.id} state in memory, serverSide={sw.ElapsedMilliseconds}ms demoted={demotePlayerOnHandoff} bag {BagSummary(snapshot.NonEquipItems)}{(action.IsSet ? $" carrying {action}" : string.Empty)}; the row is written behind the player");
                         SaveHandoffRowBehind(characterId, entity.CharacterName, zone.id, snapshot, mapName, savePosition, rotation).Forget();
                         return;
                     }

@@ -90,6 +90,23 @@ namespace MultiplayerARPG.MMO.Mesh
             return !item.IsEmptySlot() && item.GetItem() is ISkillItem;
         }
 
+        /// <summary>The bag's filled slots as index:dataId x amount #id, for the log when the count changes.</summary>
+        private static string DescribeBag(IList<CharacterItem> items)
+        {
+            if (items == null)
+                return "null";
+            System.Text.StringBuilder sb = new System.Text.StringBuilder();
+            sb.Append(items.Count).Append(" entries, scrolls ").Append(CountScrolls(items)).Append(':');
+            for (int i = 0; i < items.Count; ++i)
+            {
+                if (items[i].IsEmptySlot())
+                    continue;
+                string id = items[i].id ?? string.Empty;
+                sb.Append(' ').Append(i).Append(':').Append(items[i].dataId).Append('x').Append(items[i].amount).Append('#').Append(id.Length > 8 ? id.Substring(0, 8) : id);
+            }
+            return sb.ToString();
+        }
+
         private static int CountScrolls(IList<CharacterItem> items)
         {
             int n = 0;
@@ -333,6 +350,7 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             BasePlayerCharacterEntity self = GameInstance.PlayingCharacterEntity;
             int bag = self != null ? CountScrolls(self.NonEquipItems) : 0;
+            Log($"buildtree: bag at result: {DescribeBag(self != null ? self.NonEquipItems : null)}");
             Passed = BuildTreePassed(placed, _storageBefore, _storageAfter, _doorOpened, _movesFailed, bag, _scrollsStorage, _buildingsAfterRelogin, _storageAfterRelogin);
             Finished = true;
             Log(BuildTreeResult(placed, _treeWallId, _storageBefore, _storageAfter, _doorOpened, _movesOk, _movesRefused, _movesFailed, bag, _scrollsStorage,
@@ -410,6 +428,7 @@ namespace MultiplayerARPG.MMO.Mesh
             // 5. Stand out the window; after a lost session, count the tree and read the storage again.
             int reloginsSeen = Relogins;
             float nextLog = 0f;
+            int lastBagScrolls = -1, lastBagEntries = -1;
             while (Time.realtimeSinceStartup < windowEnd)
             {
                 PollStandMigrations();
@@ -418,6 +437,18 @@ namespace MultiplayerARPG.MMO.Mesh
                 {
                     nextLog = Time.realtimeSinceStartup + 10f;
                     Log($"buildtree: standing hp={self.CurrentHp}/{self.MaxHp} scrollsBag={CountScrolls(self.NonEquipItems)} relogins={Relogins}");
+                }
+                if (self != null)
+                {
+                    // Every change of the bag, with each filled slot's item and id: a bag doubled across a re-login's handoff once (2026-11-01).
+                    int bagScrolls = CountScrolls(self.NonEquipItems), bagEntries = self.NonEquipItems != null ? self.NonEquipItems.Count : -1;
+                    if (bagScrolls != lastBagScrolls || bagEntries != lastBagEntries)
+                    {
+                        if (lastBagScrolls >= 0)
+                            Log($"buildtree: bag changed: {DescribeBag(self.NonEquipItems)}");
+                        lastBagScrolls = bagScrolls;
+                        lastBagEntries = bagEntries;
+                    }
                 }
                 if (Relogins > reloginsSeen && self != null && !_relogging)
                 {

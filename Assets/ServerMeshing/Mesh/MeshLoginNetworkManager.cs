@@ -102,6 +102,14 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (peer.peerType == CentralServerPeerType.MapServer && string.Equals(peer.refId, mapId))
                     live.Add(peer.channelId);
             }
+            // Rig only: MESH_TEST_LOGIN_VIA=<cell id> routes every login of the map through that cell while it is live, the
+            // way a login lands on a neighbour while the owner re-registers; the neighbour hands the character on at once.
+            string via = System.Environment.GetEnvironmentVariable("MESH_TEST_LOGIN_VIA");
+            if (!string.IsNullOrEmpty(via) && live.Contains(via))
+            {
+                Logging.LogWarning("Mesh", $"Login routing: MESH_TEST_LOGIN_VIA sends {character.CharacterName} through {via}");
+                return via;
+            }
             // With the owner down, the nearest live cell of the map serves the character where it stands and hands it
             // off by position as soon as the right cell is back.
             MeshCell routed = MeshLoginRouting.Route(world, mapId, character.CurrentPosition, live, out bool fellBack);

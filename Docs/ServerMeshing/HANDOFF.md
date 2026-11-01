@@ -248,6 +248,18 @@ Where the work stands, how to get it running on another machine, and what is lef
     is sent as a container, its building-only rotation and receiver-only age listed, and the grid is shaped to
     `LayerCount` arrays of columns × rows before it is written. `MeshMessageBranchTests` round-trips every `GhostKind`
     by hand. No message changed.
+20. **An arrival's item lists reached its client twice (DESIGN 1.42, package 0.97.27).** The rig regression on the code
+    of 1.41 failed `splitbuild`: after a re-login that landed on a neighbour (the base cell was still re-registering after
+    its restart) and was handed on at once, the tester's bag showed every entry twice, 38 scrolls for 19, while every cell
+    and the database held 60 entries. 1.26's registration-time flush sent the player's queued spawn through the kit's
+    per-player send, outside the kit's sync pass, so the operations that had filled the promoted puppet were not dropped
+    and the next tick delivered them on top of the spawn's initial state. It happened on every promoted arrival; the kit's
+    next whole-list assignment (a storage move) repaired it, and only the re-login path had none. The flush now runs the
+    kit's whole pass (`ProceedServerGameStateSync`, `MeshMapNetworkManager_RegistrationSend.cs`). To reproduce or
+    re-check: set `MESH_TEST_LOGIN_VIA=N` in the editor's environment (`execute_code`, before Play: it routes every
+    login of the map through N while N is live) and run `regress.py splitbuild`; read the tester's `buildtree: bag changed`
+    lines (filled slots with ids) and the cells' `Arrival bag` / `Handoff SENT … bag` lines. Before the fix it doubled
+    in 2 of 2 forced runs; after, 0 doubled reads in 90. Clear the variable afterwards.
 
 ## Setting up on another machine
 
@@ -417,8 +429,8 @@ Where the work stands, how to get it running on another machine, and what is lef
 4. **The kit copy is upstream `master` at 493df35fc (1.33).** CE-14 is upstream (PR 28) and no `MESH-EDIT` marker is left. No
    release has it yet, so the package names `master` at 05ec55012 as its minimum: when a release does, name that. A later
    sync is a three-way merge, not a copy (`upstream/README.md`).
-5. **The rig regression** passed all 34 scenarios on the code of 1.39 (2026-10-31, 3,488 checks, 190 min, `party`'s flaky
-   `hurtTarget` check included), as it had on the code of 1.35 the same day (3,178 checks), and the 3 h `soak` 95 of 95 on the code of 1.35. To run it:
+5. **The rig regression** passed all 34 scenarios on the code of 1.42 (2026-11-01, 3,146 checks, 203 min, `party`'s flaky
+   `hurtTarget` check included), as it had on the code of 1.39 the day before (3,488 checks, 190 min) and 1.35 (3,178 checks), and the 3 h `soak` 95 of 95 on the code of 1.35. The run on the code of 1.41 the same night (26 of 34) was the clock-change hour and the item-list defect of item 20, not the rest. To run it:
    enable the five BaseDemo and TestMap scenes in Build Settings, open BaseInit-CE, then
    `python -u Tools/ServerMeshing/regress.py --build <scenarios>` (name the scenarios: `--build` alone only builds), then
    restore Build Settings and DemoMesh8kInit. `Config/mySqlConfig.json` is here and MySQL80 runs. A full run takes ~3 h.
@@ -430,6 +442,12 @@ Where the work stands, how to get it running on another machine, and what is lef
 
 ## Gotchas found on the way
 
+- **Do not run the rig regression across a daylight-saving change.** The kit stamps local time and the grader compares
+  stamps (`zone_lines`), so when the clock fell back on 2026-11-01 (02:00 → 01:00) the hour 01:00–02:00 happened twice
+  and every scenario in the second hour read the first hour's cell lines as its own: 6 process lifetimes for 1, layouts
+  of earlier coordinator incarnations, 11 `LayoutHello`. Seven scenarios failed that way with nothing wrong in them.
+- **A kit-file edit makes the player build stale for the harness** (`rigtools.build_staleness` reads the whole tree):
+  `--allow-stale-build` when the change is client-only, else `--build`.
 - **Assets loaded before `OpenScene` go dead.** Opening a scene in an editor script unloads unreferenced
   assets, so an asset loaded earlier is dead after it; assigned, it saves as nothing. That is how every
   8 km spawn area once had no monster, and the demo copy no gameplay rule. Load after opening.
