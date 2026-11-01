@@ -44,6 +44,18 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/ServerMeshingDemo/Scenes/ServerMeshTestMap8kEast-Server.unity
     guid: 30dd8918f3f410e47905330205ce3f7f
+  - enabled: 1
+    path: Assets/ServerMeshingDemo/Scenes/ServerMeshTestMap8kNorth.unity
+    guid: 70a071b2c50c9d04b8316e943fb4b8d1
+  - enabled: 1
+    path: Assets/ServerMeshingDemo/Scenes/ServerMeshTestMap8kNorth-Server.unity
+    guid: 31401c9770e1832449c43830550c6992
+  - enabled: 1
+    path: Assets/ServerMeshingDemo/Scenes/ServerMeshTestMap8kNorthEast.unity
+    guid: 88759ab6ac57c914cb32e7cdd5e89e30
+  - enabled: 1
+    path: Assets/ServerMeshingDemo/Scenes/ServerMeshTestMap8kNorthEast-Server.unity
+    guid: 7b5342ae444779244a5329199d6c60da
   m_configObjects:
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: b7b0acfa1d32d3f4fb4dd990fef8568c, type: 3}
   m_UseUCBPForAssetBundles: 0

@@ -5,8 +5,12 @@
 // of the small test maps in the shared frame; the second (ServerMeshTestMap8kEast, DESIGN 1.40) sits 8,192 m east of it,
 // so the two meet along a seam: crossing it is a map change, a scene change and a cell change in one hop, and a client
 // standing within the pre-load distance of the seam loads the other map's scene additively at the frame offset
-// (MeshMapNetworkManager_Seam). The maps share one TerrainData (the same flat ground and painted cell edges; the terrain
-// is what a game authors differently) and each has its own navmesh, spawns and curtain colour (red west, blue east).
+// (MeshMapNetworkManager_Seam). The third (ServerMeshTestMap8kNorth) sits 8,192 m north of the first and the fourth
+// (ServerMeshTestMap8kNorthEast) north of the second (DESIGN 1.43), so the four meet at one corner (world x 4,096,
+// z 24,096): a client there stands in three seams' bands at once, and a step over the corner is a hop between two maps
+// that touch at a point. The maps share one TerrainData (the same flat ground and painted cell edges; the terrain is
+// what a game authors differently) and each has its own navmesh, spawns and curtain colour (red west, blue east, green
+// north, yellow north-east).
 //
 // Past every edge that touches another map, a scene carries a seam apron: an invisible ground collider, ApronWidth wide,
 // baked into the navmesh. The map's own terrain ends at the line, but what stands past the line still belongs to this
@@ -62,7 +66,7 @@ using UnityEngine.SceneManagement;
 
 namespace MultiplayerARPG.MMO.Mesh.Editor
 {
-    /// <summary>ServerMeshLargeMapBuilder builds the ServerMeshTestMap8k and ServerMeshTestMap8kEast scenes, their assets and their registrations.</summary>
+    /// <summary>ServerMeshLargeMapBuilder builds the ServerMeshTestMap8k, ServerMeshTestMap8kEast, ServerMeshTestMap8kNorth and ServerMeshTestMap8kNorthEast scenes, their assets and their registrations.</summary>
     public static class ServerMeshLargeMapBuilder
     {
         /// <summary>MapSpec is one of the maps the builder makes: where it sits in the world, what its files are called, what is only on the start map.</summary>
@@ -95,6 +99,8 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
 
         public const string MapId = "ServerMeshTestMap8k";
         public const string EastMapId = "ServerMeshTestMap8kEast";
+        public const string NorthMapId = "ServerMeshTestMap8kNorth";
+        public const string NorthEastMapId = "ServerMeshTestMap8kNorthEast";
         public const string Folder = "Assets/ServerMeshingDemo";
         public const string SceneFolder = Folder + "/Scenes";
         public const string ScenePath = SceneFolder + "/" + MapId + ".unity";
@@ -136,6 +142,10 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         public static readonly Vector3 WorldOrigin = new Vector3(0f, 0f, 20000f);
         /// <summary>EastWorldOrigin places the second map one map east of the first: their rectangles meet at world x = 4,096, the seam.</summary>
         public static readonly Vector3 EastWorldOrigin = new Vector3(MapSize, 0f, 20000f);
+        /// <summary>NorthWorldOrigin places the third map one map north of the first: their rectangles meet at world z = 24,096, and its south-east corner is the point (4,096, 24,096) where the four maps meet (DESIGN 1.43).</summary>
+        public static readonly Vector3 NorthWorldOrigin = new Vector3(0f, 0f, 20000f + MapSize);
+        /// <summary>NorthEastWorldOrigin places the fourth map north of the east map and east of the north map: the fourth quadrant of the corner.</summary>
+        public static readonly Vector3 NorthEastWorldOrigin = new Vector3(MapSize, 0f, 20000f + MapSize);
         /// <summary>
         /// ApronWidth is how far past a seam a scene's ground collider and navmesh reach (DESIGN 1.40). Wider than the 80 m
         /// band: a monster chasing through the band stays on this server's navmesh until the line hands it over, and a
@@ -168,13 +178,21 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
         public static readonly Color EdgeColor = new Color(0.85f, 0.22f, 0.12f);
         /// <summary>EastCurtainColor is the east map's curtain colour; the painted ground lines stay red on both (one TerrainData).</summary>
         public static readonly Color EastCurtainColor = new Color(0.15f, 0.38f, 0.9f);
+        /// <summary>NorthCurtainColor is the north map's curtain colour.</summary>
+        public static readonly Color NorthCurtainColor = new Color(0.15f, 0.7f, 0.25f);
+        /// <summary>NorthEastCurtainColor is the north-east map's curtain colour.</summary>
+        public static readonly Color NorthEastCurtainColor = new Color(0.9f, 0.78f, 0.15f);
 
         /// <summary>West is the first map, where new characters start: everything the demo copy ran before 1.40.</summary>
         public static readonly MapSpec West = new MapSpec { MapId = MapId, WorldOrigin = WorldOrigin, Seed = Seed, StartSights = true, CurtainColor = EdgeColor };
         /// <summary>East is the second map, across the seam at world x = 4,096; its land is all far from the start, so its monsters are the hardest mixes.</summary>
         public static readonly MapSpec East = new MapSpec { MapId = EastMapId, WorldOrigin = EastWorldOrigin, Seed = Seed + 1000, StartSights = false, CurtainColor = EastCurtainColor };
+        /// <summary>North is the third map, across the seam at world z = 24,096 from the first; it touches the east map at the corner only (DESIGN 1.43).</summary>
+        public static readonly MapSpec North = new MapSpec { MapId = NorthMapId, WorldOrigin = NorthWorldOrigin, Seed = Seed + 2000, StartSights = false, CurtainColor = NorthCurtainColor };
+        /// <summary>NorthEast is the fourth map, north of the east map and east of the north map; it touches the first at the corner only (DESIGN 1.43).</summary>
+        public static readonly MapSpec NorthEast = new MapSpec { MapId = NorthEastMapId, WorldOrigin = NorthEastWorldOrigin, Seed = Seed + 3000, StartSights = false, CurtainColor = NorthEastCurtainColor };
         /// <summary>Maps is every map the builder makes, in build order.</summary>
-        public static readonly MapSpec[] Maps = { West, East };
+        public static readonly MapSpec[] Maps = { West, East, North, NorthEast };
 
         /// <summary>ClearRadius keeps the map's spawns this far from the start, as around a first town. It is about the 80 m view, so they come into sight within steps; the crossing rig's patrols run inside it.</summary>
         public const float ClearRadius = 90f;
@@ -259,6 +277,22 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             Build(East);
         }
 
+        [MenuItem("Tools/Open MMORPG/Server Meshing/Testing/Build 8 km Test Map North")]
+        public static void MenuNorth()
+        {
+            if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
+                return;
+            Build(North);
+        }
+
+        [MenuItem("Tools/Open MMORPG/Server Meshing/Testing/Build 8 km Test Map North-East")]
+        public static void MenuNorthEast()
+        {
+            if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
+                return;
+            Build(NorthEast);
+        }
+
         [MenuItem("Tools/Open MMORPG/Server Meshing/Testing/Build 8 km Test Map Spawns")]
         public static void SpawnsMenu()
         {
@@ -275,7 +309,23 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             BuildSpawns(East);
         }
 
-        /// <summary>BuildFromCommandLine is the batch-mode entry point: both maps; it exits 0 on success and 1 on failure.</summary>
+        [MenuItem("Tools/Open MMORPG/Server Meshing/Testing/Build 8 km Test Map North Spawns")]
+        public static void SpawnsMenuNorth()
+        {
+            if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
+                return;
+            BuildSpawns(North);
+        }
+
+        [MenuItem("Tools/Open MMORPG/Server Meshing/Testing/Build 8 km Test Map North-East Spawns")]
+        public static void SpawnsMenuNorthEast()
+        {
+            if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
+                return;
+            BuildSpawns(NorthEast);
+        }
+
+        /// <summary>BuildFromCommandLine is the batch-mode entry point: every map; it exits 0 on success and 1 on failure.</summary>
         public static void BuildFromCommandLine()
         {
             bool ok;
@@ -293,7 +343,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             EditorApplication.Exit(ok ? 0 : 1);
         }
 
-        /// <summary>Build generates the first map's scene and registers it (the menu's first entry; batch mode builds both).</summary>
+        /// <summary>Build generates the first map's scene and registers it (the menu's first entry; batch mode builds every map).</summary>
         public static bool Build()
         {
             return Build(West);

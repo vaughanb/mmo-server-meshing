@@ -237,8 +237,8 @@ Where the work stands, how to get it running on another machine, and what is lef
     and loaded additively by the cells in `OnServerOnlineSceneLoaded` (now async) before the areas are read; the seam
     pre-load dropped from one 87–101 ms frame to 45–59 ms over 2 frames. `ReplyMonsterHandoffFailed` answers on any
     map (it answered on Dynamic maps only, which is why 1.40's refused bandit was lost instead of re-promoted). The
-    client pre-loads every neighbouring map's scene within the distance, not only the nearest (a corner; code path,
-    not exercised). `ClientMigrationController.Result.frameShift` lets the auto client move its targets with a seam
+    client pre-loads every neighbouring map's scene within the distance, not only the nearest (a corner; run in
+    item 21). `ClientMigrationController.Result.frameShift` lets the auto client move its targets with a seam
     hop, so `patrol` and `flee` run across a seam: 11 crossings in 100 s, no jump, no exception. The full EditMode
     suite on this code: 4,501 passed, 2 skipped, 0 failed. Three cases of the kit copy's generic `MessageRoundTripTests`
     had failed since 1.33 (`GhostSnapshotMessage`, whose `fullRotation`, `items` and `ageSeconds` are written only for
@@ -248,6 +248,15 @@ Where the work stands, how to get it running on another machine, and what is lef
     is sent as a container, its building-only rotation and receiver-only age listed, and the grid is shaped to
     `LayerCount` arrays of columns × rows before it is written. `MeshMessageBranchTests` round-trips every `GhostKind`
     by hand. No message changed.
+21. **A corner where four maps meet (DESIGN 1.43, package 0.97.28).** Two more 8 km maps, `ServerMeshTestMap8kNorth` and
+    `ServerMeshTestMap8kNorthEast`, make a four-map corner at world (4,096, 24,096) (cells west (7,7), east (0,7), north (7,0),
+    north-east (0,0)); the spawner serves 256 cells on demand. `patrol` with `patrolReturnZ` runs diagonal legs. Diagonal
+    east ↔ north through the point: 13 hops straight between the two cells that touch at a point, three scenes pre-loaded at
+    once and two moved with every swap; straight east ↔ west beside the corner: 15 hops with three scenes held. Both `PASS`,
+    no jump, step max 0.28 m, adopted 171–239 ms. To rerun: save MeshTester on `ServerMeshTestMap8kEast` at (−4086, 21, 4086),
+    rotation 315, auto client `patrol expectedMapName="" walkTargetX=-4106 walkTargetZ=4106 walkReturnX=-4086 patrolReturnZ=4086`;
+    the straight arm at (−4086, 21, 4090) rotation 270 with `walkTargetX=-4111 walkTargetZ=4090 walkReturnX=-4081`. Read the
+    client's `Seam:` lines (`N other pre-load(s) moved`) and the corner cells' `Handoff START … East-0-7->North-7-0`.
 20. **An arrival's item lists reached its client twice (DESIGN 1.42, package 0.97.27).** The rig regression on the code
     of 1.41 failed `splitbuild`: after a re-login that landed on a neighbour (the base cell was still re-registering after
     its restart) and was handed on at once, the tester's bag showed every entry twice, 38 scrolls for 19, while every cell
@@ -404,7 +413,9 @@ Where the work stands, how to get it running on another machine, and what is lef
      pre-load is 45–59 ms over 2 frames with 7–8 roots (1.40: one 87–101 ms frame for 2,300 objects). The longest hop
      frame is now the one after the swap, 63–70 ms: the kit's `Assets.Initialize` and the pool init of its online-scene
      handling — the next lever. The session's first hop still has its 123–134 ms connect frame (first-use compilation).
-     A corner where three maps meet is covered in code (every neighbouring map's scene is pre-loaded) but not exercised.
+     A corner where four maps meet is run (1.43): hops straight through the point between cells that touch there, three
+     scenes pre-loaded at once; a corner with an empty quadrant is the edge of the world, and a step into the empty
+     quadrant is not stopped (not run).
      A death on the east map respawns on the west start (the kit's save point).
 2. **Monsters at a crossing (1.23, 1.28):** a lone monster chases a player across a Static map's line, hits
    through the ghost, and is handed over with its target; a monster that walks over a line on its own walks on

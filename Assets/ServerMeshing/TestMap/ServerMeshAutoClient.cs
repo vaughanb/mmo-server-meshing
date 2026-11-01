@@ -1276,8 +1276,9 @@ namespace MultiplayerARPG.MMO.Mesh
             walkTargetX += shift.x;
             walkReturnX += shift.x;
             if (walkTargetZ != 0f) walkTargetZ += shift.z;
+            if (patrolReturnZ != 0f) patrolReturnZ += shift.z;
             if (_walkZOverride.HasValue) _walkZOverride = _walkZOverride.Value + shift.z;
-            Log($"Seam: targets moved by the frame shift {shift}: leg x={targetX}, walk x={walkTargetX}, return x={walkReturnX}, z={walkTargetZ}");
+            Log($"Seam: targets moved by the frame shift {shift}: leg x={targetX}, walk x={walkTargetX}, return x={walkReturnX}, z={walkTargetZ}{(patrolReturnZ != 0f ? $", return z={patrolReturnZ}" : "")}");
         }
 
         private IEnumerator WalkTo(float targetX, float deadline, int migrationsBefore, System.Action<bool> onDone)

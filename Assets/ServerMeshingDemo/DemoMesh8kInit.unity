@@ -119,121 +119,6 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
---- !u!1 &15197392
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 15197396}
-  - component: {fileID: 15197395}
-  - component: {fileID: 15197394}
-  - component: {fileID: 15197393}
-  m_Layer: 0
-  m_Name: '[Mesh] 8 km map info'
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!114 &15197393
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 15197392}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: e5d96ad673203314d93bffe57a928ae9, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.MMO.Mesh.DemoMesh8kEntities
-  monsters:
-  - {fileID: 873164620747864404, guid: de93cc980cc7cb343a2a1709a20c317e, type: 3}
-  - {fileID: 5473161190021552731, guid: a3d6516556c026441826ccf4ffe7e4a2, type: 3}
-  - {fileID: 6739458657869765345, guid: a0b95ade102614242a2e8eca44c44968, type: 3}
-  - {fileID: 38391445727622635, guid: dafba289bedde4a48917160f57ab7530, type: 3}
-  - {fileID: 603400556100368069, guid: c2697765d5c0d79459919df4d16ee0f1, type: 3}
-  - {fileID: 6641323854697508692, guid: 7e0c12ac4b57f9e42a3bbfdcc54d435f, type: 3}
-  - {fileID: 183666583555378252, guid: 64f89bf8829cc1d47a5acf58b8406ad9, type: 3}
-  - {fileID: 3991679857097899636, guid: 9b9b11799193127448f03445c3d1f0c5, type: 3}
-  - {fileID: 5568610301313701246, guid: d4a0d573bf5726a4f9d9ecaad7144d99, type: 3}
-  - {fileID: 2359002542765662909, guid: 60e0c22e7f1d8e045869622b4e831e0d, type: 3}
-  harvestables:
-  - {fileID: 6203304243882818133, guid: 933876e2f5025df47bea60ad78439776, type: 3}
-  - {fileID: 8539357539722116520, guid: b0325d8f089704e499bff9d2d2be47da, type: 3}
-  - {fileID: 4487888441626957519, guid: c8ee30df3d66af049a1b83f327942bca, type: 3}
-  - {fileID: 7639041522616710880, guid: ef7710938f86ba846b2d4f2aee3d1f1d, type: 3}
-  - {fileID: 5634780553561418395, guid: ce7f7ce8d80760640b37e89ab623b55f, type: 3}
-  - {fileID: 9003530099177659093, guid: 881e28ba68774844bb0af39a98d28380, type: 3}
-  - {fileID: 4749452018276915024, guid: 82b3455ab523de947947f8a653dabf8f, type: 3}
-  - {fileID: 1721396609709006765, guid: 0b12a51297a75984580f3fb34fc418ce, type: 3}
-  - {fileID: 2845086686173985122, guid: 4cb57897e861204409624edb2f3cb23c, type: 3}
-  - {fileID: 8296804266006449163, guid: ab7524fecb642934487aa16cae200e0b, type: 3}
-  - {fileID: 3305469516082440043, guid: 091be99ef73df1040abfd034f684571d, type: 3}
-  - {fileID: 1391874003406562716, guid: 49fb5aba5a6a41e4caabe312ba90eaec, type: 3}
-  - {fileID: 7769529992183246136, guid: 2ce066a3facf83841a3ff43ff95d95dd, type: 3}
-  - {fileID: 9120935145120833547, guid: fdcc1382f4d16ce4cb6d23bc3dac3669, type: 3}
-  - {fileID: 1729664791342647150, guid: 1872e0ac90d29404cbdde82f2b208ab7, type: 3}
-  - {fileID: 9124599301998699526, guid: 529b4d02b4e7fe74ca9525dce6e2bb48, type: 3}
-  - {fileID: 6191596163499869076, guid: aece0764da1bf5846ae30c78c5236492, type: 3}
-  - {fileID: 8480765395076758270, guid: f950cae40dd247d488e21639e2f973d7, type: 3}
-  - {fileID: 453635388744267068, guid: 563ce52d4dfd272469537476f637ac23, type: 3}
-  - {fileID: 6246704331602597624, guid: 26c62451bb9de6849a226e40d5f62b94, type: 3}
-  - {fileID: 1979111952369444679, guid: fcb36086148f2c24b8c87843dc6d1554, type: 3}
-  - {fileID: 1130875781604756300, guid: 3ae55c2fc9d02ad48a8872a9d97870f9, type: 3}
-  - {fileID: 9078805512289956070, guid: d08a0da5ddcc46f469dd1d1535764f36, type: 3}
-  - {fileID: 4356866622881323477, guid: 63239bfd91930ba41b3ae0932e6500e3, type: 3}
-  - {fileID: 3398274493317748177, guid: d1e7c4fcd1639d34fa592d4410ec205a, type: 3}
-  - {fileID: 4182502067270618074, guid: 84dc8823ea9c69542a08f56bb36ac835, type: 3}
-  - {fileID: 4479238339755368030, guid: af94f9ec79c91c0428ca3c218962cc70, type: 3}
-  - {fileID: 7106403749630080781, guid: ccccfb35664617d469c554f168bea1c3, type: 3}
---- !u!114 &15197394
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 15197392}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 5dc6f771f8fe1b347b5d63ba5040fba5, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.MMO.Mesh.DemoMesh8kItems
-  items:
-  - {fileID: 11400000, guid: 8836b1cbe55f0ab44b542af47438189f, type: 2}
---- !u!114 &15197395
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 15197392}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 2938101f37520ea4cbfb050fbc127f04, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.MMO.Mesh.DemoMesh8kMapInfo
-  mapInfos:
-  - {fileID: 11400000, guid: 39a270043806f6c4089a45ddaa6ab478, type: 2}
-  - {fileID: 11400000, guid: a5efe75cd105a6c4d85f24fa16a76084, type: 2}
---- !u!4 &15197396
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 15197392}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1001 &259555351
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -315,6 +200,10 @@ PrefabInstance:
       value: ./Build/DemoMesh8kCells/kit-ce-project.exe
       objectReference: {fileID: 0}
     - target: {fileID: 114788248445432888, guid: 8ccaad8ed2e4b4f48a10f0e908a8d39e, type: 3}
+      propertyPath: spawningMaps.Array.size
+      value: 4
+      objectReference: {fileID: 0}
+    - target: {fileID: 114788248445432888, guid: 8ccaad8ed2e4b4f48a10f0e908a8d39e, type: 3}
       propertyPath: editorNotSpawnInBatchMode
       value: 0
       objectReference: {fileID: 0}
@@ -326,6 +215,14 @@ PrefabInstance:
       propertyPath: 'spawningMaps.Array.data[1]'
       value: 
       objectReference: {fileID: 11400000, guid: a5efe75cd105a6c4d85f24fa16a76084, type: 2}
+    - target: {fileID: 114788248445432888, guid: 8ccaad8ed2e4b4f48a10f0e908a8d39e, type: 3}
+      propertyPath: 'spawningMaps.Array.data[2]'
+      value: 
+      objectReference: {fileID: 11400000, guid: 204ff15508bb40042bb5672999d47434, type: 2}
+    - target: {fileID: 114788248445432888, guid: 8ccaad8ed2e4b4f48a10f0e908a8d39e, type: 3}
+      propertyPath: 'spawningMaps.Array.data[3]'
+      value: 
+      objectReference: {fileID: 11400000, guid: 9883fd2b5e27f764aad8b794823e1db0, type: 2}
     - target: {fileID: 114946005600446132, guid: 8ccaad8ed2e4b4f48a10f0e908a8d39e, type: 3}
       propertyPath: mapNetworkManager
       value: 
@@ -339,7 +236,7 @@ PrefabInstance:
     m_AddedGameObjects:
     - targetCorrespondingSourceObject: {fileID: 976896942459451648, guid: 8ccaad8ed2e4b4f48a10f0e908a8d39e, type: 3}
       insertIndex: -1
-      addedObject: {fileID: 1425939527}
+      addedObject: {fileID: 697685645}
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: 8ccaad8ed2e4b4f48a10f0e908a8d39e, type: 3}
 --- !u!4 &259555352 stripped
@@ -644,6 +541,51 @@ MonoBehaviour:
   m_ShadowLayerMask: 1
   m_RenderingLayers: 1
   m_ShadowRenderingLayers: 1
+--- !u!1 &697685644
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 697685645}
+  - component: {fileID: 697685646}
+  m_Layer: 0
+  m_Name: '[Mesh] 8 km start map'
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &697685645
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 697685644}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 259555352}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &697685646
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 697685644}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 59102717965d05c4f9d771fc5cbf618b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.MMO.Mesh.DemoMesh8kStartMap
+  startMap: {fileID: 11400000, guid: 39a270043806f6c4089a45ddaa6ab478, type: 2}
 --- !u!114 &1127565838 stripped
 MonoBehaviour:
   m_CorrespondingSourceObject: {fileID: 6213249881384088648, guid: 5f7574e5b970d004d88890c5336c1c0b, type: 3}
@@ -801,7 +743,7 @@ MonoBehaviour:
     m_VarianceClampScale: 0.9
     m_ContrastAdaptiveSharpening: 0
   m_Version: 2
---- !u!1 &1425939526
+--- !u!1 &1362309005
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -809,43 +751,115 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 1425939527}
-  - component: {fileID: 1425939528}
+  - component: {fileID: 1362309009}
+  - component: {fileID: 1362309008}
+  - component: {fileID: 1362309007}
+  - component: {fileID: 1362309006}
   m_Layer: 0
-  m_Name: '[Mesh] 8 km start map'
+  m_Name: '[Mesh] 8 km map info'
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!4 &1425939527
+--- !u!114 &1362309006
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1362309005}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e5d96ad673203314d93bffe57a928ae9, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.MMO.Mesh.DemoMesh8kEntities
+  monsters:
+  - {fileID: 873164620747864404, guid: de93cc980cc7cb343a2a1709a20c317e, type: 3}
+  - {fileID: 5473161190021552731, guid: a3d6516556c026441826ccf4ffe7e4a2, type: 3}
+  - {fileID: 6739458657869765345, guid: a0b95ade102614242a2e8eca44c44968, type: 3}
+  - {fileID: 38391445727622635, guid: dafba289bedde4a48917160f57ab7530, type: 3}
+  - {fileID: 603400556100368069, guid: c2697765d5c0d79459919df4d16ee0f1, type: 3}
+  - {fileID: 6641323854697508692, guid: 7e0c12ac4b57f9e42a3bbfdcc54d435f, type: 3}
+  - {fileID: 183666583555378252, guid: 64f89bf8829cc1d47a5acf58b8406ad9, type: 3}
+  - {fileID: 3991679857097899636, guid: 9b9b11799193127448f03445c3d1f0c5, type: 3}
+  - {fileID: 5568610301313701246, guid: d4a0d573bf5726a4f9d9ecaad7144d99, type: 3}
+  - {fileID: 2359002542765662909, guid: 60e0c22e7f1d8e045869622b4e831e0d, type: 3}
+  harvestables:
+  - {fileID: 6203304243882818133, guid: 933876e2f5025df47bea60ad78439776, type: 3}
+  - {fileID: 8539357539722116520, guid: b0325d8f089704e499bff9d2d2be47da, type: 3}
+  - {fileID: 4487888441626957519, guid: c8ee30df3d66af049a1b83f327942bca, type: 3}
+  - {fileID: 7639041522616710880, guid: ef7710938f86ba846b2d4f2aee3d1f1d, type: 3}
+  - {fileID: 5634780553561418395, guid: ce7f7ce8d80760640b37e89ab623b55f, type: 3}
+  - {fileID: 9003530099177659093, guid: 881e28ba68774844bb0af39a98d28380, type: 3}
+  - {fileID: 4749452018276915024, guid: 82b3455ab523de947947f8a653dabf8f, type: 3}
+  - {fileID: 1721396609709006765, guid: 0b12a51297a75984580f3fb34fc418ce, type: 3}
+  - {fileID: 2845086686173985122, guid: 4cb57897e861204409624edb2f3cb23c, type: 3}
+  - {fileID: 8296804266006449163, guid: ab7524fecb642934487aa16cae200e0b, type: 3}
+  - {fileID: 3305469516082440043, guid: 091be99ef73df1040abfd034f684571d, type: 3}
+  - {fileID: 1391874003406562716, guid: 49fb5aba5a6a41e4caabe312ba90eaec, type: 3}
+  - {fileID: 7769529992183246136, guid: 2ce066a3facf83841a3ff43ff95d95dd, type: 3}
+  - {fileID: 9120935145120833547, guid: fdcc1382f4d16ce4cb6d23bc3dac3669, type: 3}
+  - {fileID: 1729664791342647150, guid: 1872e0ac90d29404cbdde82f2b208ab7, type: 3}
+  - {fileID: 9124599301998699526, guid: 529b4d02b4e7fe74ca9525dce6e2bb48, type: 3}
+  - {fileID: 6191596163499869076, guid: aece0764da1bf5846ae30c78c5236492, type: 3}
+  - {fileID: 8480765395076758270, guid: f950cae40dd247d488e21639e2f973d7, type: 3}
+  - {fileID: 453635388744267068, guid: 563ce52d4dfd272469537476f637ac23, type: 3}
+  - {fileID: 6246704331602597624, guid: 26c62451bb9de6849a226e40d5f62b94, type: 3}
+  - {fileID: 1979111952369444679, guid: fcb36086148f2c24b8c87843dc6d1554, type: 3}
+  - {fileID: 1130875781604756300, guid: 3ae55c2fc9d02ad48a8872a9d97870f9, type: 3}
+  - {fileID: 9078805512289956070, guid: d08a0da5ddcc46f469dd1d1535764f36, type: 3}
+  - {fileID: 4356866622881323477, guid: 63239bfd91930ba41b3ae0932e6500e3, type: 3}
+  - {fileID: 3398274493317748177, guid: d1e7c4fcd1639d34fa592d4410ec205a, type: 3}
+  - {fileID: 4182502067270618074, guid: 84dc8823ea9c69542a08f56bb36ac835, type: 3}
+  - {fileID: 4479238339755368030, guid: af94f9ec79c91c0428ca3c218962cc70, type: 3}
+  - {fileID: 7106403749630080781, guid: ccccfb35664617d469c554f168bea1c3, type: 3}
+--- !u!114 &1362309007
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1362309005}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5dc6f771f8fe1b347b5d63ba5040fba5, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.MMO.Mesh.DemoMesh8kItems
+  items:
+  - {fileID: 11400000, guid: 8836b1cbe55f0ab44b542af47438189f, type: 2}
+--- !u!114 &1362309008
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1362309005}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2938101f37520ea4cbfb050fbc127f04, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.MMO.Mesh.DemoMesh8kMapInfo
+  mapInfos:
+  - {fileID: 11400000, guid: 39a270043806f6c4089a45ddaa6ab478, type: 2}
+  - {fileID: 11400000, guid: a5efe75cd105a6c4d85f24fa16a76084, type: 2}
+  - {fileID: 11400000, guid: 204ff15508bb40042bb5672999d47434, type: 2}
+  - {fileID: 11400000, guid: 9883fd2b5e27f764aad8b794823e1db0, type: 2}
+--- !u!4 &1362309009
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1425939526}
+  m_GameObject: {fileID: 1362309005}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
-  m_Father: {fileID: 259555352}
+  m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &1425939528
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1425939526}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 59102717965d05c4f9d771fc5cbf618b, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::MultiplayerARPG.MMO.Mesh.DemoMesh8kStartMap
-  startMap: {fileID: 11400000, guid: 39a270043806f6c4089a45ddaa6ab478, type: 2}
 --- !u!114 &1650493581 stripped
 MonoBehaviour:
   m_CorrespondingSourceObject: {fileID: 114462229916829746, guid: c47cc4ef8f369584db7fea27b2fdbd73, type: 3}
@@ -1014,4 +1028,4 @@ SceneRoots:
   - {fileID: 657742876}
   - {fileID: 3472249309801433388}
   - {fileID: 3891596336184503898}
-  - {fileID: 15197396}
+  - {fileID: 1362309009}

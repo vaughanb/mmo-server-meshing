@@ -2,6 +2,8 @@
 //
 // patrol: walk to (walkTargetX, walkTargetZ), then back and forth between x = walkTargetX and x = walkReturnX at that z
 // until -meshObserveSeconds have passed, so a bot keeps crossing whatever cuts the automatic policy makes for hours.
+// With patrolReturnZ set the return leg ends at (walkReturnX, patrolReturnZ) instead: diagonal legs, through the point
+// where lines cross (DESIGN 1.43, the corner where three maps meet).
 // Every leg logs `Patrol leg <n> to x=<x>: reached|missed at <x>,<z>`; migrations are counted from the first leg as
 // stand counts them (MIGRATION lines), and the RESULT reads `RESULT patrol: legs=<n> missed=<n>` plus the stand fields
 // and ` relogins=<n>`. A leg missed while a re-login runs is not a failure of the walk: the bot carries on.
@@ -17,6 +19,8 @@ namespace MultiplayerARPG.MMO.Mesh
         [Header("Patrol (soak)")]
         [Tooltip("How long one patrol leg may take before it is counted missed and the next one starts.")]
         public float patrolLegSeconds = 120f;
+        [Tooltip("The return leg's z (0: the lane stays at walkTargetZ). Set, the legs run diagonally between (walkTargetX, walkTargetZ) and (walkReturnX, patrolReturnZ), through a corner where lines cross (DESIGN 1.43).")]
+        public float patrolReturnZ = 0f;
         [Tooltip("Swing at the air whenever the character can while it patrols, so crossings happen mid-attack (DESIGN 1.06; trace with MESH_TRACE_ACTIONS=1).")]
         public bool attackWhileWalking = false;
         [Tooltip("With attackWhileWalking: cut the pause between swings short when a hop starts, so a swing is sent inside the gap between the warp and the adoption (DESIGN 1.07).")]
@@ -185,7 +189,10 @@ namespace MultiplayerARPG.MMO.Mesh
             yield return WalkTo(walkTargetX, deadline, ClientMigrationController.CompletedCount, r => reached = r);
             if (!reached) { _walkZOverride = null; Fail("never reached the patrol start"); yield break; }
             BasePlayerCharacterEntity self = GameInstance.PlayingCharacterEntity;
-            LogInvariant($"Patrolling between x={walkTargetX} and x={walkReturnX} at z={walkTargetZ} for {observeSeconds}s");
+            if (patrolReturnZ != 0f)
+                LogInvariant($"Patrolling between ({walkTargetX}, {walkTargetZ}) and ({walkReturnX}, {patrolReturnZ}) for {observeSeconds}s");
+            else
+                LogInvariant($"Patrolling between x={walkTargetX} and x={walkReturnX} at z={walkTargetZ} for {observeSeconds}s");
             BeginStandMigrations(self);
             bool patrolling = true;
             StartCoroutine(PollMigrationsWhile(() => patrolling));
@@ -207,6 +214,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 Phase = $"patrol-leg{legs + 1}";
                 bool legReached = false;
                 float target = toReturn ? walkReturnX : walkTargetX;
+                if (patrolReturnZ != 0f)
+                    _walkZOverride = toReturn ? patrolReturnZ : walkTargetZ; // a diagonal leg: WalkTo aims at (target, this z)
                 float legEnd = Mathf.Min(end, Time.realtimeSinceStartup + patrolLegSeconds);
                 yield return WalkTo(target, legEnd, ClientMigrationController.CompletedCount, r => legReached = r);
                 legs++;

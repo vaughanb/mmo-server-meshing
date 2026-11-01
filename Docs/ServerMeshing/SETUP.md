@@ -18,8 +18,9 @@ crashes and central restarts included (§6a). Version 0.83.
   buildings), so players see and fight across it; hits, kills, loot, party and guild rewards, quest counters, buildings
   and pickups all resolve on the owning side.
 - Maps can be placed next to each other in one world; a **seam** between two maps is crossed the same way, the
-  client pre-loading the neighbouring scene behind the player's back and swapping into it at the line. Run on two
-  8 km maps side by side, each cut 8 × 8 (DESIGN 1.40; the demo copy's `ServerMeshTestMap8k` and `ServerMeshTestMap8kEast`).
+  client pre-loading the neighbouring scene behind the player's back and swapping into it at the line, a corner where
+  four maps meet included. Run on four 8 km maps meeting at a corner, each cut 8 × 8 (DESIGN 1.40, 1.43; the demo copy's
+  `ServerMeshTestMap8k`, `…East`, `…North` and `…NorthEast`).
 - **Sleeping cells:** with nobody near it a cell does not run at all; it starts a few seconds ahead of the first
   player who approaches and exits again later. Empty land costs nothing.
 - **Dynamic cells:** a map set Dynamic has a busy cell split into more cells at runtime and merged back when it quiets,
@@ -115,8 +116,9 @@ Open the map's scene. In panel 2:
      areas are read, so an area there is one of the map's like any other) and a client never does. The scene must be in
      the build and hold no networked scene objects (NPCs, buildings and the like stay in the map scene, which both
      sides register). The 8 km builder makes one per map (`<map>-Server`).
-   The demo's two maps are the worked example: **Tools ▸ Open MMORPG ▸ Server Meshing ▸ Testing ▸ Build 8 km Test Map**
-   and **… East** make the scenes with their aprons, server scenes, map infos and layouts; **Build 8 km Demo Copy** registers both.
+   The demo's four maps are the worked example: **Tools ▸ Open MMORPG ▸ Server Meshing ▸ Testing ▸ Build 8 km Test Map**,
+   **… East**, **… North** and **… North-East** make the scenes with their aprons, server scenes, map infos and layouts;
+   **Build 8 km Demo Copy** registers them all.
 4. **Measure open scene** — the grid is fitted to everything with a renderer, collider or terrain.
 5. **Add / replace layout**. Cells are named `<prefix>-<x>-<y>`; the prefix defaults to the map id.
 
@@ -933,8 +935,8 @@ This chapter runs the test rig, which lives in the source repository
   DESIGN 1.41). Keep a map scene's object count in mind.
 - **A seam needs the maps' cooperation:** ground past the line (an apron), every crossing entity known on both sides,
   and server-only content in a server-only scene (§4.2). The pre-load holds every neighbouring map's scene whose seam
-  is within the distance, so a corner where three maps meet has both ready (DESIGN 1.41; the code path, not exercised:
-  the demo has two maps).
+  is within the distance, so at a corner where four maps meet the other three are ready, and a step over the corner
+  hops straight into the diagonal map (DESIGN 1.41, run in 1.43 on the demo's four maps).
 - **Crowds** are bounded by one process and by the kit's own AOI send cost (0.29 kB/s per visible entity per client),
   not by the mesh: 500 people in one place is a kit AOI/update-rate question.
 - **Warp portals or spawn points exactly on a login position** do what they do in the kit: a character that stands up
