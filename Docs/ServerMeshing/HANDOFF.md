@@ -367,8 +367,8 @@ Where the work stands, how to get it running on another machine, and what is lef
 4. **The kit copy is upstream `master` at 493df35fc (1.33).** CE-14 is upstream (PR 28) and no `MESH-EDIT` marker is left. No
    release has it yet, so the package names `master` at 05ec55012 as its minimum: when a release does, name that. A later
    sync is a three-way merge, not a copy (`upstream/README.md`).
-5. **The rig regression** passed all 34 scenarios on upstream `master` with kinematic puppets on the code of 1.35 (2026-10-31, 3,178 checks,
-   189 min; `party`'s `hurtTarget` check is flaky, and passed), and the 3 h `soak` 95 of 95 on the same code. To run it:
+5. **The rig regression** passed all 34 scenarios on the code of 1.39 (2026-10-31, 3,488 checks, 190 min, `party`'s flaky
+   `hurtTarget` check included), as it had on the code of 1.35 the same day (3,178 checks), and the 3 h `soak` 95 of 95 on the code of 1.35. To run it:
    enable the five BaseDemo and TestMap scenes in Build Settings, open BaseInit-CE, then
    `python -u Tools/ServerMeshing/regress.py --build <scenarios>` (name the scenarios: `--build` alone only builds), then
    restore Build Settings and DemoMesh8kInit. `Config/mySqlConfig.json` is here and MySQL80 runs. A full run takes ~3 h.
