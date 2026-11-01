@@ -561,16 +561,15 @@ namespace MultiplayerARPG.MMO.Mesh
             // Round trip: out to walkTargetX (zone E), back to walkReturnX (zone C). A character that was
             // saved in another zone gets handed off right at login, which also counts as a migration.
             int before = ClientMigrationController.CompletedCount;
-            float[] legs = { walkTargetX, walkReturnX };
             bool allLegsReached = true;
-            for (int leg = 0; leg < legs.Length; ++leg)
+            for (int leg = 0; leg < 2; ++leg)
             {
                 Phase = $"walk-leg{leg + 1}";
                 bool reached = false;
                 // With a Z target the out leg goes to (walkTargetX, walkTargetZ) — e.g. across a corner — and the return
-                // leg comes back to (walkReturnX, 0).
+                // leg comes back to (walkReturnX, 0). The fields are read per leg: a seam hop moves them with the frame.
                 _walkZOverride = walkTargetZ != 0f ? (leg == 0 ? walkTargetZ : 0f) : (float?)null;
-                yield return WalkTo(legs[leg], deadline, before, r => reached = r);
+                yield return WalkTo(leg == 0 ? walkTargetX : walkReturnX, deadline, before, r => reached = r);
                 _walkZOverride = null;
                 allLegsReached &= reached;
                 if (!reached) break;
@@ -1261,6 +1260,26 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private float? _walkZOverride;
 
+        /// <summary>
+        /// ShiftTargetsAfterSeam: a seam hop re-bases the world (DESIGN 1.40), so a target given in the frame a walk began in
+        /// is a map away once the player is across. The run's targets move with the frame — the leg's own, the fields the
+        /// next legs read, the z lane — so patrol and flee legs go on across a seam (DESIGN 1.41; before, they stood after
+        /// the hop, their target 8 km off and without a navmesh). A hop inside a map shifts nothing.
+        /// </summary>
+        private void ShiftTargetsAfterSeam(ClientMigrationController.Result hop, ref float targetX, ref Vector3 start)
+        {
+            Vector3 shift = hop.frameShift;
+            if (shift == Vector3.zero)
+                return;
+            targetX += shift.x;
+            start += shift;
+            walkTargetX += shift.x;
+            walkReturnX += shift.x;
+            if (walkTargetZ != 0f) walkTargetZ += shift.z;
+            if (_walkZOverride.HasValue) _walkZOverride = _walkZOverride.Value + shift.z;
+            Log($"Seam: targets moved by the frame shift {shift}: leg x={targetX}, walk x={walkTargetX}, return x={walkReturnX}, z={walkTargetZ}");
+        }
+
         private IEnumerator WalkTo(float targetX, float deadline, int migrationsBefore, System.Action<bool> onDone)
         {
             BasePlayerCharacterEntity p0 = GameInstance.PlayingCharacterEntity;
@@ -1330,6 +1349,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 {
                     seen = ClientMigrationController.CompletedCount;
                     ClientMigrationController.Result r = ClientMigrationController.LastResult;
+                    ShiftTargetsAfterSeam(r, ref targetX, ref start);
                     _allMigrationsReady &= r.playerReady;
                     _maxGapMs = System.Math.Max(_maxGapMs, r.playerReadyMs);
                     _maxJump = Mathf.Max(_maxJump, r.positionJump);

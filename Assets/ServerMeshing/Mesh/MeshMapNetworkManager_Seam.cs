@@ -31,16 +31,20 @@ namespace MultiplayerARPG.MMO.Mesh
         private sealed class PreloadedSeam
         {
             public string sceneName, mapId, cellId;
-            public Vector3 offset;                 // where the neighbour's content sits in the current frame
+            public Vector3 offset;                 // where the neighbour's content sits in the current frame (a swap to another seam moves it with the frame)
             public Scene scene;
-            public bool loaded;
+            public bool loading, loaded;
             public readonly List<GameObject> roots = new List<GameObject>();
             public readonly List<Behaviour> disabled = new List<Behaviour>(); // scene cameras / listeners / event systems silenced while pre-loaded; at the swap they take the old scene's state by name
             public readonly List<Behaviour> silenced = new List<Behaviour>(); // the scene's lights and its own scripts, off while pre-loaded, back on at the swap
         }
 
-        private PreloadedSeam _seam;
-        private bool _seamLoading;
+        // One pre-load per neighbouring map's scene within the band (DESIGN 1.41): at a corner where three maps meet the
+        // player stands in two seams' bands at once, and whichever line is crossed first finds its scene ready. Until 1.40
+        // one scene was held, the nearest seam's.
+        private readonly List<PreloadedSeam> _seams = new List<PreloadedSeam>();
+        private readonly Dictionary<string, MeshCell> _seamNearestByScene = new Dictionary<string, MeshCell>();
+        private readonly Dictionary<string, float> _seamDistanceByScene = new Dictionary<string, float>();
         private float _nextSeamCheck;
         // The active scene's own root objects, taken when the scene came up: at a swap everything else in the scene was
         // created at runtime (controller, HUD, cameras, indicators, stand-ins) and is carried into the new scene.
@@ -60,11 +64,12 @@ namespace MultiplayerARPG.MMO.Mesh
                 _sceneContentRoots.Add(root);
         }
 
-        /// <summary>Client tick: pre-load the neighbouring map's scene near a seam, drop it when the player walks away.</summary>
+        /// <summary>Client tick: pre-load every neighbouring map's scene near a seam, drop each when the player walks away from its seam.</summary>
         private void SeamClientUpdate()
         {
-            if (_seam != null && !_seamLoading && (!_seam.scene.IsValid() || !_seam.scene.isLoaded))
-                _seam = null; // the kit reloaded the world (session end, plain warp): the pre-load went with it
+            for (int i = _seams.Count - 1; i >= 0; --i)
+                if (!_seams[i].loading && (!_seams[i].scene.IsValid() || !_seams[i].scene.isLoaded))
+                    _seams.RemoveAt(i); // the kit reloaded the world (session end, plain warp): the pre-load went with it
             if (world == null || seamPreloadDistance <= 0f || IsMigrating || !IsClientConnected || Time.unscaledTime < _nextSeamCheck)
                 return;
             _nextSeamCheck = Time.unscaledTime + 0.5f;
@@ -76,8 +81,9 @@ namespace MultiplayerARPG.MMO.Mesh
             if (cell == null)
                 return;
             string activeScene = SceneManager.GetActiveScene().name;
-            MeshCell nearest = null;
-            float nearestDistance = float.MaxValue;
+            // The nearest cell of every other map's scene among the neighbours: a corner where three maps meet has two.
+            _seamNearestByScene.Clear();
+            _seamDistanceByScene.Clear();
             for (int i = 0; i < cell.neighbours.Count; ++i)
             {
                 MeshCell neighbour = cell.neighbours[i];
@@ -87,21 +93,48 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (string.IsNullOrEmpty(sceneName) || string.Equals(sceneName, activeScene))
                     continue; // same scene: nothing to pre-load, the swap inside a scene needs no frame change
                 float distance = cell.DistanceTo(neighbour, pos);
-                if (distance < nearestDistance)
+                if (!_seamDistanceByScene.TryGetValue(sceneName, out float nearest) || distance < nearest)
                 {
-                    nearestDistance = distance;
-                    nearest = neighbour;
+                    _seamDistanceByScene[sceneName] = distance;
+                    _seamNearestByScene[sceneName] = neighbour;
                 }
             }
-            if (_seam != null)
+            for (int i = _seams.Count - 1; i >= 0; --i)
             {
-                bool keep = nearest != null && string.Equals(_seam.sceneName, SceneNameOf(nearest.mapId)) && nearestDistance <= seamPreloadDistance + seamUnloadHysteresis;
-                if (!keep && !_seamLoading)
-                    UnloadSeam("left the band");
-                return;
+                PreloadedSeam seam = _seams[i];
+                if (seam.loading)
+                    continue;
+                if (!_seamDistanceByScene.TryGetValue(seam.sceneName, out float distance) || distance > seamPreloadDistance + seamUnloadHysteresis)
+                    UnloadSeam(seam, "left the band");
             }
-            if (nearest != null && nearestDistance <= seamPreloadDistance && !_seamLoading)
-                PreloadSeam(nearest, nearest.OffsetTo(cell)).Forget();
+            foreach (KeyValuePair<string, float> entry in _seamDistanceByScene)
+            {
+                if (entry.Value > seamPreloadDistance || FindSeam(entry.Key) != null)
+                    continue;
+                MeshCell neighbour = _seamNearestByScene[entry.Key];
+                PreloadSeam(neighbour, neighbour.OffsetTo(cell)).Forget();
+            }
+        }
+
+        private PreloadedSeam FindSeam(string sceneName)
+        {
+            for (int i = 0; i < _seams.Count; ++i)
+                if (string.Equals(_seams[i].sceneName, sceneName))
+                    return _seams[i];
+            return null;
+        }
+
+        private static void ReAddNavMesh(List<GameObject> roots)
+        {
+            for (int i = 0; i < roots.Count; ++i)
+            {
+                if (roots[i] == null) continue;
+                foreach (Unity.AI.Navigation.NavMeshSurface surface in roots[i].GetComponentsInChildren<Unity.AI.Navigation.NavMeshSurface>(true))
+                {
+                    surface.RemoveData();
+                    surface.AddData(); // at the moved transform
+                }
+            }
         }
 
         private static string SceneNameOf(string mapId)
@@ -112,9 +145,8 @@ namespace MultiplayerARPG.MMO.Mesh
         private async UniTaskVoid PreloadSeam(MeshCell neighbour, Vector3 offset)
         {
             string sceneName = SceneNameOf(neighbour.mapId);
-            PreloadedSeam seam = new PreloadedSeam { sceneName = sceneName, mapId = neighbour.mapId, cellId = neighbour.id, offset = offset };
-            _seam = seam;
-            _seamLoading = true;
+            PreloadedSeam seam = new PreloadedSeam { sceneName = sceneName, mapId = neighbour.mapId, cellId = neighbour.id, offset = offset, loading = true };
+            _seams.Add(seam);
             Stamp($"seam: pre-loading scene {sceneName} of map {neighbour.mapId} at offset {offset} (cell {neighbour.id})");
             // The scene's integration (its objects made on the main thread) is spread over frames at this priority: Low gives
             // it about 2 ms a frame. At the default, an 8 km map's 2,300 objects integrated in one 100 ms frame (DESIGN 1.40),
@@ -126,8 +158,7 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 Application.backgroundLoadingPriority = loadingPriority;
                 Logging.LogWarning("Mesh", $"Seam: scene {sceneName} (map {neighbour.mapId}) is not in the build; the kit will reload at the crossing");
-                _seam = null;
-                _seamLoading = false;
+                _seams.Remove(seam);
                 return;
             }
             float loadBegan = Time.realtimeSinceStartup;
@@ -139,18 +170,19 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             Application.backgroundLoadingPriority = loadingPriority;
             seam.scene = SceneManager.GetSceneByName(sceneName);
-            _seamLoading = false;
+            seam.loading = false;
             if (!seam.scene.IsValid() || !seam.scene.isLoaded)
             {
-                _seam = null;
+                _seams.Remove(seam);
                 Logging.LogWarning("Mesh", $"Seam: scene {sceneName} did not load");
                 return;
             }
-            if (!ReferenceEquals(_seam, seam))
+            if (!_seams.Contains(seam))
             {
-                _ = SceneManager.UnloadSceneAsync(seam.scene); // superseded while loading; nothing waits for the unload
+                _ = SceneManager.UnloadSceneAsync(seam.scene); // dropped while loading (the kit reloaded the world); nothing waits for the unload
                 return;
             }
+            offset = seam.offset; // a swap to another seam while this one loaded moved the frame, and the offset with it
             seam.scene.GetRootGameObjects(seam.roots);
             for (int i = 0; i < seam.roots.Count; ++i)
             {
@@ -180,12 +212,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 // registers a scene); until the swap the neighbour's live entities are its ghosts.
                 foreach (LiteNetLibIdentity identity in root.GetComponentsInChildren<LiteNetLibIdentity>(true))
                     if (identity.gameObject.activeSelf) identity.gameObject.SetActive(false);
-                foreach (Unity.AI.Navigation.NavMeshSurface surface in root.GetComponentsInChildren<Unity.AI.Navigation.NavMeshSurface>(true))
-                {
-                    surface.RemoveData();
-                    surface.AddData(); // at the moved transform
-                }
             }
+            ReAddNavMesh(seam.roots);
             seam.loaded = true;
             System.Text.StringBuilder rootNames = new System.Text.StringBuilder();
             for (int i = 0; i < seam.roots.Count; ++i)
@@ -194,11 +222,9 @@ namespace MultiplayerARPG.MMO.Mesh
                                $"({seam.roots.Count} roots: {rootNames}; {seam.silenced.Count} lights and scripts silenced)");
         }
 
-        private void UnloadSeam(string reason)
+        private void UnloadSeam(PreloadedSeam seam, string reason)
         {
-            PreloadedSeam seam = _seam;
-            _seam = null;
-            if (seam == null)
+            if (seam == null || !_seams.Remove(seam))
                 return;
             if (seam.scene.IsValid() && seam.scene.isLoaded)
                 SceneManager.UnloadSceneAsync(seam.scene);
@@ -212,10 +238,11 @@ namespace MultiplayerARPG.MMO.Mesh
         protected override async void HandleServerSceneChange(ServerSceneInfo serverSceneInfo)
         {
             bool swapped = false;
-            if (!IsServer && _seam != null && _seam.loaded && !_seamLoading && _seam.scene.IsValid() && _seam.scene.isLoaded
-                && string.Equals(_seam.sceneName, serverSceneInfo.sceneName) && !string.Equals(SceneManager.GetActiveScene().name, serverSceneInfo.sceneName))
+            PreloadedSeam ready = IsServer ? null : FindSeam(serverSceneInfo.sceneName);
+            if (ready != null && ready.loaded && !ready.loading && ready.scene.IsValid() && ready.scene.isLoaded
+                && !string.Equals(SceneManager.GetActiveScene().name, serverSceneInfo.sceneName))
             {
-                await SwapToPreloadedScene();
+                await SwapToPreloadedScene(ready);
                 swapped = true;
             }
             // A hop between cells of one scene: the scene the kit is about to "load" is the one already active and
@@ -299,10 +326,9 @@ namespace MultiplayerARPG.MMO.Mesh
             }
         }
 
-        private async UniTask SwapToPreloadedScene()
+        private async UniTask SwapToPreloadedScene(PreloadedSeam seam)
         {
-            PreloadedSeam seam = _seam;
-            _seam = null;
+            _seams.Remove(seam);
             Scene oldScene = SceneManager.GetActiveScene();
             Vector3 shift = -seam.offset; // add to anything in the old frame to express it in the new one
             Stamp($"seam: swapping to scene {seam.sceneName} (frame shift {shift})");
@@ -353,6 +379,20 @@ namespace MultiplayerARPG.MMO.Mesh
             if (ownTransform != null)
                 Stamp($"seam: own player after the carry at {ownTransform.position} ({platformsForgotten} platform(s) forgotten)");
             TraceOwnPlayerFrames(3).Forget();
+            // Any other pre-loaded seam (a corner, DESIGN 1.41) was placed in the old frame: its content moves by the same
+            // shift, and its offset is read in the new frame from here on. One still loading lands at the moved offset.
+            int othersShifted = 0;
+            for (int i = 0; i < _seams.Count; ++i)
+            {
+                PreloadedSeam other = _seams[i];
+                other.offset += shift;
+                if (!other.loaded)
+                    continue;
+                for (int r = 0; r < other.roots.Count; ++r)
+                    if (other.roots[r] != null) other.roots[r].transform.position += shift;
+                ReAddNavMesh(other.roots);
+                othersShifted++;
+            }
             double shiftedMs = swapWatch.Elapsed.TotalMilliseconds;
             for (int i = 0; i < seam.disabled.Count; ++i)
             {
@@ -367,22 +407,14 @@ namespace MultiplayerARPG.MMO.Mesh
             // The scene's lights and scripts come back as they were authored: this is their scene now.
             for (int i = 0; i < seam.silenced.Count; ++i)
                 if (seam.silenced[i] != null) seam.silenced[i].enabled = true;
-            for (int i = 0; i < seam.roots.Count; ++i)
-            {
-                if (seam.roots[i] == null) continue;
-                foreach (Unity.AI.Navigation.NavMeshSurface surface in seam.roots[i].GetComponentsInChildren<Unity.AI.Navigation.NavMeshSurface>(true))
-                {
-                    surface.RemoveData();
-                    surface.AddData();
-                }
-            }
+            ReAddNavMesh(seam.roots);
             _sceneContentRoots.Clear();
             for (int i = 0; i < seam.roots.Count; ++i)
                 if (seam.roots[i] != null) _sceneContentRoots.Add(seam.roots[i]);
             _sceneContentFromSwap = true; // the kit's scene-loaded hook follows: keep this list, not a fresh snapshot
             _migration?.NoteFrameShift(shift);
-            Stamp($"seam: swap: roots and carried shifted in {shiftedMs:0.#} ms, scripts back and navmesh re-added by {swapWatch.Elapsed.TotalMilliseconds:0.#} ms");
-            Logging.Log("Mesh", $"Seam: swapped to scene {seam.sceneName} of map {seam.mapId} (frame shift {shift}, {carried.Count} runtime roots carried: {carriedNames})");
+            Stamp($"seam: swap: roots and carried shifted in {shiftedMs:0.#} ms ({othersShifted} other pre-load(s) moved), scripts back and navmesh re-added by {swapWatch.Elapsed.TotalMilliseconds:0.#} ms");
+            Logging.Log("Mesh", $"Seam: swapped to scene {seam.sceneName} of map {seam.mapId} (frame shift {shift}, {carried.Count} runtime roots carried: {carriedNames}{(othersShifted > 0 ? $"; {othersShifted} other pre-loaded scene(s) moved with the frame" : "")})");
         }
 
     }

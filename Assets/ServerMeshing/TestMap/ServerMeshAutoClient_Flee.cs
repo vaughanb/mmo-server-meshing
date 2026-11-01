@@ -42,12 +42,25 @@ namespace MultiplayerARPG.MMO.Mesh
             Vector3 end = new Vector3(walkReturnX, start.y, walkTargetZ);
             float t0 = Time.realtimeSinceStartup, nextLog = 0f, maxGap = 0f, lastNearest = -1f;
             bool chased = false;
+            int seenHops = ClientMigrationController.CompletedCount;
             Log($"flee: {(fleeSprint ? "sprinting" : "running")} from {start} to {end}; nearest monster {NearestMonster(self, out bool startTargeted):0.0} m targets me {startTargeted}");
             while (Time.realtimeSinceStartup < deadline)
             {
                 self = GameInstance.PlayingCharacterEntity;
                 if (self == null || self.IsDead())
                     break;
+                if (ClientMigrationController.CompletedCount > seenHops)
+                {
+                    // A seam hop re-bases the world: the run's end and start move with the frame (DESIGN 1.41).
+                    seenHops = ClientMigrationController.CompletedCount;
+                    Vector3 shift = ClientMigrationController.LastResult.frameShift;
+                    if (shift != Vector3.zero)
+                    {
+                        end += shift;
+                        start += shift;
+                        Log($"flee: seam frame shift {shift}; running on to {end}");
+                    }
+                }
                 Vector3 pos = self.EntityTransform.position;
                 Vector3 left = end - pos;
                 left.y = 0f;

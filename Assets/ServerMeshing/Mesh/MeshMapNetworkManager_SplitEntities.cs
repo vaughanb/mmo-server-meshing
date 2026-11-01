@@ -5,7 +5,8 @@
 // registered on a Dynamic map (inactive areas included, so a child that disables every area can spawn puppets and
 // handed-off entities); the spawn-area filter on a Dynamic map tested against the cell's base rectangle (spawn areas
 // never move: the base process is home for its whole base rectangle); and the per-snapshot-tick entry point of the
-// split work. Also the "Ghost owner changed" line once this cell has applied a layout. Static maps: unchanged.
+// split work. Also the "Ghost owner changed" line once this cell has applied a layout. Static maps: unchanged, except
+// that MonsterHandoffFailed is answered on them too since DESIGN 1.41.
 using System.Collections.Generic;
 using LiteNetLibManager;
 using UnityEngine;
@@ -14,7 +15,7 @@ namespace MultiplayerARPG.MMO.Mesh
 {
     public partial class MeshMapNetworkManager
     {
-        [Tooltip("Dynamic maps: after a monster handoff is refused by its receiver, seconds before that monster is handed again.")]
+        [Tooltip("After a monster handoff is refused by its receiver and the monster re-promoted here, seconds before it is handed again.")]
         public float monsterHandoffFailedRetrySeconds = 10f;
 
 #if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
@@ -122,11 +123,13 @@ namespace MultiplayerARPG.MMO.Mesh
 
         // ---- MonsterHandoffFailed (128) ----
 
-        /// <summary>OnMonsterHandoff's hook where it cannot spawn the monster: on a Dynamic map the sender is told, so it re-promotes.</summary>
+        /// <summary>
+        /// OnMonsterHandoff's hook where it cannot spawn the monster: the sender is told, so it re-promotes its puppet. On any
+        /// map since DESIGN 1.41: it answered on Dynamic maps only, so a Static map's sender (a bandit refused at the 8 km seam,
+        /// 1.40) never heard, and its demoted copy went stale 2 s later — the monster was gone.
+        /// </summary>
         private void ReplyMonsterHandoffFailed(string fromZone, string meshId, string reason)
         {
-            if (!IsDynamicMap)
-                return;
             if (string.IsNullOrEmpty(fromZone) || !_linkClients.TryGetValue(fromZone, out MeshLinkClient link) || !link.IsConnected)
             {
                 // Slice 2d: a sender hands only to a cell whose readiness report reached it over that cell's own link, so

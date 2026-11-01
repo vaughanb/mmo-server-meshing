@@ -17,6 +17,12 @@
 // New characters start StartEdgeDistance inside cell (4,4), facing its edge with cell (3,4). A see-through curtain in the
 // edge colour stands over every painted cell edge, so the borders read from afar.
 //
+// Each map is two scenes (DESIGN 1.41): the map scene (terrain, light and sky, aprons, curtains, the start's NPCs and spawn
+// point: what a client loads) and a server-only scene beside it, <map>-Server, holding the 2,300 spawn areas. The registry
+// layout names it (serverScenes) and the cells load it additively when their scene is up; a client never does, so a seam
+// pre-load integrates ten objects instead of 2,300 (the 87-101 ms frame of DESIGN 1.40). A server scene holds no networked
+// scene objects.
+//
 // The scene has no camera: the player controller brings its own (a scene camera would draw over it). Its light, sky and
 // fog are the kit demo's (DemoMap's directional light, its DayNightSkyCycle and its lighting settings), so the map looks
 // and reads like the demo's; without the demo it gets a plain directional light.
@@ -74,6 +80,9 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             public Color CurtainColor;
 
             public string ScenePath => SceneFolder + "/" + MapId + ".unity";
+            /// <summary>The server-only scene beside the map scene: the spawn areas, which the cells load additively and a client never does (DESIGN 1.41).</summary>
+            public string ServerSceneName => MapId + "-Server";
+            public string ServerScenePath => SceneFolder + "/" + ServerSceneName + ".unity";
             public string AssetFolder => SceneFolder + "/" + MapId;
             public string NavMeshPath => AssetFolder + "/NavMesh.asset";
             public string MapInfoPath => Folder + "/GameData/" + MapId + "-MapInfo.asset";
@@ -321,28 +330,26 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             List<Side> seams = CreateSeamAprons(world, spec);
             CreateCellEdgeCurtains(spec, seams);
             CreateZoneManager(world, spec);
-            string spawns = CreateSpawnAreas(mixes, spec);
+            Scene serverScene = OpenOrCreateServerScene(spec);
+            string spawns = CreateSpawnAreas(mixes, spec, scene, serverScene);
             CreateSpawnPoint();
             BakeNavMesh(terrain, spec);
 
-            EditorSceneManager.MarkSceneDirty(scene);
-            if (!EditorSceneManager.SaveScene(scene, spec.ScenePath))
-            {
-                Debug.LogError("Large map error: the scene could not be saved at " + spec.ScenePath);
+            if (!SaveScenes(spec, scene, serverScene))
                 return false;
-            }
-            Debug.Log($"Large map: scene {spec.ScenePath}, {MapSize:0} m terrain, seams {(seams.Count > 0 ? string.Join(", ", seams) : "none")}, {spawns}");
+            Debug.Log($"Large map: scene {spec.ScenePath}, {MapSize:0} m terrain, seams {(seams.Count > 0 ? string.Join(", ", seams) : "none")}, {spawns} (in {spec.ServerScenePath})");
 
             MapInfo mapInfo = EnsureMapInfo(spec);
             AddToDatabase(mapInfo);
-            AddToBuildSettings(spec);
+            AddToBuildSettings(spec.ScenePath);
+            AddToBuildSettings(spec.ServerScenePath);
             AddLayout(world, spec);
             CheckGameplayRule();
             AssetDatabase.SaveAssets();
             return true;
         }
 
-        /// <summary>BuildSpawns replaces a map's spawn areas and leaves the rest of the scene as it is: no terrain, no navmesh bake.</summary>
+        /// <summary>BuildSpawns replaces a map's spawn areas (and the start's NPCs) and leaves the rest of the scene as it is: no terrain, no navmesh bake.</summary>
         public static bool BuildSpawns(MapSpec spec)
         {
             SpawnMixes mixes = LoadSpawnMixes();
@@ -351,15 +358,36 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             Scene scene = OpenOrCreateScene(spec);
             foreach (GameObject root in scene.GetRootGameObjects())
                 if (root.name == MonsterPlan.root || root.name == NodePlan.root || root.name == NpcRoot)
-                    UnityEngine.Object.DestroyImmediate(root);
-            string spawns = CreateSpawnAreas(mixes, spec);
+                    UnityEngine.Object.DestroyImmediate(root); // a map scene from before 1.41 still holds the areas
+            Scene serverScene = OpenOrCreateServerScene(spec);
+            string spawns = CreateSpawnAreas(mixes, spec, scene, serverScene);
+            if (!SaveScenes(spec, scene, serverScene))
+                return false;
+            AddToBuildSettings(spec.ServerScenePath);
+            MeshWorldRegistry world = AssetDatabase.LoadAssetAtPath<MeshWorldRegistry>(WorldPath);
+            if (world != null)
+                AddLayout(world, spec); // names the server scene
+            AssetDatabase.SaveAssets();
+            Debug.Log($"Large map: {spec.ScenePath}, {spawns} (in {spec.ServerScenePath})");
+            return true;
+        }
+
+        /// <summary>SaveScenes writes the server scene and the map scene and closes the server scene, which was open beside the map's.</summary>
+        private static bool SaveScenes(MapSpec spec, Scene scene, Scene serverScene)
+        {
+            EditorSceneManager.MarkSceneDirty(serverScene);
+            if (!EditorSceneManager.SaveScene(serverScene, spec.ServerScenePath))
+            {
+                Debug.LogError("Large map error: the server scene could not be saved at " + spec.ServerScenePath);
+                return false;
+            }
             EditorSceneManager.MarkSceneDirty(scene);
             if (!EditorSceneManager.SaveScene(scene, spec.ScenePath))
             {
                 Debug.LogError("Large map error: the scene could not be saved at " + spec.ScenePath);
                 return false;
             }
-            Debug.Log($"Large map: {spec.ScenePath}, {spawns}");
+            EditorSceneManager.CloseScene(serverScene, true);
             return true;
         }
 
@@ -371,6 +399,26 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 return EditorSceneManager.OpenScene(spec.ScenePath, OpenSceneMode.Single);
             Scene scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
             EditorSceneManager.SaveScene(scene, spec.ScenePath);
+            return scene;
+        }
+
+        /// <summary>
+        /// OpenOrCreateServerScene opens the map's server-only scene beside the open map scene, emptied: everything in it is
+        /// made again. The cells load it additively (the registry layout names it, AddLayout) and a client never does, so the
+        /// spawn areas in it cost a client's seam pre-load nothing (DESIGN 1.41). It holds no networked scene objects.
+        /// </summary>
+        private static Scene OpenOrCreateServerScene(MapSpec spec)
+        {
+            Scene scene;
+            if (File.Exists(spec.ServerScenePath))
+                scene = EditorSceneManager.OpenScene(spec.ServerScenePath, OpenSceneMode.Additive);
+            else
+            {
+                scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Additive);
+                EditorSceneManager.SaveScene(scene, spec.ServerScenePath);
+            }
+            foreach (GameObject root in scene.GetRootGameObjects())
+                UnityEngine.Object.DestroyImmediate(root);
             return scene;
         }
 
@@ -670,13 +718,21 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             go.AddComponent<ServerMeshZoneBootstrap>();
         }
 
-        private static string CreateSpawnAreas(SpawnMixes mixes, MapSpec spec)
+        /// <summary>
+        /// CreateSpawnAreas puts the map's spawn areas (and the start's herd and harvestable row) into the server scene, and
+        /// the start's NPCs into the map scene: an NPC is a networked scene object both sides register, an area is read by
+        /// the cells alone.
+        /// </summary>
+        private static string CreateSpawnAreas(SpawnMixes mixes, MapSpec spec, Scene mapScene, Scene serverScene)
         {
+            SceneManager.SetActiveScene(serverScene);
             string monsters = PlaceAreas<MonsterSpawnArea, BaseMonsterCharacterEntity>(spec, MonsterPlan, mixes.monsters);
             string nodes = PlaceAreas<HarvestableSpawnArea, HarvestableEntity>(spec, NodePlan, mixes.harvestables);
             if (spec.StartSights)
-            {
                 CreateStartSights();
+            SceneManager.SetActiveScene(mapScene);
+            if (spec.StartSights)
+            {
                 CreateStartNpcs();
                 CreateTwoSeatHorse();
             }
@@ -1279,9 +1335,8 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             Debug.Log("Large map: map info added to " + DatabasePath);
         }
 
-        private static void AddToBuildSettings(MapSpec spec)
+        private static void AddToBuildSettings(string scenePath)
         {
-            string scenePath = spec.ScenePath;
             List<EditorBuildSettingsScene> scenes = EditorBuildSettings.scenes.ToList();
             if (scenes.Any(s => s.path == scenePath))
                 return;
@@ -1297,7 +1352,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 string entry = $"  - enabled: 1\n    path: {scenePath}\n    guid: {AssetDatabase.AssetPathToGUID(scenePath)}\n";
                 File.WriteAllText(settingsPath, text.Insert(at, entry));
             }
-            Debug.Log("Large map: scene added to the build settings");
+            Debug.Log($"Large map: {scenePath} added to the build settings");
         }
 
         private static void AddLayout(MeshWorldRegistry world, MapSpec spec)
@@ -1307,6 +1362,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             {
                 mapId = spec.MapId, worldOrigin = spec.WorldOrigin, gridOrigin = new Vector3(-MapSize * 0.5f, 0f, -MapSize * 0.5f),
                 cellSize = CellSize, columns = perSide, rows = perSide, cellIdFormat = "{map}-{x}-{y}", cellIds = null, cellRects = null,
+                serverScenes = new[] { spec.ServerSceneName }, // the spawn areas: the cells load them, a client never does (DESIGN 1.41)
             };
             int existing = world.maps.FindIndex(l => l != null && string.Equals(l.mapId, spec.MapId));
             if (existing >= 0)

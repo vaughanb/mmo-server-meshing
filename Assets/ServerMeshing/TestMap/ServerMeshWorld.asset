@@ -37,6 +37,7 @@ MonoBehaviour:
     autoSplit: 0
     autoMerge: 0
     onDemandLinks: 0
+    serverScenes: []
   - mapId: ServerMeshTestMap2
     worldOrigin: {x: 400, y: 0, z: 0}
     gridOrigin: {x: -100, y: 0, z: -100}
@@ -56,6 +57,7 @@ MonoBehaviour:
     autoSplit: 0
     autoMerge: 0
     onDemandLinks: 0
+    serverScenes: []
   - mapId: ServerMeshTestMap8k
     worldOrigin: {x: 0, y: 0, z: 20000}
     gridOrigin: {x: -4096, y: 0, z: -4096}
@@ -71,6 +73,8 @@ MonoBehaviour:
     autoSplit: 0
     autoMerge: 0
     onDemandLinks: 0
+    serverScenes:
+    - ServerMeshTestMap8k-Server
   - mapId: ServerMeshTestMap8kEast
     worldOrigin: {x: 8192, y: 0, z: 20000}
     gridOrigin: {x: -4096, y: 0, z: -4096}
@@ -86,6 +90,8 @@ MonoBehaviour:
     autoSplit: 0
     autoMerge: 0
     onDemandLinks: 0
+    serverScenes:
+    - ServerMeshTestMap8kEast-Server
   touchTolerance: 0.5
   dynamicSettings:
     bandWidth: 80

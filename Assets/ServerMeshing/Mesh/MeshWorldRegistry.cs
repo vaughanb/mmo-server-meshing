@@ -67,6 +67,8 @@ namespace MultiplayerARPG.MMO.Mesh
         public bool autoMerge;
         [Tooltip("On: this map's cells link only to the cells they need (band neighbours, and the cells a handoff, ghost or lent record names), opening a link when one is needed and closing it once idle; linkAllZones is ignored for them. Off: the map managers' linkAllZones decides (every cell of the map, which a link server's 64 connections caps at about 64 cells).")]
         public bool onDemandLinks;
+        [Tooltip("Scenes this map's cells load additively beside the map scene, and a client never loads: server-only content such as spawn areas (an 8 km map's 2,300 of them were the whole cost of a client's seam pre-load, DESIGN 1.41). Each must be in the build. They hold no networked scene objects.")]
+        public string[] serverScenes;
 
         public bool IsExplicit => cellRects != null && cellRects.Length > 0;
         public bool IsDynamic => cellMode == MeshCellMode.Dynamic;

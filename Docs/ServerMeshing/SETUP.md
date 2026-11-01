@@ -108,8 +108,15 @@ Open the map's scene. In panel 2:
      (`unknown monster entity id`, the monster lost). Anything that can cross a seam — handed over, or as a puppet in the
      band — must be registered in every process: list it in the game database (the usual way), or add it at load as
      the demo copy does (`DemoMesh8kEntities`).
+   - **Server-only content in a server-only scene** (DESIGN 1.41). A client pre-loads the whole neighbour scene, and
+     Unity makes a scene's objects in one frame: on the 8 km demo the 2,300 spawn areas a client never reads cost one
+     87–101 ms frame 80 m before the line. Put such content — spawn areas above all — in a second scene and name it in
+     the layout's `serverScenes`: the map's cells load it additively as soon as their scene is up (before the spawn
+     areas are read, so an area there is one of the map's like any other) and a client never does. The scene must be in
+     the build and hold no networked scene objects (NPCs, buildings and the like stay in the map scene, which both
+     sides register). The 8 km builder makes one per map (`<map>-Server`).
    The demo's two maps are the worked example: **Tools ▸ Open MMORPG ▸ Server Meshing ▸ Testing ▸ Build 8 km Test Map**
-   and **… East** make the scenes with their aprons, map infos and layouts; **Build 8 km Demo Copy** registers both.
+   and **… East** make the scenes with their aprons, server scenes, map infos and layouts; **Build 8 km Demo Copy** registers both.
 4. **Measure open scene** — the grid is fitted to everything with a renderer, collider or terrain.
 5. **Add / replace layout**. Cells are named `<prefix>-<x>-<y>`; the prefix defaults to the map id.
 
@@ -129,8 +136,9 @@ The band is not part of the layout: a cell's server streams the strip inside its
 
 The registry's own fields, for hand edits: `maps` (one layout per map), and per layout `mapId`, `worldOrigin` (where
 the map's origin sits in the shared world frame), `gridOrigin`, `cellSize`, `columns`, `rows`, `cellIdFormat` (the id
-pattern: `{map}` = the map id, `{x}`/`{y}` = column/row), the optional `cellRects` and `cellIds` above, `cellMode`, and
-for Dynamic maps `minCellSize`, `maxCellsPerBase`, `autoSplit` and `autoMerge` (§6a.2). Registry-wide: `touchTolerance`
+pattern: `{map}` = the map id, `{x}`/`{y}` = column/row), the optional `cellRects` and `cellIds` above, `cellMode`,
+for Dynamic maps `minCellSize`, `maxCellsPerBase`, `autoSplit` and `autoMerge` (§6a.2), `onDemandLinks` (§6a.12) and
+`serverScenes` (scenes the map's cells load beside the map scene and a client never does, §4.2). Registry-wide: `touchTolerance`
 (how close two rectangles must come to count as neighbours across a seam, 0.5 m) and `dynamicSettings`, read only when
 a map is Dynamic (§6a.11). Every mesh manager (`MeshMapNetworkManager`, `MeshLoginNetworkManager`,
 `MeshCentralNetworkManager`, `MeshMapSpawnNetworkManager`) carries a `world` reference to this asset; panel 3 assigns
@@ -920,12 +928,13 @@ This chapter runs the test rig, which lives in the source repository
 - **A seam pre-load** moves the neighbour scene's roots; its light and reflection probes and static batching stay at
   the authored origin until the swap, so lighting in the pre-loaded strip can differ briefly. Its lights and own scripts
   are off until the swap. The scene's objects are made in one frame when it loads (Unity integrates a scene's objects at
-  once; the loading priority spreads only assets): on the 8 km demo, whose maps hold 2,300 spawn-area objects a client
-  never needs, that frame is 87–101 ms, 80 m before the line (DESIGN 1.40). Keep a map's client-side object count in
-  mind, or put server-only content in a scene the cells alone load.
-- **A seam needs the maps' cooperation:** ground past the line (an apron) and every crossing entity known on both sides
-  (§4.2). The pre-load holds one neighbour map at a time, so a corner where three maps meet is not pre-loaded for the
-  third.
+  once; the loading priority spreads only assets), so what a map scene holds is what that frame costs: the 8 km demo's
+  2,300 spawn areas made it 87–101 ms (DESIGN 1.40) until they moved into a server-only scene (`serverScenes`, §4.2,
+  DESIGN 1.41). Keep a map scene's object count in mind.
+- **A seam needs the maps' cooperation:** ground past the line (an apron), every crossing entity known on both sides,
+  and server-only content in a server-only scene (§4.2). The pre-load holds every neighbouring map's scene whose seam
+  is within the distance, so a corner where three maps meet has both ready (DESIGN 1.41; the code path, not exercised:
+  the demo has two maps).
 - **Crowds** are bounded by one process and by the kit's own AOI send cost (0.29 kB/s per visible entity per client),
   not by the mesh: 500 people in one place is a kit AOI/update-rate question.
 - **Warp portals or spawn points exactly on a login position** do what they do in the kit: a character that stands up

@@ -290,8 +290,9 @@ namespace MultiplayerARPG.MMO.Mesh
         /// before the base class discovers them. A server of a meshed map that cannot place itself on a cell
         /// disables every area.
         /// </summary>
-        public override void OnServerOnlineSceneLoaded()
+        public override async void OnServerOnlineSceneLoaded()
         {
+            await LoadServerScenes(); // DESIGN 1.41: the map's server-only scenes first, so their spawn areas are read with the map scene's below
             if (ownSpawnAreasByZone && world != null && world.HasLayout(OwnMapId))
             {
                 // A server of a meshed map that cannot place itself on a cell must spawn nothing: every other cell of

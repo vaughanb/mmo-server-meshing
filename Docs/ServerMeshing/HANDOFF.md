@@ -232,6 +232,19 @@ Where the work stands, how to get it running on another machine, and what is lef
     active scene's. Verified: round trips in both directions (positions right, adopted in 230–420 ms), an observer on
     the east map seeing the crosser as a translated ghost, a bandit chasing a player over the seam and handed over
     with its target.
+19. **The seam's leftovers (DESIGN 1.41, package 0.97.26).** Each 8 km map is two scenes: the map scene a client loads
+    (7–8 roots) and `<map>-Server.unity` with the 2,300 spawn areas, named in the registry layout's new `serverScenes`
+    and loaded additively by the cells in `OnServerOnlineSceneLoaded` (now async) before the areas are read; the seam
+    pre-load dropped from one 87–101 ms frame to 45–59 ms over 2 frames. `ReplyMonsterHandoffFailed` answers on any
+    map (it answered on Dynamic maps only, which is why 1.40's refused bandit was lost instead of re-promoted). The
+    client pre-loads every neighbouring map's scene within the distance, not only the nearest (a corner; code path,
+    not exercised). `ClientMigrationController.Result.frameShift` lets the auto client move its targets with a seam
+    hop, so `patrol` and `flee` run across a seam: 11 crossings in 100 s, no jump, no exception. The full EditMode
+    suite on this code: 4,491 passed, 2 skipped, 3 failed — all three in the kit copy's `MessageRoundTripTests`
+    (`GhostSnapshotMessage`, whose `fullRotation`, `items` and `ageSeconds` are written only for some kinds since 1.38
+    and 1.39; `MeshLoadReportMessage` and `MeshOccupancyGrid`, an index out of range in the test's filler), none of them
+    changed by 1.41 and all older than it: the generic round-trip test needs branch rules for those three, not the
+    messages a fix. Every Mesh test passes.
 
 ## Setting up on another machine
 
@@ -313,8 +326,10 @@ Where the work stands, how to get it running on another machine, and what is lef
   `swapped … N runtime roots carried`), the `seam:` hop stamps (the own player before and after the carry, the swap's
   timings) and the CONTINUITY line's `moved … (frame shift …)`. An observer: a bot `stand` on the east map at
   (−4093, 517) with `-meshExpectedMap ServerMeshTestMap8kEast` and `MESH_TRACE_OBSERVED=1`; its `MeshRemote` lines show
-  the crosser as a ghost at x ≈ −4111 before the line. `patrol` and `flee` keep their targets in one frame, so across a
-  seam they stop after the hop (a target 8 km off has no navmesh): walk legs only. `MESH_TEST_MONSTER=4091,509,BanditMale,free`
+  the crosser as a ghost at x ≈ −4111 before the line. Since 1.41 the auto client's targets move with a seam's frame
+  shift (`Seam: targets moved by the frame shift …` in its log), so `patrol` back and forth over the seam
+  (`walkTargetX 4111, walkReturnX 4081, walkTargetZ 512`, crossing every leg) and `flee` across it run too; before, they
+  stood after the hop, their target 8 km off. `MESH_TEST_MONSTER=4091,509,BanditMale,free`
   puts a bandit 5 m west of the seam (the spot is each cell's own scene frame, so the east map's cell (7,4) spawns one
   too, 8 km away); `flee` from (4084, 520) to a bait within 3 m of it (`walkTargetX 4093, walkTargetZ 511`) makes it chase.
 - **Local test accounts:** meshtest, meshtest2, bot1, bot2 exist only in this machine's
@@ -369,11 +384,13 @@ Where the work stands, how to get it running on another machine, and what is lef
    PK kill across a line credits the killer on its own cell (`GhostAction.PkKill`). Both measured, the loot with a pinned test
    deer (`MESH_TEST_MONSTER=-1.3,540,Deer` on the cell start) killed from across the line. A shop dialog crosses a hop and a
    purchase on the new cell is served. Passengers on a vehicle have no content: the demo's horse has one seat.
-   - A seam between the two 8 km maps (1.40): the hop is the usual one (adopted 227–419 ms, the character 0.9–1.6 m on);
-     the swap frame is 25–45 ms, and the pre-load of the neighbour's scene costs one 87–101 ms frame 80 m before the line
-     (its 2,300 spawn-area objects integrated at once). The lever is a server-only companion scene for the spawn areas
-     (the cells load it additively, a client never does), which would leave ~10 objects to integrate; not built. The
-     session's first hop still has its 117–134 ms connect frame (first-use compilation).
+   - A seam between the two 8 km maps (1.40, 1.41): the hop is the usual one (adopted 154–202 ms, the character
+     0.35–0.76 m on). The spawn areas live in a server-only scene the cells load and a client never does (1.41), so the
+     pre-load is 45–59 ms over 2 frames with 7–8 roots (1.40: one 87–101 ms frame for 2,300 objects). The longest hop
+     frame is now the one after the swap, 63–70 ms: the kit's `Assets.Initialize` and the pool init of its online-scene
+     handling — the next lever. The session's first hop still has its 123–134 ms connect frame (first-use compilation).
+     A corner where three maps meet is covered in code (every neighbouring map's scene is pre-loaded) but not exercised.
+     A death on the east map respawns on the west start (the kit's save point).
 2. **Monsters at a crossing (1.23, 1.28):** a lone monster chases a player across a Static map's line, hits
    through the ghost, and is handed over with its target; a monster that walks over a line on its own walks on
    (1.28: the handoff carries its walk and its AI's wander bookkeeping), and monster puppets are led by the NavMesh

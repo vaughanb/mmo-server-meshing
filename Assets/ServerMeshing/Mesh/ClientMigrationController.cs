@@ -43,6 +43,7 @@ namespace MultiplayerARPG.MMO.Mesh
             public bool mountedBefore;      // the character was riding when the handoff started
             public long mountedAfterMs;     // when the new entity was seen riding again (-1 = never during the swap)
             public bool preconnected;       // continuity only: the hop used a connection opened ahead of it (DESIGN 1.03)
+            public Vector3 frameShift;      // a seam crossing re-based the world by this during the hop (DESIGN 1.40); zero inside a map
         }
 
         /// <summary>Continuity hops that used a pre-connected transport, for automated tests / tooling.</summary>
@@ -584,7 +585,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 captureMs = tCapture, stopMs = tStop, connectedMs = tConnected, playerReadyMs = tPlayerReady, fadedMs = tFaded,
                 positionBefore = posBefore, positionAfter = posAfter,
                 positionJump = playerReady ? Vector3.Distance(posBefore + _frameShift, posAfter) : -1f,
-                resyncJump = resyncJump, framesWithoutCamera = framesWithoutCamera, standIns = standIns.Count,
+                resyncJump = resyncJump, framesWithoutCamera = framesWithoutCamera, standIns = standIns.Count, frameShift = _frameShift,
             };
             LastResult.mountedBefore = mountedBefore;
             LastResult.mountedAfterMs = mountedAfterMs;
@@ -1116,7 +1117,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 address = address, port = port, connected = tConnected >= 0, playerReady = true, seamless = true, fellBack = false,
                 connectedMs = tConnected, playerReadyMs = tAdopted, fadedMs = tSettled,
                 positionBefore = posBefore, positionAfter = posAfter,
-                positionJump = 0f, resyncJump = 0f, framesWithoutCamera = 0, standIns = 0, preconnected = preconnected,
+                positionJump = 0f, resyncJump = 0f, framesWithoutCamera = 0, standIns = 0, preconnected = preconnected, frameShift = _frameShift,
             };
             CompletedCount++;
             if (preconnected)
@@ -1211,7 +1212,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 address = address, port = port, connected = connected, playerReady = playerReady, seamless = false, fellBack = fellBack,
                 captureMs = tCapture, stopMs = tStop, connectedMs = tConnected, playerReadyMs = tPlayerReady, fadedMs = tFaded,
                 positionBefore = posBefore, positionAfter = posAfter,
-                positionJump = playerReady ? Vector3.Distance(posBefore + _frameShift, posAfter) : -1f, resyncJump = -1f,
+                positionJump = playerReady ? Vector3.Distance(posBefore + _frameShift, posAfter) : -1f, resyncJump = -1f, frameShift = _frameShift,
             };
             CompletedCount++;
             RunQueuedHop();

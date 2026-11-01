@@ -201,19 +201,20 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             float end = Time.realtimeSinceStartup + observeSeconds;
             int legs = 0, missed = 0;
-            float target = walkReturnX;
+            bool toReturn = true; // the fields are read per leg: a seam hop moves them with the frame (ShiftTargetsAfterSeam)
             while (Time.realtimeSinceStartup < end)
             {
                 Phase = $"patrol-leg{legs + 1}";
                 bool legReached = false;
+                float target = toReturn ? walkReturnX : walkTargetX;
                 float legEnd = Mathf.Min(end, Time.realtimeSinceStartup + patrolLegSeconds);
                 yield return WalkTo(target, legEnd, ClientMigrationController.CompletedCount, r => legReached = r);
                 legs++;
                 if (!legReached) missed++;
                 self = GameInstance.PlayingCharacterEntity;
                 Vector3 pos = self != null ? self.EntityTransform.position : Vector3.zero;
-                Log(PatrolLegLine(legs, target, legReached, pos.x, pos.z));
-                target = Mathf.Approximately(target, walkReturnX) ? walkTargetX : walkReturnX;
+                Log(PatrolLegLine(legs, toReturn ? walkReturnX : walkTargetX, legReached, pos.x, pos.z));
+                toReturn = !toReturn;
                 yield return new WaitForSecondsRealtime(1f);
             }
             patrolling = false;

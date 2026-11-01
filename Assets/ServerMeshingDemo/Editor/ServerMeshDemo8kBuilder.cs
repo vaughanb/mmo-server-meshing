@@ -325,10 +325,14 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
                 .ToArray();
         }
 
-        /// <summary>MapScenes is every 8 km map scene that has been built, in the builder's order: what the copy's builds and build settings carry.</summary>
+        /// <summary>
+        /// MapScenes is every 8 km map scene that has been built, each with its server-only scene (the spawn areas, DESIGN
+        /// 1.41), in the builder's order: what the copy's builds and build settings carry. The player build carries the
+        /// server scenes too and never loads them.
+        /// </summary>
         public static IEnumerable<string> MapScenes()
         {
-            return ServerMeshLargeMapBuilder.Maps.Select(m => m.ScenePath).Where(File.Exists);
+            return ServerMeshLargeMapBuilder.Maps.SelectMany(m => new[] { m.ScenePath, m.ServerScenePath }).Where(File.Exists);
         }
 
         /// <summary>ExeRelative is the copy's player, relative to the project (the editor's working directory).</summary>
