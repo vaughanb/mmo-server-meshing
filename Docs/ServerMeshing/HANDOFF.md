@@ -240,11 +240,14 @@ Where the work stands, how to get it running on another machine, and what is lef
     client pre-loads every neighbouring map's scene within the distance, not only the nearest (a corner; code path,
     not exercised). `ClientMigrationController.Result.frameShift` lets the auto client move its targets with a seam
     hop, so `patrol` and `flee` run across a seam: 11 crossings in 100 s, no jump, no exception. The full EditMode
-    suite on this code: 4,491 passed, 2 skipped, 3 failed — all three in the kit copy's `MessageRoundTripTests`
-    (`GhostSnapshotMessage`, whose `fullRotation`, `items` and `ageSeconds` are written only for some kinds since 1.38
-    and 1.39; `MeshLoadReportMessage` and `MeshOccupancyGrid`, an index out of range in the test's filler), none of them
-    changed by 1.41 and all older than it: the generic round-trip test needs branch rules for those three, not the
-    messages a fix. Every Mesh test passes.
+    suite on this code: 4,501 passed, 2 skipped, 0 failed. Three cases of the kit copy's generic `MessageRoundTripTests`
+    had failed since 1.33 (`GhostSnapshotMessage`, whose `fullRotation`, `items` and `ageSeconds` are written only for
+    some kinds; `MeshLoadReportMessage` and `MeshOccupancyGrid`, an index out of range in the test's filler): the
+    add-on's rows now join that test's tables from `Assets/ServerMeshing/Tests/Editor/MeshMessageRoundTripTests.cs`
+    (a partial of the kit class, so the kit copy's file stays upstream's but for the `partial` keyword): the snapshot
+    is sent as a container, its building-only rotation and receiver-only age listed, and the grid is shaped to
+    `LayerCount` arrays of columns × rows before it is written. `MeshMessageBranchTests` round-trips every `GhostKind`
+    by hand. No message changed.
 
 ## Setting up on another machine
 
@@ -421,8 +424,8 @@ Where the work stands, how to get it running on another machine, and what is lef
    restore Build Settings and DemoMesh8kInit. `Config/mySqlConfig.json` is here and MySQL80 runs. A full run takes ~3 h.
    To change a setting for a run pass `--env KEY=VALUE`: a variable set in the editor did not reach the cells (1.34). Confirm it in the cell logs before trusting a pass
    (`Puppet motion kinematic (from ...)`, `Puppets window`).
-6. **Run the full EditMode suite** after any further core edit (4,476 tests, three of which fail by construction in
-   `MessageRoundTripTests`, DESIGN 1.33; `WebSocketClientSendTests.
+6. **Run the full EditMode suite** after any further core edit (4,503 tests, all green since the add-on's rows joined
+   `MessageRoundTripTests` on 2026-10-31, item 19; `WebSocketClientSendTests.
    ReusedWriter_SendsOwnedPayloadsInOrder` is timing-flaky and passes alone).
 
 ## Gotchas found on the way

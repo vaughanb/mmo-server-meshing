@@ -24,7 +24,7 @@ namespace OpenMMORPG.Tests
     /// The branches the filler does not take are tested by hand in MessageBranchTests.
     /// </summary>
     [Category(TestCategories.Logic)]
-    public class MessageRoundTripTests : KitTestFixture
+    public partial class MessageRoundTripTests : KitTestFixture
     {
         private const string BranchOnly = "written only for some values of the message's type field; every branch is in MessageBranchTests";
         private const string CharacterSelectList = "the character-select list leaves it out (ResponseCharactersMessage passes withTransforms: false and the like to SerializeCharacterData)";
