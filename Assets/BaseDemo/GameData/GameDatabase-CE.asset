@@ -29,6 +29,7 @@ MonoBehaviour:
   - {fileID: 11400000, guid: 02eb1add6d598174da644183772119c5, type: 2}
   - {fileID: 11400000, guid: b98bbe65532569a479c154badc5c6b60, type: 2}
   - {fileID: 11400000, guid: 746b00a5760ec9d40939d35cb8377083, type: 2}
+  - {fileID: 11400000, guid: e424c9b45c7c0f54da833fca1c17e8fc, type: 2}
   itemCraftFormulas:
   - {fileID: 11400000, guid: 6d731ee76775c0643b2922bdb9f499cd, type: 2}
   armorTypes: []

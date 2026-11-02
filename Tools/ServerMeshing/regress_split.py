@@ -184,7 +184,7 @@ def grade_status(rep, status, spec):
 
 def start_split(name, rep, rig, start, day, bots, spec_name=None, observe_s=OBSERVE_S, plan=None, load_plan=None,
                 enabled=True, env=None, grade_status=grade_status, on_poll=None, tester=None, clear_buildings=False,
-                observe_seconds=None, line_x=None, before_command=None):
+                observe_seconds=None, line_x=None, before_command=None, bot_args=None):
     """The split phase: setup (database, bot positions, the Dynamic Play, the bots, each with an `observe_s` stand
     window, their logs named after `name`), the command once every bot stands, its status graded, and the wait for
     the base's e3 apply (when the op is done). `spec_name` picks the split (SPECS; default `name`). Slice 2d's crash
@@ -193,7 +193,8 @@ def start_split(name, rep, rig, start, day, bots, spec_name=None, observe_s=OBSE
     `grade_status` is the status grader (None: the caller grades), `on_poll` goes to wait_op. Slice 4: `tester` is
     (mode, x, z) for the editor's tester (default: `stand` at the spec's park), `clear_buildings`, `observe_seconds`
     and `line_x` reach db_reset and request_play (only when set, so older rigs keep their shapes), and `before_command`
-    runs once every bot stands, before the command (it returns False to send nothing). Returns a SplitRun."""
+    runs once every bot stands, before the command (it returns False to send nothing). DESIGN 1.47: `bot_args` adds
+    arguments to named bots ({user: [...]}). Returns a SplitRun."""
     spec, split = SPECS[spec_name or name], split_of(spec_name or name, rig.MAP)
     plan = plan_bots(spec_name or name) if plan is None else list(plan)
     harvest = next((b for b in plan if b.harvest), None)
@@ -225,6 +226,7 @@ def start_split(name, rep, rig, start, day, bots, spec_name=None, observe_s=OBSE
         # The harvest variant is the harvest mode with -meshHarvestAfterMigration; it logs "Standing at" too.
         mode = "harvest" if b.harvest else "stand"
         args = ["-meshAutoMode", mode, "-meshWalkX", f"{b.point[0]:g}", "-meshWalkZ", f"{b.point[1]:g}"]
+        args += (bot_args or {}).get(b.user, [])
         logs[b.user] = rig.launch_bot(name, b.user, args, channel=spec.channel, observe_seconds=observe_s,
                                       line_x=spec.at, harvest_after_migration=b.harvest)
         bots.append((mode, logs[b.user]))

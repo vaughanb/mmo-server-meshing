@@ -599,6 +599,7 @@ namespace MultiplayerARPG.MMO.Mesh
             yield return WalkTo(walkTargetX, deadline, ClientMigrationController.CompletedCount, r => reached = r);
             _walkZOverride = null;
             BasePlayerCharacterEntity self = GameInstance.PlayingCharacterEntity;
+            _standing = true; // a shop may open now (socialVendNow)
             Log($"Standing at {(self != null ? self.EntityTransform.position : Vector3.zero)} party={(self != null ? self.PartyId : 0)}; watching exp/gold/quests for {observeSeconds}s");
             BeginStandMigrations(self);
             int expStart = self != null ? self.Exp : 0, goldStart = self != null ? self.Gold : 0, levelStart = self != null ? self.Level : 0, killsStart = CountQuestKills(self);

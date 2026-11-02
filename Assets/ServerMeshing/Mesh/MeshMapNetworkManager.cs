@@ -1064,6 +1064,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 // Hysteresis: only flip once clearly past the edge, so loitering on the line doesn't thrash.
                 if (-OwnCell.DistanceToEdge(pos) < handoffHysteresis)
                     continue;
+                if (HoldsHandoffForVending(entity))
+                    continue; // DESIGN 1.47: the vendor's answer comes here, where the price is in escrow
                 _handoffCandidates.Add(entity);
             }
             PaceHandoffCandidates(_handoffCandidates); // Slice 2b: drain admission while a split is in progress

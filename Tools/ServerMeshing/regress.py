@@ -52,6 +52,7 @@ import regress_policy
 import regress_procs
 import regress_remote
 import regress_soak
+import regress_vend
 import rigauto
 import riglinks
 import rigprocs
@@ -94,6 +95,8 @@ ENV_KEYS = ["MESH_NO_MONSTER_HANDOFF", "MESH_FAULT_DIE_ON_NOTICE", "MESH_GHOST_L
             # 0.71 measurement toggles (DESIGN 0.71): re-cut maps, per-cell synthetic load, a crowd square, the probe's burn test
             "MESH_LAYOUT_OVERRIDE", "MESH_LOAD_PLAN", "MESH_LOAD_AREA", "MESH_PROBE_BURN_MS", "MESH_NO_MONSTERS", "MESH_BAND",
             "MESH_LOAD_SEED", "MESH_MONSTER_AREAS",
+            # DESIGN 1.47: the vendor's cell holds its answers this long (regress_vend's market)
+            "MESH_TEST_VENDING_ANSWER_DELAY",
             # 0.72 dynamic cells: per-map cell mode, and where the central's layout coordinator keeps its store
             "MESH_CELL_MODE", "MESH_COORDINATOR_STORE",
             # Phase 0 step 2 instrument toggles (p0tools.ENV_REGISTRY): tick-frame bins, frame and physics rates,
@@ -1185,6 +1188,9 @@ def run_scenario(name, rep):
     elif name in regress_soak.SCENARIOS:
         split = regress_soak.run(name, rep, sys.modules[__name__], start, day, bots)   # DESIGN 0.91: a SoakRun
 
+    elif name in regress_vend.SCENARIOS:
+        split = regress_vend.run(name, rep, sys.modules[__name__], start, day, bots)   # DESIGN 1.47: a MergeRun or None
+
     else:
         raise ValueError(f"unknown scenario {name}")
 
@@ -1215,6 +1221,8 @@ def run_scenario(name, rep):
         regress_policy.grade_layout(rep, sys.modules[__name__], start, day, split)
     elif name in regress_soak.SCENARIOS:
         regress_soak.grade_layout(rep, sys.modules[__name__], start, day, split)
+    elif name in regress_vend.SCENARIOS:
+        regress_vend.grade_layout(rep, sys.modules[__name__], start, day, split)
     else:
         grade_layout(rep, start, day, expect.get(name))
     for kind, log in bots:
@@ -1256,7 +1264,7 @@ TWO_HOST_SKIP = {
 SPAWNER_SCENARIOS = ({"sleep", "wake", "dynidle"} | set(regress_split.SCENARIOS) | set(regress_merge.SCENARIOS)
                      | set(regress_splitcrash.SCENARIOS) | set(regress_auto.SCENARIOS) | set(regress_building.SCENARIOS)
                      | set(regress_central.SCENARIOS) | set(regress_family.SCENARIOS) | set(regress_policy.SCENARIOS)
-                     | set(regress_soak.SCENARIOS))
+                     | set(regress_soak.SCENARIOS) | {"splitvend"})
 
 
 def remote_mode_of(name):
@@ -1267,7 +1275,7 @@ def remote_mode_of(name):
 ALL = (DEFAULT + ["pvp", "wake", "dynidle", "social"] + list(regress_split.SCENARIOS) + list(regress_merge.SCENARIOS)
        + list(regress_splitcrash.SCENARIOS) + list(regress_auto.SCENARIOS) + list(regress_building.SCENARIOS)
        + list(regress_central.SCENARIOS) + list(regress_links.SCENARIOS) + list(regress_family.SCENARIOS)
-       + list(regress_policy.SCENARIOS) + list(regress_soak.SCENARIOS))
+       + list(regress_policy.SCENARIOS) + list(regress_soak.SCENARIOS) + list(regress_vend.SCENARIOS))
 # A persisted remote cell outlives the Plays, so no scenario's environment reaches it.
 PERSIST_SKIP = {"dynidle": "runs the test map Dynamic through the environment, which a persisted remote cell never gets",
                 "sleep": "runs the other machine's spawner for the scenario, which a persisted remote cell never is",
@@ -1281,7 +1289,8 @@ PERSIST_SKIP = {"dynidle": "runs the test map Dynamic through the environment, w
                 **{n: regress_links.PERSIST_REASON for n in regress_links.SCENARIOS},
                 **{n: regress_family.PERSIST_REASON for n in regress_family.SCENARIOS},
                 **{n: regress_policy.PERSIST_REASON for n in regress_policy.SCENARIOS},
-                **{n: regress_soak.PERSIST_REASON for n in regress_soak.SCENARIOS}}
+                **{n: regress_soak.PERSIST_REASON for n in regress_soak.SCENARIOS},
+                "splitvend": regress_vend.PERSIST_REASON}
 
 
 def main():

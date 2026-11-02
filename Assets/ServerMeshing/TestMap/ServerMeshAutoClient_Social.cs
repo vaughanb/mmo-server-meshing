@@ -10,7 +10,9 @@
 // across=<bool> trade=... party=... guild=... friend=... vend=... duel=... craft=...`, PASS when every step went through.
 // socialAutoAccept (the other side, any mode): accept every trade request (offering its own first bag item and
 // socialGold, lock, confirm after the other confirms), every duel request, every party or guild invitation and every
-// friend request; with socialVend, open a shop of one bag item once it has joined the party and the guild.
+// friend request; with socialVend, open a shop of one bag item once it has joined the party and the guild (DESIGN 1.47:
+// with socialVendNow as soon as it stands, of socialVendCount items). socialSteps runs other steps instead
+// (ServerMeshAutoClient_Market).
 using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
@@ -63,6 +65,12 @@ namespace MultiplayerARPG.MMO.Mesh
             if (!string.IsNullOrEmpty(target))
                 socialTargetName = target;
             socialVend = socialVend || System.Array.IndexOf(args, ARG_SOCIAL_VEND) >= 0;
+            socialVendNow = socialVendNow || System.Array.IndexOf(args, ARG_SOCIAL_VEND_NOW) >= 0;
+            if (int.TryParse(ReadArg(args, ARG_SOCIAL_VEND_COUNT, null), NumberStyles.Integer, CultureInfo.InvariantCulture, out int count) && count > 0)
+                socialVendCount = count;
+            string steps = ReadArg(args, ARG_SOCIAL_STEPS, null);
+            if (!string.IsNullOrEmpty(steps))
+                socialSteps = steps;
             string leave = ReadArg(args, ARG_SOCIAL_LEAVE_DUEL, null);
             if (!string.IsNullOrEmpty(leave) && float.TryParse(leave, NumberStyles.Float, CultureInfo.InvariantCulture, out float seconds))
                 socialLeaveDuelSeconds = seconds;
@@ -148,13 +156,15 @@ namespace MultiplayerARPG.MMO.Mesh
                     _friendPoller = true;
                     StartCoroutine(AcceptFriendRequests());
                 }
+                if (socialVendNow)
+                    MaybeOpenShop();
             }
         }
 
         /// <summary>With socialVend: once both invitations are accepted, a shop of one bag item (the driver buys it across the line).</summary>
         private void MaybeOpenShop()
         {
-            if (!socialVend || _shopOpened || _invitesAccepted < 2)
+            if (!socialVend || _shopOpened || (_invitesAccepted < 2 && !socialVendNow))
                 return;
             _shopOpened = true;
             StartCoroutine(OpenShop());
@@ -163,21 +173,30 @@ namespace MultiplayerARPG.MMO.Mesh
         private IEnumerator OpenShop()
         {
             yield return new WaitForSecondsRealtime(2f);
+            // A shop stops the walk (the kit refuses a vendor's movement): a stand client opens it once it stands.
+            float until = Time.realtimeSinceStartup + 120f;
+            while (mode == Mode.stand && !_standing && Time.realtimeSinceStartup < until)
+                yield return null;
             BasePlayerCharacterEntity self = GameInstance.PlayingCharacterEntity;
             if (self == null || self.VendingComponent == null)
                 yield break;
-            for (int i = 0; i < self.NonEquipItems.Count; ++i)
+            StartVendingItems items = new StartVendingItems();
+            List<string> titles = new List<string>();
+            for (int i = 0; i < self.NonEquipItems.Count && items.Count < socialVendCount; ++i)
             {
                 CharacterItem item = self.NonEquipItems[i];
                 if (item.IsEmptySlot() || item.GetItem() == null || item.GetItem().RestrictDealing)
                     continue;
-                StartVendingItems items = new StartVendingItems();
                 items.Add(new StartVendingItem { id = item.id, amount = 1, price = socialVendPrice });
-                Log($"social: opening a shop: {item.GetItem().Title} x1 for {socialVendPrice} gold");
-                self.VendingComponent.CallCmdStartVending("MeshShop", items);
+                titles.Add(item.GetItem().Title);
+            }
+            if (items.Count == 0)
+            {
+                Log("social: no bag item to sell, no shop");
                 yield break;
             }
-            Log("social: no bag item to sell, no shop");
+            Log($"social: opening a shop: {string.Join(", ", titles)}, x1 each for {socialVendPrice} gold");
+            self.VendingComponent.CallCmdStartVending("MeshShop", items);
         }
 
         /// <summary>The auto-accepting side: every friend request that comes in is accepted (the kit's client asks for them; nothing is pushed).</summary>
@@ -286,6 +305,11 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private IEnumerator RunSocial(float deadline)
         {
+            if (!string.IsNullOrEmpty(socialSteps))
+            {
+                yield return RunMarket(deadline); // DESIGN 1.47 (ServerMeshAutoClient_Market)
+                yield break;
+            }
             Phase = "social-walk";
             _walkZOverride = walkTargetZ;
             bool reached = false;
@@ -579,6 +603,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 result = "no items reached the client";
             else
             {
+                int listed = seen.Count; // the last entry sold closes the shop; with more listed it stays open
                 int price = seen[0].price, goldBefore = self.Gold, bagBefore = BagAmount(self);
                 self.VendingComponent.CallCmdBuyItem(0);
                 until = Time.realtimeSinceStartup + 15f;
@@ -593,8 +618,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 while (shop != null && shop.Data.isStarted && Time.realtimeSinceStartup < until) yield return null;
                 bool closed = shop == null || !shop.Data.isStarted;
                 int bagAfter = BagAmount(self);
-                string detail = $"{price} gold, gold {goldBefore}->{self.Gold}, bag amount {bagBefore}->{bagAfter}, {(closed ? "sold out and closed" : "still open")}";
-                result = self.Gold == goldBefore - price && bagAfter > bagBefore && closed ? $"ok ({detail})" : detail;
+                string detail = $"{price} gold, gold {goldBefore}->{self.Gold}, bag amount {bagBefore}->{bagAfter}, {(closed ? "sold out and closed" : $"still open ({listed - 1} left)")}";
+                result = self.Gold == goldBefore - price && bagAfter > bagBefore && closed == (listed == 1) ? $"ok ({detail})" : detail;
             }
             if (shop != null) shop.onUpdateItems -= onItems;
             self = GameInstance.PlayingCharacterEntity;
