@@ -248,6 +248,10 @@ Where the work stands, how to get it running on another machine, and what is lef
     is sent as a container, its building-only rotation and receiver-only age listed, and the grid is shaped to
     `LayerCount` arrays of columns × rows before it is written. `MeshMessageBranchTests` round-trips every `GhostKind`
     by hand. No message changed.
+26. **A purchase survives a buyer who leaves and a lost answer (DESIGN 1.48, package 0.97.33).** The buyer's cell
+    decides whether a sale happened, and the vendor is paid only on its word; without one the vendor's cell asks. A
+    buyer who disconnects mid-purchase gets its escrow back before the kit saves it and the item goes back to the
+    vendor. `regress.py market` runs both (83 checks, gold and bags read from the database).
 25. **A purchase across a hop, a shop through a split and a merge, a workbench across a line (DESIGN 1.47, package
     0.97.32).** A buyer is no longer handed off while its purchase is on its way (at most the escrow's 10 s), and an
     answer that comes late reaches it on its new cell; before, a buyer who crossed meanwhile lost the price. Two new
@@ -475,9 +479,9 @@ Where the work stands, how to get it running on another machine, and what is lef
 4. **The kit copy is upstream `master` at 493df35fc (1.33).** CE-14 is upstream (PR 28) and no `MESH-EDIT` marker is left. No
    release has it yet, so the package names `master` at 05ec55012 as its minimum: when a release does, name that. A later
    sync is a three-way merge, not a copy (`upstream/README.md`).
-5. **The rig regression** on the code of 1.47 is the changed paths only: `market` 70, `splitvend` 116, `social` 70 and
-   `harvest` 47 checks, all passing (2026-11-02; the code every scenario runs changed by one lookup in the boundary
-   tick). The full run below is the 1.46 code's. It passed all 35 scenarios on the code of 1.46, `social` at 70 checks (2026-11-02, 3,216 checks, 175 min, every scenario on its
+5. **The rig regression** on the code of 1.48 is the changed paths only: `market` 83, `social` 70 and `splitvend` 116
+   checks, all passing (2026-11-02), as on 1.47's `market` 70, `splitvend` 116, `social` 70 and `harvest` 47 (the code
+   every scenario runs changed by one lookup in the boundary tick). The full run below is the 1.46 code's. It passed all 35 scenarios on the code of 1.46, `social` at 70 checks (2026-11-02, 3,216 checks, 175 min, every scenario on its
    first run; 27 fewer per split or merge scenario than 1.45 only because that run crossed midnight and also checked the
    8 km demo map's logs of the day before for "no own-cell layout"), as it had all 35 on the code of 1.45 (3,694 checks, 230 min) and all 34 on the code of 1.44 (2026-11-01, 3,658 checks, 205 min; `party`'s flaky
    `hurtTarget` check failed in the full run, the fighter having killed its monster in one hit, and `party` passed 55 of 55 alone right

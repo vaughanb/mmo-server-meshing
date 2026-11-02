@@ -895,9 +895,11 @@ namespace MultiplayerARPG.MMO.Mesh
             if (IsServer)
             {
                 // DESIGN 1.44: a duelist leaving this cell (a disconnect or a hop) loses its duel, on the other's cell too.
-                if (ServerUserHandlers.TryGetPlayerCharacter(connectionId, out IPlayerCharacterData leaving) && leaving is BasePlayerCharacterEntity leavingPlayer
-                    && leavingPlayer != null && leavingPlayer.DuelingComponent is MeshPlayerCharacterDuelingComponent dueling)
+                BasePlayerCharacterEntity leavingPlayer = ServerUserHandlers.TryGetPlayerCharacter(connectionId, out IPlayerCharacterData leaving) ? leaving as BasePlayerCharacterEntity : null;
+                if (leavingPlayer != null && leavingPlayer.DuelingComponent is MeshPlayerCharacterDuelingComponent dueling)
                     dueling.EndOnLeaving("left the cell");
+                if (leavingPlayer != null)
+                    VendingOnLeaving(leavingPlayer); // DESIGN 1.48: before the kit saves it
                 GhostingOnRealPlayerUnregistered(connectionId);
             }
             base.UnregisterPlayerCharacter(connectionId);

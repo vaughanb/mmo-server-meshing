@@ -951,7 +951,9 @@ This chapter runs the test rig, which lives in the source repository
   component goes onto the player entity like the dealing one, the shop's sign travels in the ghost snapshot, and a
   purchase is done in two halves with the price held in escrow on the buyer's cell. A shop is carried with a handoff
   when a split or merge of cells moves its vendor. A buyer is not handed off while its purchase is on its way: it stays
-  on its cell past the line for up to 10 s, until the vendor's cell answers or the gold goes back (DESIGN 1.47).
+  on its cell past the line for up to 10 s, until the vendor's cell answers or the gold goes back (DESIGN 1.47). The
+  vendor is paid when the buyer's cell says it gave the item, and gets the item back when it did not; a buyer who
+  disconnects mid-purchase keeps its gold (DESIGN 1.48).
 - **A crafting queue** crosses a hop with its crafter (DESIGN 1.46): the crafter's own queue, and its entries in a public
   workbench's queue near it, which go to the destination's copy of that workbench. An entry whose workbench the
   destination does not have is dropped, as the kit drops a craft whose crafter walked too far from it.

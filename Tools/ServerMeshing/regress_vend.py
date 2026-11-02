@@ -2,13 +2,18 @@
 
     python Tools/ServerMeshing/regress.py market splitvend
 
-market: the test map Static, no tester in the editor. The fixture meshbot opens a shop of two items on E a metre past
-the C/E line (-meshSocialVendNow -meshSocialVendCount 2); meshbot2 on C (the buyer, -meshSocialSteps vendhop,bench)
-buys an entry and walks over the line at once, twice, while E holds its answers (MESH_TEST_VENDING_ANSWER_DELAY 4 then
-13 s): the first purchase holds the buyer's hop until the item arrives; the second outlasts the escrow's 10 s, the gold
-goes back, the buyer crosses, and the answer reaches it on E, the vendor's own cell, where the price is taken again.
-Then meshbot2 places a TestBench-CE (a public crafting queue) two metres on C's side, queues 8 crafts on it and walks
-over the line within its 5 m reach: E's copy of the bench crafts the rest.
+market: the test map Static, no tester in the editor. The fixture meshbot opens a shop of five items on E a metre past
+the C/E line (-meshSocialVendNow -meshSocialVendCount 5); meshbot2 on C (the buyer, -meshSocialSteps
+vendhop,bench,buyrefund,buy,buyquit) buys an entry and walks over the line at once, twice, while E holds its answers
+(MESH_TEST_VENDING_ANSWER_DELAY 4 then 13 s): the first purchase holds the buyer's hop until the item arrives; the
+second outlasts the escrow's 10 s, the gold goes back, the buyer crosses, and the answer reaches it on E, the vendor's
+own cell, where the price is taken again. Then meshbot2 places a TestBench-CE (a public crafting queue) two metres on
+C's side, queues 8 crafts on it and walks over the line within its 5 m reach: E's copy of the bench crafts the rest.
+DESIGN 1.48, three more purchases from C (MESH_TEST_VENDING_DROP sold3,done3): E drops its third answer, so the gold
+goes back, E asks after 15 s, C says the item never came and E puts it back in the vendor's bag; C drops its third
+word (on the fourth purchase), so E asks and C says paid; and the buyer quits as soon as its fifth purchase is in
+escrow (E holds that answer 3 s): C gives the escrow back before the save and, when the item comes, tells E it was not
+delivered.
 splitvend: `split`'s cut of C at x = 0 with meshbot2 (one of the eight stand bots) six metres into the child's half
 with a shop of two items; once the split is done meshbot10 buys one from the kept half across the new line, the merge
 brings the vendor back to C, and meshbot11 buys the last one there (the shop crossed with the handoff both times).
@@ -30,7 +35,9 @@ PERSIST_REASON = regress_split.PERSIST_REASON
 EXPECTED_ZONES = {}
 
 PRICE = 7                     # ServerMeshAutoClient.socialVendPrice
-ANSWER_DELAYS = "4,13"        # MESH_TEST_VENDING_ANSWER_DELAY for market: inside the 10 s escrow, then past it
+ANSWER_DELAYS = "4,13,0,0,3"  # MESH_TEST_VENDING_ANSWER_DELAY for market: inside the escrow, past it, none, none, 3 s
+VENDING_DROPS = "sold3,done3"  # MESH_TEST_VENDING_DROP for market: E's third answer, C's third word
+SALES = 5                     # market's purchases: 2 hops, a refund, one asked about, one the buyer quit on
 CRAFTS = 8                    # ServerMeshAutoClient.socialCraftAmount, 1 gold each
 ITEM_BENCH = 418037898        # TestBenchItem-CE, id "TestBenchItem-CE" (a QueuedWorkbenchEntity, 'Mesh Test Craft')
 BUYER_GOLD = 100
@@ -47,6 +54,10 @@ SPLIT_BUYERS, SPLIT_BUYER_AT = ("meshbot10", "meshbot11"), (-6.0, 75.0)
 SPLITVEND_OBSERVE_S = 480     # the stand window: the split, the first purchase, the cooldown and the merge fit in it
 BUYER_TIMEOUT_S = 240
 VENDOR_ARGS = ["-meshSocialAccept", "-meshSocialVend", "-meshSocialVendNow", "-meshSocialVendCount", "2"]
+MARKET_VENDOR_ARGS = ["-meshSocialAccept", "-meshSocialVend", "-meshSocialVendNow", "-meshSocialVendCount", str(SALES)]
+# Six stacks, so five shop entries whatever the kit lets be dealt: the fixtures' bag and the tester's buildings.
+MARKET_VENDOR_BAG = provision_rows.COMMON_BAG + [provision_rows.Item(provision_rows.ITEM_BUILDING, amount=3),
+                                                 provision_rows.Item(provision_rows.ITEM_STORAGE), provision_rows.Item(provision_rows.ITEM_DOOR)]
 
 
 def set_bag(cur, character_id, items, gold):
@@ -71,6 +82,12 @@ def setup_bags(rig, bags):
     finally:
         conn.close()
     return ids
+
+
+def bag_amount(rig, name):
+    rows = rig.db_rows("select sum(i.amount) from characteritem i join characters c on c.id = i.characterId "
+                       "where c.characterName=%s and i.inventoryType=%s", (name, provision_rows.INVENTORY_BAG))
+    return int(rows[0][0] or 0) if rows else None
 
 
 def gold_of(rig, name):
@@ -126,51 +143,69 @@ def run_market(rep, rig, start, day, bots):
     buyer_char, vendor_char = f"{MARKET_BUYER}Char", provision.BOT.character_name
     provision.reset_bot_positions(2, 1, [MARKET_BUYER_AT], status_path=rig.STATUS)
     setup_bags(rig, {buyer_char: ([provision_rows.Item(ITEM_BENCH)], BUYER_GOLD),
-                     vendor_char: (provision_rows.COMMON_BAG, 0)})
+                     vendor_char: (MARKET_VENDOR_BAG, 0)})
+    vendor_bag = sum(item.amount for item in MARKET_VENDOR_BAG)
     rig.request_play("stand", MARKET_BUYER_AT[0], MARKET_BUYER_AT[1], enabled=False, line_x=MARKET_LINE,
-                     env={"MESH_NO_MONSTER_HANDOFF": "1", "MESH_NO_MONSTERS": "1", "MESH_TEST_VENDING_ANSWER_DELAY": ANSWER_DELAYS})
+                     env={"MESH_NO_MONSTER_HANDOFF": "1", "MESH_NO_MONSTERS": "1", "MESH_TEST_VENDING_ANSWER_DELAY": ANSWER_DELAYS,
+                          "MESH_TEST_VENDING_DROP": VENDING_DROPS})
     rig.wait_play(60)
     time.sleep(20)
     vendor_log = rig.launch_bot("market", provision.BOT.username,
-                                ["-meshAutoMode", "stand", "-meshWalkX", f"{MARKET_VENDOR_AT[0]:g}", "-meshWalkZ", f"{MARKET_VENDOR_AT[1]:g}"] + VENDOR_ARGS,
+                                ["-meshAutoMode", "stand", "-meshWalkX", f"{MARKET_VENDOR_AT[0]:g}", "-meshWalkZ", f"{MARKET_VENDOR_AT[1]:g}"] + MARKET_VENDOR_ARGS,
                                 observe_seconds=300)
     bots.append(("stand", vendor_log))
     time.sleep(10)
     buyer_log = rig.launch_bot("market", MARKET_BUYER,
                                ["-meshAutoMode", "social", "-meshWalkX", f"{MARKET_BUYER_AT[0]:g}", "-meshWalkZ", f"{MARKET_BUYER_AT[1]:g}",
-                                "-meshSocialTarget", vendor_char, "-meshSocialSteps", "vendhop,bench"], line_x=MARKET_LINE)
+                                "-meshSocialTarget", vendor_char, "-meshSocialSteps", "vendhop,bench,buyrefund,buy,buyquit"], line_x=MARKET_LINE)
     bots.append(("social", buyer_log))
     result = rig.wait_for_bot(buyer_log, "social", 420)
     rep.check("-> PASS" in result, f"buyer: {result[:240] or 'no RESULT'}")
-    for step in ("vendhop1", "vendhop2", "bench"):
+    for step in ("vendhop1", "vendhop2", "bench", "buyrefund", "buy"):
         rep.check(f"{step}=ok" in result, f"the buyer's {step} step went through")
     rep.check("across=True" in result, "the buyer and the vendor stood on either side of the line (C and E)")
 
+    # The buyer quit with its fifth purchase on its way, and E asks about the fourth 15 s after it: the vendor's stand
+    # window (and its save) outlasts both; its RESULT is the end of the market.
+    rig.wait_for_bot(vendor_log, "stand", 360)
+    time.sleep(8)
     c_lines, e_lines = rig.zone_lines("C", start, day), rig.zone_lines("E", start, day)
     b, v = re.escape(buyer_char), re.escape(vendor_char)
     for zone, lines, pattern, want, what in (
-            ("C", c_lines, rf"Vending buy: {b}'s {PRICE} gold in escrow", 2, "took the price into escrow twice"),
+            ("C", c_lines, rf"Vending buy: {b}'s {PRICE} gold in escrow", SALES, f"took the price into escrow {SALES} times"),
             ("C", c_lines, rf"Handoff of {b} held: a purchase from {v}'s shop is on its way", 2, "held the buyer's hop for both purchases"),
             ("E", e_lines, r"the answer \(VendingSold\) to \S+ held 4 s", 1, "held its first answer 4 s"),
             ("E", e_lines, r"the answer \(VendingSold\) to \S+ held 13 s", 1, "held its second answer 13 s"),
-            ("C", c_lines, rf"Vending bought here: {b} received", 1, "gave the buyer the first item, before its hop"),
-            ("C", c_lines, rf"Vending escrow of {b} returned \(no answer from {v}'s cell in 10 s\)", 1, "gave the second price back at the timeout"),
+            ("C", c_lines, rf"Vending bought here: {b} received", 2, "gave the buyer the first item (before its hop) and the fourth"),
+            ("C", c_lines, rf"Vending escrow of {b} returned \(no answer from {v}'s cell in 10 s\)", 2, "gave the second and third prices back at the timeout"),
             ("E", e_lines, rf"{b} crossed onto the vendor's cell before the answer \(VendingSold\); handled here", 1, "handled the late answer itself"),
             ("E", e_lines, rf"Vending sold to {b} after its escrow went back: {PRICE} gold taken again", 1, "took the price again with the late item"),
-            ("E", e_lines, rf"Crafting: {b}'s queue carried with the handoff, 0 own entries, 1 on workbenches, 0 dropped", 1, "put the bench's entry on its copy of the bench")):
+            ("E", e_lines, rf"Crafting: {b}'s queue carried with the handoff, 0 own entries, 1 on workbenches, 0 dropped", 1, "put the bench's entry on its copy of the bench"),
+            # DESIGN 1.48
+            ("E", e_lines, r"the answer \(VendingSold\) to \S+ dropped \(MESH_TEST_VENDING_DROP sold3\)", 1, "dropped its third answer"),
+            ("E", e_lines, rf"no word on sale \S+ \({v} to {b}\) after \d+ s; asking the buyer's cell", 2, "asked about the third and fourth sales"),
+            ("C", c_lines, rf"asked about sale \S+ for {b}, whose item never came here; not paid", 1, "said the third item never came"),
+            ("C", c_lines, r"the word on sale \S+ \(paid\) dropped \(MESH_TEST_VENDING_DROP done3\)", 1, "dropped its word on the fourth sale"),
+            ("C", c_lines, r"asked about sale \S+ for \S+; this cell's word was paid", 1, "said paid when asked about the fourth (the buyer gone by then)"),
+            ("C", c_lines, rf"Vending escrow of {b} returned \(left the cell before the answer\)", 1, "gave the fifth price back as the buyer left"),
+            ("C", c_lines, r"the item of sale \S+ reached this cell after \S+ left it; not paid", 1, "told E the fifth item found no buyer"),
+            ("E", e_lines, rf"Vending: sale \S+ of {v} to {b} not delivered \(the buyer's cell gave no item\)", 2, "put the third and fifth items back in the vendor's bag"),
+            ("E", e_lines, rf"Vending paid here: {v} received {PRICE} gold for sale", 3, "paid the vendor for the three items delivered")):
         n = rig.count(lines, pattern)
         rep.check(n == want, f"{zone} {what} ({n}, expected {want})")
     problems = hops_during_escrows(c_lines, buyer_char)
     rep.check(not problems, "no hop of the buyer while a purchase was on its way" + (f" ({problems[0]})" if problems else ""))
-    rep.check(rig.count(c_lines + e_lines, r"Vending: the item .* reached this cell after it moved on") == 0,
+    rep.check(rig.count(c_lines + e_lines, r"Vending: VendingSold for .* who moved on; passed to its owner") == 0,
               "no answer had to be passed on (the buyer was where the answer looked for it)")
-    # The database once both bots are gone (each saves on its way out): 2 purchases and 8 crafts from 100 gold, and the
-    # vendor's 2 x 7.
-    rig.wait_for_bot(vendor_log, "stand", 360)
-    time.sleep(8)
+    rep.check(rig.count(c_lines + e_lines, r"settled \(.*\) with the vendor no longer here|no word from the buyer's cell in \d+ s") == 0,
+              "every sale was settled on the buyer's cell's word")
+    # The database once both bots are gone (each saves on its way out): 3 items delivered and 8 crafts from 100 gold,
+    # the vendor paid 3 x 7, and 2 of its 5 items back in its bag.
     buyer_gold, vendor_gold = gold_of(rig, buyer_char), gold_of(rig, vendor_char)
-    rep.check(buyer_gold == BUYER_GOLD - 2 * PRICE - CRAFTS, f"the buyer's gold in the database {buyer_gold}, expected {BUYER_GOLD - 2 * PRICE - CRAFTS}")
-    rep.check(vendor_gold == 2 * PRICE, f"the vendor's gold in the database {vendor_gold}, expected {2 * PRICE}")
+    rep.check(buyer_gold == BUYER_GOLD - 3 * PRICE - CRAFTS, f"the buyer's gold in the database {buyer_gold}, expected {BUYER_GOLD - 3 * PRICE - CRAFTS}")
+    rep.check(vendor_gold == 3 * PRICE, f"the vendor's gold in the database {vendor_gold}, expected {3 * PRICE}")
+    bag = bag_amount(rig, vendor_char)
+    rep.check(bag == vendor_bag - 3, f"the vendor's bag in the database holds {bag} items, expected {vendor_bag - 3} ({vendor_bag} less the 3 delivered)")
 
 
 # ------------------------------------------------------------------ splitvend

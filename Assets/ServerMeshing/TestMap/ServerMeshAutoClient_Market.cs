@@ -9,6 +9,11 @@
 //   bench    place a TestBench-CE (a public crafting queue, 5 m reach) on this side of the line, queue socialCraftAmount
 //            crafts of socialCraftFormula on it, and walk across within its reach while they run; then walk back and
 //            destroy the bench (a building is saved: one left standing blocked the next run's walks there)
+//   buyrefund  buy the first entry from this side and stay: no item comes (the harness drops the vendor's cell's
+//            answer) and the gold goes back (DESIGN 1.48)
+//   buy      buy the first entry from this side and stay: the item comes (the harness may drop this cell's word to the
+//            vendor's cell, which then asks)
+//   buyquit  last: log the RESULT, buy the first entry and quit at once, while the answer is on its way
 // The RESULT reads `RESULT social: across=<bool> <step>=<result> ... -> PASS`, PASS when every step named went through.
 using System.Collections;
 using System.Collections.Generic;
@@ -95,9 +100,110 @@ namespace MultiplayerARPG.MMO.Mesh
                 results.Add($"bench={bench}");
                 ok &= bench.StartsWith("ok");
             }
+            foreach (string step in new[] { "buyrefund", "buy" })
+            {
+                if (!HasSocialStep(step))
+                    continue;
+                Phase = $"market-{step}";
+                string r = "";
+                yield return BuyAndStay(targetName, line, home, step == "buy", s => r = s);
+                Log($"market: {step} {r}");
+                results.Add($"{step}={r}");
+                ok &= r.StartsWith("ok");
+            }
+            bool quit = HasSocialStep("buyquit");
+            if (quit)
+                results.Add("buyquit=leaving");
             Finished = true;
             Passed = ok && results.Count > 0;
             Log($"RESULT social: across={across} {string.Join(" ", results)} -> {(Passed ? "PASS" : "FAIL")}");
+            if (quit)
+            {
+                Phase = "market-buyquit";
+                yield return BuyAndQuit(targetName, line, home);
+            }
+        }
+
+        /// <summary>Back home, the target's shop open and its items listed: the shop, or null with `why` set.</summary>
+        private IEnumerator OpenTargetShop(string targetName, float line, Vector3 home, System.Action<PlayerCharacterVendingComponent, VendingItems, string> done)
+        {
+            bool atHome = false;
+            yield return WalkHome(home, line, r => atHome = r);
+            if (!atHome) { done(null, null, "never got back to its side of the line"); yield break; }
+            BasePlayerCharacterEntity target = null;
+            float until = Time.realtimeSinceStartup + 20f;
+            while ((target == null || target.VendingComponent == null || !target.VendingComponent.Data.isStarted) && Time.realtimeSinceStartup < until)
+            {
+                yield return null;
+                target = FindPlayerByName(targetName);
+            }
+            if (target == null || !target.VendingComponent.Data.isStarted) { done(null, null, target == null ? "the target is not in sight" : "no shop open"); yield break; }
+            PlayerCharacterVendingComponent shop = target.VendingComponent;
+            VendingItems seen = null;
+            System.Action<VendingItems> onItems = items => seen = items;
+            shop.onUpdateItems += onItems;
+            GameInstance.PlayingCharacterEntity.VendingComponent.CallCmdSubscribe(target.ObjectId);
+            until = Time.realtimeSinceStartup + 15f;
+            while ((seen == null || seen.Count == 0) && Time.realtimeSinceStartup < until) yield return null;
+            shop.onUpdateItems -= onItems;
+            done(shop, seen, seen == null || seen.Count == 0 ? "no items reached the client" : null);
+        }
+
+        /// <summary>
+        /// Buys the first entry from this side of the line and stays: with `expectItem` the item comes and the price is
+        /// paid; without, no item comes and the gold goes back (the escrow's 10 s and a few more).
+        /// </summary>
+        private IEnumerator BuyAndStay(string targetName, float line, Vector3 home, bool expectItem, System.Action<string> done)
+        {
+            PlayerCharacterVendingComponent shop = null;
+            VendingItems seen = null;
+            string why = null;
+            yield return OpenTargetShop(targetName, line, home, (s, i, w) => { shop = s; seen = i; why = w; });
+            if (why != null) { done(why); yield break; }
+            BasePlayerCharacterEntity self = GameInstance.PlayingCharacterEntity;
+            int price = seen[0].price, goldBefore = self.Gold, bagBefore = BagAmount(self), lowest = goldBefore;
+            self.VendingComponent.CallCmdBuyItem(0);
+            Log($"market: bought entry 0 ({price} gold, {seen.Count} listed); staying");
+            float until = Time.realtimeSinceStartup + (expectItem ? 15f : 14f);
+            while (Time.realtimeSinceStartup < until)
+            {
+                self = GameInstance.PlayingCharacterEntity;
+                if (self != null) lowest = Mathf.Min(lowest, self.Gold);
+                if (expectItem && BagAmount(self) > bagBefore)
+                    break;
+                yield return null;
+            }
+            yield return new WaitForSecondsRealtime(2f);
+            self = GameInstance.PlayingCharacterEntity;
+            int bagAfter = BagAmount(self);
+            if (self != null && self.VendingComponent != null) self.VendingComponent.CallCmdUnsubscribe();
+            string detail = $"{price} gold, gold {goldBefore}->{(self != null ? self.Gold : -1)} (lowest {lowest}), bag amount {bagBefore}->{bagAfter}";
+            bool ok = self != null && (expectItem
+                ? self.Gold == goldBefore - price && bagAfter == bagBefore + 1
+                : self.Gold == goldBefore && bagAfter == bagBefore && lowest == goldBefore - price);
+            done(ok ? $"ok ({detail})" : detail);
+        }
+
+        /// <summary>Buys the first entry and quits once the price is in escrow, while the answer is on its way.</summary>
+        private IEnumerator BuyAndQuit(string targetName, float line, Vector3 home)
+        {
+            PlayerCharacterVendingComponent shop = null;
+            VendingItems seen = null;
+            string why = null;
+            yield return OpenTargetShop(targetName, line, home, (s, i, w) => { shop = s; seen = i; why = w; });
+            BasePlayerCharacterEntity self = GameInstance.PlayingCharacterEntity;
+            if (why == null && self != null)
+            {
+                int goldBefore = self.Gold;
+                self.VendingComponent.CallCmdBuyItem(0);
+                float until = Time.realtimeSinceStartup + 5f;
+                while (GameInstance.PlayingCharacterEntity != null && GameInstance.PlayingCharacterEntity.Gold >= goldBefore && Time.realtimeSinceStartup < until)
+                    yield return null;
+                Log($"market: bought entry 0 ({seen[0].price} gold, gold {goldBefore}->{(GameInstance.PlayingCharacterEntity != null ? GameInstance.PlayingCharacterEntity.Gold : -1)}); quitting at once");
+            }
+            else
+                Log($"market: buyquit found no shop ({why}); quitting");
+            Application.Quit();
         }
 
         /// <summary>

@@ -15,7 +15,10 @@
 //  * a purchase is split in two halves, as a trade is (DESIGN 1.44): the buyer's cell takes the price out of the
 //    buyer's gold into an escrow and asks the vendor's cell (VendingBuy); that cell checks the entry is still the one
 //    the buyer saw, takes the item from the vendor, pays the vendor and answers with the item (VendingSold), which the
-//    buyer's cell gives; a refusal (VendingFailed) or 10 s without an answer gives the gold back.
+//    buyer's cell gives; a refusal (VendingFailed) or 10 s without an answer gives the gold back. DESIGN 1.48: the
+//    vendor is paid only when the buyer's cell says it gave the item (VendingDone), and gets the item back when it says
+//    it did not (MeshMapNetworkManager_Vending).
+// The carrier also takes a buyer's recent words on sales across with it (DESIGN 1.48).
 // The shop is also carried with a handoff (IMeshHandoffCarrier): a vendor cannot walk, but a split or a merge of
 // cells hands it over all the same, and the kit's shop is not character data.
 using System.Collections.Generic;
@@ -145,8 +148,9 @@ namespace MultiplayerARPG.MMO.Mesh
 
         /// <summary>
         /// The vendor's half of a purchase from across a line: the entry must still be the one the buyer saw (same item,
-        /// same price); then the item leaves the vendor's inventory and the price is paid to the vendor. The buyer's gold
-        /// is already in escrow on the buyer's cell. NONE and the item sold, or the reason for the buyer.
+        /// same price); then the item leaves the vendor's inventory. The buyer's gold is already in escrow on the buyer's
+        /// cell; the vendor is paid when that cell says it gave the item (PaySale; DESIGN 1.48). NONE and the item sold,
+        /// or the reason for the buyer.
         /// </summary>
         internal UITextKeys SellAcross(BasePlayerCharacterEntity buyerGhost, int index, string itemId, int price, out CharacterItem sold)
         {
@@ -166,8 +170,6 @@ namespace MultiplayerARPG.MMO.Mesh
                 GameInstance.ServerGameMessageHandlers.SendGameMessage(ConnectionId, UITextKeys.UI_ERROR_NOT_ENOUGH_ITEMS);
                 return UITextKeys.UI_ERROR_INVALID_ITEM_DATA;
             }
-            Entity.Gold = Entity.Gold.Increase(price);
-            Entity.OnRewardGold(RewardGivenType.Vending, price);
             sold = entry.item;
             _items.RemoveAt(index);
             if (_items.Count <= 0)
@@ -180,6 +182,22 @@ namespace MultiplayerARPG.MMO.Mesh
             if (buyerGhost != null)
                 GameInstance.ServerLogHandlers.LogSellVendingItem(Entity, buyerGhost, sold, price);
             return UITextKeys.NONE;
+        }
+
+        /// <summary>The buyer's cell gave the item of a sale: the vendor is paid.</summary>
+        internal void PaySale(int price)
+        {
+            Entity.Gold = Entity.Gold.Increase(price);
+            Entity.OnRewardGold(RewardGivenType.Vending, price);
+        }
+
+        /// <summary>The buyer's cell gave no item: it goes back to the vendor's bag (not to the shop, which may have closed).</summary>
+        internal void ReturnSale(CharacterItem item)
+        {
+            if (item.IsEmptySlot())
+                return;
+            Entity.IncreaseItems(item);
+            Entity.FillEmptySlots();
         }
 
         // ---- the kit's server RPCs, again under the same names ----
@@ -264,20 +282,54 @@ namespace MultiplayerARPG.MMO.Mesh
 
         public bool WriteHandoff(BasePlayerCharacterEntity player, NetDataWriter writer)
         {
-            if (!ReferenceEquals(player, Entity) || IsPuppet || !Data.isStarted || _items.Count == 0)
+            if (!ReferenceEquals(player, Entity) || IsPuppet)
                 return false;
-            writer.Put(Data.title ?? string.Empty);
-            writer.Put(_items.Count);
-            for (int i = 0; i < _items.Count; ++i)
+            bool shop = Data.isStarted && _items.Count > 0;
+            List<MeshMapNetworkManager.SaleDecision> decisions = Mesh != null ? Mesh.SaleDecisionsOf(player.Id) : null;
+            if (!shop && decisions == null)
+                return false;
+            writer.Put(shop);
+            if (shop)
             {
-                writer.Put(_items[i].item.id ?? string.Empty);
-                writer.Put(_items[i].item.amount);
-                writer.Put(_items[i].price);
+                writer.Put(Data.title ?? string.Empty);
+                writer.Put(_items.Count);
+                for (int i = 0; i < _items.Count; ++i)
+                {
+                    writer.Put(_items[i].item.id ?? string.Empty);
+                    writer.Put(_items[i].item.amount);
+                    writer.Put(_items[i].price);
+                }
+            }
+            writer.Put(decisions != null ? decisions.Count : 0);
+            if (decisions != null)
+            {
+                foreach (MeshMapNetworkManager.SaleDecision d in decisions)
+                {
+                    writer.Put(d.saleId);
+                    writer.Put(d.paid);
+                    writer.Put(Time.unscaledTime - d.at);
+                }
             }
             return true;
         }
 
         public void ReadHandoff(BasePlayerCharacterEntity player, NetDataReader reader)
+        {
+            if (reader.GetBool())
+                ReadShop(player, reader);
+            int decisions = reader.GetInt();
+            for (int i = 0; i < decisions; ++i)
+            {
+                string saleId = reader.GetString();
+                bool paid = reader.GetBool();
+                float age = reader.GetFloat();
+                Mesh?.ImportSaleDecision(player.Id, saleId, paid, age);
+            }
+            if (decisions > 0)
+                Logging.Log("Mesh", $"Vending: {player.CharacterName}'s word on {decisions} recent sale(s) carried with the handoff");
+        }
+
+        private void ReadShop(BasePlayerCharacterEntity player, NetDataReader reader)
         {
             string title = reader.GetString();
             int count = reader.GetInt();
