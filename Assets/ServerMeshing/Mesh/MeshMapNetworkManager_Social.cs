@@ -163,8 +163,13 @@ namespace MultiplayerARPG.MMO.Mesh
             player.DealingComponent.DealingCharacter = other;
             other.DealingComponent.DealingCharacter = player;
             (other.DealingComponent as MeshPlayerCharacterDealingComponent)?.SetMirror(DealingState.Dealing, 0, new DealingCharacterItems());
-            player.DealingComponent.ClearDealingData();
-            player.DealingComponent.DealingState = DealingState.Dealing;
+            if (player.DealingComponent is MeshPlayerCharacterDealingComponent mesh)
+                mesh.OpenFresh(); // no None before the accept: the kit's trade window would close on it and cancel
+            else
+            {
+                player.DealingComponent.ClearDealingData();
+                player.DealingComponent.DealingState = DealingState.Dealing;
+            }
             player.DealingComponent.CallOwnerAcceptedDealingRequest(other.ObjectId);
             player.DealingComponent.CallOwnerUpdateAnotherDealingState(DealingState.Dealing);
             Logging.Log("Mesh", $"Trade {player.CharacterName} <-> {other.CharacterName} open here from the other side's accept");

@@ -1,13 +1,15 @@
 // Server Meshing add-on — automated test client: a trade, a duel and a party invitation with a player across a line
 // (DESIGN.md 1.44).
 //
-// social (the driver): walk to (walkTargetX, walkTargetZ), find the character named socialTargetName (a puppet of a
-// player on the other cell, or anyone), then in order: trade one bag item and socialGold for whatever it offers, duel it
-// until the duel ends, make a party and invite it. The RESULT reads `RESULT social: trade=<ok|how far> duel=<ok|how
-// far> party=<ok|how far>`, PASS when all three went through.
+// social (the driver): walk to (walkTargetX, walkTargetZ), find the character named socialTargetName (or, without one,
+// the nearest other player), then in order: trade one bag item and socialGold for whatever it offers, make a party and
+// invite it, found a guild and invite it (when socialGuild), and duel it last, until the duel ends (it may die). The
+// line the test is about is lineX when given (the harness's cut), else x = 0. The RESULT reads `RESULT social:
+// across=<bool> trade=... party=... guild=... duel=...`, PASS when every step went through.
 // socialAutoAccept (the other side, any mode): accept every trade request (offering its own first bag item and
 // socialGold, lock, confirm after the other confirms), every duel request and every party or guild invitation.
 using System.Collections;
+using System.Globalization;
 using UnityEngine;
 
 namespace MultiplayerARPG.MMO.Mesh
@@ -21,6 +23,11 @@ namespace MultiplayerARPG.MMO.Mesh
         public bool socialAutoAccept = false;
         [Tooltip("Gold offered in a trade, by the driver and by an auto-accepting client.")]
         public int socialGold = 5;
+        [Tooltip("social: found a guild and invite the target to it too (the kit asks the founder for gold, 1,000 in the demo's settings).")]
+        public bool socialGuild = true;
+        [Tooltip("With socialAutoAccept: quit this many seconds after a duel starts (0: stay), so the duel ends with this side gone, the way a disconnect ends it.")]
+        public float socialLeaveDuelSeconds = 0f;
+        public const string ARG_SOCIAL_LEAVE_DUEL = "-meshSocialLeaveDuel";
 
         public const string ARG_SOCIAL_ACCEPT = "-meshSocialAccept";
         public const string ARG_SOCIAL_TARGET = "-meshSocialTarget";
@@ -37,6 +44,9 @@ namespace MultiplayerARPG.MMO.Mesh
             string target = ReadArg(args, ARG_SOCIAL_TARGET, null);
             if (!string.IsNullOrEmpty(target))
                 socialTargetName = target;
+            string leave = ReadArg(args, ARG_SOCIAL_LEAVE_DUEL, null);
+            if (!string.IsNullOrEmpty(leave) && float.TryParse(leave, NumberStyles.Float, CultureInfo.InvariantCulture, out float seconds))
+                socialLeaveDuelSeconds = seconds;
         }
 
         /// <summary>Hooks the own character's trade and duel events (again after a hop: the entity changes).</summary>
@@ -91,6 +101,8 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 _duelStarted = true;
                 Log($"social: duel with {other.CharacterName} starts ({countDown:0}+{duration:0} s)");
+                if (autoAccept && socialLeaveDuelSeconds > 0f)
+                    StartCoroutine(LeaveDuel(countDown + socialLeaveDuelSeconds));
             };
             dueling.onEndDueling += loser =>
             {
@@ -129,6 +141,14 @@ namespace MultiplayerARPG.MMO.Mesh
             }
         }
 
+        /// <summary>Quits the client mid-duel: the server ends the duel with this side as the loser, as on a disconnect.</summary>
+        private IEnumerator LeaveDuel(float seconds)
+        {
+            yield return new WaitForSecondsRealtime(seconds);
+            Log($"social: leaving {seconds:0} s into the duel (quitting)");
+            Application.Quit();
+        }
+
         /// <summary>Offers the first filled bag item (one of it) and socialGold, then locks.</summary>
         private void OfferAndLock(BasePlayerCharacterEntity self)
         {
@@ -165,12 +185,25 @@ namespace MultiplayerARPG.MMO.Mesh
             }
         }
 
+        /// <summary>The other player named <paramref name="name"/>, or with no name the nearest other player.</summary>
         private static BasePlayerCharacterEntity FindPlayerByName(string name)
         {
+            BasePlayerCharacterEntity self = GameInstance.PlayingCharacterEntity, nearest = null;
+            float best = float.MaxValue;
             foreach (BasePlayerCharacterEntity entity in FindObjectsByType<BasePlayerCharacterEntity>(FindObjectsSortMode.None))
-                if (entity != null && !entity.IsOwnerClient && string.Equals(entity.CharacterName, name))
-                    return entity;
-            return null;
+            {
+                if (entity == null || entity.IsOwnerClient || string.IsNullOrEmpty(entity.CharacterName))
+                    continue;
+                if (!string.IsNullOrEmpty(name))
+                {
+                    if (string.Equals(entity.CharacterName, name))
+                        return entity;
+                    continue;
+                }
+                float distance = self != null ? Vector3.Distance(self.EntityTransform.position, entity.EntityTransform.position) : 0f;
+                if (distance < best) { best = distance; nearest = entity; }
+            }
+            return nearest;
         }
 
         private IEnumerator RunSocial(float deadline)
@@ -183,17 +216,19 @@ namespace MultiplayerARPG.MMO.Mesh
             if (!reached) { Fail("never reached the social position"); yield break; }
             Phase = "social-find";
             BasePlayerCharacterEntity target = null;
-            float until = Time.realtimeSinceStartup + 30f;
+            float until = Time.realtimeSinceStartup + 90f; // the other client may log in after this one
             while (target == null && Time.realtimeSinceStartup < until)
             {
                 target = FindPlayerByName(socialTargetName);
                 yield return null;
             }
-            if (target == null) { Fail($"no player named '{socialTargetName}' in sight"); yield break; }
+            if (target == null) { Fail(string.IsNullOrEmpty(socialTargetName) ? "no other player in sight" : $"no player named '{socialTargetName}' in sight"); yield break; }
+            string targetName = target.CharacterName; // found by name from here on, whatever the field said
             BasePlayerCharacterEntity self = GameInstance.PlayingCharacterEntity;
             HookSocial(false);
-            // The line the test is about is x = 0 (the lane's cell edge): the target across it or on this side.
-            bool across = (target.EntityTransform.position.x < 0f) != (self.EntityTransform.position.x < 0f);
+            // The line the test is about: the harness's cut when it gave one, else x = 0 (the 8 km demo's start line).
+            float line = hasLineX ? lineX : 0f;
+            bool across = (target.EntityTransform.position.x < line) != (self.EntityTransform.position.x < line);
             Log($"social: target '{target.CharacterName}' id {target.Id} object {target.ObjectId} at {target.EntityTransform.position}, {Vector3.Distance(self.EntityTransform.position, target.EntityTransform.position):0.#} m away, {(across ? "across the line" : "on this side")}; my gold {self.Gold}, bag {BagSummaryShort(self)}");
 
             // 1. Trade.
@@ -202,10 +237,26 @@ namespace MultiplayerARPG.MMO.Mesh
             string bagBefore = BagSummaryShort(self);
             string trade = "not started";
             _dealStarted = _dealEnded = false;
-            self.DealingComponent.CallCmdSendDealingRequest(target.ObjectId);
-            until = Time.realtimeSinceStartup + 40f;
+            // A request the other side never answered lapses after the kit's dealingRequestDuration (5 s in the demo): the
+            // other client may still be finishing its login when this one first sees it. Ask again until it opens.
+            until = Time.realtimeSinceStartup + 60f;
+            float nextRequest = 0f;
+            int requests = 0;
             while (!_dealEnded && Time.realtimeSinceStartup < until)
+            {
+                if (!_dealStarted && Time.realtimeSinceStartup >= nextRequest)
+                {
+                    target = FindPlayerByName(targetName);
+                    if (target != null)
+                    {
+                        self.DealingComponent.CallCmdSendDealingRequest(target.ObjectId);
+                        requests++;
+                        Log($"social: trade request {requests} sent");
+                    }
+                    nextRequest = Time.realtimeSinceStartup + 8f;
+                }
                 yield return null;
+            }
             self = GameInstance.PlayingCharacterEntity;
             if (!_dealStarted) trade = "never opened";
             else if (!_dealEnded) trade = $"stuck at mine={_myDealState} other={_otherDealState}";
@@ -217,7 +268,7 @@ namespace MultiplayerARPG.MMO.Mesh
             // 2. Party: make one, invite the target, wait for it to join.
             Phase = "social-party";
             self = GameInstance.PlayingCharacterEntity;
-            target = FindPlayerByName(socialTargetName);
+            target = FindPlayerByName(targetName);
             string party = "not started";
             if (target == null)
                 party = "the target left";
@@ -252,11 +303,58 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             Log($"social: party {party}");
             bool partyOk = party.StartsWith("ok");
-            // 3. Duel, last: it may end with the target dead.
+            // 3. Guild: found one (a fresh name every run), invite the target, wait for it to join.
+            string guild = "not asked";
+            if (socialGuild)
+            {
+                Phase = "social-guild";
+                self = GameInstance.PlayingCharacterEntity;
+                target = FindPlayerByName(targetName);
+                if (target == null)
+                    guild = "the target left";
+                else
+                {
+                    bool founded = GameInstance.JoinedGuild != null, answered = founded;
+                    string guildName = "MeshG" + Random.Range(1000, 9999).ToString(CultureInfo.InvariantCulture);
+                    if (!founded)
+                        GameInstance.ClientGuildHandlers.RequestCreateGuild(new RequestCreateGuildMessage { guildName = guildName }, (handler, code, response) => { answered = true; founded = code == LiteNetLibManager.AckResponseCode.Success; Log($"social: create guild {guildName} -> {code} {response.message}"); });
+                    until = Time.realtimeSinceStartup + 15f;
+                    while (!answered && Time.realtimeSinceStartup < until) yield return null;
+                    until = Time.realtimeSinceStartup + 10f;
+                    while (founded && GameInstance.JoinedGuild == null && Time.realtimeSinceStartup < until) yield return null;
+                    if (!founded || GameInstance.JoinedGuild == null)
+                        guild = "no guild";
+                    else
+                    {
+                        bool sent = false; answered = false;
+                        string inviteeId = target.Id;
+                        GameInstance.ClientGuildHandlers.RequestSendGuildInvitation(new RequestSendGuildInvitationMessage { inviteeId = inviteeId }, (handler, code, response) => { answered = true; sent = code == LiteNetLibManager.AckResponseCode.Success; Log($"social: guild invitation -> {code} {response.message}"); });
+                        until = Time.realtimeSinceStartup + 15f;
+                        while (!answered && Time.realtimeSinceStartup < until) yield return null;
+                        if (!sent) guild = "invitation refused";
+                        else
+                        {
+                            until = Time.realtimeSinceStartup + 30f;
+                            bool joined = false;
+                            while (!joined && Time.realtimeSinceStartup < until)
+                            {
+                                joined = GameInstance.JoinedGuild != null && GameInstance.JoinedGuild.IsMember(inviteeId);
+                                yield return null;
+                            }
+                            guild = joined ? $"ok ({GameInstance.JoinedGuild.CountMember()} members)" : "invited, never joined";
+                        }
+                    }
+                }
+                Log($"social: guild {guild}");
+                yield return new WaitForSecondsRealtime(2f);
+            }
+            bool guildOk = !socialGuild || guild.StartsWith("ok");
+
+            // 4. Duel, last: it may end with the target dead.
             Phase = "social-duel";
             _duelStarted = _duelEnded = false;
-            target = FindPlayerByName(socialTargetName);
-            if (target == null) { Fail("the target left before the duel"); yield break; }
+            target = FindPlayerByName(targetName);
+            if (target == null) { Fail($"{targetName} left before the duel"); yield break; }
             self.DuelingComponent.CallCmdSendDuelingRequest(target.ObjectId);
             until = Time.realtimeSinceStartup + 30f;
             while (!_duelStarted && Time.realtimeSinceStartup < until)
@@ -272,9 +370,14 @@ namespace MultiplayerARPG.MMO.Mesh
                 while (!_duelEnded && Time.realtimeSinceStartup < until)
                 {
                     self = GameInstance.PlayingCharacterEntity;
-                    target = FindPlayerByName(socialTargetName);
-                    if (self == null || self.IsDead() || target == null)
+                    target = FindPlayerByName(targetName);
+                    if (self == null || self.IsDead())
                         break;
+                    if (target == null)
+                    {
+                        yield return null; // gone (left or out of sight): the end may still be on its way
+                        continue;
+                    }
                     targetHpMin = Mathf.Min(targetHpMin, target.CurrentHp);
                     if (self.IsWeaponsSheathed && self.IsOwnerClient)
                         self.IsWeaponsSheathed = false;
@@ -306,8 +409,8 @@ namespace MultiplayerARPG.MMO.Mesh
             yield return new WaitForSecondsRealtime(2f);
 
             Finished = true;
-            Passed = tradeOk && duelOk && partyOk;
-            Log($"RESULT social: across={across} trade={trade} duel={duel} party={party} -> {(Passed ? "PASS" : "FAIL")}");
+            Passed = tradeOk && duelOk && partyOk && guildOk;
+            Log($"RESULT social: across={across} trade={trade} party={party} guild={guild} duel={duel} -> {(Passed ? "PASS" : "FAIL")}");
         }
 
         private static string BagSummaryShort(BasePlayerCharacterEntity self)

@@ -893,7 +893,13 @@ namespace MultiplayerARPG.MMO.Mesh
         public override void UnregisterPlayerCharacter(long connectionId)
         {
             if (IsServer)
+            {
+                // DESIGN 1.44: a duelist leaving this cell (a disconnect or a hop) loses its duel, on the other's cell too.
+                if (ServerUserHandlers.TryGetPlayerCharacter(connectionId, out IPlayerCharacterData leaving) && leaving is BasePlayerCharacterEntity leavingPlayer
+                    && leavingPlayer != null && leavingPlayer.DuelingComponent is MeshPlayerCharacterDuelingComponent dueling)
+                    dueling.EndOnLeaving("left the cell");
                 GhostingOnRealPlayerUnregistered(connectionId);
+            }
             base.UnregisterPlayerCharacter(connectionId);
         }
 

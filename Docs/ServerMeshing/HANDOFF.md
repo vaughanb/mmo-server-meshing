@@ -248,6 +248,12 @@ Where the work stands, how to get it running on another machine, and what is lef
     is sent as a container, its building-only rotation and receiver-only age listed, and the grid is shaped to
     `LayerCount` arrays of columns × rows before it is written. `MeshMessageBranchTests` round-trips every `GhostKind`
     by hand. No message changed.
+23. **Trades, duels and invitations in the rig regression (DESIGN 1.45, package 0.97.30).** `regress.py social` (the 35th
+    scenario) trades, invites to a party and to a guild, and duels across the C/E line, the bot quitting 10 s into the duel.
+    Writing it found two defects, fixed: a cross-line trade cancelled itself as it opened (the kit's trade window closed on
+    a None that overtook the accept), and a duel never ended when a duelist disconnected (the kit's end in `OnDestroy`
+    comes after the despawn delay and no longer runs; the add-on ends it as the player is unregistered, so a hop forfeits
+    too). The guild invitation across a line now runs and passes.
 22. **Trades, duels and party or guild invitations across a line (DESIGN 1.44, package 0.97.29).** Mesh subclasses of
     the kit's dealing and dueling components (put on the entity before the kit adds its own; they declare the kit's server
     RPCs again under the same names and forward the other side's half as ghost actions) and wrappers on the party and guild
@@ -455,9 +461,10 @@ Where the work stands, how to get it running on another machine, and what is lef
 4. **The kit copy is upstream `master` at 493df35fc (1.33).** CE-14 is upstream (PR 28) and no `MESH-EDIT` marker is left. No
    release has it yet, so the package names `master` at 05ec55012 as its minimum: when a release does, name that. A later
    sync is a three-way merge, not a copy (`upstream/README.md`).
-5. **The rig regression** passed all 34 scenarios on the code of 1.44 (2026-11-01, 3,658 checks, 205 min; `party`'s flaky
+5. **The rig regression** passed all 35 scenarios on the code of 1.45, `social` included (2026-11-02, 3,694 checks, 230 min, every scenario on its first
+   run), as it had all 34 on the code of 1.44 (2026-11-01, 3,658 checks, 205 min; `party`'s flaky
    `hurtTarget` check failed in the full run, the fighter having killed its monster in one hit, and `party` passed 55 of 55 alone right
-   after), as it had on the code of 1.42 the same day (3,146 checks, 203 min), 1.39 (3,488) and 1.35 (3,178), and the 3 h `soak` 95 of 95 on the code of 1.35. The run on the code of 1.41 (26 of 34) was the clock-change hour and the item-list defect of item 20, not the rest. To run it:
+   after), and on the code of 1.42 the same day (3,146 checks, 203 min), 1.39 (3,488) and 1.35 (3,178), and the 3 h `soak` 95 of 95 on the code of 1.35. The run on the code of 1.41 (26 of 34) was the clock-change hour and the item-list defect of item 20, not the rest. To run it:
    enable the five BaseDemo and TestMap scenes in Build Settings, open BaseInit-CE, then
    `python -u Tools/ServerMeshing/regress.py --build <scenarios>` (name the scenarios: `--build` alone only builds), then
    restore Build Settings and DemoMesh8kInit. `Config/mySqlConfig.json` is here and MySQL80 runs. A full run takes ~3 h.

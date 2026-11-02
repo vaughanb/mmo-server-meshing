@@ -4,7 +4,7 @@
 Drives the ten-cell rig (a 3x3 grid plus C2 across a seam) end to end and grades each scenario from the logs:
 
     python Tools/ServerMeshing/regress.py                 # the default set: pet party crash harvest build seam seamcold sleep
-    python Tools/ServerMeshing/regress.py crash build     # a subset; also pvp wake dynidle
+    python Tools/ServerMeshing/regress.py crash build     # a subset; also pvp wake dynidle social
     python Tools/ServerMeshing/regress.py --list
     python Tools/ServerMeshing/regress.py --remote-cells E [--remote-persist] [--impair loss2] ...
                                                           # E served by the second machine (Docs/ServerMeshing/MULTIHOST.md)
@@ -552,6 +552,25 @@ def db_reset(tester_pos, bot_pos, tester_party=1, bot_party=1, clear_buildings=F
         conn.close()
 
 
+def social_db_setup():
+    """DESIGN 1.44's social scenario: no guild left by an earlier run, and gold for a guild (the tester) and a trade (both)."""
+    conn = db_connect()
+    try:
+        with conn.cursor() as cur:
+            ids = (provision.TESTER.character_id, provision.BOT.character_id)
+            cur.execute("select id from guild where leaderId in (%s, %s)", ids)
+            for (guild_id,) in cur.fetchall():
+                for table in ("guildrole", "guildskill", "guildrequest"):
+                    cur.execute(f"delete from {table} where guildId=%s", (guild_id,))
+                cur.execute("delete from guild where id=%s", (guild_id,))
+            cur.execute("update characters set guildId=0 where id in (%s, %s)", ids)
+            cur.execute("update characters set gold=%s where id=%s", (1100, provision.TESTER.character_id))
+            cur.execute("update characters set gold=%s where id=%s", (50, provision.BOT.character_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def db_rows(sql, params=()):
     """The rows of one read-only query against the rig's database (Slice 4's scenario reads building and storage rows;
     the unit tests fake this)."""
@@ -1059,6 +1078,41 @@ def run_scenario(name, rep):
         c_lines = zone_lines("C", start, day)
         rep.check(count(c_lines, r"Hit on ghost meshbotChar") == 0, "no hit on the party member's ghost was forwarded")
 
+    elif name == "social":
+        # DESIGN 1.44: a trade, a party and a guild invitation, and a duel with a player standing across the C/E line, a
+        # metre and a bit apart (the kit's conversation distance is 1 m plus its 1 m buffer). Both start in no party and
+        # no guild; the tester gets the kit's 1,000 gold for a guild and both some gold for the trade (the kit's dealing fee
+        # refuses a lock it cannot pay). No monsters. The duel comes last, and the bot leaves 10 s into it: the test bow's
+        # hits (about 5 each) do not outpace the bot's regeneration, so a duel to the death never ended on the rig
+        # (2026-11-01: 97 hits, 500 -> 487); a duelist who disconnects loses, which this checks (the 8 km run of DESIGN 1.44
+        # checked a death).
+        db_reset((99.4, 60), (100.6, 60), tester_party=0, bot_party=0)
+        social_db_setup()
+        request_play("social", 99.4, 60, env={"MESH_NO_MONSTER_HANDOFF": "1", "MESH_NO_MONSTERS": "1"}, line_x=100)
+        wait_play(60)
+        time.sleep(20)
+        bots.append(("stand", launch_bot(name, "meshbot", ["-meshAutoMode", "stand", "-meshWalkX", "100.6", "-meshWalkZ", "60",
+                                                            "-meshSocialAccept", "-meshSocialLeaveDuel", "10"], observe_seconds=300)))
+        st = wait_status(lambda st: st.get("finished") == "True", 420, "the social driver")
+        result = st.get("result", "")
+        rep.check("-> PASS" in result, f"driver: {result[:200]}")
+        rep.check("across=True" in result, "the two stood on either side of the line (C and E)")
+        c_lines, e_lines = zone_lines("C", start, day), zone_lines("E", start, day)
+        for zone, lines, pattern, what in (
+                ("C", c_lines, rf"Trade request {TESTER} -> {BOT} across a line", "the trade request went to E"),
+                ("E", e_lines, rf"Trade request from {TESTER} across a line reached {BOT}", "E asked the bot"),
+                ("C", c_lines, rf"Trade commit: {TESTER}'s offer .* in escrow", "C took the tester's offer into escrow"),
+                ("E", e_lines, rf"Trade committed here: {BOT} gave \d+ item\(s\) and \d+ gold, received", "E did the bot's half"),
+                ("C", c_lines, rf"Trade committed here: {TESTER} received .*its escrow is spent", "C did the tester's half"),
+                ("E", e_lines, rf"Party invitation from {TESTER} across a line reached {BOT}", "the party invitation reached the bot on E"),
+                ("E", e_lines, rf"Guild invitation from {TESTER} across a line reached {BOT}", "the guild invitation reached the bot on E"),
+                ("E", e_lines, rf"Duel accepted {BOT} <-> {TESTER} across a line", "the bot accepted the duel on E"),
+                ("E", e_lines, rf"Duel ended by {BOT} \(left the cell\) across a line", "the bot's leaving E ended the duel"),
+                ("E", e_lines, rf"Forwarded hit applied to {BOT} ", "the tester's hits during the duel reached the bot on E"),
+                ("C", c_lines, rf"Duel of {TESTER} ended from across the line \({BOT} lost\)", "C ended the tester's side with the bot as the loser")):
+            rep.check(count(lines, pattern) >= 1, f"{zone}: {what}")
+        rep.check(count(c_lines + e_lines, r"Trade escrow of .* returned") == 0, "no escrow went back (nothing refused, nothing timed out)")
+
     elif name == "dynidle":
         # Dynamic cells, idle (DESIGN.md 0.72): the test map runs Dynamic with nothing to split or merge. Each of its
         # cells says hello and applies the central's (empty) layout before a player registers, and a walk from C to E
@@ -1190,7 +1244,7 @@ def remote_mode_of(name):
     return regress_remote.SPAWNER if REMOTE_FORCE_SPAWNER or name in SPAWNER_SCENARIOS else regress_remote.CELL
 
 
-ALL = (DEFAULT + ["pvp", "wake", "dynidle"] + list(regress_split.SCENARIOS) + list(regress_merge.SCENARIOS)
+ALL = (DEFAULT + ["pvp", "wake", "dynidle", "social"] + list(regress_split.SCENARIOS) + list(regress_merge.SCENARIOS)
        + list(regress_splitcrash.SCENARIOS) + list(regress_auto.SCENARIOS) + list(regress_building.SCENARIOS)
        + list(regress_central.SCENARIOS) + list(regress_links.SCENARIOS) + list(regress_family.SCENARIOS)
        + list(regress_policy.SCENARIOS) + list(regress_soak.SCENARIOS))

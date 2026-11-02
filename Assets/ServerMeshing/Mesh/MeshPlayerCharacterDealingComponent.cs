@@ -35,6 +35,19 @@ namespace MultiplayerARPG.MMO.Mesh
             _dealingItems = items ?? new DealingCharacterItems();
         }
 
+        /// <summary>
+        /// Opens a fresh trade for this trader: no offer, state Dealing, its client told once. The kit's accept clears the
+        /// data first (state None) and then sets Dealing, and the None can reach the client after the accept message (it
+        /// travels ordered, the accept unordered): the kit's trade window, just opened, closes on None and closing it sends
+        /// a cancel. Across a line that ordering was common (DESIGN 1.44); here no None is sent.
+        /// </summary>
+        internal void OpenFresh()
+        {
+            _dealingGold = 0;
+            _dealingItems = new DealingCharacterItems();
+            DealingState = DealingState.Dealing;
+        }
+
         /// <summary>Clears the mirror without the kit's RPCs (the puppet has no client; the real other is told by its owner).</summary>
         internal void ClearMirror()
         {
@@ -145,8 +158,13 @@ namespace MultiplayerARPG.MMO.Mesh
                 other.DealingComponent.DealingState = DealingState.Dealing;
                 other.DealingComponent.CallOwnerAcceptedDealingRequest(ObjectId);
             }
-            ClearDealingData();
-            DealingState = DealingState.Dealing;
+            if (across)
+                OpenFresh();
+            else
+            {
+                ClearDealingData();
+                DealingState = DealingState.Dealing;
+            }
             CallOwnerAcceptedDealingRequest(other.ObjectId);
             if (across)
                 CallOwnerUpdateAnotherDealingState(DealingState.Dealing); // the mirror's setter did not run: tell this client the other is open

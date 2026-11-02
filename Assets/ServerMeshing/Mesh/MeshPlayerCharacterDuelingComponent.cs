@@ -147,9 +147,30 @@ namespace MultiplayerARPG.MMO.Mesh
 #endif
         }
 
+        /// <summary>
+        /// This duelist is leaving the cell (the server unregisters it: a disconnect, or a hop): a duel in progress is lost,
+        /// on the other side's cell too, and a pending request is dropped. The kit ends a duel in OnDestroy, which on a
+        /// disconnect comes after the kit's despawn delay and found the entity no longer a server object (DESIGN 1.44: the
+        /// rig's duelist quit and its duel never ended).
+        /// </summary>
+        internal void EndOnLeaving(string why)
+        {
+#if UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES
+            if (DuelingStartingOrStarted)
+            {
+                ForwardEndAsLoser(why);
+                EndDueling(Entity);
+            }
+            else if (DuelingCharacter != null)
+            {
+                StopDueling();
+            }
+#endif
+        }
+
         protected override void OnDestroy()
         {
-            // A hop or a disconnect mid-duel: the kit's OnDestroy ends it here as a loss; the other side hears the same.
+            // The fallback when the entity goes without being unregistered first; EndOnLeaving has normally ended it.
             if (IsServer && DuelingStarted)
                 ForwardEndAsLoser("left the cell");
             base.OnDestroy();
