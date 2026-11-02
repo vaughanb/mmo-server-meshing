@@ -14,6 +14,33 @@ namespace MultiplayerARPG.MMO.Mesh
     public partial class MeshMapNetworkManager
     {
         /// <summary>
+        /// The kit makes the harvestable and item-drop prefabs spawnable from the spawn areas in the loaded scenes. With
+        /// the areas in a server-only scene a client registered none of them, and a harvestable puppet's spawn failed on
+        /// it ("Asset Id ... is not registered"), which drops the rest of that baseline packet: a player puppet written
+        /// in the same packet never reached the client, so a player who logged in beside the line did not see the one
+        /// already standing across it (DESIGN 1.44). Every harvestable and drop prefab the game instance knows is
+        /// spawnable in every process, as the monsters already are.
+        /// </summary>
+        public override void InitPrefabs()
+        {
+            base.InitPrefabs();
+#if !EXCLUDE_PREFAB_REFS || DISABLE_ADDRESSABLES
+            System.Collections.Generic.HashSet<LiteNetLibIdentity> prefabs = new System.Collections.Generic.HashSet<LiteNetLibIdentity>(Assets.spawnablePrefabs ?? System.Array.Empty<LiteNetLibIdentity>());
+            int added = 0;
+            foreach (HarvestableEntity entry in GameInstance.HarvestableEntities.Values)
+                if (entry != null && entry.Identity != null && prefabs.Add(entry.Identity)) added++;
+            foreach (ItemDropEntity entry in GameInstance.ItemDropEntities.Values)
+                if (entry != null && entry.Identity != null && prefabs.Add(entry.Identity)) added++;
+            if (added > 0)
+            {
+                Assets.spawnablePrefabs = new LiteNetLibIdentity[prefabs.Count];
+                prefabs.CopyTo(Assets.spawnablePrefabs);
+                Logging.Log("Mesh", $"Spawnable prefabs: {added} harvestable and drop prefab(s) of the game instance added (their spawn areas may be in a server-only scene)");
+            }
+#endif
+        }
+
+        /// <summary>
         /// LoadServerScenes loads the own map's server-only scenes (MeshMapLayout.serverScenes) additively, on a server
         /// only; the caller awaits it before anything reads the scene. One already loaded is kept; one not in the build is
         /// skipped with a warning. Without server scenes it completes at once, and the caller goes on in the same frame.

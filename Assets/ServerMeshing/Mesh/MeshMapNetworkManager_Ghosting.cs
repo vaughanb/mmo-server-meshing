@@ -1805,6 +1805,8 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (player == null || player.DealingComponent == null)
                 return;
+            if (player.DealingComponent is MeshPlayerCharacterDealingComponent)
+                return; // a trade with a puppet is forwarded to its owner (DESIGN 1.44); the guard was the refusal before that
             if (on)
                 player.DealingComponent.DealingCharacter = player;
             else if (ReferenceEquals(player.DealingComponent.DealingCharacter, player))
@@ -3134,7 +3136,10 @@ namespace MultiplayerARPG.MMO.Mesh
             GhostSuppression.Ghostify(entity, this, extras, false, false, disableMovement: false);
             entity.IsInvincible = true;
             if (entity is BasePlayerCharacterEntity demotedPlayer && demotedPlayer.DealingComponent != null && demotedPlayer.DealingComponent.DealingCharacter != null)
+            {
+                (demotedPlayer.DealingComponent as MeshPlayerCharacterDealingComponent)?.EndAcrossBeforeLeaving(); // the other trader may be across a line (DESIGN 1.44)
                 demotedPlayer.DealingComponent.StopDealing(); // a trade in progress ends for both sides, as the kit does on a warp
+            }
             SetDealingGuard(entity as BasePlayerCharacterEntity, true);
             ReceiveDamageDelegate hitHook = (target, position, fromPosition, instigator, damageAmounts, weapon, skill, skillLevel) =>
                 ForwardGhostHit(meshId, position, fromPosition, instigator, damageAmounts, weapon, skill, skillLevel);

@@ -380,6 +380,7 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             List<Side> seams = CreateSeamAprons(world, spec);
             CreateCellEdgeCurtains(spec, seams);
             CreateZoneManager(world, spec);
+            CreateAoiBounds(spec);
             Scene serverScene = OpenOrCreateServerScene(spec);
             string spawns = CreateSpawnAreas(mixes, spec, scene, serverScene);
             CreateSpawnPoint();
@@ -754,6 +755,21 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             }
             data.SetAlphamaps(0, 0, maps);
             Debug.Log($"Large map: cell edges painted every {CellSize:0} m, {EdgeWidth:0} m wide");
+        }
+
+        /// <summary>
+        /// CreateAoiBounds gives the kit's grid interest manager its bounds (DESIGN 1.44). Without an AOIMapBounds in the
+        /// scene the kit's JobifiedGridSpatialPartitioningAOI never builds its grid ("degraded fallback mode") and a client
+        /// is sent only what spawns after it logged in: a player already standing across the line, a puppet here, was not
+        /// shown to a client that logged in beside it. The box covers the map and its aprons.
+        /// </summary>
+        private static void CreateAoiBounds(MapSpec spec)
+        {
+            GameObject go = new GameObject("AOIMapBounds");
+            AOIMapBounds bounds = go.AddComponent<AOIMapBounds>();
+            bounds.mode = AOIMapBounds.EMode.Bounds;
+            bounds.bounds = new Bounds(new Vector3(0f, GroundHeight, 0f), new Vector3(MapSize + 2f * ApronWidth, 400f, MapSize + 2f * ApronWidth));
+            Debug.Log($"Large map: AOI bounds {bounds.bounds.size.x:0} x {bounds.bounds.size.z:0} m for the kit's grid interest manager");
         }
 
         private static void CreateZoneManager(MeshWorldRegistry world, MapSpec spec)

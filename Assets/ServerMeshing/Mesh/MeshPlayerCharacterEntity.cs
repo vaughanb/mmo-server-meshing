@@ -40,6 +40,32 @@ namespace MultiplayerARPG.MMO.Mesh
         /// limit lifted mid-swing and the next one could start before the animation ended (DESIGN 1.06). During a hop it
         /// is the arrival, not a respawn: the states stay and only the event fires.
         /// </summary>
+        /// <summary>
+        /// The kit adds its trade and duel components at runtime (DefaultEntitySetting.InitialPlayerCharacterEntityComponents,
+        /// GetOrAddComponent): the add-on's subclasses are put on first, under the same switches, so the kit finds them
+        /// instead and a trade or a duel reaches a player across a line (DESIGN 1.44). A prefab that carries the kit's
+        /// components gets them swapped by the setup window instead.
+        /// </summary>
+        public override void InitialRequiredComponents()
+        {
+            if (CurrentGameInstance.EntitySetting is DefaultEntitySetting setting)
+            {
+                if (setting.enablePlayerCharacterDealing && GetComponent<PlayerCharacterDealingComponent>() == null)
+                    gameObject.AddComponent<MeshPlayerCharacterDealingComponent>();
+                if (setting.enablePlayerCharacterDueling && GetComponent<PlayerCharacterDuelingComponent>() == null)
+                    gameObject.AddComponent<MeshPlayerCharacterDuelingComponent>();
+            }
+            base.InitialRequiredComponents();
+        }
+
+        /// <summary>A death mid-duel: the other duelist across a line is told before the kit ends the duel here (DESIGN 1.44).</summary>
+        public override void Killed(EntityInfo lastAttacker)
+        {
+            if (IsServer && DuelingComponent is MeshPlayerCharacterDuelingComponent dueling)
+                dueling.ForwardEndAsLoser("died");
+            base.Killed(lastAttacker);
+        }
+
         protected override void RpcOnRespawn()
         {
             bool hopArrival = IsOwnerClient && !IsServer && BaseGameNetworkManager.Singleton is MeshMapNetworkManager mesh && mesh.IsClientHopping;

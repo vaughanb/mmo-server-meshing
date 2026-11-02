@@ -82,6 +82,8 @@ namespace MultiplayerARPG.MMO.Mesh.Editor
             (typeof(DefaultCharacterAttackComponent), typeof(MeshCharacterAttackComponent)),
             (typeof(DefaultCharacterUseSkillComponent), typeof(MeshCharacterUseSkillComponent)),
             (typeof(DefaultCharacterChargeComponent), typeof(MeshCharacterChargeComponent)),
+            (typeof(PlayerCharacterDealingComponent), typeof(MeshPlayerCharacterDealingComponent)), // DESIGN 1.44: a trade across a line
+            (typeof(PlayerCharacterDuelingComponent), typeof(MeshPlayerCharacterDuelingComponent)), // DESIGN 1.44: a duel across a line
         };
 
         [MenuItem("Tools/Open MMORPG/Server Meshing/Testing/Build 8 km Demo Copy")]

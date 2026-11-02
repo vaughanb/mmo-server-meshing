@@ -248,6 +248,20 @@ Where the work stands, how to get it running on another machine, and what is lef
     is sent as a container, its building-only rotation and receiver-only age listed, and the grid is shaped to
     `LayerCount` arrays of columns × rows before it is written. `MeshMessageBranchTests` round-trips every `GhostKind`
     by hand. No message changed.
+22. **Trades, duels and party or guild invitations across a line (DESIGN 1.44, package 0.97.29).** Mesh subclasses of
+    the kit's dealing and dueling components (put on the entity before the kit adds its own; they declare the kit's server
+    RPCs again under the same names and forward the other side's half as ghost actions) and wrappers on the party and guild
+    invitation handlers; a trade's exchange runs in two halves with an escrow on the committing cell. Measured on the 8 km
+    demo with the editor client and a bot a metre apart across the start cell's west line: trade, party and duel all pass
+    (`RESULT social: across=True trade=ok duel=ok party=ok`). To rerun: save `bot2Char` alive (`currentHp`), with gold for the
+    kit's dealing fee, at (−0.5, 21, 515) on `ServerMeshTestMap8k` and MeshTester at (0.5, 21, 515), clear both `partyId`
+    and the `party` rows; start the bot first (`-meshAutoMode stand -meshWalkX -0.5 -meshWalkZ 515 -meshSocialAccept`),
+    then the editor's auto client `mode=social socialTargetName=bot2Char walkTargetX=0.5 walkTargetZ=515
+    expectedMapName=ServerMeshTestMap8k`. A dead character logs in at the map start and walks to its spot, 1.5 m short.
+    Also found and fixed: a client logging in beside a line did not see the player already across it (a harvestable
+    puppet's unregistered prefab dropped the rest of the baseline packet; every harvestable and drop prefab is now
+    spawnable in every process), and the 8 km maps had no `AOIMapBounds` (the kit's grid interest manager ran without a
+    grid; the builder adds one).
 21. **A corner where four maps meet (DESIGN 1.43, package 0.97.28).** Two more 8 km maps, `ServerMeshTestMap8kNorth` and
     `ServerMeshTestMap8kNorthEast`, make a four-map corner at world (4,096, 24,096) (cells west (7,7), east (0,7), north (7,0),
     north-east (0,0)); the spawner serves 256 cells on demand. `patrol` with `patrolReturnZ` runs diagonal legs. Diagonal
@@ -402,8 +416,9 @@ Where the work stands, how to get it running on another machine, and what is lef
    A local chat reaches the players across a line, and an NPC dialog or a player or guild storage open at a hop crosses with it (1.37,
    `MeshInteractionHandlers.cs`: the kit's chat and storage handlers wrapped in `SetServerHandlersRef`, and the first built-in
    `IMeshHandoffCarrier`). The 8 km map's banker and merchant stand on the line beside the start to try it: talk to the banker from one
-   side, step over, open the strongbox, step back. A chest's storage still closes at a hop; trades, invitations and duels across a line
-   are still refused with the kit's messages; a shop dialog crosses by the same code but was not run.
+   side, step over, open the strongbox, step back. A chest's storage still closes at a hop; a trade, a duel and a party or
+   guild invitation with a player across a line work since 1.44 (item 22; the guild one and friend requests not run); a
+   shop dialog crosses by the same code but was not run.
    A corpse in the band is a puppet with its items since 1.38 (`GhostKind.Container`), and a loot on it goes to its owner; a
    PK kill across a line credits the killer on its own cell (`GhostAction.PkKill`). Both measured, the loot with a pinned test
    deer (`MESH_TEST_MONSTER=-1.3,540,Deer` on the cell start) killed from across the line. A shop dialog crosses a hop and a
@@ -440,8 +455,9 @@ Where the work stands, how to get it running on another machine, and what is lef
 4. **The kit copy is upstream `master` at 493df35fc (1.33).** CE-14 is upstream (PR 28) and no `MESH-EDIT` marker is left. No
    release has it yet, so the package names `master` at 05ec55012 as its minimum: when a release does, name that. A later
    sync is a three-way merge, not a copy (`upstream/README.md`).
-5. **The rig regression** passed all 34 scenarios on the code of 1.42 (2026-11-01, 3,146 checks, 203 min, `party`'s flaky
-   `hurtTarget` check included), as it had on the code of 1.39 the day before (3,488 checks, 190 min) and 1.35 (3,178 checks), and the 3 h `soak` 95 of 95 on the code of 1.35. The run on the code of 1.41 the same night (26 of 34) was the clock-change hour and the item-list defect of item 20, not the rest. To run it:
+5. **The rig regression** passed all 34 scenarios on the code of 1.44 (2026-11-01, 3,658 checks, 205 min; `party`'s flaky
+   `hurtTarget` check failed in the full run, the fighter having killed its monster in one hit, and `party` passed 55 of 55 alone right
+   after), as it had on the code of 1.42 the same day (3,146 checks, 203 min), 1.39 (3,488) and 1.35 (3,178), and the 3 h `soak` 95 of 95 on the code of 1.35. The run on the code of 1.41 (26 of 34) was the clock-change hour and the item-list defect of item 20, not the rest. To run it:
    enable the five BaseDemo and TestMap scenes in Build Settings, open BaseInit-CE, then
    `python -u Tools/ServerMeshing/regress.py --build <scenarios>` (name the scenarios: `--build` alone only builds), then
    restore Build Settings and DemoMesh8kInit. `Config/mySqlConfig.json` is here and MySQL80 runs. A full run takes ~3 h.

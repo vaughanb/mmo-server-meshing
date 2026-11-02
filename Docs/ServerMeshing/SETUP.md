@@ -937,6 +937,14 @@ This chapter runs the test rig, which lives in the source repository
   and server-only content in a server-only scene (§4.2). The pre-load holds every neighbouring map's scene whose seam
   is within the distance, so at a corner where four maps meet the other three are ready, and a step over the corner
   hops straight into the diagonal map (DESIGN 1.41, run in 1.43 on the demo's four maps).
+- **A map needs the kit's `AOIMapBounds`** (DESIGN 1.44): without one the kit's grid interest manager never builds its
+  grid and a client is sent only what spawns while it is there (the kit's warning about it prints in every case). The 8 km
+  builder puts one over each map and its aprons. The add-on makes every harvestable and item-drop prefab the game instance
+  knows spawnable in every process, since their spawn areas may sit in a server-only scene and a client that lacks a
+  prefab loses whatever shares a baseline packet with it.
+- **Trades, duels and party or guild invitations** with a player across a line work as on one cell (DESIGN 1.44): the
+  add-on's subclasses of the kit's dealing and dueling components go onto the player entity before the kit adds its own,
+  and the party and guild invitation handlers are wrapped. A duelist who crosses a line forfeits, as on a map change.
 - **Crowds** are bounded by one process and by the kit's own AOI send cost (0.29 kB/s per visible entity per client),
   not by the mesh: 500 people in one place is a kit AOI/update-rate question.
 - **Warp portals or spawn points exactly on a login position** do what they do in the kit: a character that stands up

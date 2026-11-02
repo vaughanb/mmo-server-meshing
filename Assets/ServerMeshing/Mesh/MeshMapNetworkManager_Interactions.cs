@@ -21,11 +21,22 @@ namespace MultiplayerARPG.MMO.Mesh
         private readonly Dictionary<string, float> _arrivalsLoaded = new Dictionary<string, float>();
         private readonly List<string> _arrivalsLoadedGone = new List<string>();
 
-        /// <summary>The kit's handlers, wrapped: a local chat reaches the players across a line, and storage opens are known to the handoff.</summary>
+        /// <summary>The kit's handlers, wrapped: a local chat reaches the players across a line, storage opens are known to the handoff, and a party or guild invitation reaches a player across a line (DESIGN 1.44).</summary>
         protected override void SetServerHandlersRef()
         {
             if (ServerChatHandlers != null && !(ServerChatHandlers is MeshServerChatHandlers))
                 ServerChatHandlers = new MeshServerChatHandlers(ServerChatHandlers, this);
+            if (ServerPartyMessageHandlers != null && !(ServerPartyMessageHandlers is MeshServerPartyMessageHandlers))
+                ServerPartyMessageHandlers = new MeshServerPartyMessageHandlers(ServerPartyMessageHandlers, this);
+            if (ServerGuildMessageHandlers != null && !(ServerGuildMessageHandlers is MeshServerGuildMessageHandlers))
+                ServerGuildMessageHandlers = new MeshServerGuildMessageHandlers(ServerGuildMessageHandlers, this);
+            // The kit registered its request handlers as delegates when it registered its messages, before this ran: the
+            // two the wrappers change are registered again, so a request reaches the wrapper (the chat and storage
+            // handlers are reached through the property at call time and need no such thing).
+            if (ServerPartyMessageHandlers is MeshServerPartyMessageHandlers)
+                RegisterRequestToServer<RequestSendPartyInvitationMessage, ResponseSendPartyInvitationMessage>(GameNetworkingConsts.SendPartyInvitation, ServerPartyMessageHandlers.HandleRequestSendPartyInvitation);
+            if (ServerGuildMessageHandlers is MeshServerGuildMessageHandlers)
+                RegisterRequestToServer<RequestSendGuildInvitationMessage, ResponseSendGuildInvitationMessage>(GameNetworkingConsts.SendGuildInvitation, ServerGuildMessageHandlers.HandleRequestSendGuildInvitation);
             if (ServerStorageHandlers != null && !(ServerStorageHandlers is MeshServerStorageHandlers))
                 ServerStorageHandlers = _storageWrapper = new MeshServerStorageHandlers(ServerStorageHandlers);
             base.SetServerHandlersRef();

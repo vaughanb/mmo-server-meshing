@@ -26,6 +26,20 @@ namespace MultiplayerARPG.MMO.Mesh
         GiveItems = 2,   // a harvest yield earned by a ghost: item dataId, amount, exp (see MeshHarvestableEntity)
         Chat = 3,        // a local chat said within range of this cell's player by someone across the line: the ChatMessage (MeshServerChatHandlers)
         PkKill = 4,      // this cell's player killed a player across the line: the PK points and consecutive kills the kit credited to its puppet there
+        // Duels, trades and invitations across a line (DESIGN 1.44; MeshMapNetworkManager_Social, the Mesh dueling and dealing components, MeshSocialHandlers)
+        DuelRequest = 5,    // the instigator asks the target to duel: nothing
+        DuelAccepted = 6,   // the target accepted the instigator's request: countDown, duration
+        DuelEnded = 7,      // declined (bool), the instigator lost (bool): a decline, or the instigator died or left
+        DealRequest = 8,    // the instigator asks the target to trade: nothing
+        DealAccepted = 9,   // the target accepted: nothing
+        DealMirror = 10,    // the instigator's offer: state (byte), gold, items (DealingCharacterItems)
+        DealEnded = 11,     // the instigator ended the trade: the message for the target (ushort UITextKeys)
+        DealCommit = 12,    // the instigator's offer is in escrow on its cell: item count, items, gold
+        DealCommitted = 13, // the target's half is done on the instigator's cell: item count, items, gold taken there
+        DealFailed = 14,    // the instigator's cell refused the commit: the message for the target
+        PartyInvite = 15,   // inviterId, inviterName, inviterLevel, partyId, shareExp, shareItem
+        GuildInvite = 16,   // inviterId, inviterName, inviterLevel, guildId, guildName, guildLevel
+        GameMessage = 17,   // a UITextKeys for the target's client
     }
 
     /// <summary>What the kit writes on an attacker for a PK kill, read off a puppet before and after the killing hit (DESIGN 1.38).</summary>
@@ -74,6 +88,7 @@ namespace MultiplayerARPG.MMO.Mesh
             _ghostActionHandlers[(ushort)GhostActionKind.GiveItems] = HandleGiveItemsAction;
             _ghostActionHandlers[(ushort)GhostActionKind.Chat] = HandleChatAction;
             _ghostActionHandlers[(ushort)GhostActionKind.PkKill] = HandlePkKillAction;
+            RegisterSocialGhostActions(); // DESIGN 1.44
             _ghostReplayHandlers.Clear();
             _ghostReplayHandlers[(ushort)GhostReplayKind.Attack] = HandleAttackReplay;
             _ghostReplayHandlers[(ushort)GhostReplayKind.AttackTrigger] = HandleAttackTriggerReplay;

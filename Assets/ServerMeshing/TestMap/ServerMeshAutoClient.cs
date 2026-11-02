@@ -61,7 +61,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public const string PREF_PET = "ServerMesh.AutoClient.Pet";
 #endif
 
-        public enum Mode { none, walk, self, stand, pace, observe, fight, pvp, harvest, build, buildtree, patrol, flee }
+        public enum Mode { none, walk, self, stand, pace, observe, fight, pvp, harvest, build, buildtree, patrol, flee, social }
 
         [Header("Session")]
         public string username = "meshtest";
@@ -207,6 +207,7 @@ namespace MultiplayerARPG.MMO.Mesh
             string boardSeat = ReadArg(args, ARG_BOARD_SEAT, null);
             if (!string.IsNullOrEmpty(boardSeat) && byte.TryParse(boardSeat, out byte seat)) c.boardSeat = seat; // DESIGN 1.39
             c.ReadMigrationSettings(args);
+            c.ReadSocialArgs(args); // DESIGN 1.44
         }
 
         private static string ReadArg(string[] args, string key, string fallback)
@@ -436,8 +437,13 @@ namespace MultiplayerARPG.MMO.Mesh
                 yield return SummonPet();
 
             // 5) Test.
+            if (socialAutoAccept)
+                StartCoroutine(KeepSocialHooked()); // DESIGN 1.44: answer trade, duel and invitation requests in any mode
             switch (mode)
             {
+                case Mode.social:
+                    yield return RunSocial(deadline); // DESIGN 1.44 (ServerMeshAutoClient_Social)
+                    break;
                 case Mode.self:
                     yield return RunSelfMigration(deadline);
                     break;
