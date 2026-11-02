@@ -40,6 +40,13 @@ namespace MultiplayerARPG.MMO.Mesh
         PartyInvite = 15,   // inviterId, inviterName, inviterLevel, partyId, shareExp, shareItem
         GuildInvite = 16,   // inviterId, inviterName, inviterLevel, guildId, guildName, guildLevel
         GameMessage = 17,   // a UITextKeys for the target's client
+        // A player's shop across a line (DESIGN 1.46; MeshPlayerCharacterVendingComponent, MeshMapNetworkManager_Vending)
+        VendingSubscribe = 18,   // the instigator opened the target's shop: nothing
+        VendingUnsubscribe = 19, // the instigator closed it: its character id
+        VendingItems = 20,       // the instigator's shop items, for the target's cell (VendingItems)
+        VendingBuy = 21,         // the instigator buys an entry of the target's shop, its price in escrow: index, item id, price
+        VendingSold = 22,        // the target's purchase is done on the instigator's cell: the item (CharacterItem), the price
+        VendingFailed = 23,      // the instigator's cell refused the target's purchase: the message for it (ushort UITextKeys)
     }
 
     /// <summary>What the kit writes on an attacker for a PK kill, read off a puppet before and after the killing hit (DESIGN 1.38).</summary>

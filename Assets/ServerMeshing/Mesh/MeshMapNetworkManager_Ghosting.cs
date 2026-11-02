@@ -860,6 +860,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     factionId = asPlayer != null ? asPlayer.FactionId : 0,
                     isPkOn = asPlayer != null && asPlayer.IsPkOn,
                     isWeaponsSheathed = asPlayer != null && asPlayer.IsWeaponsSheathed,
+                    vendingTitle = asPlayer != null && asPlayer.VendingComponent != null && asPlayer.VendingComponent.Data.isStarted ? (asPlayer.VendingComponent.Data.title ?? string.Empty) : null,
                     rightWeaponDataId = weapons.rightHand.dataId,
                     rightWeaponLevel = weapons.rightHand.level,
                     leftWeaponDataId = weapons.leftHand.dataId,
@@ -1798,6 +1799,7 @@ namespace MultiplayerARPG.MMO.Mesh
             if (player.GuildId != msg.guildId) player.GuildId = msg.guildId;
             if (player.FactionId != msg.factionId) player.FactionId = msg.factionId;
             if (player.IsPkOn != msg.isPkOn) player.IsPkOn = msg.isPkOn;
+            (player.VendingComponent as MeshPlayerCharacterVendingComponent)?.SetMirrorSign(msg.vendingTitle); // DESIGN 1.46
             SetDealingGuard(player, true);
         }
 
@@ -4014,6 +4016,7 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>Destination (DESIGN 1.22): what the origin's carriers wrote for this arrival, read back by ours, once.</summary>
         private void ApplyCarriedState(BasePlayerCharacterEntity playerCharacter)
         {
+            (playerCharacter.VendingComponent as MeshPlayerCharacterVendingComponent)?.ClearMirror(); // a promoted puppet's sign was the owner's (DESIGN 1.46)
             if (!_incomingHandoffFrom.TryGetValue(playerCharacter.Id, out IncomingHandoff incoming) || incoming.carried == null)
                 return;
             byte[] carried = incoming.carried;

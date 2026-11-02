@@ -54,6 +54,8 @@ namespace MultiplayerARPG.MMO.Mesh
                     gameObject.AddComponent<MeshPlayerCharacterDealingComponent>();
                 if (setting.enablePlayerCharacterDueling && GetComponent<PlayerCharacterDuelingComponent>() == null)
                     gameObject.AddComponent<MeshPlayerCharacterDuelingComponent>();
+                if (setting.enablePlayerCharacterVending && GetComponent<PlayerCharacterVendingComponent>() == null)
+                    gameObject.AddComponent<MeshPlayerCharacterVendingComponent>(); // DESIGN 1.46: a shop across a line
             }
             base.InitialRequiredComponents();
         }

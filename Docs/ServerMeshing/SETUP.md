@@ -945,6 +945,15 @@ This chapter runs the test rig, which lives in the source repository
 - **Trades, duels and party or guild invitations** with a player across a line work as on one cell (DESIGN 1.44): the
   add-on's subclasses of the kit's dealing and dueling components go onto the player entity before the kit adds its own,
   and the party and guild invitation handlers are wrapped. A duelist who crosses a line forfeits, as on a map change.
+  When two traders confirm at the same moment, the cell of the one with the smaller character id does the exchange
+  (DESIGN 1.46). Friend requests need nothing: the kit writes them to the database by character id.
+- **A player's shop** (the kit's vending) can be seen and bought from across a line (DESIGN 1.46): the add-on's vending
+  component goes onto the player entity like the dealing one, the shop's sign travels in the ghost snapshot, and a
+  purchase is done in two halves with the price held in escrow on the buyer's cell. A shop is carried with a handoff
+  when a split or merge of cells moves its vendor.
+- **A crafting queue** crosses a hop with its crafter (DESIGN 1.46): the crafter's own queue, and its entries in a public
+  workbench's queue near it, which go to the destination's copy of that workbench. An entry whose workbench the
+  destination does not have is dropped, as the kit drops a craft whose crafter walked too far from it.
 - **Crowds** are bounded by one process and by the kit's own AOI send cost (0.29 kB/s per visible entity per client),
   not by the mesh: 500 people in one place is a kit AOI/update-rate question.
 - **Warp portals or spawn points exactly on a login position** do what they do in the kit: a character that stands up

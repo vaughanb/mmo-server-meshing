@@ -669,6 +669,7 @@ namespace MultiplayerARPG.MMO.Mesh
         public int factionId;
         public bool isPkOn;
         public bool isWeaponsSheathed; // players: the kit does not save it, so a puppet (and the character it is promoted to) kept a stale one (DESIGN 1.06)
+        public string vendingTitle;    // players: the shop's title while it is open, null when it is not (DESIGN 1.46: the kit's sign is the owner's sync field)
         public CharacterItem[] items;  // containers only (DESIGN 1.38): what the corpse holds, written after everything else when kind == Container
         public double sampleMs;        // the sender's MeshLinkClock when it sampled the position, ms (0: not stamped); written last (DESIGN 1.19)
         public float ageSeconds;       // receiver only, never on the wire: how late the snapshot arrived against its link's fastest (DESIGN 1.19)
@@ -696,6 +697,7 @@ namespace MultiplayerARPG.MMO.Mesh
             writer.Put(summonId ?? string.Empty);
             writer.Put(summonType);
             writer.Put(rightWeaponDataId); writer.Put(rightWeaponLevel); writer.Put(leftWeaponDataId); writer.Put(leftWeaponLevel); writer.Put(partyId); writer.Put(guildId); writer.Put(factionId); writer.Put(isPkOn); writer.Put(isWeaponsSheathed); if (kind == GhostKind.Building) { writer.Put(fullRotation.x); writer.Put(fullRotation.y); writer.Put(fullRotation.z); }
+            if (kind == GhostKind.Player) { writer.Put(vendingTitle != null); if (vendingTitle != null) writer.Put(vendingTitle); }
             writer.Put(sampleMs);
             if (kind == GhostKind.Container)
             {
@@ -727,6 +729,7 @@ namespace MultiplayerARPG.MMO.Mesh
             summonId = reader.GetString();
             summonType = reader.GetByte();
             rightWeaponDataId = reader.GetInt(); rightWeaponLevel = reader.GetInt(); leftWeaponDataId = reader.GetInt(); leftWeaponLevel = reader.GetInt(); partyId = reader.GetInt(); guildId = reader.GetInt(); factionId = reader.GetInt(); isPkOn = reader.GetBool(); isWeaponsSheathed = reader.GetBool(); if (kind == GhostKind.Building) fullRotation = new Vector3(reader.GetFloat(), reader.GetFloat(), reader.GetFloat());
+            vendingTitle = kind == GhostKind.Player && reader.GetBool() ? reader.GetString() : null;
             sampleMs = reader.AvailableBytes >= 8 ? reader.GetDouble() : 0.0;
             items = null;
             if (kind == GhostKind.Container && reader.AvailableBytes >= 4)

@@ -19,11 +19,12 @@ namespace OpenMMORPG.Tests
     {
         static MessageRoundTripTests()
         {
-            // A ghost snapshot writes its full rotation only for a building and its items only for a container, which is
-            // the branch that writes the most; the age is the receiver's own measurement. Every kind is in
-            // MultiplayerARPG.MMO.Mesh.Tests.MeshMessageBranchTests.
+            // A ghost snapshot writes its full rotation only for a building, its items only for a container (the branch
+            // that writes the most) and a shop's title only for a player (DESIGN 1.46); the age is the receiver's own
+            // measurement. Every kind is in MultiplayerARPG.MMO.Mesh.Tests.MeshMessageBranchTests.
             Branches[typeof(GhostSnapshotMessage)] = o => TestReflection.SetField(o, "kind", GhostKind.Container);
             NotRoundTripped.Add(typeof(GhostSnapshotMessage), Wire.NotWritten, BranchOnly, "fullRotation");
+            NotRoundTripped.Add(typeof(GhostSnapshotMessage), Wire.NotWritten, BranchOnly, "vendingTitle");
             NotRoundTripped.Add(typeof(GhostSnapshotMessage), Wire.NotWritten, "receiver only: how late the snapshot arrived against its link's fastest, measured where it is read (DESIGN 1.19)", "ageSeconds");
             // An occupancy grid is LayerCount arrays of columns x rows counts, and its reader checks the header against
             // MaxSide; the filler's two arrays of two under a header of 70,000 columns would not serialize. Not a branch,
@@ -78,7 +79,7 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             GhostSnapshotMessage received = OpenMMORPG.Tests.TestNetData.RoundTrip(sent);
 
             List<string> common = OpenMMORPG.Tests.TestNetData.Differences(sent, received, (owner, member) =>
-                owner == typeof(GhostSnapshotMessage) && (member == "fullRotation" || member == "items" || member == "ageSeconds")
+                owner == typeof(GhostSnapshotMessage) && (member == "fullRotation" || member == "items" || member == "ageSeconds" || member == "vendingTitle")
                     ? OpenMMORPG.Tests.TestNetData.MemberRule.Ignore
                     : OpenMMORPG.Tests.TestNetData.MemberRule.Exact);
             Assert.That(common, Is.Empty, $"the fields every kind sends, for {kind}");
@@ -88,9 +89,25 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
                 Assert.That(OpenMMORPG.Tests.TestNetData.Differences(sent.items, received.items), Is.Empty, "a container's items");
             else
                 Assert.That(received.items, Is.Null, "items travel with a container only");
+            Assert.That(received.vendingTitle, Is.EqualTo(kind == GhostKind.Player ? sent.vendingTitle : null),
+                "a shop's title travels with a player only");
             Assert.That(received.ageSeconds, Is.Zero, "the age is measured by the receiver, never sent");
             // Written after the kind-specific rotation: a branch taken on one side only would shift it.
             Assert.That(received.sampleMs, Is.EqualTo(sent.sampleMs), "the sample stamp after the branch");
+        }
+
+        [Test]
+        public void APlayerWithNoShopArrivesWithNone()
+        {
+            GhostSnapshotMessage sent = FilledSnapshot(GhostKind.Player);
+            sent.vendingTitle = null;
+
+            GhostSnapshotMessage received = OpenMMORPG.Tests.TestNetData.RoundTrip(sent);
+
+            Assert.That(received.vendingTitle, Is.Null, "no shop: no title, and not an empty one (an empty title is an open shop)");
+            Assert.That(received.sampleMs, Is.EqualTo(sent.sampleMs), "the sample stamp after the branch");
+            sent.vendingTitle = string.Empty;
+            Assert.That(OpenMMORPG.Tests.TestNetData.RoundTrip(sent).vendingTitle, Is.EqualTo(string.Empty), "an open shop with no title");
         }
 
         [Test]

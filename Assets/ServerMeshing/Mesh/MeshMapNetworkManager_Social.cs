@@ -47,6 +47,7 @@ namespace MultiplayerARPG.MMO.Mesh
             _ghostActionHandlers[(ushort)GhostActionKind.PartyInvite] = HandlePartyInviteAction;
             _ghostActionHandlers[(ushort)GhostActionKind.GuildInvite] = HandleGuildInviteAction;
             _ghostActionHandlers[(ushort)GhostActionKind.GameMessage] = HandleGameMessageAction;
+            RegisterVendingGhostActions(); // DESIGN 1.46
         }
 
         /// <summary>A player streamed to this cell as a ghost, by character id; null when it is not here or is this cell's own.</summary>
@@ -190,6 +191,8 @@ namespace MultiplayerARPG.MMO.Mesh
             player.DealingComponent.CallOwnerUpdateAnotherDealingState(state);
             player.DealingComponent.CallOwnerUpdateAnotherDealingGold(gold);
             player.DealingComponent.CallOwnerUpdateAnotherDealingItems(items);
+            if (state == DealingState.ConfirmDealing && player.DealingComponent is MeshPlayerCharacterDealingComponent mesh)
+                mesh.BeginAcrossIfChosen("the other's confirm"); // DESIGN 1.46: two confirms at once each saw the other locked
         }
 
         /// <summary>The other side ended the trade (declined, cancelled, left): a message, the escrow back if any, both cleared here.</summary>

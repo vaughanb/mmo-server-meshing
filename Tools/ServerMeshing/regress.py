@@ -553,7 +553,8 @@ def db_reset(tester_pos, bot_pos, tester_party=1, bot_party=1, clear_buildings=F
 
 
 def social_db_setup():
-    """DESIGN 1.44's social scenario: no guild left by an earlier run, and gold for a guild (the tester) and a trade (both)."""
+    """DESIGN 1.44's social scenario: no guild and no friendship left by an earlier run, and gold for a guild (the tester),
+    a trade (both), a purchase from the bot's shop and the crafts (the tester; DESIGN 1.46)."""
     conn = db_connect()
     try:
         with conn.cursor() as cur:
@@ -564,6 +565,7 @@ def social_db_setup():
                     cur.execute(f"delete from {table} where guildId=%s", (guild_id,))
                 cur.execute("delete from guild where id=%s", (guild_id,))
             cur.execute("update characters set guildId=0 where id in (%s, %s)", ids)
+            cur.execute("delete from friend where characterId1 in (%s, %s) or characterId2 in (%s, %s)", ids + ids)
             cur.execute("update characters set gold=%s where id=%s", (1100, provision.TESTER.character_id))
             cur.execute("update characters set gold=%s where id=%s", (50, provision.BOT.character_id))
         conn.commit()
@@ -1085,33 +1087,51 @@ def run_scenario(name, rep):
         # refuses a lock it cannot pay). No monsters. The duel comes last, and the bot leaves 10 s into it: the test bow's
         # hits (about 5 each) do not outpace the bot's regeneration, so a duel to the death never ended on the rig
         # (2026-11-01: 97 hits, 500 -> 487); a duelist who disconnects loses, which this checks (the 8 km run of DESIGN 1.44
-        # checked a death).
+        # checked a death). DESIGN 1.46: between the guild and the duel a friend request (the bot accepts it) and a purchase
+        # from the shop the bot opens once it has joined the guild (-meshSocialVend: one bag item for 7 gold); after the
+        # duel the tester queues 8 crafts of the rig's 'Mesh Test Craft' (1 s and 1 gold each) and walks over to E while
+        # they run.
         db_reset((99.4, 60), (100.6, 60), tester_party=0, bot_party=0)
         social_db_setup()
         request_play("social", 99.4, 60, env={"MESH_NO_MONSTER_HANDOFF": "1", "MESH_NO_MONSTERS": "1"}, line_x=100)
         wait_play(60)
         time.sleep(20)
         bots.append(("stand", launch_bot(name, "meshbot", ["-meshAutoMode", "stand", "-meshWalkX", "100.6", "-meshWalkZ", "60",
-                                                            "-meshSocialAccept", "-meshSocialLeaveDuel", "10"], observe_seconds=300)))
-        st = wait_status(lambda st: st.get("finished") == "True", 420, "the social driver")
+                                                            "-meshSocialAccept", "-meshSocialVend", "-meshSocialLeaveDuel", "10"], observe_seconds=360)))
+        st = wait_status(lambda st: st.get("finished") == "True", 600, "the social driver")
         result = st.get("result", "")
         rep.check("-> PASS" in result, f"driver: {result[:200]}")
         rep.check("across=True" in result, "the two stood on either side of the line (C and E)")
         c_lines, e_lines = zone_lines("C", start, day), zone_lines("E", start, day)
+        # DESIGN 1.46: the cell of the trader with the smaller character id begins the exchange (both confirmed).
+        first, second = (("C", c_lines, TESTER), ("E", e_lines, BOT)) if provision.TESTER.character_id < provision.BOT.character_id \
+            else (("E", e_lines, BOT), ("C", c_lines, TESTER))
         for zone, lines, pattern, what in (
                 ("C", c_lines, rf"Trade request {TESTER} -> {BOT} across a line", "the trade request went to E"),
                 ("E", e_lines, rf"Trade request from {TESTER} across a line reached {BOT}", "E asked the bot"),
-                ("C", c_lines, rf"Trade commit: {TESTER}'s offer .* in escrow", "C took the tester's offer into escrow"),
-                ("E", e_lines, rf"Trade committed here: {BOT} gave \d+ item\(s\) and \d+ gold, received", "E did the bot's half"),
-                ("C", c_lines, rf"Trade committed here: {TESTER} received .*its escrow is spent", "C did the tester's half"),
+                (first[0], first[1], rf"Trade commit: {first[2]}'s offer .* in escrow", f"{first[0]} took {first[2]}'s offer into escrow"),
+                (second[0], second[1], rf"Trade committed here: {second[2]} gave \d+ item\(s\) and \d+ gold, received", f"{second[0]} did {second[2]}'s half"),
+                (first[0], first[1], rf"Trade committed here: {first[2]} received .*its escrow is spent", f"{first[0]} did {first[2]}'s half"),
                 ("E", e_lines, rf"Party invitation from {TESTER} across a line reached {BOT}", "the party invitation reached the bot on E"),
                 ("E", e_lines, rf"Guild invitation from {TESTER} across a line reached {BOT}", "the guild invitation reached the bot on E"),
+                ("C", c_lines, rf"Vending: {TESTER} opened {BOT}'s shop across a line", "C asked E for the bot's shop"),
+                ("E", e_lines, rf"Vending: {TESTER} across a line opened {BOT}'s shop, sent 1 item", "E sent the shop's item"),
+                ("C", c_lines, rf"Vending buy: {TESTER}'s \d+ gold in escrow", "C took the price into escrow"),
+                ("E", e_lines, rf"Vending sold here: {BOT} sold .* to {TESTER} across a line", "E did the vendor's half"),
+                ("C", c_lines, rf"Vending bought here: {TESTER} received .*its escrow is spent", "C gave the tester the item"),
+                ("E", e_lines, rf"Crafting: {TESTER}'s queue carried with the handoff, 1 own entry", "E took over the tester's craft queue"),
                 ("E", e_lines, rf"Duel accepted {BOT} <-> {TESTER} across a line", "the bot accepted the duel on E"),
                 ("E", e_lines, rf"Duel ended by {BOT} \(left the cell\) across a line", "the bot's leaving E ended the duel"),
                 ("E", e_lines, rf"Forwarded hit applied to {BOT} ", "the tester's hits during the duel reached the bot on E"),
                 ("C", c_lines, rf"Duel of {TESTER} ended from across the line \({BOT} lost\)", "C ended the tester's side with the bot as the loser")):
             rep.check(count(lines, pattern) >= 1, f"{zone}: {what}")
         rep.check(count(c_lines + e_lines, r"Trade escrow of .* returned") == 0, "no escrow went back (nothing refused, nothing timed out)")
+        rep.check(count(c_lines + e_lines, r"Vending escrow of .* returned") == 0, "no purchase's gold went back")
+        friends = db_rows("select characterId1, characterId2, state from friend where characterId1 in (%s, %s)",
+                          (provision.TESTER.character_id, provision.BOT.character_id))
+        pairs = {(a, b) for a, b, state in friends if state == 0}
+        rep.check((provision.TESTER.character_id, provision.BOT.character_id) in pairs and (provision.BOT.character_id, provision.TESTER.character_id) in pairs,
+                  f"the friendship is in the database both ways ({len(friends)} row(s))")
 
     elif name == "dynidle":
         # Dynamic cells, idle (DESIGN.md 0.72): the test map runs Dynamic with nothing to split or merge. Each of its

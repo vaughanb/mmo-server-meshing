@@ -1,14 +1,18 @@
-// Server Meshing add-on — automated test client: a trade, a duel and a party invitation with a player across a line
-// (DESIGN.md 1.44).
+// Server Meshing add-on — automated test client: trades, invitations, friends, a shop, a duel and a craft queue with a
+// player across a line (DESIGN.md 1.44, 1.45, 1.46).
 //
 // social (the driver): walk to (walkTargetX, walkTargetZ), find the character named socialTargetName (or, without one,
 // the nearest other player), then in order: trade one bag item and socialGold for whatever it offers, make a party and
-// invite it, found a guild and invite it (when socialGuild), and duel it last, until the duel ends (it may die). The
-// line the test is about is lineX when given (the harness's cut), else x = 0. The RESULT reads `RESULT social:
-// across=<bool> trade=... party=... guild=... duel=...`, PASS when every step went through.
+// invite it, found a guild and invite it (when socialGuild), send it a friend request (when socialFriend), buy the one
+// entry of the shop it opens (when socialBuy), duel it until the duel ends (it may die or leave), and last queue
+// socialCraftAmount crafts of socialCraftFormula and walk across the line while they run (when socialCraftAmount > 0).
+// The line the test is about is lineX when given (the harness's cut), else x = 0. The RESULT reads `RESULT social:
+// across=<bool> trade=... party=... guild=... friend=... vend=... duel=... craft=...`, PASS when every step went through.
 // socialAutoAccept (the other side, any mode): accept every trade request (offering its own first bag item and
-// socialGold, lock, confirm after the other confirms), every duel request and every party or guild invitation.
+// socialGold, lock, confirm after the other confirms), every duel request, every party or guild invitation and every
+// friend request; with socialVend, open a shop of one bag item once it has joined the party and the guild.
 using System.Collections;
+using System.Collections.Generic;
 using System.Globalization;
 using UnityEngine;
 
@@ -28,6 +32,20 @@ namespace MultiplayerARPG.MMO.Mesh
         [Tooltip("With socialAutoAccept: quit this many seconds after a duel starts (0: stay), so the duel ends with this side gone, the way a disconnect ends it.")]
         public float socialLeaveDuelSeconds = 0f;
         public const string ARG_SOCIAL_LEAVE_DUEL = "-meshSocialLeaveDuel";
+        [Tooltip("social: send the target a friend request and wait until it is a friend (the other side accepts with socialAutoAccept).")]
+        public bool socialFriend = true;
+        [Tooltip("social: wait for the target's shop and buy its first entry (the other side opens one with socialVend).")]
+        public bool socialBuy = true;
+        [Tooltip("With socialAutoAccept: open a shop of one bag item at socialVendPrice once the party and guild invitations are accepted.")]
+        public bool socialVend = false;
+        public const string ARG_SOCIAL_VEND = "-meshSocialVend";
+        [Tooltip("The price of the shop's one entry.")]
+        public int socialVendPrice = 7;
+        [Tooltip("social: after the duel, queue this many crafts of socialCraftFormula and walk across the line while they run (0: no craft step).")]
+        public int socialCraftAmount = 8;
+        [Tooltip("social: the title of the craft formula to queue (the rig's database has 'Mesh Test Craft', one second and one gold a craft).")]
+        public string socialCraftFormula = "Mesh Test Craft";
+        private bool _friendPoller, _shopOpened;
 
         public const string ARG_SOCIAL_ACCEPT = "-meshSocialAccept";
         public const string ARG_SOCIAL_TARGET = "-meshSocialTarget";
@@ -44,6 +62,7 @@ namespace MultiplayerARPG.MMO.Mesh
             string target = ReadArg(args, ARG_SOCIAL_TARGET, null);
             if (!string.IsNullOrEmpty(target))
                 socialTargetName = target;
+            socialVend = socialVend || System.Array.IndexOf(args, ARG_SOCIAL_VEND) >= 0;
             string leave = ReadArg(args, ARG_SOCIAL_LEAVE_DUEL, null);
             if (!string.IsNullOrEmpty(leave) && float.TryParse(leave, NumberStyles.Float, CultureInfo.InvariantCulture, out float seconds))
                 socialLeaveDuelSeconds = seconds;
@@ -116,14 +135,73 @@ namespace MultiplayerARPG.MMO.Mesh
                 {
                     Log($"social: party invitation from {invitation.InviterName} (party {invitation.PartyId}), accepting");
                     GameInstance.ClientPartyHandlers.RequestAcceptPartyInvitation(new RequestAcceptPartyInvitationMessage { partyId = invitation.PartyId, inviterId = invitation.InviterId },
-                        (handler, code, response) => { _invitesAccepted++; Log($"social: party invitation accept -> {code} {response.message}"); });
+                        (handler, code, response) => { _invitesAccepted++; Log($"social: party invitation accept -> {code} {response.message}"); MaybeOpenShop(); });
                 };
                 ClientGuildActions.onNotifyGuildInvitation += invitation =>
                 {
                     Log($"social: guild invitation from {invitation.InviterName} (guild {invitation.GuildId}), accepting");
                     GameInstance.ClientGuildHandlers.RequestAcceptGuildInvitation(new RequestAcceptGuildInvitationMessage { guildId = invitation.GuildId, inviterId = invitation.InviterId },
-                        (handler, code, response) => { _invitesAccepted++; Log($"social: guild invitation accept -> {code} {response.message}"); });
+                        (handler, code, response) => { _invitesAccepted++; Log($"social: guild invitation accept -> {code} {response.message}"); MaybeOpenShop(); });
                 };
+                if (!_friendPoller)
+                {
+                    _friendPoller = true;
+                    StartCoroutine(AcceptFriendRequests());
+                }
+            }
+        }
+
+        /// <summary>With socialVend: once both invitations are accepted, a shop of one bag item (the driver buys it across the line).</summary>
+        private void MaybeOpenShop()
+        {
+            if (!socialVend || _shopOpened || _invitesAccepted < 2)
+                return;
+            _shopOpened = true;
+            StartCoroutine(OpenShop());
+        }
+
+        private IEnumerator OpenShop()
+        {
+            yield return new WaitForSecondsRealtime(2f);
+            BasePlayerCharacterEntity self = GameInstance.PlayingCharacterEntity;
+            if (self == null || self.VendingComponent == null)
+                yield break;
+            for (int i = 0; i < self.NonEquipItems.Count; ++i)
+            {
+                CharacterItem item = self.NonEquipItems[i];
+                if (item.IsEmptySlot() || item.GetItem() == null || item.GetItem().RestrictDealing)
+                    continue;
+                StartVendingItems items = new StartVendingItems();
+                items.Add(new StartVendingItem { id = item.id, amount = 1, price = socialVendPrice });
+                Log($"social: opening a shop: {item.GetItem().Title} x1 for {socialVendPrice} gold");
+                self.VendingComponent.CallCmdStartVending("MeshShop", items);
+                yield break;
+            }
+            Log("social: no bag item to sell, no shop");
+        }
+
+        /// <summary>The auto-accepting side: every friend request that comes in is accepted (the kit's client asks for them; nothing is pushed).</summary>
+        private IEnumerator AcceptFriendRequests()
+        {
+            HashSet<string> accepted = new HashSet<string>();
+            while (true)
+            {
+                yield return new WaitForSecondsRealtime(3f);
+                if (GameInstance.ClientFriendHandlers == null || GameInstance.PlayingCharacterEntity == null)
+                    continue;
+                GameInstance.ClientFriendHandlers.RequestGetFriendRequests(new RequestGetFriendRequestsMessage { skip = 0, limit = 20 }, (handler, code, response) =>
+                {
+                    if (response.friendRequests == null)
+                        return;
+                    foreach (SocialCharacterData requester in response.friendRequests)
+                    {
+                        if (string.IsNullOrEmpty(requester.id) || !accepted.Add(requester.id))
+                            continue;
+                        Log($"social: friend request from {requester.characterName}, accepting");
+                        GameInstance.ClientFriendHandlers.RequestAcceptFriendRequest(new RequestAcceptFriendRequestMessage { requesterId = requester.id },
+                            (h, c, r) => Log($"social: friend request accept -> {c} {r.message}"));
+                    }
+                });
             }
         }
 
@@ -350,7 +428,29 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             bool guildOk = !socialGuild || guild.StartsWith("ok");
 
-            // 4. Duel, last: it may end with the target dead.
+            // 4. Friend request: the kit writes it to the database by id; the target's client asks for it and accepts.
+            string friend = "not asked";
+            if (socialFriend)
+            {
+                Phase = "social-friend";
+                yield return SendFriendRequest(targetName, r => friend = r);
+                Log($"social: friend {friend}");
+            }
+            bool friendOk = !socialFriend || friend.StartsWith("ok");
+
+            // 5. The target's shop: its sign, its items and a purchase, across the line.
+            string vend = "not asked";
+            if (socialBuy)
+            {
+                Phase = "social-vend";
+                yield return BuyFromShop(targetName, r => vend = r);
+                Log($"social: vend {vend}");
+                yield return new WaitForSecondsRealtime(2f);
+            }
+            bool vendOk = !socialBuy || vend.StartsWith("ok");
+            self = GameInstance.PlayingCharacterEntity;
+
+            // 6. Duel: it may end with the target dead or gone.
             Phase = "social-duel";
             _duelStarted = _duelEnded = false;
             target = FindPlayerByName(targetName);
@@ -408,9 +508,161 @@ namespace MultiplayerARPG.MMO.Mesh
             bool duelOk = _duelEnded && targetHpMin < targetHpStart;
             yield return new WaitForSecondsRealtime(2f);
 
+            // 7. A craft queue that runs across a hop: queue, let a few complete, walk over the line, let the rest complete.
+            string craft = "not asked";
+            if (socialCraftAmount > 0)
+            {
+                Phase = "social-craft";
+                yield return CraftAcrossTheLine(line, r => craft = r);
+                Log($"social: craft {craft}");
+            }
+            bool craftOk = socialCraftAmount <= 0 || craft.StartsWith("ok");
+
             Finished = true;
-            Passed = tradeOk && duelOk && partyOk && guildOk;
-            Log($"RESULT social: across={across} trade={trade} party={party} guild={guild} duel={duel} -> {(Passed ? "PASS" : "FAIL")}");
+            Passed = tradeOk && duelOk && partyOk && guildOk && friendOk && vendOk && craftOk;
+            Log($"RESULT social: across={across} trade={trade} party={party} guild={guild} friend={friend} vend={vend} duel={duel} craft={craft} -> {(Passed ? "PASS" : "FAIL")}");
+        }
+
+        private IEnumerator SendFriendRequest(string targetName, System.Action<string> done)
+        {
+            BasePlayerCharacterEntity target = FindPlayerByName(targetName);
+            if (target == null) { done("the target left"); yield break; }
+            string friendId = target.Id;
+            bool answered = false, sent = false;
+            GameInstance.ClientFriendHandlers.RequestSendFriendRequest(new RequestSendFriendRequestMessage { requesteeId = friendId },
+                (handler, code, response) => { answered = true; sent = code == LiteNetLibManager.AckResponseCode.Success; Log($"social: friend request -> {code} {response.message}"); });
+            float until = Time.realtimeSinceStartup + 15f;
+            while (!answered && Time.realtimeSinceStartup < until) yield return null;
+            if (!sent) { done("request refused"); yield break; }
+            bool isFriend = false;
+            float nextAsk = 0f;
+            until = Time.realtimeSinceStartup + 40f;
+            while (!isFriend && Time.realtimeSinceStartup < until)
+            {
+                if (Time.realtimeSinceStartup >= nextAsk)
+                {
+                    nextAsk = Time.realtimeSinceStartup + 3f;
+                    GameInstance.ClientFriendHandlers.RequestGetFriends(new RequestGetFriendsMessage { skip = 0, limit = 50 }, (handler, code, response) =>
+                    {
+                        if (response.friends == null) return;
+                        foreach (SocialCharacterData f in response.friends)
+                            if (f.id == friendId) isFriend = true;
+                    });
+                }
+                yield return null;
+            }
+            done(isFriend ? "ok" : "requested, never accepted");
+        }
+
+        private IEnumerator BuyFromShop(string targetName, System.Action<string> done)
+        {
+            BasePlayerCharacterEntity target = FindPlayerByName(targetName);
+            float until = Time.realtimeSinceStartup + 30f;
+            while (target != null && !(target.VendingComponent != null && target.VendingComponent.Data.isStarted) && Time.realtimeSinceStartup < until)
+            {
+                yield return null;
+                target = FindPlayerByName(targetName);
+            }
+            if (target == null) { done("the target left"); yield break; }
+            PlayerCharacterVendingComponent shop = target.VendingComponent;
+            if (shop == null || !shop.Data.isStarted) { done("no shop opened"); yield break; }
+            Log($"social: {target.CharacterName}'s shop '{shop.Data.title}' is open");
+            VendingItems seen = null;
+            System.Action<VendingItems> onItems = items => { seen = items; Log($"social: the shop lists {items.Count} item(s)"); };
+            shop.onUpdateItems += onItems;
+            BasePlayerCharacterEntity self = GameInstance.PlayingCharacterEntity;
+            self.VendingComponent.CallCmdSubscribe(target.ObjectId);
+            until = Time.realtimeSinceStartup + 15f;
+            while ((seen == null || seen.Count == 0) && Time.realtimeSinceStartup < until) yield return null;
+            string result;
+            if (seen == null || seen.Count == 0)
+                result = "no items reached the client";
+            else
+            {
+                int price = seen[0].price, goldBefore = self.Gold, bagBefore = BagAmount(self);
+                self.VendingComponent.CallCmdBuyItem(0);
+                until = Time.realtimeSinceStartup + 15f;
+                while (self != null && self.Gold > goldBefore - price && Time.realtimeSinceStartup < until)
+                {
+                    yield return null;
+                    self = GameInstance.PlayingCharacterEntity;
+                }
+                yield return new WaitForSecondsRealtime(1.5f);
+                self = GameInstance.PlayingCharacterEntity;
+                until = Time.realtimeSinceStartup + 5f;
+                while (shop != null && shop.Data.isStarted && Time.realtimeSinceStartup < until) yield return null;
+                bool closed = shop == null || !shop.Data.isStarted;
+                int bagAfter = BagAmount(self);
+                string detail = $"{price} gold, gold {goldBefore}->{self.Gold}, bag amount {bagBefore}->{bagAfter}, {(closed ? "sold out and closed" : "still open")}";
+                result = self.Gold == goldBefore - price && bagAfter > bagBefore && closed ? $"ok ({detail})" : detail;
+            }
+            if (shop != null) shop.onUpdateItems -= onItems;
+            self = GameInstance.PlayingCharacterEntity;
+            if (self != null && self.VendingComponent != null) self.VendingComponent.CallCmdUnsubscribe();
+            done(result);
+        }
+
+        private IEnumerator CraftAcrossTheLine(float line, System.Action<string> done)
+        {
+            BasePlayerCharacterEntity self = GameInstance.PlayingCharacterEntity;
+            ItemCraftFormula formula = null;
+            foreach (ItemCraftFormula f in GameInstance.ItemCraftFormulas.Values)
+                if (f != null && f.Title == socialCraftFormula) { formula = f; break; }
+            if (self == null || formula == null || formula.ItemCraft.CraftingItem == null) { done($"no formula '{socialCraftFormula}'"); yield break; }
+            int itemId = formula.ItemCraft.CraftingItem.DataId, per = formula.ItemCraft.Amount, goldPer = formula.ItemCraft.RequireGold;
+            int before = CountItem(self, itemId), goldBefore = self.Gold, hopsBefore = ClientMigrationController.CompletedCount;
+            self.CallCmdAppendCraftingQueueItem(self.ObjectId, formula.DataId, socialCraftAmount);
+            Log($"social: queued {socialCraftAmount} x '{formula.Title}' ({per} x item {itemId} and {goldPer} gold each); have {before}, gold {goldBefore}");
+            float until = Time.realtimeSinceStartup + 15f;
+            while (CountItem(GameInstance.PlayingCharacterEntity, itemId) < before + 2 * per && Time.realtimeSinceStartup < until) yield return null;
+            self = GameInstance.PlayingCharacterEntity;
+            int doneBeforeHop = (CountItem(self, itemId) - before) / per;
+            int leftAtHop = self.CraftingComponent != null && self.CraftingComponent.QueueItems.Count > 0 ? self.CraftingComponent.QueueItems[0].amount : 0;
+            float targetX = self.EntityTransform.position.x < line ? line + 3f : line - 3f;
+            Log($"social: {doneBeforeHop} crafted here, {leftAtHop} queued; walking over the line to x={targetX:0.#}");
+            bool reached = false;
+            _walkZOverride = self.EntityTransform.position.z;
+            yield return WalkTo(targetX, Time.realtimeSinceStartup + 30f, hopsBefore, r => reached = r);
+            _walkZOverride = null;
+            // The client counts a hop once its new character is ready, which can come after the walk reached its mark.
+            until = Time.realtimeSinceStartup + 10f;
+            while (ClientMigrationController.CompletedCount <= hopsBefore && Time.realtimeSinceStartup < until) yield return null;
+            bool hopped = ClientMigrationController.CompletedCount > hopsBefore;
+            until = Time.realtimeSinceStartup + socialCraftAmount * 2f + 20f;
+            while (Time.realtimeSinceStartup < until)
+            {
+                self = GameInstance.PlayingCharacterEntity;
+                if (self != null && CountItem(self, itemId) >= before + socialCraftAmount * per)
+                    break;
+                yield return null;
+            }
+            yield return new WaitForSecondsRealtime(3f); // and nothing more after the queue ran out
+            self = GameInstance.PlayingCharacterEntity;
+            int crafted = (CountItem(self, itemId) - before) / per;
+            int queueLeft = self.CraftingComponent != null ? self.CraftingComponent.QueueItems.Count : -1;
+            string detail = $"{crafted} of {socialCraftAmount} crafted ({doneBeforeHop} before the hop, {leftAtHop} queued at it), gold {goldBefore}->{self.Gold}, hopped {hopped}, {queueLeft} left queued";
+            bool ok = crafted == socialCraftAmount && hopped && leftAtHop > 0 && goldBefore - self.Gold == socialCraftAmount * goldPer && queueLeft == 0;
+            done(ok ? $"ok ({detail})" : detail);
+        }
+
+        private static int CountItem(BasePlayerCharacterEntity self, int dataId)
+        {
+            if (self == null) return 0;
+            int amount = 0;
+            for (int i = 0; i < self.NonEquipItems.Count; ++i)
+                if (!self.NonEquipItems[i].IsEmptySlot() && self.NonEquipItems[i].dataId == dataId)
+                    amount += self.NonEquipItems[i].amount;
+            return amount;
+        }
+
+        private static int BagAmount(BasePlayerCharacterEntity self)
+        {
+            if (self == null) return 0;
+            int amount = 0;
+            for (int i = 0; i < self.NonEquipItems.Count; ++i)
+                if (!self.NonEquipItems[i].IsEmptySlot())
+                    amount += self.NonEquipItems[i].amount;
+            return amount;
         }
 
         private static string BagSummaryShort(BasePlayerCharacterEntity self)

@@ -286,7 +286,7 @@ namespace MultiplayerARPG.MMO.Mesh
             DealingState = DealingState.ConfirmDealing;
             MirrorToOwner();
             if (other.DealingComponent.DealingState != DealingState.ConfirmDealing)
-                return; // the other has not confirmed yet: its confirm closes the trade
+                return; // the other has not confirmed yet: its confirm (or, across a line, its mirror here) closes the trade
             if (!(MeshIdentity.IsGhostEntity(other) && Mesh != null))
             {
                 // Both here: the kit's exchange, as it was.
@@ -313,8 +313,32 @@ namespace MultiplayerARPG.MMO.Mesh
                 StopDealing();
                 return;
             }
-            // Across a line: this trader can receive what the other offers (its offer is the mirror's), and its own
-            // offer goes into escrow and over to the other's owner, which does the other half and answers.
+            BeginAcrossIfChosen("its own confirm");
+#endif
+        }
+
+        /// <summary>
+        /// Both traders have confirmed and the other is across a line: exactly one of the two cells begins the exchange,
+        /// the one whose trader has the smaller character id (both cells decide alike), as soon as it sees both
+        /// confirmed, from its own trader's confirm or from the other's arriving as a mirror. Two confirms sent within the
+        /// same moment each saw the other still locked, and neither cell began it (DESIGN 1.46: the rig's trade stuck at
+        /// both confirmed). The other cell waits for the DealCommit.
+        /// </summary>
+        internal void BeginAcrossIfChosen(string seenBy)
+        {
+#if UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES
+            BasePlayerCharacterEntity other = DealingCharacter;
+            if (other == null || other.DealingComponent == null || !MeshIdentity.IsGhostEntity(other) || Mesh == null)
+                return;
+            if (DealingState != DealingState.ConfirmDealing || other.DealingComponent.DealingState != DealingState.ConfirmDealing || Mesh.HasDealEscrow(Entity))
+                return;
+            if (string.CompareOrdinal(Entity.Id, other.Id) > 0)
+            {
+                Logging.Log("Mesh", $"Trade {Entity.CharacterName} <-> {other.CharacterName}: both confirmed (seen by {seenBy}); the other cell begins the exchange");
+                return;
+            }
+            // This trader can receive what the other offers (its offer is the mirror's), and its own offer goes into
+            // escrow and over to the other's owner, which does the other half and answers.
             if (MeshDealing.WillOverwhelm(Entity, other.DealingComponent.DealingItems))
             {
                 GameInstance.ServerGameMessageHandlers.SendGameMessage(ConnectionId, UITextKeys.UI_ERROR_WILL_OVERWHELMING);
@@ -329,6 +353,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 StopDealing();
                 return;
             }
+            Logging.Log("Mesh", $"Trade {Entity.CharacterName} <-> {other.CharacterName}: both confirmed (seen by {seenBy}); this cell begins the exchange");
             // The state stays ConfirmDealing until the answer: the kit refuses every other action meanwhile.
 #endif
         }
