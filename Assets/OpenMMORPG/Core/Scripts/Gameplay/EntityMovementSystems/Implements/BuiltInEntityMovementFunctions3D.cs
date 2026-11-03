@@ -484,6 +484,16 @@ namespace MultiplayerARPG
                 return;
             }
 
+            // A seated character is put on its seat every frame, so its interpolation is held where the seat put it.
+            // Otherwise a copy that saw it before it boarded is drawn back at that spot from leaving the seat until the
+            // exit teleport's state arrives.
+            if (IsSeatedInVehicle)
+            {
+                _startInterpPosition = EntityTransform.position;
+                _endInterpPosition = _startInterpPosition;
+                return;
+            }
+
             if (_acceptedPositionTimestamp > 0)
             {
                 _interpElapsedTime += deltaTime;
@@ -1282,7 +1292,7 @@ namespace MultiplayerARPG
         }
 
         // IQuantizedEntityMovementDataHandler. Matches WriteServerState, which sends nothing before start.
-        public bool CanWriteQuantizedServerState => _isStarted;
+        public bool CanWriteQuantizedServerState => _isStarted && !ShouldSkipSeatedServerState;
 
         // This is used to create movement data for server, and it will be sent to clients, so it can be used to sync movement state from server to clients, and it's called at server, so it can be used to create movement data from server state.
         public MovementData CreateMovementData(out List<EntityMovementForceApplier> forceAppliers)
@@ -1334,10 +1344,27 @@ namespace MultiplayerARPG
             return movementData;
         }
 
+        /// <summary>
+        /// When true, the server writes no movement state for a character seated in a vehicle unless a jump, dash or teleport
+        /// is pending. Every peer already puts a seated character on its seat each frame from the vehicle's passenger list,
+        /// and a new subscriber gets its position in the spawn message, so those states carry nothing. Off by default.
+        /// </summary>
+        public static bool SkipSeatedServerStates = false;
+
+        /// <summary>The character sits in a vehicle, and every peer puts it on its seat each frame.</summary>
+        public bool IsSeatedInVehicle => !Entity.PassengingVehicleEntity.IsNull();
+
+        /// <summary>The server sends this character no state this tick: read by both send paths.</summary>
+        private bool ShouldSkipSeatedServerState => SkipSeatedServerStates && IsSeatedInVehicle && !_sendingJump && !_sendingDash && !_isTeleporting;
+
         public bool WriteServerState(long writeTimestamp, NetDataWriter writer, out bool shouldSendReliably)
         {
             shouldSendReliably = false;
             if (!_isStarted)
+                return false;
+            // The send loop records only what was written, so a skipped character keeps its one-shot flags for a tick that
+            // writes them
+            if (ShouldSkipSeatedServerState)
                 return false;
             // Sync transform from server to all clients (include owner client)
             if (_sendingJump)
