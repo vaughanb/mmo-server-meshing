@@ -287,7 +287,12 @@ namespace MultiplayerARPG.MMO.Mesh
             };
             StartCoroutine(WatchPendingSale(saleId));
             Logging.Log("Mesh", $"Vending sold here: {target.CharacterName} sold {sold.amount} x item {sold.dataId} for {price} gold to {buyer.CharacterName} across a line (sale {saleId}; paid on the buyer's cell's word)");
-            AnswerBuyer(buyer.Id, buyerZone, GhostActionKind.VendingSold, vendor, writer => { writer.Put((byte)0); writer.Put(saleId); writer.Put(sold); writer.Put(price); }, delay);
+            string saleZone = OwnZoneId, vendorId = target.Id;
+            AnswerBuyer(buyer.Id, buyerZone, GhostActionKind.VendingSold, vendor, writer =>
+            {
+                writer.Put((byte)0); writer.Put(saleId); writer.Put(sold); writer.Put(price);
+                writer.Put(saleZone ?? string.Empty); writer.Put(vendorId ?? string.Empty); // DESIGN 1.52: where the word goes
+            }, delay);
         }
 
         /// <summary>
@@ -347,8 +352,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 BaseCharacterEntity buyer = ResolveGhostOrReal(sale.buyerId);
                 BasePlayerCharacterEntity vendor = ResolveOwnedCharacter(sale.vendorId) as BasePlayerCharacterEntity;
                 Logging.LogWarning("Mesh", $"Vending: no word on sale {saleId} ({sale.vendorName} to {sale.buyerName}) after {Time.unscaledTime - sale.since:0} s; asking the buyer's cell");
-                string id = saleId;
-                System.Action<NetDataWriter> query = writer => { writer.Put((byte)0); writer.Put(id); };
+                string id = saleId, saleZone = OwnZoneId, vendorId = sale.vendorId;
+                System.Action<NetDataWriter> query = writer => { writer.Put((byte)0); writer.Put(id); writer.Put(saleZone ?? string.Empty); writer.Put(vendorId ?? string.Empty); };
                 if (!SendToPlayer(buyer, GhostActionKind.VendingQuery, vendor, query) && !SendToPlayerOnZone(sale.buyerZone, sale.buyerId, GhostActionKind.VendingQuery, vendor, query))
                     Logging.LogWarning("Mesh", $"Vending: {sale.buyerName} is neither here nor streamed here, and zone {sale.buyerZone ?? "?"} is not linked; sale {saleId} is asked about again later");
             }
@@ -524,7 +529,10 @@ namespace MultiplayerARPG.MMO.Mesh
             if (vendorInfo != null)
                 vendorInfo.TryGetEntity(out vendor);
             System.Action<NetDataWriter> done = writer => { writer.Put((byte)0); writer.Put(saleId); writer.Put(paid); };
-            if (!SendToPlayer(vendor, GhostActionKind.VendingDone, buyer, done) && !SendToPlayerOnZone(replyZone, vendorMeshId, GhostActionKind.VendingDone, buyer, done))
+            // DESIGN 1.52: to the sale's cell first, wherever its vendor is now (a released or restarted sale's vendor may be elsewhere).
+            if (SendToPlayerOnZone(replyZone, vendorMeshId, GhostActionKind.VendingDone, buyer, done))
+                return;
+            if (!SendToPlayer(vendor, GhostActionKind.VendingDone, buyer, done))
                 Logging.LogWarning("Mesh", $"Vending: the word on sale {saleId} ({(paid ? "paid" : "not paid")}) found the vendor neither here nor streamed here; its cell asks again");
         }
 
@@ -539,13 +547,14 @@ namespace MultiplayerARPG.MMO.Mesh
             string saleId = payload.GetString();
             CharacterItem sold = payload.Get<CharacterItem>();
             int price = payload.GetInt();
+            string saleZone = payload.GetString(), vendorId = payload.GetString();
             if (!(target is BasePlayerCharacterEntity buyer))
                 return;
             instigator.TryGetEntity(out BasePlayerCharacterEntity vendor);
             if (TryGetSaleDecision(buyer.Id, saleId, out bool decided))
             {
                 Logging.LogWarning("Mesh", $"Vending: the item of sale {saleId} reached {buyer.CharacterName} after this cell's word on it ({(decided ? "paid" : "not paid")}); the same word again, nothing given");
-                SendSaleDone(instigator, saleId, decided, buyer);
+                SendSaleDone(instigator, saleId, decided, buyer, saleZone, vendorId);
                 return;
             }
             bool paid = true;
@@ -571,7 +580,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     ServerLogHandlers.LogBuyVendingItem(buyer, vendor, sold, price);
                 Logging.Log("Mesh", $"Vending bought here: {buyer.CharacterName} received {sold.amount} x item {sold.dataId} for {price} gold from {(vendor != null ? vendor.CharacterName : "a vendor")} across a line; its escrow is spent");
             }
-            SendSaleDone(instigator, saleId, paid, buyer);
+            SendSaleDone(instigator, saleId, paid, buyer, saleZone, vendorId);
         }
 
         /// <summary>The vendor's cell asks about a sale it has no word on: this cell's word, or not paid when it never saw the item.</summary>
@@ -579,8 +588,10 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             payload.GetByte();
             string saleId = payload.GetString();
+            string saleZone = payload.GetString(), vendorId = payload.GetString();
             BasePlayerCharacterEntity buyer = target as BasePlayerCharacterEntity;
-            AnswerSaleQuery(buyer != null ? buyer.Id : target.Id, buyer != null ? buyer.CharacterName : target.Id, saleId, instigator, buyer);
+            AnswerSaleQuery(buyer != null ? buyer.Id : target.Id, buyer != null ? buyer.CharacterName : target.Id, saleId, instigator, buyer,
+                string.IsNullOrEmpty(saleZone) ? null : saleZone, string.IsNullOrEmpty(vendorId) ? null : vendorId);
         }
 
         private void AnswerSaleQuery(string buyerId, string buyerName, string saleId, EntityInfo vendorInfo, BasePlayerCharacterEntity buyer, string replyZone = null, string vendorMeshId = null)
@@ -638,6 +649,22 @@ namespace MultiplayerARPG.MMO.Mesh
             reader.GetByte();
             string saleId = reader.GetString();
             string replyZone = _neighbourZoneByConnection.TryGetValue(connectionId, out string fromZone) ? fromZone : null;
+            string vendorMeshId = msg.instigatorMeshId;
+            if (kind != GhostActionKind.VendingDone)
+            {
+                // The sale's cell and its vendor, from the message itself (the link it came over may be a forwarder's).
+                if (kind == GhostActionKind.VendingSold)
+                {
+                    reader.Get<CharacterItem>();
+                    reader.GetInt();
+                }
+                if (reader.AvailableBytes > 0)
+                {
+                    string saleZone = reader.GetString(), vendorId = reader.GetString();
+                    if (!string.IsNullOrEmpty(saleZone)) replyZone = saleZone;
+                    if (!string.IsNullOrEmpty(vendorId)) vendorMeshId = vendorId;
+                }
+            }
             if (kind == GhostActionKind.VendingDone)
             {
                 Logging.LogWarning("Mesh", $"Vending: word on sale {saleId} for {msg.targetMeshId}, who is not here; dropped");
@@ -647,10 +674,10 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 RecordSaleDecision(msg.targetMeshId, saleId, false);
                 Logging.LogWarning("Mesh", $"Vending: the item of sale {saleId} reached this cell after {msg.targetMeshId} left it; not paid, the item goes back to the vendor");
-                SendSaleDone(instigator, saleId, false, null, replyZone, msg.instigatorMeshId);
+                SendSaleDone(instigator, saleId, false, null, replyZone, vendorMeshId);
                 return true;
             }
-            AnswerSaleQuery(msg.targetMeshId, msg.targetMeshId, saleId, instigator, null, replyZone, msg.instigatorMeshId);
+            AnswerSaleQuery(msg.targetMeshId, msg.targetMeshId, saleId, instigator, null, replyZone, vendorMeshId);
             return true;
         }
 

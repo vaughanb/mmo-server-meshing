@@ -92,6 +92,29 @@ namespace MultiplayerARPG.MMO.Mesh
         public static string FaultLine(string key, string what) => $"FAULT: dying on {what} ({key})";
 
         /// <summary>
+        /// QuitOnce (DESIGN 1.52) is FireOnce's clean form: the marker, a <c>FAULT: quitting on &lt;what&gt;</c> line, and the
+        /// kit's own quit path (it saves every player and building) instead of a kill. False when it fired already.
+        /// </summary>
+        public static bool QuitOnce(string key, string zone, string what)
+        {
+            string marker = MarkerPath(key, zone);
+            if (System.IO.File.Exists(marker))
+                return false;
+            try
+            {
+                System.IO.Directory.CreateDirectory("Temp");
+                System.IO.File.WriteAllText(marker, DateTime.Now.ToString("HH:mm:ss.fff", System.Globalization.CultureInfo.InvariantCulture));
+            }
+            catch (Exception)
+            {
+                // A marker that cannot be written only means the restarted incarnation quits too.
+            }
+            LiteNetLibManager.Logging.LogError("Mesh", $"FAULT: quitting on {what} ({key})");
+            UnityEngine.Application.Quit();
+            return true;
+        }
+
+        /// <summary>
         /// FireOnce kills this process for the fault <paramref name="key"/> on <paramref name="zone"/> unless it already fired
         /// in this run (its marker exists): the marker is written first, then the FAULT line, then Process.Kill. Returns
         /// false when the marker says it fired already (nothing happens).

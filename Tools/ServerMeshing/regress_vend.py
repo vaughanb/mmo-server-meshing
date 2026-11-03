@@ -29,6 +29,12 @@ and settles the exchange on it when the answers come through; and the fixture lo
 despawn delay) as both have confirmed the fifth trade (-meshSocialQuitOnTrade 5 -meshSocialQuitSafe, C holding that
 answer 3 s): E asks at once, C answers, and E mails the fixture what it received.
 
+tradestop (DESIGN 1.52): `trade`'s two traders, two trades. C drops every answer to the second for 45 s
+(MESH_TEST_TRADE_BLACKOUT 2:45), so its escrow stays open on E, and E quits cleanly 5 s into it
+(MESH_FAULT_QUIT_WITH_EXCHANGE E:5): the kit's quit path saves the fixture, E writes its exchanges journal, the
+spawner starts E again, and the new E takes the journal up and asks; once C answers, the exchange is settled on the
+fixture (if it logged in again) or mailed to it. The bags, the gold and the mail are read from the database.
+
 regress.py hands itself in as `rig`; the graders read the cells' logs and the database.
 """
 import os
@@ -41,7 +47,7 @@ import regress_merge
 import regress_split
 import rigtools
 
-SCENARIOS = ("market", "splitvend", "trade")
+SCENARIOS = ("market", "splitvend", "trade", "tradestop")
 PERSIST_REASON = regress_split.PERSIST_REASON
 EXPECTED_ZONES = {}
 
@@ -140,6 +146,9 @@ def run(name, rep, rig, start, day, bots):
         return None
     if name == "trade":
         run_trade(rep, rig, start, day, bots)
+        return None
+    if name == "tradestop":
+        run_tradestop(rep, rig, start, day, bots)
         return None
     return run_splitvend(rep, rig, start, day, bots)
 
@@ -349,6 +358,97 @@ def run_trade(rep, rig, start, day, bots):
     ga, gd = gold_of(rig, acceptor_char), gold_of(rig, driver_char)
     rep.check(gd == TRADE_GOLD and ga == TRADE_GOLD - TRADE_OFFER_GOLD,
               f"the traders' gold in the database: driver {gd} (expected {TRADE_GOLD}), fixture {ga} (expected {TRADE_GOLD - TRADE_OFFER_GOLD}, the rest in the mail)")
+
+
+# ------------------------------------------------------------------ tradestop
+
+TRADESTOP_STEPS = "trade,trade,quit"
+TRADESTOP_BLACKOUT = "2:45"         # C's second commit handled: answered after 45 s
+TRADESTOP_QUIT = "E:5"              # E quits cleanly once an exchange has been open 5 s
+# The cells' exchange journals: <persistentDataPath>/ServerMeshing of the player build (MeshMapNetworkManager.exchangeJournalFolder).
+JOURNAL_FOLDER = os.path.join(os.path.expanduser("~"), "AppData", "LocalLow", "DefaultCompany", "kit-ce-project", "ServerMeshing")
+
+
+def clear_journals():
+    """No journal left by an earlier run may be taken up by this one's cells."""
+    if not os.path.isdir(JOURNAL_FOLDER):
+        return 0
+    removed = 0
+    for name in os.listdir(JOURNAL_FOLDER):
+        if name.startswith("ServerMesh.Exchanges.") and name.endswith(".bin"):
+            os.remove(os.path.join(JOURNAL_FOLDER, name))
+            removed += 1
+    return removed
+
+
+def run_tradestop(rep, rig, start, day, bots):
+    driver_char, acceptor_char = f"{TRADE_DRIVER}Char", provision.BOT.character_name
+    rig.db_reset(TRADE_DRIVER_AT, TRADE_ACCEPTOR_AT, tester_party=0, bot_party=0)
+    provision.reset_bot_positions(2, 1, [TRADE_DRIVER_AT], status_path=rig.STATUS)
+    setup_bags(rig, {driver_char: ([provision_rows.Item(ITEM_BENCH, amount=5)], TRADE_GOLD),
+                     acceptor_char: (provision_rows.COMMON_BAG, TRADE_GOLD)})
+    conn = rig.db_connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("delete from mail where senderName=%s and receiverId in (select userId from characters where characterName=%s)",
+                        (MESH_MAIL_SENDER, acceptor_char))
+        conn.commit()
+    finally:
+        conn.close()
+    stale = clear_journals()
+    if stale:
+        rep.notes.append(f"   {stale} exchanges journal(s) of an earlier run removed")
+    rig.request_play("stand", TRADE_DRIVER_AT[0], TRADE_DRIVER_AT[1], enabled=False, line_x=TRADE_LINE,
+                     env={"MESH_NO_MONSTER_HANDOFF": "1", "MESH_NO_MONSTERS": "1", "MESH_TEST_TRADE_BLACKOUT": TRADESTOP_BLACKOUT,
+                          "MESH_FAULT_QUIT_WITH_EXCHANGE": TRADESTOP_QUIT})
+    rig.wait_play(60)
+    time.sleep(20)
+    acceptor_log = rig.launch_bot("tradestop", provision.BOT.username,
+                                  ["-meshAutoMode", "stand", "-meshWalkX", f"{TRADE_ACCEPTOR_AT[0]:g}", "-meshWalkZ", f"{TRADE_ACCEPTOR_AT[1]:g}",
+                                   "-meshSocialAccept"], observe_seconds=300)
+    bots.append(("stand", acceptor_log))
+    time.sleep(10)
+    driver_log = rig.launch_bot("tradestop", TRADE_DRIVER,
+                                ["-meshAutoMode", "social", "-meshWalkX", f"{TRADE_DRIVER_AT[0]:g}", "-meshWalkZ", f"{TRADE_DRIVER_AT[1]:g}",
+                                 "-meshSocialTarget", acceptor_char, "-meshSocialSteps", TRADESTOP_STEPS], line_x=TRADE_LINE)
+    bots.append(("social", driver_log))
+    result = rig.wait_for_bot(driver_log, "social", 420)
+    rep.check("-> PASS" in result, f"driver: {result[:300] or 'no RESULT'}")
+    rep.check("across=True" in result, "the two traders stood on either side of the line (C and E)")
+    # E restarts and asks about the second trade (released: every 30 s) after C's 45 s; then the saves (20 s at most).
+    e_end = time.time() + 150
+    while time.time() < e_end:
+        e_lines = rig.zone_lines("E", start, day)
+        if rig.count(e_lines, r"Trade committed here: .*s after the commit\)|committed for \S+, who is not on this cell: mailed") >= 1:
+            break
+        time.sleep(5)
+    time.sleep(30)
+    c_lines, e_lines = rig.zone_lines("C", start, day), rig.zone_lines("E", start, day)
+    a = re.escape(acceptor_char)
+    for zone, lines, pattern, want, what in (
+            ("E", e_lines, rf"Trade commit: {a}'s offer .* in escrow", 2, "took the fixture's offer into escrow twice"),
+            ("C", c_lines, r"Trade \S+: every answer dropped for 45 s \(MESH_TEST_TRADE_BLACKOUT", 1, "blacked out the second trade's answers"),
+            ("E", e_lines, r"FAULT: quitting on an exchange open \d+ s \(MESH_FAULT_QUIT_WITH_EXCHANGE\)", 1, "quit cleanly with the second trade open"),
+            ("E", e_lines, r"Exchanges journal written as the cell stops: 1 trade escrow\(s\)", 1, "wrote the open escrow to its journal"),
+            ("E", e_lines, r"Exchanges journal taken up: 1 trade escrow\(s\)", 1, "took the journal up after its restart")):
+        n = rig.count(lines, pattern)
+        rep.check(n == want, f"{zone} {what} ({n}, expected {want})")
+    applied = rig.count(e_lines, rf"Trade committed here: {a} received .* s after the commit\)")
+    mailed = rig.count(e_lines, rf"Trade \S+ committed for {a}, who is not on this cell: mailed to {a}")
+    rep.check(applied + mailed == 1, f"E settled the second trade after its restart ({'on the fixture' if applied else 'by mail' if mailed else 'not at all'})")
+    rep.check(rig.count(c_lines + e_lines, r"with no escrow here|no answer from the other cell in \d+ s|are lost") == 0,
+              "every exchange was settled on the other cell's answer, nothing lost")
+    # The database: two exchanges, the second one's bench and 5 gold in the fixture's bag or in its mail.
+    mails = mails_to(rig, acceptor_char, 0)
+    benches = item_count(rig, acceptor_char, ITEM_BENCH) + mailed_amount(mails, ITEM_BENCH)
+    rep.check(benches == 2, f"the fixture has 2 benches in its bag and mail ({benches}; {len(mails)} mail(s))")
+    for name, data_id, want, what in ((driver_char, ITEM_SKILL, 2, "scrolls"), (driver_char, ITEM_BENCH, 3, "benches left"),
+                                      (acceptor_char, ITEM_SKILL, 18, "scrolls left")):
+        n = item_count(rig, name, data_id)
+        rep.check(n == want, f"{name} has {n} {what} in the database, expected {want}")
+    ga, gd = gold_of(rig, acceptor_char), gold_of(rig, driver_char)
+    gm = sum(g for g, _ in mails)
+    rep.check(gd == TRADE_GOLD and ga + gm == TRADE_GOLD, f"the traders' gold: driver {gd} (expected {TRADE_GOLD}), fixture {ga} + {gm} mailed (expected {TRADE_GOLD})")
 
 
 # ------------------------------------------------------------------ splitvend

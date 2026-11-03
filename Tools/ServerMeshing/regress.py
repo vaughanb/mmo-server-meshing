@@ -103,6 +103,8 @@ ENV_KEYS = ["MESH_NO_MONSTER_HANDOFF", "MESH_FAULT_DIE_ON_NOTICE", "MESH_GHOST_L
             "MESH_TEST_TRADE_DROP", "MESH_TEST_TRADE_ANSWER_DELAY",
             # DESIGN 1.51: a cell drops every answer about one exchange for a while (regress_vend's trade and market)
             "MESH_TEST_TRADE_BLACKOUT", "MESH_TEST_VENDING_BLACKOUT",
+            # DESIGN 1.52: a cell quits cleanly with an exchange open (regress_vend's tradestop)
+            "MESH_FAULT_QUIT_WITH_EXCHANGE",
             # 0.72 dynamic cells: per-map cell mode, and where the central's layout coordinator keeps its store
             "MESH_CELL_MODE", "MESH_COORDINATOR_STORE",
             # Phase 0 step 2 instrument toggles (p0tools.ENV_REGISTRY): tick-frame bins, frame and physics rates,

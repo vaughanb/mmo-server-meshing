@@ -270,7 +270,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 return;
             bool holdsLayout = HasOwnZone && world != null && !world.AppliedPair.IsNone;
             MeshCellState state = OwnCell != null ? OwnCell.state : MeshCellState.Pending;
-            MeshRetireDecision decision = MeshRetireRule.Decide(LayoutCellId, CellIncarnation, LayoutCellId, CellIncarnation, holdsLayout, state, _drainState.IsDrained);
+            // DESIGN 1.52: an open exchange across a line holds the retire as a character does (it lives in this process).
+            MeshRetireDecision decision = MeshRetireRule.Decide(LayoutCellId, CellIncarnation, LayoutCellId, CellIncarnation, holdsLayout, state, _drainState.IsDrained && OpenExchangeCount == 0);
             if (decision == MeshRetireDecision.QuitDrained)
             {
                 QuitDrainedCell();
@@ -282,7 +283,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 return;
             }
             if (MeshDrainRules.StragglingDue(_mergeRetireAt, now, RetireMaxSeconds, StragglingLogSeconds, ref _mergeRetireNextStraggle))
-                Logging.LogWarning("Mesh", $"Merge retire: {LayoutCellId} still holds {_drainState.Describe()}");
+                Logging.LogWarning("Mesh", $"Merge retire: {LayoutCellId} still holds {_drainState.Describe()}{(OpenExchangeCount > 0 ? $" and {OpenExchangeCount} open exchange(s)" : string.Empty)}");
         }
 
         /// <summary>The drained cell ends itself through the kit's quit path (wantsToQuit, ProceedBeforeQuit), as Sleep does.</summary>

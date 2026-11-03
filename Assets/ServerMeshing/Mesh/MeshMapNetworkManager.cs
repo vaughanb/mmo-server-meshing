@@ -964,6 +964,7 @@ namespace MultiplayerARPG.MMO.Mesh
             if (IsServer)
             {
                 SampleFrame();
+                ExchangeJournalTick(); // DESIGN 1.52: the journal taken up once the zone is known
                 ClusterConnectTick();
                 ClusterMirrorTick();
                 DatabaseConnectTick();
@@ -1321,6 +1322,11 @@ namespace MultiplayerARPG.MMO.Mesh
             if (players > 0 || Players.Count > 0)
             {
                 Logging.Log("Mesh", $"Sleep asked for cell {message.cellId} but {players} player(s) / {Players.Count} connection(s) are here: staying up");
+                return;
+            }
+            if (OpenExchangeCount > 0)
+            {
+                Logging.Log("Mesh", $"Sleep asked for cell {message.cellId} but {OpenExchangeCount} exchange(s) across a line are open here: staying up (DESIGN 1.52)");
                 return;
             }
             Logging.Log("Mesh", $"Sleeping: cell {OwnZoneId} has nobody near it; saving and exiting");

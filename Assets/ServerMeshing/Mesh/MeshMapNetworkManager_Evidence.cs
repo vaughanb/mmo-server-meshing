@@ -264,6 +264,8 @@ namespace MultiplayerARPG.MMO.Mesh
             MeshLayoutEvidenceMessage evidence = MeshSplitEvidence.Assemble(OwnZoneId, CellIncarnation, pair, _evidenceWindowStart, appliedAt,
                 NeighbourEvidence(now), _puppetQueue.Count, work.saturatedShare, work.workP95Ms, work.budgetMs, _splitShrunk, _splitGivenAway, drain);
             evidence = MeshSplitEvidence.WithDrainState(evidence, IsDraining, EvidenceDrainState(onChange));
+            if (evidence.drained && OpenExchangeCount > 0)
+                evidence.drained = false; // DESIGN 1.52: the central's drain gate waits for this cell's open exchanges too
             ClusterClient.SendPacket(0, DeliveryMethod.ReliableOrdered, MeshClusterMsg.LayoutEvidence, writer => evidence.Serialize(writer));
         }
 #endif

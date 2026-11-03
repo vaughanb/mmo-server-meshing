@@ -402,8 +402,8 @@ namespace MultiplayerARPG.MMO.Mesh
         private void SendDealQuery(DealEscrow escrow, string why)
         {
             BaseCharacterEntity other = ResolveGhostOrReal(escrow.otherMeshId);
-            string tradeId = escrow.tradeId;
-            System.Action<NetDataWriter> query = writer => writer.Put(tradeId);
+            string tradeId = escrow.tradeId, escrowZone = OwnZoneId, traderId = escrow.traderId;
+            System.Action<NetDataWriter> query = writer => { writer.Put(tradeId); writer.Put(escrowZone ?? string.Empty); writer.Put(traderId ?? string.Empty); };
             BasePlayerCharacterEntity trader = RegisteredPlayer(escrow.traderId);
             Logging.LogWarning("Mesh", $"Trade {tradeId} of {escrow.traderName}: {why}; asking the other cell");
             if (!SendToPlayer(other, GhostActionKind.DealQuery, trader, query) && !SendToPlayerOnZone(escrow.otherZone, escrow.otherMeshId, GhostActionKind.DealQuery, trader, query))
@@ -569,12 +569,21 @@ namespace MultiplayerARPG.MMO.Mesh
                     writer.Put(decision.tradeId);
                 }
             };
+            // DESIGN 1.52: to the escrow's cell first, wherever its trader is now (a trader released or restarted away from
+            // its escrow logged in on this very cell in the first rig run, and the answer, handled here, found no escrow).
+            if (SendToPlayerOnZone(decision.otherZone, decision.otherId, kind, answering, write))
+                return;
             BaseCharacterEntity other = null;
             if (otherInfo != null)
                 otherInfo.TryGetEntity(out other);
             if (other == null)
                 other = ResolveGhostOrReal(decision.otherId);
-            if (!SendToPlayer(other, kind, answering, write) && !SendToPlayerOnZone(decision.otherZone, decision.otherId, kind, answering, write))
+            if (other != null && !MeshIdentity.IsGhostEntity(other) && !string.IsNullOrEmpty(decision.otherZone) && !string.Equals(decision.otherZone, OwnZoneId))
+            {
+                Logging.LogWarning("Mesh", $"Trade {decision.tradeId}: the escrow's zone {decision.otherZone} is not linked; its cell asks again");
+                return; // the trader is here but its escrow is not: handled here, the answer would find nothing
+            }
+            if (!SendToPlayer(other, kind, answering, write))
                 Logging.LogWarning("Mesh", $"Trade {decision.tradeId}: the answer found the other trader neither here nor streamed here; its cell asks again");
         }
 
@@ -634,8 +643,9 @@ namespace MultiplayerARPG.MMO.Mesh
         private void HandleDealQueryAction(BaseCharacterEntity target, EntityInfo instigator, NetDataReader payload)
         {
             string tradeId = payload.GetString();
+            string escrowZone = payload.GetString(), traderId = payload.GetString();
             BasePlayerCharacterEntity player = target as BasePlayerCharacterEntity;
-            AnswerDealQuery(player != null ? player.Id : target.Id, player, tradeId, instigator, null, null);
+            AnswerDealQuery(player != null ? player.Id : target.Id, player, tradeId, instigator, NullIfEmpty(escrowZone), NullIfEmpty(traderId));
         }
 
         private void AnswerDealQuery(string traderId, BasePlayerCharacterEntity player, string tradeId, EntityInfo otherInfo, string replyZone, string otherMeshId)
@@ -654,8 +664,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 Logging.Log("Mesh", $"Trade {tradeId} asked about for {(player != null ? player.CharacterName : traderId)}: the same answer ({(decision.committed ? "committed" : "failed")})");
             if (string.IsNullOrEmpty(decision.otherId))
                 decision.otherId = otherMeshId;
-            if (string.IsNullOrEmpty(decision.otherZone))
-                decision.otherZone = replyZone;
+            if (!string.IsNullOrEmpty(replyZone))
+                decision.otherZone = replyZone; // the question names the escrow's cell
             SendDealAnswer(player, otherInfo, decision, 0f);
         }
 
@@ -693,9 +703,18 @@ namespace MultiplayerARPG.MMO.Mesh
                 return true;
             }
             string asked = reader.GetString();
+            if (kind == GhostActionKind.DealQuery && reader.AvailableBytes > 0)
+            {
+                // The escrow's cell and its trader, from the question itself (the link it came over may be a forwarder's).
+                string escrowZone = reader.GetString(), traderId = reader.GetString();
+                AnswerDealQuery(msg.targetMeshId, null, asked, instigator, NullIfEmpty(escrowZone) ?? replyZone, NullIfEmpty(traderId) ?? msg.instigatorMeshId);
+                return true;
+            }
             AnswerDealQuery(msg.targetMeshId, null, asked, instigator, replyZone, msg.instigatorMeshId);
             return true;
         }
+
+        private static string NullIfEmpty(string s) => string.IsNullOrEmpty(s) ? null : s;
 
         /// <summary>UnregisterPlayerCharacter's hook for a trader leaving otherwise than by a handoff: its exchange is asked about at once.</summary>
         private void TradeOnLeaving(BasePlayerCharacterEntity player)

@@ -248,6 +248,11 @@ Where the work stands, how to get it running on another machine, and what is lef
     is sent as a container, its building-only rotation and receiver-only age listed, and the grid is shaped to
     `LayerCount` arrays of columns × rows before it is written. `MeshMessageBranchTests` round-trips every `GhostKind`
     by hand. No message changed.
+29. **Open exchanges survive a cell's clean stop (DESIGN 1.52, package 0.97.37).** A cell does not sleep or retire while
+    it holds an open trade or sale; one stopped all the same writes them to a journal as it quits (after the kit saved
+    every player) and its next process takes them up. An answer now goes to the cell that holds the exchange.
+    `regress.py tradestop` (66 checks) stops E cleanly with a trade open. A crash still loses what the kit's last save
+    did not have (every 20 s at most), exchanges included.
 28. **No deadline on an exchange, and mail for a player who is gone (DESIGN 1.51, package 0.97.36).** A trade or a sale
     across a line is settled only by the other cell's answer; after a minute without one its player is released and the
     exchange stays open. A result for a player no longer on the cell (logged out, disconnected, hopped) is mailed to its
@@ -488,7 +493,8 @@ Where the work stands, how to get it running on another machine, and what is lef
    release has it yet, so the package names `master` at 05ec55012 as its minimum: when a release does, name that. A later
    sync is a three-way merge, not a copy (`upstream/README.md`).
 5. **The rig regression** is run on the paths a change reaches, not in full (the user's choice, 2026-11-02). On the
-   code of 1.51: `trade` 82, `market` 84 and `social` 70 checks. On the code of 1.50 (the server code of 1.49): `splitvend` 116 checks, and `pet` and `party` 109 in a full run stopped after
+   code of 1.52: `tradestop` 66, `trade` 82, `market` 84, `social` 70, `splitvend` 116, `sleep` 57 and `merge` 144
+   checks. On the code of 1.51: `trade` 82, `market` 84 and `social` 70 checks. On the code of 1.50 (the server code of 1.49): `splitvend` 116 checks, and `pet` and `party` 109 in a full run stopped after
    them; on 1.49's `trade` 75, `social` 70 and `market` 83, all passing (2026-11-02), as on 1.48's `market` 83, `social` 70 and `splitvend` 116, and on 1.47's `market` 70, `splitvend` 116, `social` 70 and `harvest` 47 (the code
    every scenario runs changed by one lookup in the boundary tick). The full run below is the 1.46 code's. It passed all 35 scenarios on the code of 1.46, `social` at 70 checks (2026-11-02, 3,216 checks, 175 min, every scenario on its
    first run; 27 fewer per split or merge scenario than 1.45 only because that run crossed midnight and also checked the
