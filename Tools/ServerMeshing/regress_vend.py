@@ -18,6 +18,14 @@ splitvend: `split`'s cut of C at x = 0 with meshbot2 (one of the eight stand bot
 with a shop of two items; once the split is done meshbot10 buys one from the kept half across the new line, the merge
 brings the vendor back to C, and meshbot11 buys the last one there (the shop crossed with the handoff both times).
 
+trade (DESIGN 1.49): the test map Static. The fixture meshbot (the smaller character id, so its cell, E, begins every
+exchange and keeps the escrow) stands a metre into E and accepts every trade; meshbot2 on C trades with it four times
+(-meshSocialSteps trade,tradefail,trade,trade: one of each first bag stack and 5 gold each way). E drops its second
+commit (MESH_TEST_TRADE_DROP commit2), so E asks after 10 s, C answers failed and ends meshbot2's trade, and E gives
+the escrow back; C drops its second committed answer (committed2), so E asks and C answers committed again; and the
+fixture quits as both have confirmed the fourth trade (-meshSocialQuitOnTrade 4, C holding that answer 3 s): E asks at
+once, C answers, and E applies it to the character the kit keeps for its despawn delay, whose save takes it.
+
 regress.py hands itself in as `rig`; the graders read the cells' logs and the database.
 """
 import os
@@ -30,7 +38,7 @@ import regress_merge
 import regress_split
 import rigtools
 
-SCENARIOS = ("market", "splitvend")
+SCENARIOS = ("market", "splitvend", "trade")
 PERSIST_REASON = regress_split.PERSIST_REASON
 EXPECTED_ZONES = {}
 
@@ -126,6 +134,9 @@ def run(name, rep, rig, start, day, bots):
     if name == "market":
         run_market(rep, rig, start, day, bots)
         return None
+    if name == "trade":
+        run_trade(rep, rig, start, day, bots)
+        return None
     return run_splitvend(rep, rig, start, day, bots)
 
 
@@ -206,6 +217,80 @@ def run_market(rep, rig, start, day, bots):
     rep.check(vendor_gold == 3 * PRICE, f"the vendor's gold in the database {vendor_gold}, expected {3 * PRICE}")
     bag = bag_amount(rig, vendor_char)
     rep.check(bag == vendor_bag - 3, f"the vendor's bag in the database holds {bag} items, expected {vendor_bag - 3} ({vendor_bag} less the 3 delivered)")
+
+
+# ------------------------------------------------------------------ trade
+
+TRADE_LINE = 100.0
+TRADE_DRIVER, TRADE_DRIVER_AT = "meshbot2", (99.4, 52.0)   # clear of market's layout (z 56-58) and harvest's tree
+TRADE_ACCEPTOR_AT = (100.6, 52.0)
+TRADE_DROPS = "commit2,committed2"   # MESH_TEST_TRADE_DROP: E's second commit, C's second committed answer
+TRADE_DELAYS = "0,0,3"               # MESH_TEST_TRADE_ANSWER_DELAY: C's answers to the commits it handles
+TRADE_STEPS = "trade,tradefail,trade,trade,quit"
+TRADE_EXCHANGES = 3
+ITEM_SKILL = provision_rows.ITEM_SKILL
+TRADE_GOLD = 100
+
+
+def item_count(rig, name, data_id):
+    rows = rig.db_rows("select sum(i.amount) from characteritem i join characters c on c.id = i.characterId "
+                       "where c.characterName=%s and i.inventoryType=%s and i.dataId=%s", (name, provision_rows.INVENTORY_BAG, data_id))
+    return int(rows[0][0] or 0) if rows else None
+
+
+def run_trade(rep, rig, start, day, bots):
+    driver_char, acceptor_char = f"{TRADE_DRIVER}Char", provision.BOT.character_name
+    rig.db_reset(TRADE_DRIVER_AT, TRADE_ACCEPTOR_AT, tester_party=0, bot_party=0)
+    provision.reset_bot_positions(2, 1, [TRADE_DRIVER_AT], status_path=rig.STATUS)
+    setup_bags(rig, {driver_char: ([provision_rows.Item(ITEM_BENCH, amount=5)], TRADE_GOLD),
+                     acceptor_char: (provision_rows.COMMON_BAG, TRADE_GOLD)})
+    rig.request_play("stand", TRADE_DRIVER_AT[0], TRADE_DRIVER_AT[1], enabled=False, line_x=TRADE_LINE,
+                     env={"MESH_NO_MONSTER_HANDOFF": "1", "MESH_NO_MONSTERS": "1",
+                          "MESH_TEST_TRADE_DROP": TRADE_DROPS, "MESH_TEST_TRADE_ANSWER_DELAY": TRADE_DELAYS})
+    rig.wait_play(60)
+    time.sleep(20)
+    acceptor_log = rig.launch_bot("trade", provision.BOT.username,
+                                  ["-meshAutoMode", "stand", "-meshWalkX", f"{TRADE_ACCEPTOR_AT[0]:g}", "-meshWalkZ", f"{TRADE_ACCEPTOR_AT[1]:g}",
+                                   "-meshSocialAccept", "-meshSocialQuitOnTrade", "4"], observe_seconds=300)
+    bots.append(("stand", acceptor_log))
+    time.sleep(10)
+    driver_log = rig.launch_bot("trade", TRADE_DRIVER,
+                                ["-meshAutoMode", "social", "-meshWalkX", f"{TRADE_DRIVER_AT[0]:g}", "-meshWalkZ", f"{TRADE_DRIVER_AT[1]:g}",
+                                 "-meshSocialTarget", acceptor_char, "-meshSocialSteps", TRADE_STEPS], line_x=TRADE_LINE)
+    bots.append(("social", driver_log))
+    result = rig.wait_for_bot(driver_log, "social", 420)
+    rep.check("-> PASS" in result, f"driver: {result[:300] or 'no RESULT'}")
+    for step in ("trade1", "tradefail2", "trade3", "trade4"):
+        rep.check(f"{step}=ok" in result, f"the driver's {step} went as expected")
+    rep.check("across=True" in result, "the two traders stood on either side of the line (C and E)")
+    # The fixture quit on the fourth trade (the kit's despawn delay is 5 s, then its second save), the driver at the end;
+    # the kit's save scheduler writes a character at most every 20 s (characterSaveMinIntervalSeconds).
+    time.sleep(30)
+    c_lines, e_lines = rig.zone_lines("C", start, day), rig.zone_lines("E", start, day)
+    d, a = re.escape(driver_char), re.escape(acceptor_char)
+    for zone, lines, pattern, want, what in (
+            ("E", e_lines, rf"Trade commit: {a}'s offer .* in escrow", 4, "took the fixture's offer into escrow four times"),
+            ("E", e_lines, rf"Trade commit \S+ of {a} dropped \(MESH_TEST_TRADE_DROP commit2\)", 1, "dropped its second commit"),
+            ("C", c_lines, rf"Trade \S+ asked about for {d}, whose cell never saw it: failed", 1, "answered the dropped exchange failed"),
+            ("E", e_lines, rf"Trade escrow of {a} returned \(refused by the other cell", 1, "gave the second escrow back"),
+            ("C", c_lines, r"the answer \(committed\) dropped \(MESH_TEST_TRADE_DROP committed2\)", 1, "dropped its second committed answer"),
+            ("C", c_lines, rf"Trade \S+ asked about for {d}: the same answer \(committed\)", 2, "answered committed again for the third and the fourth"),
+            ("E", e_lines, rf"Trade \S+ of {a}: the trader left the cell with its exchange in escrow; asking the other cell", 1, "asked at once when the fixture left"),
+            ("E", e_lines, rf"Trade \S+: the answer \(DealCommitted\) reached this cell after {a} left it; applied", 1, "applied the fourth answer to the leaving fixture"),
+            ("E", e_lines, r"Trade \S+ committed for \S+ again \(a repeated answer\); settled already", 1, "took the held answer as a repeat"),
+            ("E", e_lines, rf"Trade committed here: {a} received", TRADE_EXCHANGES, f"completed {TRADE_EXCHANGES} exchanges for the fixture"),
+            ("C", c_lines, rf"Trade committed here: {d} gave", TRADE_EXCHANGES, f"did the driver's half {TRADE_EXCHANGES} times")):
+        n = rig.count(lines, pattern)
+        rep.check(n == want, f"{zone} {what} ({n}, expected {want})")
+    rep.check(rig.count(c_lines + e_lines, r"with no escrow here|no answer from the other cell in \d+ s") == 0,
+              "every exchange was settled on the other cell's answer")
+    # The database: each exchange moved one bench to the fixture and one scroll to the driver; the fees are alike.
+    for name, data_id, want, what in ((acceptor_char, ITEM_BENCH, TRADE_EXCHANGES, "benches"), (driver_char, ITEM_SKILL, TRADE_EXCHANGES, "scrolls"),
+                                      (driver_char, ITEM_BENCH, 5 - TRADE_EXCHANGES, "benches left"), (acceptor_char, ITEM_SKILL, 20 - TRADE_EXCHANGES, "scrolls left")):
+        n = item_count(rig, name, data_id)
+        rep.check(n == want, f"{name} has {n} {what} in the database, expected {want}")
+    ga, gd = gold_of(rig, acceptor_char), gold_of(rig, driver_char)
+    rep.check(ga is not None and ga == gd and ga <= TRADE_GOLD, f"both traders' gold alike in the database ({ga} and {gd}: 5 each way, the same fees)")
 
 
 # ------------------------------------------------------------------ splitvend

@@ -899,7 +899,10 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (leavingPlayer != null && leavingPlayer.DuelingComponent is MeshPlayerCharacterDuelingComponent dueling)
                     dueling.EndOnLeaving("left the cell");
                 if (leavingPlayer != null)
+                {
                     VendingOnLeaving(leavingPlayer); // DESIGN 1.48: before the kit saves it
+                    TradeOnLeaving(leavingPlayer);   // DESIGN 1.49
+                }
                 GhostingOnRealPlayerUnregistered(connectionId);
             }
             base.UnregisterPlayerCharacter(connectionId);
@@ -1066,8 +1069,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 // Hysteresis: only flip once clearly past the edge, so loitering on the line doesn't thrash.
                 if (-OwnCell.DistanceToEdge(pos) < handoffHysteresis)
                     continue;
-                if (HoldsHandoffForVending(entity))
-                    continue; // DESIGN 1.47: the vendor's answer comes here, where the price is in escrow
+                if (HoldsHandoffForVending(entity) || HoldsHandoffForTrade(entity))
+                    continue; // DESIGN 1.47/1.49: the answer comes here, where the price or the offer is in escrow
                 _handoffCandidates.Add(entity);
             }
             PaceHandoffCandidates(_handoffCandidates); // Slice 2b: drain admission while a split is in progress

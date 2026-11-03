@@ -14,6 +14,11 @@
 //   buy      buy the first entry from this side and stay: the item comes (the harness may drop this cell's word to the
 //            vendor's cell, which then asks)
 //   buyquit  last: log the RESULT, buy the first entry and quit at once, while the answer is on its way
+//   trade, tradefail  in the order named, each a trade with the target (one of the first dealable bag stack and
+//            socialGold each way; the target accepts with socialAutoAccept): `trade` expects the exchange, `tradefail`
+//            none (the harness drops the commit, DESIGN 1.49). With socialQuitOnTrade N the accepting side quits once
+//            both have confirmed its N-th trade, while the exchange is on its way.
+//   quit     last: log the RESULT and quit (the kit saves the character as it leaves)
 // The RESULT reads `RESULT social: across=<bool> <step>=<result> ... -> PASS`, PASS when every step named went through.
 using System.Collections;
 using System.Collections.Generic;
@@ -33,8 +38,29 @@ namespace MultiplayerARPG.MMO.Mesh
         public int socialVendCount = 1;
         public const string ARG_SOCIAL_VEND_COUNT = "-meshSocialVendCount";
         [Tooltip("bench: where the bench goes, metres from the line on this side, and along z from where this client stands.")]
-        public Vector2 socialBenchOffset = new Vector2(2f, 1f);
+        public Vector2 socialBenchOffset = new Vector2(1f, 1.5f); // 1 m: a walk aimed 3 m past the line can stop at 3 m, 4 m from it
         private bool _standing;
+        [Tooltip("With socialAutoAccept: quit 1.5 s after both sides confirmed this trade (its number, 1 first; 0: never).")]
+        public int socialQuitOnTrade = 0;
+        public const string ARG_SOCIAL_QUIT_ON_TRADE = "-meshSocialQuitOnTrade";
+        private int _myConfirms; // trades this side confirmed (a trade can send two confirms: count it once)
+        private bool _quittingOnTrade, _confirmedThisTrade;
+
+        /// <summary>socialQuitOnTrade: called on this side's confirm and on the other's; quits once both confirmed the N-th trade.</summary>
+        private void MaybeQuitOnTrade()
+        {
+            if (socialQuitOnTrade <= 0 || _quittingOnTrade || _myConfirms != socialQuitOnTrade || _otherDealState != DealingState.ConfirmDealing)
+                return;
+            _quittingOnTrade = true;
+            StartCoroutine(QuitOnTrade());
+        }
+
+        private IEnumerator QuitOnTrade()
+        {
+            yield return new WaitForSecondsRealtime(1.5f);
+            Log($"social: both confirmed trade {_myConfirms}; quitting with the exchange on its way");
+            Application.Quit();
+        }
 
         private bool HasSocialStep(string step)
         {
@@ -111,6 +137,20 @@ namespace MultiplayerARPG.MMO.Mesh
                 results.Add($"{step}={r}");
                 ok &= r.StartsWith("ok");
             }
+            int trades = 0;
+            foreach (string part in socialSteps.Split(','))
+            {
+                string step = part.Trim().ToLowerInvariant();
+                if (step != "trade" && step != "tradefail")
+                    continue;
+                trades++;
+                Phase = $"market-{step}{trades}";
+                string r = "";
+                yield return TradeOnce(targetName, step == "trade", s => r = s);
+                Log($"market: {step} {trades} {r}");
+                results.Add($"{step}{trades}={r}");
+                ok &= r.StartsWith("ok");
+            }
             bool quit = HasSocialStep("buyquit");
             if (quit)
                 results.Add("buyquit=leaving");
@@ -121,6 +161,12 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 Phase = "market-buyquit";
                 yield return BuyAndQuit(targetName, line, home);
+            }
+            else if (HasSocialStep("quit"))
+            {
+                yield return new WaitForSecondsRealtime(1f);
+                Log("market: quitting");
+                Application.Quit();
             }
         }
 
@@ -181,6 +227,63 @@ namespace MultiplayerARPG.MMO.Mesh
             bool ok = self != null && (expectItem
                 ? self.Gold == goldBefore - price && bagAfter == bagBefore + 1
                 : self.Gold == goldBefore && bagAfter == bagBefore && lowest == goldBefore - price);
+            done(ok ? $"ok ({detail})" : detail);
+        }
+
+        private static Dictionary<int, int> BagCounts(BasePlayerCharacterEntity self)
+        {
+            Dictionary<int, int> counts = new Dictionary<int, int>();
+            if (self == null)
+                return counts;
+            foreach (CharacterItem item in self.NonEquipItems)
+            {
+                if (item.IsEmptySlot())
+                    continue;
+                counts.TryGetValue(item.dataId, out int n);
+                counts[item.dataId] = n + item.amount;
+            }
+            return counts;
+        }
+
+        private static bool SameCounts(Dictionary<int, int> a, Dictionary<int, int> b)
+        {
+            if (a.Count != b.Count)
+                return false;
+            foreach (KeyValuePair<int, int> kv in a)
+                if (!b.TryGetValue(kv.Key, out int n) || n != kv.Value)
+                    return false;
+            return true;
+        }
+
+        /// <summary>
+        /// One trade with the target (it accepts with socialAutoAccept; HookSocial's handlers offer, lock and confirm):
+        /// `expectExchange` wants the bag changed, else unchanged (an exchange that failed gives everything back).
+        /// </summary>
+        private IEnumerator TradeOnce(string targetName, bool expectExchange, System.Action<string> done)
+        {
+            BasePlayerCharacterEntity self = GameInstance.PlayingCharacterEntity;
+            Dictionary<int, int> before = BagCounts(self);
+            int goldBefore = self != null ? self.Gold : 0;
+            _dealStarted = _dealEnded = false;
+            _myDealState = _otherDealState = DealingState.None;
+            float until = Time.realtimeSinceStartup + 60f, nextRequest = 0f;
+            while (!_dealEnded && Time.realtimeSinceStartup < until)
+            {
+                if (!_dealStarted && Time.realtimeSinceStartup >= nextRequest)
+                {
+                    BasePlayerCharacterEntity target = FindPlayerByName(targetName);
+                    if (target != null)
+                        GameInstance.PlayingCharacterEntity.DealingComponent.CallCmdSendDealingRequest(target.ObjectId);
+                    nextRequest = Time.realtimeSinceStartup + 8f;
+                }
+                yield return null;
+            }
+            yield return new WaitForSecondsRealtime(2f);
+            self = GameInstance.PlayingCharacterEntity;
+            Dictionary<int, int> after = BagCounts(self);
+            bool changed = !SameCounts(before, after);
+            string detail = $"{(_dealStarted ? (_dealEnded ? "ended" : $"stuck at mine={_myDealState} other={_otherDealState}") : "never opened")}, bag {(changed ? "changed" : "unchanged")}, gold {goldBefore}->{(self != null ? self.Gold : -1)}";
+            bool ok = _dealStarted && _dealEnded && changed == expectExchange && (expectExchange || self.Gold == goldBefore);
             done(ok ? $"ok ({detail})" : detail);
         }
 

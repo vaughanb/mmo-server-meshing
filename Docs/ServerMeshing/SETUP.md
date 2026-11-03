@@ -946,7 +946,8 @@ This chapter runs the test rig, which lives in the source repository
   add-on's subclasses of the kit's dealing and dueling components go onto the player entity before the kit adds its own,
   and the party and guild invitation handlers are wrapped. A duelist who crosses a line forfeits, as on a map change.
   When two traders confirm at the same moment, the cell of the one with the smaller character id does the exchange
-  (DESIGN 1.46). Friend requests need nothing: the kit writes them to the database by character id.
+  (DESIGN 1.46). That cell holds its trader's offer in escrow until the other cell answers, asking again when no answer
+  comes; a trader who disconnects mid-exchange keeps what the exchange gave it (DESIGN 1.49). Friend requests need nothing: the kit writes them to the database by character id.
 - **A player's shop** (the kit's vending) can be seen and bought from across a line (DESIGN 1.46): the add-on's vending
   component goes onto the player entity like the dealing one, the shop's sign travels in the ghost snapshot, and a
   purchase is done in two halves with the price held in escrow on the buyer's cell. A shop is carried with a handoff

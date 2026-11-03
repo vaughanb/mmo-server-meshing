@@ -68,6 +68,8 @@ namespace MultiplayerARPG.MMO.Mesh
             socialVendNow = socialVendNow || System.Array.IndexOf(args, ARG_SOCIAL_VEND_NOW) >= 0;
             if (int.TryParse(ReadArg(args, ARG_SOCIAL_VEND_COUNT, null), NumberStyles.Integer, CultureInfo.InvariantCulture, out int count) && count > 0)
                 socialVendCount = count;
+            if (int.TryParse(ReadArg(args, ARG_SOCIAL_QUIT_ON_TRADE, null), NumberStyles.Integer, CultureInfo.InvariantCulture, out int quitOn) && quitOn > 0)
+                socialQuitOnTrade = quitOn;
             string steps = ReadArg(args, ARG_SOCIAL_STEPS, null);
             if (!string.IsNullOrEmpty(steps))
                 socialSteps = steps;
@@ -95,6 +97,7 @@ namespace MultiplayerARPG.MMO.Mesh
             dealing.onStartDealing += other =>
             {
                 _dealStarted = true;
+                _confirmedThisTrade = false;
                 _myDealState = DealingState.Dealing;
                 Log($"social: trade with {other.CharacterName} open");
                 OfferAndLock(self);
@@ -115,7 +118,13 @@ namespace MultiplayerARPG.MMO.Mesh
                 {
                     Log("social: confirming the trade");
                     dealing.CallCmdConfirmDealing();
+                    if (!_confirmedThisTrade)
+                    {
+                        _confirmedThisTrade = true;
+                        _myConfirms++;
+                    }
                 }
+                MaybeQuitOnTrade(); // DESIGN 1.49 (ServerMeshAutoClient_Market)
             };
             dealing.onUpdateAnotherDealingItems += items => Log($"social: the other offers {items.Count} item(s)");
             dealing.onUpdateAnotherDealingGold += gold => Log($"social: the other offers {gold} gold");
@@ -364,7 +373,9 @@ namespace MultiplayerARPG.MMO.Mesh
             else if (!_dealEnded) trade = $"stuck at mine={_myDealState} other={_otherDealState}";
             else trade = _otherDealState == DealingState.ConfirmDealing || _myDealState == DealingState.None ? "ok" : "ended early";
             Log($"social: trade {trade}; gold {goldBefore} -> {self.Gold}; bag {bagBefore} -> {BagSummaryShort(self)}");
-            bool tradeOk = trade == "ok" && self.Gold != goldBefore;
+            // Not the gold: 5 each way with no fee, and the same scroll each way, change nothing a client sees (the
+            // check passed only while the client read its gold before the received half arrived; DESIGN 1.49).
+            bool tradeOk = trade == "ok";
             yield return new WaitForSecondsRealtime(2f);
 
             // 2. Party: make one, invite the target, wait for it to join.

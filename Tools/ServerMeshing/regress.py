@@ -99,6 +99,8 @@ ENV_KEYS = ["MESH_NO_MONSTER_HANDOFF", "MESH_FAULT_DIE_ON_NOTICE", "MESH_GHOST_L
             "MESH_TEST_VENDING_ANSWER_DELAY",
             # DESIGN 1.48: the cells drop their n-th sale answer or word (regress_vend's market)
             "MESH_TEST_VENDING_DROP",
+            # DESIGN 1.49: the cells drop their n-th trade commit or answer, and hold their answers (regress_vend's trade)
+            "MESH_TEST_TRADE_DROP", "MESH_TEST_TRADE_ANSWER_DELAY",
             # 0.72 dynamic cells: per-map cell mode, and where the central's layout coordinator keeps its store
             "MESH_CELL_MODE", "MESH_COORDINATOR_STORE",
             # Phase 0 step 2 instrument toggles (p0tools.ENV_REGISTRY): tick-frame bins, frame and physics rates,

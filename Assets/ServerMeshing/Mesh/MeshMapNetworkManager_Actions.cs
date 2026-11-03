@@ -34,9 +34,9 @@ namespace MultiplayerARPG.MMO.Mesh
         DealAccepted = 9,   // the target accepted: nothing
         DealMirror = 10,    // the instigator's offer: state (byte), gold, items (DealingCharacterItems)
         DealEnded = 11,     // the instigator ended the trade: the message for the target (ushort UITextKeys)
-        DealCommit = 12,    // the instigator's offer is in escrow on its cell: item count, items, gold
-        DealCommitted = 13, // the target's half is done on the instigator's cell: item count, items, gold taken there
-        DealFailed = 14,    // the instigator's cell refused the commit: the message for the target
+        DealCommit = 12,    // the instigator's offer is in escrow on its cell: trade id (DESIGN 1.49), item count, items, gold
+        DealCommitted = 13, // the target's half is done on the instigator's cell: trade id, item count, items, gold taken there
+        DealFailed = 14,    // the instigator's cell refused the commit: the message for the target, trade id
         PartyInvite = 15,   // inviterId, inviterName, inviterLevel, partyId, shareExp, shareItem
         GuildInvite = 16,   // inviterId, inviterName, inviterLevel, guildId, guildName, guildLevel
         GameMessage = 17,   // a UITextKeys for the target's client
@@ -49,6 +49,7 @@ namespace MultiplayerARPG.MMO.Mesh
         VendingFailed = 23,      // the instigator's cell refused the target's purchase: the message for it (ushort UITextKeys), sale id
         VendingDone = 24,        // the buyer's cell's word on the target's sale (DESIGN 1.48): forwards (byte), sale id, paid (bool)
         VendingQuery = 25,       // the vendor's cell asks about the target's purchase: forwards (byte), sale id
+        DealQuery = 26,          // the escrow's cell asks about the target's exchange (DESIGN 1.49): trade id
     }
 
     /// <summary>What the kit writes on an attacker for a PK kill, read off a puppet before and after the killing hit (DESIGN 1.38).</summary>
@@ -148,8 +149,8 @@ namespace MultiplayerARPG.MMO.Mesh
             BaseCharacterEntity target = ResolveOwnedCharacter(msg.targetMeshId);
             if (target == null)
             {
-                if (HandleVendingForAbsent(connectionId, msg))
-                    return; // DESIGN 1.48: a sale's message follows the player, or is answered for one who left
+                if (HandleVendingForAbsent(connectionId, msg) || HandleDealForAbsent(connectionId, msg))
+                    return; // DESIGN 1.48/1.49: a sale's or a trade's message follows the player, or is answered for one who left
                 WarnThrottled($"Ghost action {msg.action} for {msg.targetMeshId} dropped: not owned here");
                 return;
             }

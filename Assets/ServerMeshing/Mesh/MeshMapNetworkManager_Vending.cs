@@ -165,7 +165,7 @@ namespace MultiplayerARPG.MMO.Mesh
         /// Sends a sale's message to `to` where it is now: through its owner while it is a ghost here, or handled here
         /// when it is this cell's own (as if it had come over a link). False when `to` is neither.
         /// </summary>
-        private bool SendSaleMessage(BaseCharacterEntity to, GhostActionKind kind, BasePlayerCharacterEntity from, System.Action<NetDataWriter> write)
+        private bool SendToPlayer(BaseCharacterEntity to, GhostActionKind kind, BasePlayerCharacterEntity from, System.Action<NetDataWriter> write)
         {
             if (to == null)
                 return false;
@@ -183,7 +183,7 @@ namespace MultiplayerARPG.MMO.Mesh
         /// A sale's message to a player this cell has no trace of, sent to the cell it is known to be on (by mesh id;
         /// that cell's OnGhostAction finds it, or answers for it). False without a live link to that cell.
         /// </summary>
-        private bool SendSaleMessageToZone(string zone, string targetMeshId, GhostActionKind kind, BaseCharacterEntity from, System.Action<NetDataWriter> write)
+        private bool SendToPlayerOnZone(string zone, string targetMeshId, GhostActionKind kind, BaseCharacterEntity from, System.Action<NetDataWriter> write)
         {
             if (string.IsNullOrEmpty(zone) || string.IsNullOrEmpty(targetMeshId) || string.Equals(zone, OwnZoneId)
                 || !_linkClients.TryGetValue(zone, out MeshLinkClient link) || !link.IsConnected)
@@ -197,7 +197,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 action = (ushort)kind,
                 payload = _actionWriter.CopyData(),
             });
-            Logging.Log("Mesh", $"Vending: {kind} for {targetMeshId}, who is not streamed here, sent to zone {zone}");
+            Logging.Log("Mesh", $"{kind} for {targetMeshId}, who is not streamed here, sent to zone {zone}");
             return true;
         }
 
@@ -277,7 +277,7 @@ namespace MultiplayerARPG.MMO.Mesh
             BaseCharacterEntity buyer = ResolveGhostOrReal(buyerId);
             if (buyer is BasePlayerCharacterEntity player && player != null && !MeshIdentity.IsGhostEntity(player))
                 Logging.Log("Mesh", $"Vending: {player.CharacterName} crossed onto the vendor's cell before the answer ({kind}); handled here");
-            if (!SendSaleMessage(buyer, kind, vendor, write) && !SendSaleMessageToZone(buyerZone, buyerId, kind, vendor, write))
+            if (!SendToPlayer(buyer, kind, vendor, write) && !SendToPlayerOnZone(buyerZone, buyerId, kind, vendor, write))
                 Logging.LogWarning("Mesh", $"Vending: the answer ({kind}) to {buyerId} found it neither here nor streamed here, and zone {buyerZone ?? "?"} is not linked; dropped (a sale is asked about later)");
         }
 
@@ -305,7 +305,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 Logging.LogWarning("Mesh", $"Vending: no word on sale {saleId} ({sale.vendorName} to {sale.buyerName}) after {Time.unscaledTime - sale.since:0} s; asking the buyer's cell");
                 string id = saleId;
                 System.Action<NetDataWriter> query = writer => { writer.Put((byte)0); writer.Put(id); };
-                if (!SendSaleMessage(buyer, GhostActionKind.VendingQuery, vendor, query) && !SendSaleMessageToZone(sale.buyerZone, sale.buyerId, GhostActionKind.VendingQuery, vendor, query))
+                if (!SendToPlayer(buyer, GhostActionKind.VendingQuery, vendor, query) && !SendToPlayerOnZone(sale.buyerZone, sale.buyerId, GhostActionKind.VendingQuery, vendor, query))
                     Logging.LogWarning("Mesh", $"Vending: {sale.buyerName} is neither here nor streamed here, and zone {sale.buyerZone ?? "?"} is not linked; sale {saleId} is asked about again later");
             }
         }
@@ -468,7 +468,7 @@ namespace MultiplayerARPG.MMO.Mesh
             if (vendorInfo != null)
                 vendorInfo.TryGetEntity(out vendor);
             System.Action<NetDataWriter> done = writer => { writer.Put((byte)0); writer.Put(saleId); writer.Put(paid); };
-            if (!SendSaleMessage(vendor, GhostActionKind.VendingDone, buyer, done) && !SendSaleMessageToZone(replyZone, vendorMeshId, GhostActionKind.VendingDone, buyer, done))
+            if (!SendToPlayer(vendor, GhostActionKind.VendingDone, buyer, done) && !SendToPlayerOnZone(replyZone, vendorMeshId, GhostActionKind.VendingDone, buyer, done))
                 Logging.LogWarning("Mesh", $"Vending: the word on sale {saleId} ({(paid ? "paid" : "not paid")}) found the vendor neither here nor streamed here; its cell asks again");
         }
 
