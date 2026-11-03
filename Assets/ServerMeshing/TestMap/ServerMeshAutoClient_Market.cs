@@ -50,6 +50,9 @@ namespace MultiplayerARPG.MMO.Mesh
         [Tooltip("With socialQuitOnTrade: log out through the kit's safe disconnect before quitting (the server despawns the character at once).")]
         public bool socialQuitSafe = false;
         public const string ARG_SOCIAL_QUIT_SAFE = "-meshSocialQuitSafe";
+        [Tooltip("With socialVend: log out (socialQuitSafe) or quit once the shop has sold this many entries (0: never; DESIGN 1.53).")]
+        public int socialQuitAfterSales = 0;
+        public const string ARG_SOCIAL_QUIT_AFTER_SALES = "-meshSocialQuitAfterSales";
         private int _myConfirms; // trades this side confirmed (a trade can send two confirms: count it once)
         private bool _quittingOnTrade, _confirmedThisTrade;
 
@@ -65,7 +68,42 @@ namespace MultiplayerARPG.MMO.Mesh
         private IEnumerator QuitOnTrade()
         {
             yield return new WaitForSecondsRealtime(1.5f);
-            Log($"social: both confirmed trade {_myConfirms}; {(socialQuitSafe ? "logging out" : "quitting")} with the exchange on its way");
+            yield return QuitNow($"both confirmed trade {_myConfirms}");
+        }
+
+        /// <summary>
+        /// socialQuitAfterSales: the shop's own item list (the vendor's client hears it after a sale that leaves entries)
+        /// counts the sales, and the shop closing (its last entry sold: no list is sent then) counts them all.
+        /// </summary>
+        private void WatchOwnShop(PlayerCharacterVendingComponent shop, int listed)
+        {
+            if (socialQuitAfterSales <= 0 || shop == null)
+                return;
+            int sold = 0;
+            shop.onUpdateItems += items => sold = Mathf.Max(sold, listed - (items != null ? items.Count : 0));
+            StartCoroutine(WatchOwnShopRoutine(shop, listed, () => sold));
+        }
+
+        private IEnumerator WatchOwnShopRoutine(PlayerCharacterVendingComponent shop, int listed, System.Func<int> soldSoFar)
+        {
+            float until = Time.realtimeSinceStartup + 30f;
+            while (shop != null && !shop.Data.isStarted && Time.realtimeSinceStartup < until)
+                yield return null;
+            while (shop != null)
+            {
+                int sold = shop.Data.isStarted ? soldSoFar() : listed;
+                if (sold >= socialQuitAfterSales)
+                {
+                    yield return QuitNow($"the shop sold {sold} entr{(sold == 1 ? "y" : "ies")}");
+                    yield break;
+                }
+                yield return new WaitForSecondsRealtime(0.2f);
+            }
+        }
+
+        private IEnumerator QuitNow(string why)
+        {
+            Log($"social: {why}; {(socialQuitSafe ? "logging out" : "quitting")} with the exchange on its way");
             if (socialQuitSafe && BaseGameNetworkManager.Singleton != null)
             {
                 Cysharp.Threading.Tasks.UniTask<AsyncResponseData<EmptyMessage>> logout = BaseGameNetworkManager.Singleton.SendClientSafeDisconnect();

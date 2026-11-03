@@ -35,6 +35,21 @@ tradestop (DESIGN 1.52): `trade`'s two traders, two trades. C drops every answer
 spawner starts E again, and the new E takes the journal up and asks; once C answers, the exchange is settled on the
 fixture (if it logged in again) or mailed to it. The bags, the gold and the mail are read from the database.
 
+DESIGN 1.53, the paths 1.51-1.52 built and no scenario ran:
+vendleave: market's layout, one sale; C drops its word on it for 40 s (MESH_TEST_VENDING_BLACKOUT 1:40) and the vendor
+logs out as its shop sells (-meshSocialQuitAfterSales 1 -meshSocialQuitSafe); E keeps asking and, when the word comes,
+mails the vendor its gold.
+buystop: one purchase; E holds its answer 8 s and C quits cleanly 3 s into the escrow (MESH_FAULT_QUIT_WITH_EXCHANGE
+C:3): C's journal has the purchase, its next process refunds it by mail and refuses the sale, and E puts the item back
+in the vendor's bag.
+salestop: one purchase; C drops its word for 30 s and E quits cleanly 5 s into the sale (E:5): E's journal has the sale,
+its next process asks again and pays the vendor (on E, or by mail) when the word comes.
+sleephold: sleeping cells (MESH_SLEEP, no awake ring, 30 s); one trade, C's answer dropped for 150 s (the central put C
+to sleep about 80 s after the trade in the first rig run, after a 60 s blackout had ended), and both traders
+leave (the fixture by the safe disconnect): E holds its open escrow and stays up when told to sleep, C (only an answer
+left) sleeps and writes it to its journal, E asks the central to wake C, the woken C answers from its journal, E mails
+the fixture and then sleeps.
+
 regress.py hands itself in as `rig`; the graders read the cells' logs and the database.
 """
 import os
@@ -47,9 +62,11 @@ import regress_merge
 import regress_split
 import rigtools
 
-SCENARIOS = ("market", "splitvend", "trade", "tradestop")
+SCENARIOS = ("market", "splitvend", "trade", "tradestop", "vendleave", "buystop", "salestop", "sleephold")
+SLEEP_SCENARIOS = ("sleephold",)
+SLEEPHOLD_ZONES = {"C", "E"}   # sleeping cells with no awake ring: only the traders' cells start
 PERSIST_REASON = regress_split.PERSIST_REASON
-EXPECTED_ZONES = {}
+EXPECTED_ZONES = {"sleephold": SLEEPHOLD_ZONES}
 
 PRICE = 7                     # ServerMeshAutoClient.socialVendPrice
 ANSWER_DELAYS = "4,13,0,0,3"  # MESH_TEST_VENDING_ANSWER_DELAY for market: inside the escrow, past it, none, none, 3 s
@@ -150,12 +167,18 @@ def run(name, rep, rig, start, day, bots):
     if name == "tradestop":
         run_tradestop(rep, rig, start, day, bots)
         return None
+    if name in ("vendleave", "buystop", "salestop"):
+        run_vendfault(name, rep, rig, start, day, bots)
+        return None
+    if name == "sleephold":
+        run_sleephold(rep, rig, start, day, bots)
+        return "sleephold"
     return run_splitvend(rep, rig, start, day, bots)
 
 
 def grade_layout(rep, rig, start, day, result):
-    if result is None:
-        rig.grade_layout(rep, start, day, None)
+    if result is None or isinstance(result, str):
+        rig.grade_layout(rep, start, day, EXPECTED_ZONES.get(result) if isinstance(result, str) else None)
     else:
         regress_merge.grade_layout(rep, rig, start, day, result)
 
@@ -449,6 +472,159 @@ def run_tradestop(rep, rig, start, day, bots):
     ga, gd = gold_of(rig, acceptor_char), gold_of(rig, driver_char)
     gm = sum(g for g, _ in mails)
     rep.check(gd == TRADE_GOLD and ga + gm == TRADE_GOLD, f"the traders' gold: driver {gd} (expected {TRADE_GOLD}), fixture {ga} + {gm} mailed (expected {TRADE_GOLD})")
+
+
+# ------------------------------------------------------------------ vendleave, buystop, salestop
+
+VENDFAULT = {
+    # name: (the cells' environment, the vendor's extra arguments, the buyer's steps)
+    "vendleave": ({"MESH_TEST_VENDING_BLACKOUT": "1:40"}, ["-meshSocialQuitAfterSales", "1", "-meshSocialQuitSafe"], "buy,quit"),
+    "buystop": ({"MESH_TEST_VENDING_ANSWER_DELAY": "8", "MESH_FAULT_QUIT_WITH_EXCHANGE": "C:3"}, [], "buy"),
+    "salestop": ({"MESH_TEST_VENDING_BLACKOUT": "1:30", "MESH_FAULT_QUIT_WITH_EXCHANGE": "E:5"}, [], "buy,quit"),
+}
+
+
+def clear_mail(rig, *character_names):
+    conn = rig.db_connect()
+    try:
+        with conn.cursor() as cur:
+            for name in character_names:
+                cur.execute("delete from mail where senderName=%s and receiverId in (select userId from characters where characterName=%s)",
+                            (MESH_MAIL_SENDER, name))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def wait_lines(rig, zone, start, day, pattern, timeout):
+    end = time.time() + timeout
+    while time.time() < end:
+        if rig.count(rig.zone_lines(zone, start, day), pattern) >= 1:
+            return True
+        time.sleep(5)
+    return False
+
+
+def run_vendfault(name, rep, rig, start, day, bots):
+    env, vendor_args, steps = VENDFAULT[name]
+    buyer_char, vendor_char = f"{MARKET_BUYER}Char", provision.BOT.character_name
+    rig.db_reset(MARKET_BUYER_AT, MARKET_VENDOR_AT, tester_party=0, bot_party=0)
+    provision.reset_bot_positions(2, 1, [MARKET_BUYER_AT], status_path=rig.STATUS)
+    setup_bags(rig, {buyer_char: ([], BUYER_GOLD), vendor_char: (provision_rows.COMMON_BAG, 0)})
+    clear_mail(rig, buyer_char, vendor_char)
+    clear_journals()
+    vendor_bag = sum(item.amount for item in provision_rows.COMMON_BAG)
+    rig.request_play("stand", MARKET_BUYER_AT[0], MARKET_BUYER_AT[1], enabled=False, line_x=MARKET_LINE,
+                     env=dict({"MESH_NO_MONSTER_HANDOFF": "1", "MESH_NO_MONSTERS": "1"}, **env))
+    rig.wait_play(60)
+    time.sleep(20)
+    vendor_log = rig.launch_bot(name, provision.BOT.username,
+                                ["-meshAutoMode", "stand", "-meshWalkX", f"{MARKET_VENDOR_AT[0]:g}", "-meshWalkZ", f"{MARKET_VENDOR_AT[1]:g}",
+                                 "-meshSocialAccept", "-meshSocialVend", "-meshSocialVendNow", "-meshSocialVendCount", "1"] + vendor_args,
+                                observe_seconds=300)
+    bots.append(("stand", vendor_log))
+    time.sleep(10)
+    buyer_log = rig.launch_bot(name, MARKET_BUYER,
+                               ["-meshAutoMode", "social", "-meshWalkX", f"{MARKET_BUYER_AT[0]:g}", "-meshWalkZ", f"{MARKET_BUYER_AT[1]:g}",
+                                "-meshSocialTarget", vendor_char, "-meshSocialSteps", steps], line_x=MARKET_LINE)
+    bots.append(("social", buyer_log))
+    b, v = re.escape(buyer_char), re.escape(vendor_char)
+    if name == "buystop":
+        # The buyer's cell stops under it: its RESULT is not this scenario's; the sale's end is. Either the item goes back to
+        # the vendor (the buyer away when the late answer comes), or the buyer, logged in again on the vendor's own cell
+        # (its own was down), receives it there and pays again (the first rig run): the restarted C refunded the escrow.
+        settled = wait_lines(rig, "E", start, day, rf"Vending: sale \S+ of {v} to {b} not delivered|Vending paid here: {v} received {PRICE} gold", 180)
+    else:
+        result = rig.wait_for_bot(buyer_log, "social", 300)
+        rep.check("buy=ok" in result, f"the buyer bought the shop's item: {result[:240] or 'no RESULT'}")
+        settled = wait_lines(rig, "E", start, day, rf"Vending paid here: {v} received {PRICE} gold|paid for {v}, who is not on this cell: mailed", 180)
+    rep.check(settled, "E settled the sale")
+    time.sleep(30)   # the kit's save scheduler writes a character at most every 20 s
+    c_lines, e_lines = rig.zone_lines("C", start, day), rig.zone_lines("E", start, day)
+    checks = [("E", e_lines, rf"Vending sold here: {v} sold .* to {b} across a line", 1, "sold the item")]
+    if name == "vendleave":
+        checks += [("E", e_lines, rf"Vending: sale \S+ paid for {v}, who is not on this cell: mailed to {v}", 1, "mailed the vendor its gold")]
+    elif name == "buystop":
+        checks += [("C", c_lines, r"FAULT: quitting on an exchange open \d+ s \(MESH_FAULT_QUIT_WITH_EXCHANGE\)", 1, "quit cleanly with the purchase in escrow"),
+                   ("C", c_lines, r"Exchanges journal written as the cell stops: 0 trade escrow\(s\), 1 purchase\(s\)", 1, "wrote the purchase to its journal"),
+                   ("C", c_lines, r"Exchanges journal taken up: .* 1 purchase\(s\) refunded", 1, "took the journal up after its restart"),
+                   ("C", c_lines, rf"Vending: purchase \S+ of {b} refunded after the restart: mailed to {b}", 1, "mailed the buyer its gold")]
+    else:
+        checks += [("E", e_lines, r"FAULT: quitting on an exchange open \d+ s \(MESH_FAULT_QUIT_WITH_EXCHANGE\)", 1, "quit cleanly with the sale open"),
+                   ("E", e_lines, r"Exchanges journal written as the cell stops: 0 trade escrow\(s\), 0 purchase\(s\), 1 sale\(s\)", 1, "wrote the sale to its journal"),
+                   ("E", e_lines, r"Exchanges journal taken up: 0 trade escrow\(s\) and 1 sale\(s\)", 1, "took the journal up after its restart")]
+    for zone, lines, pattern, want, what in checks:
+        n = rig.count(lines, pattern)
+        rep.check(n == want, f"{zone} {what} ({n}, expected {want})")
+    if name != "buystop":
+        n = rig.count(c_lines, r"the word on sale \S+ \(paid\) dropped \(MESH_TEST_VENDING_BLACKOUT")
+        rep.check(n >= 1, f"C dropped its word on the sale ({n})")
+    rep.check(rig.count(c_lines + e_lines, r"are lost|no word from the buyer's cell in \d+ s") == 0, "nothing lost, the sale settled on the buyer's cell's word")
+    # The database: the gold in the bags and the mails, and the item with the buyer or back with the vendor.
+    vendor_mails, buyer_mails = mails_to(rig, vendor_char, 0), mails_to(rig, buyer_char, 0)
+    vg, bg = gold_of(rig, vendor_char), gold_of(rig, buyer_char)
+    vm, bm = sum(g for g, _ in vendor_mails), sum(g for g, _ in buyer_mails)
+    if name == "buystop":
+        bought = item_count(rig, buyer_char, ITEM_SKILL)
+        returned = rig.count(e_lines, rf"Vending: sale \S+ of {v} to {b} not delivered")
+        rep.check(bought + returned == 1 and bag_amount(rig, vendor_char) + bought == vendor_bag,
+                  f"the item with the buyer ({bought}) or back in the vendor's bag ({bag_amount(rig, vendor_char)} of {vendor_bag}), exactly one of them")
+        rep.check(vg + vm == PRICE * bought and bg + bm == BUYER_GOLD - PRICE * bought,
+                  f"one price per item held: vendor {vg}+{vm} mailed, buyer {bg}+{bm} mailed (the buyer holds {bought} item(s))")
+    else:
+        rep.check(vg + vm == PRICE and bg == BUYER_GOLD - PRICE, f"one sale: vendor {vg}+{vm} mailed (expected {PRICE}), buyer {bg} (expected {BUYER_GOLD - PRICE})")
+        rep.check(bag_amount(rig, vendor_char) == vendor_bag - 1 and item_count(rig, buyer_char, ITEM_SKILL) == 1,
+                  f"the item with the buyer (vendor's bag {bag_amount(rig, vendor_char)} of {vendor_bag})")
+
+
+# ------------------------------------------------------------------ sleephold
+
+def run_sleephold(rep, rig, start, day, bots):
+    driver_char, acceptor_char = f"{TRADE_DRIVER}Char", provision.BOT.character_name
+    rig.db_reset(TRADE_DRIVER_AT, TRADE_ACCEPTOR_AT, tester_party=0, bot_party=0)
+    provision.reset_bot_positions(2, 1, [TRADE_DRIVER_AT], status_path=rig.STATUS)
+    setup_bags(rig, {driver_char: ([provision_rows.Item(ITEM_BENCH, amount=5)], TRADE_GOLD),
+                     acceptor_char: (provision_rows.COMMON_BAG, TRADE_GOLD)})
+    clear_mail(rig, acceptor_char)
+    clear_journals()
+    rig.request_play("stand", TRADE_DRIVER_AT[0], TRADE_DRIVER_AT[1], enabled=False, line_x=TRADE_LINE,
+                     env={"MESH_NO_MONSTER_HANDOFF": "1", "MESH_NO_MONSTERS": "1", "MESH_SLEEP": "1", "MESH_SLEEP_RINGS": "0",
+                          "MESH_SLEEP_AFTER": "30", "MESH_TEST_TRADE_BLACKOUT": "1:150"})
+    rig.wait_play(60)
+    time.sleep(20)
+    acceptor_log = rig.launch_bot("sleephold", provision.BOT.username,
+                                  ["-meshAutoMode", "stand", "-meshWalkX", f"{TRADE_ACCEPTOR_AT[0]:g}", "-meshWalkZ", f"{TRADE_ACCEPTOR_AT[1]:g}",
+                                   "-meshSocialAccept", "-meshSocialQuitOnTrade", "1", "-meshSocialQuitSafe"], observe_seconds=300)
+    bots.append(("stand", acceptor_log))
+    time.sleep(15)
+    driver_log = rig.launch_bot("sleephold", TRADE_DRIVER,
+                                ["-meshAutoMode", "social", "-meshWalkX", f"{TRADE_DRIVER_AT[0]:g}", "-meshWalkZ", f"{TRADE_DRIVER_AT[1]:g}",
+                                 "-meshSocialTarget", acceptor_char, "-meshSocialSteps", "trade,quit"], line_x=TRADE_LINE)
+    bots.append(("social", driver_log))
+    result = rig.wait_for_bot(driver_log, "social", 300)
+    rep.check("trade1=ok" in result, f"the driver's trade: {result[:240] or 'no RESULT'}")
+    a = re.escape(acceptor_char)
+    mailed = wait_lines(rig, "E", start, day, rf"Trade \S+ committed for {a}, who is not on this cell: mailed to {a}", 300)
+    rep.check(mailed, "E settled the trade by mail")
+    slept = wait_lines(rig, "E", start, day, r"Sleeping: cell E has nobody near it", 120)
+    time.sleep(30)
+    c_lines, e_lines = rig.zone_lines("C", start, day), rig.zone_lines("E", start, day)
+    for zone, lines, pattern, what in (
+            ("C", c_lines, r"Sleeping: cell C has nobody near it", "slept once the driver left"),
+            ("C", c_lines, r"Exchanges journal written as the cell stops: 0 trade escrow\(s\), 0 purchase\(s\), 0 sale\(s\), 1 answer\(s\)", "wrote its answer to its journal as it slept"),
+            ("E", e_lines, r"Sleep asked for cell E but 1 exchange\(s\) across a line are open here: staying up", "stayed up while the exchange was open"),
+            ("E", e_lines, r"Exchange: zone C is not linked; asking the central to wake it", "asked the central to wake C"),
+            ("C", c_lines, r"Exchanges journal taken up: .* 1 answer\(s\) kept", "answered from its journal once woken")):
+        rep.check(rig.count(lines, pattern) >= 1, f"{zone} {what}")
+    mail_at = next((rigtools.stamp_of(line) for line in e_lines if re.search(rf"committed for {a}, who is not on this cell: mailed", line)), None)
+    sleep_at = next((rigtools.stamp_of(line) for line in reversed(e_lines) if "Sleeping: cell E has nobody near it" in line), None)
+    rep.check(slept and mail_at is not None and sleep_at is not None and sleep_at >= mail_at, f"E slept after the exchange settled (mailed {mail_at}, slept {sleep_at})")
+    rep.check(rig.count(c_lines + e_lines, r"with no escrow here|no answer from the other cell in \d+ s|are lost") == 0, "nothing lost")
+    mails = mails_to(rig, acceptor_char, 0)
+    benches = item_count(rig, acceptor_char, ITEM_BENCH) + mailed_amount(mails, ITEM_BENCH)
+    ga, gm = gold_of(rig, acceptor_char), sum(g for g, _ in mails)
+    rep.check(benches == 1 and ga + gm == TRADE_GOLD, f"the fixture has the bench and its gold in its bag and mail ({benches} bench, {ga}+{gm} gold)")
+    rep.check(item_count(rig, driver_char, ITEM_SKILL) == 1 and gold_of(rig, driver_char) == TRADE_GOLD, "the driver has the fixture's scroll and its gold")
 
 
 # ------------------------------------------------------------------ splitvend

@@ -407,7 +407,10 @@ namespace MultiplayerARPG.MMO.Mesh
             BasePlayerCharacterEntity trader = RegisteredPlayer(escrow.traderId);
             Logging.LogWarning("Mesh", $"Trade {tradeId} of {escrow.traderName}: {why}; asking the other cell");
             if (!SendToPlayer(other, GhostActionKind.DealQuery, trader, query) && !SendToPlayerOnZone(escrow.otherZone, escrow.otherMeshId, GhostActionKind.DealQuery, trader, query))
+            {
                 Logging.LogWarning("Mesh", $"Trade {tradeId}: the other trader is neither here nor streamed here, and zone {escrow.otherZone ?? "?"} is not linked; asked again later");
+                WakeToAsk(escrow.otherZone); // DESIGN 1.53: the answering cell may be asleep, its answer in its journal
+            }
         }
 
         internal bool HasDealEscrow(BasePlayerCharacterEntity trader)

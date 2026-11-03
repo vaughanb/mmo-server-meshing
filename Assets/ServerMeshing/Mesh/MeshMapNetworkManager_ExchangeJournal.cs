@@ -6,8 +6,12 @@
 // A cell stopped all the same (an operator, a deploy) writes them to its journal (MeshExchangeJournal) as it quits,
 // after the kit's quit path has saved every player, and its next process reads them back: escrows and sales are asked
 // about again and settled by mail to players who are gone, a purchase in escrow is refunded by mail (its item never
-// reached the buyer), and the recorded answers are answered again. MESH_FAULT_QUIT_WITH_EXCHANGE (`<cell>:<seconds>`)
-// makes the cell quit cleanly once an exchange has been open that long, once per run (a fault marker), for the rig.
+// reached the buyer), and the recorded answers are answered again. MESH_FAULT_QUIT_WITH_EXCHANGE (`<cell>:<seconds>`,
+// comma-separated for several cells) makes the cell quit cleanly once an exchange has been open that long, once per run
+// (a fault marker), for the rig.
+//
+// DESIGN 1.53: a cell with only answers (no open exchange) may sleep; the cell that waits for one of them asks the central
+// to wake it when its link is down (WakeToAsk), and the woken cell answers from the journal it wrote as it went to sleep.
 using System.Collections.Generic;
 using System.IO;
 using LiteNetLib.Utils;
@@ -214,17 +218,37 @@ namespace MultiplayerARPG.MMO.Mesh
                 return;
             RestoreExchangesOnce();
             string toggle = MeshFault.Toggle(FaultQuitWithExchange);
-            if (toggle == null || !HasOwnZone)
+            if (toggle == null || !HasOwnZone || OpenExchangeCount == 0)
                 return;
-            int colon = toggle.LastIndexOf(':');
-            if (colon <= 0 || !MeshFault.NamesCell(toggle.Substring(0, colon), OwnZoneId)
-                || !float.TryParse(toggle.Substring(colon + 1), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float seconds))
+            foreach (string part in toggle.Split(','))
+            {
+                int colon = part.LastIndexOf(':');
+                if (colon <= 0 || !MeshFault.NamesCell(part.Substring(0, colon), OwnZoneId)
+                    || !float.TryParse(part.Substring(colon + 1), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float seconds))
+                    continue;
+                float oldest = 0f, now = Time.unscaledTime;
+                foreach (DealEscrow e in _dealEscrowsByTrade.Values)
+                    oldest = Mathf.Max(oldest, now - e.since);
+                foreach (VendingEscrow e in _vendingEscrows.Values)
+                    oldest = Mathf.Max(oldest, now - e.since);
+                foreach (PendingSale s in _pendingSales.Values)
+                    oldest = Mathf.Max(oldest, now - s.since);
+                if (oldest >= seconds)
+                    MeshFault.QuitOnce(FaultQuitWithExchange, OwnZoneId, $"an exchange open {oldest:0} s");
                 return;
-            float oldest = 0f, now = Time.unscaledTime;
-            foreach (DealEscrow e in _dealEscrowsByTrade.Values)
-                oldest = Mathf.Max(oldest, now - e.since);
-            if (oldest >= seconds)
-                MeshFault.QuitOnce(FaultQuitWithExchange, OwnZoneId, $"an exchange open {oldest:0} s");
+            }
+        }
+
+        /// <summary>A cell this one waits on for an answer is not linked: it may be asleep; the central is asked to wake it (throttled).</summary>
+        private void WakeToAsk(string zone)
+        {
+            if (string.IsNullOrEmpty(zone) || string.Equals(zone, OwnZoneId) || world == null)
+                return;
+            MeshCell cell = world.GetCellById(zone);
+            if (cell == null)
+                return;
+            Logging.Log("Mesh", $"Exchange: zone {zone} is not linked; asking the central to wake it for its answer");
+            RequestWake(cell);
         }
 #else
         internal int OpenExchangeCount => 0;

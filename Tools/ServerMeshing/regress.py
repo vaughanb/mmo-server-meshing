@@ -1206,7 +1206,8 @@ def run_scenario(name, rep):
     # runs them all (autosplit: plus the child the policy makes).
     expect = {"wake": {"C", "E", "C2"}, "autosplit": {z for z, _ in ZONES} | {"C.1"}, **regress_auto.EXPECTED_ZONES,
               **regress_building.EXPECTED_ZONES, **regress_central.EXPECTED_ZONES, **regress_links.EXPECTED_ZONES,
-              **regress_family.EXPECTED_ZONES, **regress_policy.EXPECTED_ZONES, **regress_soak.EXPECTED_ZONES}
+              **regress_family.EXPECTED_ZONES, **regress_policy.EXPECTED_ZONES, **regress_soak.EXPECTED_ZONES,
+              **regress_vend.EXPECTED_ZONES}
     grade_common(rep, start, day, expect=expect.get(name))
     grade_links(rep, name, start, day, expect.get(name))
     if REMOTE_CELLS and REMOTE_MODE == regress_remote.SPAWNER:
@@ -1272,7 +1273,7 @@ TWO_HOST_SKIP = {
 SPAWNER_SCENARIOS = ({"sleep", "wake", "dynidle"} | set(regress_split.SCENARIOS) | set(regress_merge.SCENARIOS)
                      | set(regress_splitcrash.SCENARIOS) | set(regress_auto.SCENARIOS) | set(regress_building.SCENARIOS)
                      | set(regress_central.SCENARIOS) | set(regress_family.SCENARIOS) | set(regress_policy.SCENARIOS)
-                     | set(regress_soak.SCENARIOS) | {"splitvend"})
+                     | set(regress_soak.SCENARIOS) | {"splitvend"} | set(regress_vend.SLEEP_SCENARIOS))
 
 
 def remote_mode_of(name):
@@ -1298,7 +1299,8 @@ PERSIST_SKIP = {"dynidle": "runs the test map Dynamic through the environment, w
                 **{n: regress_family.PERSIST_REASON for n in regress_family.SCENARIOS},
                 **{n: regress_policy.PERSIST_REASON for n in regress_policy.SCENARIOS},
                 **{n: regress_soak.PERSIST_REASON for n in regress_soak.SCENARIOS},
-                "splitvend": regress_vend.PERSIST_REASON}
+                "splitvend": regress_vend.PERSIST_REASON,
+                **{n: "runs the other machine's spawner for the scenario, which a persisted remote cell never is" for n in regress_vend.SLEEP_SCENARIOS}}
 
 
 def main():

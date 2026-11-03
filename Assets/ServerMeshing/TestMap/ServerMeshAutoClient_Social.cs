@@ -71,6 +71,8 @@ namespace MultiplayerARPG.MMO.Mesh
             if (int.TryParse(ReadArg(args, ARG_SOCIAL_QUIT_ON_TRADE, null), NumberStyles.Integer, CultureInfo.InvariantCulture, out int quitOn) && quitOn > 0)
                 socialQuitOnTrade = quitOn;
             socialQuitSafe = socialQuitSafe || System.Array.IndexOf(args, ARG_SOCIAL_QUIT_SAFE) >= 0;
+            if (int.TryParse(ReadArg(args, ARG_SOCIAL_QUIT_AFTER_SALES, null), NumberStyles.Integer, CultureInfo.InvariantCulture, out int quitAfter) && quitAfter > 0)
+                socialQuitAfterSales = quitAfter;
             string steps = ReadArg(args, ARG_SOCIAL_STEPS, null);
             if (!string.IsNullOrEmpty(steps))
                 socialSteps = steps;
@@ -206,6 +208,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 yield break;
             }
             Log($"social: opening a shop: {string.Join(", ", titles)}, x1 each for {socialVendPrice} gold");
+            WatchOwnShop(self.VendingComponent, items.Count); // DESIGN 1.53 (ServerMeshAutoClient_Market)
             self.VendingComponent.CallCmdStartVending("MeshShop", items);
         }
 

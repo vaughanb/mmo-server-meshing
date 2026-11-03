@@ -74,6 +74,7 @@ namespace MultiplayerARPG.MMO.Mesh
             public int gold;
             public string vendorName;
             public string saleId;
+            public float since;
         }
 
         private sealed class PendingSale
@@ -355,7 +356,10 @@ namespace MultiplayerARPG.MMO.Mesh
                 string id = saleId, saleZone = OwnZoneId, vendorId = sale.vendorId;
                 System.Action<NetDataWriter> query = writer => { writer.Put((byte)0); writer.Put(id); writer.Put(saleZone ?? string.Empty); writer.Put(vendorId ?? string.Empty); };
                 if (!SendToPlayer(buyer, GhostActionKind.VendingQuery, vendor, query) && !SendToPlayerOnZone(sale.buyerZone, sale.buyerId, GhostActionKind.VendingQuery, vendor, query))
+                {
                     Logging.LogWarning("Mesh", $"Vending: {sale.buyerName} is neither here nor streamed here, and zone {sale.buyerZone ?? "?"} is not linked; sale {saleId} is asked about again later");
+                    WakeToAsk(sale.buyerZone); // DESIGN 1.53: the buyer's cell may be asleep, its word in its journal
+                }
             }
         }
 
@@ -431,7 +435,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 return false;
             buyer.Gold -= entry.price;
             string saleId = System.Guid.NewGuid().ToString("N");
-            _vendingEscrows[buyer.Id] = new VendingEscrow { buyer = buyer, gold = entry.price, vendorName = vendorGhost.CharacterName, saleId = saleId };
+            _vendingEscrows[buyer.Id] = new VendingEscrow { buyer = buyer, gold = entry.price, vendorName = vendorGhost.CharacterName, saleId = saleId, since = Time.unscaledTime };
             string itemId = entry.item.id;
             int price = entry.price;
             ForwardGhostAction(vendorGhost, GhostActionKind.VendingBuy, buyer.GetInfo(), writer => { writer.Put(index); writer.Put(itemId); writer.Put(price); writer.Put(saleId); });
@@ -637,6 +641,21 @@ namespace MultiplayerARPG.MMO.Mesh
             if (data.Length == 0)
                 return true;
             EntityInfo instigator = ResolveInstigator(msg.instigatorMeshId);
+            if (kind == GhostActionKind.VendingDone)
+            {
+                // DESIGN 1.53: the word is for a sale pending on this cell, whose vendor has left it (logged out, or logged
+                // in elsewhere while this cell restarted): it is settled here, by mail, never passed on (the first rig run
+                // dropped it for a vendor who had logged out, and passed it to another cell for one who had logged back in).
+                NetDataReader word = new NetDataReader(data);
+                word.GetByte();
+                string wordSale = word.GetString();
+                bool wordPaid = word.GetBool();
+                if (_pendingSales.ContainsKey(wordSale))
+                {
+                    SettleSale(wordSale, wordPaid, wordPaid ? "the buyer's cell gave the item" : "the buyer's cell gave no item");
+                    return true;
+                }
+            }
             BaseCharacterEntity ghost = ResolveGhostOrReal(msg.targetMeshId);
             byte forwards = data[0];
             if (ghost != null && MeshIdentity.IsGhostEntity(ghost) && forwards < VendingMaxForwards)
