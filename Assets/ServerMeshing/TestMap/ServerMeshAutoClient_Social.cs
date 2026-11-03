@@ -70,6 +70,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 socialVendCount = count;
             if (int.TryParse(ReadArg(args, ARG_SOCIAL_QUIT_ON_TRADE, null), NumberStyles.Integer, CultureInfo.InvariantCulture, out int quitOn) && quitOn > 0)
                 socialQuitOnTrade = quitOn;
+            socialQuitSafe = socialQuitSafe || System.Array.IndexOf(args, ARG_SOCIAL_QUIT_SAFE) >= 0;
             string steps = ReadArg(args, ARG_SOCIAL_STEPS, null);
             if (!string.IsNullOrEmpty(steps))
                 socialSteps = steps;

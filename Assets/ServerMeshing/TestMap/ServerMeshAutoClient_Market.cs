@@ -14,14 +14,18 @@
 //   buy      buy the first entry from this side and stay: the item comes (the harness may drop this cell's word to the
 //            vendor's cell, which then asks)
 //   buyquit  last: log the RESULT, buy the first entry and quit at once, while the answer is on its way
-//   trade, tradefail  in the order named, each a trade with the target (one of the first dealable bag stack and
-//            socialGold each way; the target accepts with socialAutoAccept): `trade` expects the exchange, `tradefail`
-//            none (the harness drops the commit, DESIGN 1.49). With socialQuitOnTrade N the accepting side quits once
-//            both have confirmed its N-th trade, while the exchange is on its way.
+//   trade, tradefail, tradelate  in the order named, each a trade with the target (one of the first dealable bag
+//            stack and socialGold each way; the target accepts with socialAutoAccept): `trade` and `tradelate` expect the
+//            exchange (`tradelate`: the harness keeps the answer from the target's cell for over a minute, DESIGN 1.51),
+//            `tradefail` none (the harness drops the commit, DESIGN 1.49). With socialQuitOnTrade N the accepting side
+//            quits once both have confirmed its N-th trade, while the exchange is on its way; with socialQuitSafe it logs
+//            out the way the game's own logout does (the kit's safe disconnect: no despawn delay).
+//   pause<n> among the trades: wait n seconds before the next one
 //   quit     last: log the RESULT and quit (the kit saves the character as it leaves)
 // The RESULT reads `RESULT social: across=<bool> <step>=<result> ... -> PASS`, PASS when every step named went through.
 using System.Collections;
 using System.Collections.Generic;
+using LiteNetLibManager;
 using UnityEngine;
 
 namespace MultiplayerARPG.MMO.Mesh
@@ -43,6 +47,9 @@ namespace MultiplayerARPG.MMO.Mesh
         [Tooltip("With socialAutoAccept: quit 1.5 s after both sides confirmed this trade (its number, 1 first; 0: never).")]
         public int socialQuitOnTrade = 0;
         public const string ARG_SOCIAL_QUIT_ON_TRADE = "-meshSocialQuitOnTrade";
+        [Tooltip("With socialQuitOnTrade: log out through the kit's safe disconnect before quitting (the server despawns the character at once).")]
+        public bool socialQuitSafe = false;
+        public const string ARG_SOCIAL_QUIT_SAFE = "-meshSocialQuitSafe";
         private int _myConfirms; // trades this side confirmed (a trade can send two confirms: count it once)
         private bool _quittingOnTrade, _confirmedThisTrade;
 
@@ -58,7 +65,15 @@ namespace MultiplayerARPG.MMO.Mesh
         private IEnumerator QuitOnTrade()
         {
             yield return new WaitForSecondsRealtime(1.5f);
-            Log($"social: both confirmed trade {_myConfirms}; quitting with the exchange on its way");
+            Log($"social: both confirmed trade {_myConfirms}; {(socialQuitSafe ? "logging out" : "quitting")} with the exchange on its way");
+            if (socialQuitSafe && BaseGameNetworkManager.Singleton != null)
+            {
+                Cysharp.Threading.Tasks.UniTask<AsyncResponseData<EmptyMessage>> logout = BaseGameNetworkManager.Singleton.SendClientSafeDisconnect();
+                float until = Time.realtimeSinceStartup + 5f;
+                while (logout.Status == Cysharp.Threading.Tasks.UniTaskStatus.Pending && Time.realtimeSinceStartup < until)
+                    yield return null;
+                Log($"social: safe disconnect {logout.Status}");
+            }
             Application.Quit();
         }
 
@@ -141,12 +156,18 @@ namespace MultiplayerARPG.MMO.Mesh
             foreach (string part in socialSteps.Split(','))
             {
                 string step = part.Trim().ToLowerInvariant();
-                if (step != "trade" && step != "tradefail")
+                if (step.StartsWith("pause") && float.TryParse(step.Substring(5), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float pause))
+                {
+                    Log($"market: pausing {pause:0} s before the next trade");
+                    yield return new WaitForSecondsRealtime(pause);
+                    continue;
+                }
+                if (step != "trade" && step != "tradefail" && step != "tradelate")
                     continue;
                 trades++;
                 Phase = $"market-{step}{trades}";
                 string r = "";
-                yield return TradeOnce(targetName, step == "trade", s => r = s);
+                yield return TradeOnce(targetName, step != "tradefail", s => r = s);
                 Log($"market: {step} {trades} {r}");
                 results.Add($"{step}{trades}={r}");
                 ok &= r.StartsWith("ok");
@@ -266,7 +287,8 @@ namespace MultiplayerARPG.MMO.Mesh
             int goldBefore = self != null ? self.Gold : 0;
             _dealStarted = _dealEnded = false;
             _myDealState = _otherDealState = DealingState.None;
-            float until = Time.realtimeSinceStartup + 60f, nextRequest = 0f;
+            // The target may still be in its last trade (released only a minute after its answer stopped coming, DESIGN 1.51).
+            float until = Time.realtimeSinceStartup + 100f, nextRequest = 0f;
             while (!_dealEnded && Time.realtimeSinceStartup < until)
             {
                 if (!_dealStarted && Time.realtimeSinceStartup >= nextRequest)

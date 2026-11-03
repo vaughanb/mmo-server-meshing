@@ -27,6 +27,13 @@
 // message goes to the cell it came from: the vendor's cell keeps the buyer's cell of each sale, and the buyer's cell
 // answers the cell that asked. MESH_TEST_VENDING_DROP (comma-separated `sold<n>`, `done<n>`) drops this cell's n-th
 // answer or word, as a link that went down would.
+//
+// DESIGN 1.51: a sale has no deadline any more. After a minute without the buyer's cell's word the vendor is released
+// (its handoff no longer held) while the sale stays open, asked about every 30 s; its settlement (the word, or 30
+// minutes without one: paid) is applied to the vendor if it is registered here and mailed to its account otherwise
+// (MeshMapNetworkManager_Delivery): a vendor who leaves no longer gets paid up front for a sale whose item may come
+// back. MESH_TEST_VENDING_BLACKOUT (`<n>:<seconds>`) drops every word about the sale of this cell's n-th word for that
+// long, as a link down for a minute would.
 using System.Collections;
 using System.Collections.Generic;
 using LiteNetLib.Utils;
@@ -50,8 +57,12 @@ namespace MultiplayerARPG.MMO.Mesh
         public const float VendingEscrowSeconds = 10f;
         /// <summary>How long the vendor's cell waits for the buyer's cell's word on a sale before it asks, and between asks.</summary>
         public const float VendingSaleAskSeconds = 15f;
-        /// <summary>After this long without a word the vendor's cell settles a sale as paid (the item has left the vendor).</summary>
-        public const float VendingSaleGiveUpSeconds = 75f;
+        /// <summary>After this long without a word the vendor is released, the sale left open (DESIGN 1.51).</summary>
+        public const float VendingSaleReleaseSeconds = 60f;
+        /// <summary>How often a released sale is asked about.</summary>
+        public const float VendingSaleReleasedAskSeconds = 30f;
+        /// <summary>After this long without a word the sale is settled as paid (the item has left the vendor; logged as an error).</summary>
+        public const float VendingSaleGiveUpSeconds = 1800f;
         /// <summary>How long the buyer's cell remembers its word on a sale.</summary>
         public const float VendingDecisionSeconds = 600f;
         /// <summary>How many times a sale's message is passed on after the player it is for.</summary>
@@ -67,7 +78,8 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private sealed class PendingSale
         {
-            public string saleId, vendorId, vendorName, buyerId, buyerName, buyerZone;
+            public string saleId, vendorId, vendorUserId, vendorName, buyerId, buyerName, buyerZone;
+            public bool released; // the vendor's handoff no longer waits for it
             public CharacterItem item;
             public int price;
             public float since;
@@ -80,6 +92,7 @@ namespace MultiplayerARPG.MMO.Mesh
         private float[] _testVendingAnswerDelays;
         private int _testVendingAnswers, _testSoldSent, _testDoneSent;
         private HashSet<string> _testVendingDrops;
+        private readonly Dictionary<string, float> _testVendingBlackouts = new Dictionary<string, float>(); // sale id -> until
 
         /// <summary>
         /// The boundary tick holds the handoff of a buyer whose purchase is on its way (DESIGN 1.47), and of a vendor whose
@@ -97,10 +110,10 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             foreach (PendingSale sale in _pendingSales.Values)
             {
-                if (sale.vendorId != player.Id)
+                if (sale.vendorId != player.Id || sale.released)
                     continue;
                 if (_vendingHoldLogged.Add(player.Id))
-                    Logging.Log("Mesh", $"Handoff of {player.CharacterName} held: its sale to {sale.buyerName} waits for the buyer's cell (at most {VendingSaleGiveUpSeconds:0} s)");
+                    Logging.Log("Mesh", $"Handoff of {player.CharacterName} held: its sale to {sale.buyerName} waits for the buyer's cell (at most {VendingSaleReleaseSeconds:0} s)");
                 return true;
             }
             _vendingHoldLogged.Remove(player.Id);
@@ -128,6 +141,26 @@ namespace MultiplayerARPG.MMO.Mesh
             if (_testVendingAnswerDelays.Length == 0)
                 return 0f;
             return _testVendingAnswerDelays[Mathf.Min(_testVendingAnswers++, _testVendingAnswerDelays.Length - 1)];
+        }
+
+        /// <summary>MESH_TEST_VENDING_BLACKOUT `<n>:<seconds>`: the sale of this cell's n-th word has every word dropped for that long.</summary>
+        private bool TestVendingBlackout(string saleId, int n, out float left)
+        {
+            left = 0f;
+            string text = System.Environment.GetEnvironmentVariable("MESH_TEST_VENDING_BLACKOUT");
+            if (!string.IsNullOrEmpty(text))
+            {
+                string[] parts = text.Split(':');
+                if (parts.Length == 2 && int.TryParse(parts[0], out int which) && which == n
+                    && float.TryParse(parts[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float seconds))
+                    _testVendingBlackouts[saleId] = Time.unscaledTime + seconds;
+            }
+            if (_testVendingBlackouts.TryGetValue(saleId, out float until) && Time.unscaledTime < until)
+            {
+                left = until - Time.unscaledTime;
+                return true;
+            }
+            return false;
         }
 
         /// <summary>MESH_TEST_VENDING_DROP: true when this cell's n-th message of this kind ("sold", "done") is to be dropped.</summary>
@@ -249,7 +282,7 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             _pendingSales[saleId] = new PendingSale
             {
-                saleId = saleId, vendorId = target.Id, vendorName = target.CharacterName, buyerId = buyer.Id, buyerName = buyer.CharacterName,
+                saleId = saleId, vendorId = target.Id, vendorUserId = vendor != null ? vendor.UserId : null, vendorName = target.CharacterName, buyerId = buyer.Id, buyerName = buyer.CharacterName,
                 buyerZone = buyerZone, item = sold, price = price, since = Time.unscaledTime,
             };
             StartCoroutine(WatchPendingSale(saleId));
@@ -287,18 +320,29 @@ namespace MultiplayerARPG.MMO.Mesh
             AnswerBuyer(buyerId, buyerZone, kind, vendor, write, 0f);
         }
 
-        /// <summary>A sale without the buyer's cell's word: asked about every VendingSaleAskSeconds, settled as paid at the give-up.</summary>
+        /// <summary>
+        /// A sale without the buyer's cell's word: asked about every VendingSaleAskSeconds; after a minute the vendor is
+        /// released and the sale asked about every 30 s; settled as paid at the give-up.
+        /// </summary>
         private IEnumerator WatchPendingSale(string saleId)
         {
             while (true)
             {
-                yield return new WaitForSecondsRealtime(VendingSaleAskSeconds);
+                bool released = _pendingSales.TryGetValue(saleId, out PendingSale before) && before.released;
+                yield return new WaitForSecondsRealtime(released ? VendingSaleReleasedAskSeconds : VendingSaleAskSeconds);
                 if (!_pendingSales.TryGetValue(saleId, out PendingSale sale))
                     yield break;
                 if (Time.unscaledTime - sale.since >= VendingSaleGiveUpSeconds)
                 {
+                    Logging.LogError("Mesh", $"Vending: no word on sale {saleId} ({sale.vendorName} to {sale.buyerName}) in {VendingSaleGiveUpSeconds:0} s; settled as paid");
                     SettleSale(saleId, true, $"no word from the buyer's cell in {VendingSaleGiveUpSeconds:0} s");
                     yield break;
+                }
+                if (!sale.released && Time.unscaledTime - sale.since >= VendingSaleReleaseSeconds)
+                {
+                    sale.released = true;
+                    _vendingHoldLogged.Remove(sale.vendorId);
+                    Logging.LogWarning("Mesh", $"Vending: sale {saleId} of {sale.vendorName} to {sale.buyerName} released after {VendingSaleReleaseSeconds:0} s without a word: the sale stays open, settled when the buyer's cell answers (mailed if {sale.vendorName} has left)");
                 }
                 BaseCharacterEntity buyer = ResolveGhostOrReal(sale.buyerId);
                 BasePlayerCharacterEntity vendor = ResolveOwnedCharacter(sale.vendorId) as BasePlayerCharacterEntity;
@@ -317,11 +361,17 @@ namespace MultiplayerARPG.MMO.Mesh
                 return;
             _pendingSales.Remove(saleId);
             _vendingHoldLogged.Remove(sale.vendorId);
-            BasePlayerCharacterEntity vendor = ResolveOwnedCharacter(sale.vendorId) as BasePlayerCharacterEntity;
+            BasePlayerCharacterEntity vendor = RegisteredPlayer(sale.vendorId);
             MeshPlayerCharacterVendingComponent vending = VendingOf(vendor);
             if (vending == null)
             {
-                Logging.LogError("Mesh", $"Vending: sale {saleId} of {sale.vendorName} settled ({(paid ? "paid" : "not paid")}, {why}) with the vendor no longer here: its {(paid ? $"{sale.price} gold" : $"{sale.item.amount} x item {sale.item.dataId}")} is lost");
+                // DESIGN 1.51: the vendor has left this cell; what the sale owes it goes by mail.
+                if (paid)
+                    MailToAbsent(sale.vendorUserId, sale.vendorName, "Shop sale", $"The gold for an item {sale.vendorName}'s shop sold to {sale.buyerName} after it left ({why}).",
+                        null, sale.price, $"Vending: sale {saleId} paid for {sale.vendorName}, who is not on this cell");
+                else
+                    MailToAbsent(sale.vendorUserId, sale.vendorName, "Shop item back", $"The item {sale.vendorName}'s shop sold to {sale.buyerName}, back: it did not reach the buyer ({why}).",
+                        new List<CharacterItem> { sale.item }, 0, $"Vending: sale {saleId} not delivered for {sale.vendorName}, who is not on this cell; its item");
                 return;
             }
             if (paid)
@@ -459,7 +509,13 @@ namespace MultiplayerARPG.MMO.Mesh
         /// </summary>
         private void SendSaleDone(EntityInfo vendorInfo, string saleId, bool paid, BasePlayerCharacterEntity buyer, string replyZone = null, string vendorMeshId = null)
         {
-            if (TestVendingDrop("done", ++_testDoneSent))
+            int n = ++_testDoneSent;
+            if (TestVendingBlackout(saleId, n, out float left))
+            {
+                Logging.LogWarning("Mesh", $"Vending: the word on sale {saleId} ({(paid ? "paid" : "not paid")}) dropped (MESH_TEST_VENDING_BLACKOUT, {left:0} s left)");
+                return;
+            }
+            if (TestVendingDrop("done", n))
             {
                 Logging.LogWarning("Mesh", $"Vending: the word on sale {saleId} ({(paid ? "paid" : "not paid")}) dropped (MESH_TEST_VENDING_DROP done{_testDoneSent})");
                 return;
@@ -600,21 +656,14 @@ namespace MultiplayerARPG.MMO.Mesh
 
         /// <summary>
         /// UnregisterPlayerCharacter's hook for a player leaving otherwise than by a handoff (a disconnect, a warp): its
-        /// purchase on its way gets its escrow back before the kit saves it, and its pending sales are paid (the items
-        /// have left it). A handoff is held while either waits (HoldsHandoffForVending).
+        /// purchase on its way gets its escrow back before the kit saves it. Its pending sales stay open and are settled by
+        /// the buyer's cell's word, mailed to it (DESIGN 1.51). A handoff is held while either waits (HoldsHandoffForVending).
         /// </summary>
         private void VendingOnLeaving(BasePlayerCharacterEntity player)
         {
             if (player == null || string.IsNullOrEmpty(player.Id) || _handoffsInProgress.Contains(player.Id))
                 return;
             RefundVendingEscrow(player, "left the cell before the answer");
-            List<string> sales = null;
-            foreach (PendingSale sale in _pendingSales.Values)
-                if (sale.vendorId == player.Id)
-                    (sales ??= new List<string>()).Add(sale.saleId);
-            if (sales != null)
-                foreach (string saleId in sales)
-                    SettleSale(saleId, true, "the vendor left the cell; paid as delivered");
         }
 #else
         internal bool BeginVendingEscrow(BasePlayerCharacterEntity buyer, BasePlayerCharacterEntity vendorGhost, int index, VendingItem entry) { return false; }

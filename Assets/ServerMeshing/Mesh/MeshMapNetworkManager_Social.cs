@@ -16,6 +16,13 @@
 // despawn delay, whose second save takes it. A repeated answer for an exchange already settled here changes nothing.
 // MESH_TEST_TRADE_DROP (comma-separated `commit<n>`, `committed<n>`) drops a cell's n-th commit or answer, and
 // MESH_TEST_TRADE_ANSWER_DELAY (seconds, one per commit handled) holds a cell's answers, for regress.py trade.
+//
+// DESIGN 1.51: an exchange has no deadline any more. After a minute without an answer its trader is released (the trade
+// ends for it, it may move and hop again) while the exchange stays open, asked about every 30 s; whatever settles it
+// (an answer, or 30 minutes without one) is applied to the trader if it is registered here, and mailed to its account
+// otherwise (MeshMapNetworkManager_Delivery): a trader who logged out (the kit's safe disconnect despawns at once), was
+// disconnected or hopped away. MESH_TEST_TRADE_BLACKOUT (`<n>:<seconds>`) drops every answer to the n-th commit a cell
+// handles for that long, as a link down for a minute would.
 using System.Collections;
 using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
@@ -41,14 +48,19 @@ namespace MultiplayerARPG.MMO.Mesh
 #if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
         /// <summary>How long a trader's escrow waits for the other cell's answer before it asks, and between asks.</summary>
         public const float DealEscrowSeconds = 10f;
-        /// <summary>After this long without an answer the escrow goes back (DESIGN 1.49).</summary>
-        public const float DealGiveUpSeconds = 60f;
+        /// <summary>After this long without an answer the trader is released, the exchange left open (DESIGN 1.51).</summary>
+        public const float DealReleaseSeconds = 60f;
+        /// <summary>How often a released exchange is asked about.</summary>
+        public const float DealReleasedAskSeconds = 30f;
+        /// <summary>After this long without an answer the escrow goes back (applied or mailed; logged as an error).</summary>
+        public const float DealGiveUpSeconds = 1800f;
         /// <summary>How long the other cell remembers its answer on an exchange.</summary>
         public const float DealDecisionSeconds = 600f;
 
         private sealed class DealEscrow
         {
-            public BasePlayerCharacterEntity trader;
+            public string traderId, traderUserId, traderName;
+            public bool released; // no longer the trader's open trade: settled by the answer, applied or mailed
             public string otherMeshId, otherZone, tradeId;
             public List<CharacterItem> items = new List<CharacterItem>();
             public int goldTaken;   // the offer plus the fee, out of the inventory
@@ -56,7 +68,10 @@ namespace MultiplayerARPG.MMO.Mesh
             public float since;
         }
 
-        private readonly Dictionary<string, DealEscrow> _dealEscrows = new Dictionary<string, DealEscrow>();
+        private readonly Dictionary<string, DealEscrow> _dealEscrows = new Dictionary<string, DealEscrow>();        // trader id: its open trade's escrow
+        private readonly Dictionary<string, DealEscrow> _dealEscrowsByTrade = new Dictionary<string, DealEscrow>(); // trade id: every escrow until settled
+        private readonly Dictionary<string, float> _testTradeBlackouts = new Dictionary<string, float>();       // trade id -> until
+        private int _testCommitsHandled;
         private readonly Dictionary<string, List<DealDecision>> _dealDecisions = new Dictionary<string, List<DealDecision>>(); // the answering trader's id
         private readonly Dictionary<string, float> _dealsSettled = new Dictionary<string, float>(); // trade id -> when, on the escrow's cell
         private readonly HashSet<string> _dealHoldLogged = new HashSet<string>();
@@ -234,7 +249,8 @@ namespace MultiplayerARPG.MMO.Mesh
             UITextKeys message = (UITextKeys)payload.GetUShort();
             if (!(target is BasePlayerCharacterEntity player) || player.DealingComponent == null)
                 return;
-            RefundDealEscrow(player, "the other side ended the trade");
+            if (_dealEscrows.TryGetValue(player.Id, out DealEscrow ended))
+                SettleDealEscrow(ended, false, null, 0, message, "the other side ended the trade");
             if (player.DealingComponent.DealingState != DealingState.None || player.DealingComponent.DealingCharacter != null)
                 ServerGameMessageHandlers.SendGameMessage(player.ConnectionId, message);
             player.DealingComponent.StopDealing();
@@ -251,12 +267,14 @@ namespace MultiplayerARPG.MMO.Mesh
             MeshIdentity otherIdentity = MeshIdentity.Get(otherGhost);
             DealEscrow escrow = new DealEscrow
             {
-                trader = trader, otherMeshId = MeshEntityIdOf(otherGhost), otherZone = otherIdentity != null ? otherIdentity.OwnerZoneId : null,
+                traderId = trader.Id, traderUserId = trader.UserId, traderName = trader.CharacterName,
+                otherMeshId = MeshEntityIdOf(otherGhost), otherZone = otherIdentity != null ? otherIdentity.OwnerZoneId : null,
                 tradeId = System.Guid.NewGuid().ToString("N"), goldTaken = goldWithFee, goldOffered = goldOffered, since = Time.unscaledTime,
             };
             if (!MeshDealing.TakeOffered(trader, offered, goldWithFee, escrow.items))
                 return false;
             _dealEscrows[trader.Id] = escrow;
+            _dealEscrowsByTrade[escrow.tradeId] = escrow;
             List<CharacterItem> items = escrow.items;
             string tradeId = escrow.tradeId;
             if (TestTradeDrop("commit", ++_testCommitsSent))
@@ -269,7 +287,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     for (int i = 0; i < items.Count; ++i) writer.Put(items[i]);
                     writer.Put(goldOffered);
                 });
-            StartCoroutine(DealEscrowTimeout(trader.Id, tradeId));
+            StartCoroutine(DealEscrowTimeout(tradeId));
             Logging.Log("Mesh", $"Trade commit: {trader.CharacterName}'s offer ({items.Count} item(s), {goldOffered} gold, {goldWithFee - goldOffered} fee) in escrow, sent to {otherGhost.CharacterName}'s owner (trade {tradeId})");
             return true;
         }
@@ -284,7 +302,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 return false;
             }
             if (_dealHoldLogged.Add(player.Id))
-                Logging.Log("Mesh", $"Handoff of {player.CharacterName} held: its exchange is in escrow here (at most {DealGiveUpSeconds:0} s)");
+                Logging.Log("Mesh", $"Handoff of {player.CharacterName} held: its exchange is in escrow here (at most {DealReleaseSeconds:0} s)");
             return true;
         }
 
@@ -320,10 +338,64 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private DealEscrow FindDealEscrow(string tradeId)
         {
-            foreach (DealEscrow escrow in _dealEscrows.Values)
-                if (escrow.tradeId == tradeId)
-                    return escrow;
-            return null;
+            return !string.IsNullOrEmpty(tradeId) && _dealEscrowsByTrade.TryGetValue(tradeId, out DealEscrow escrow) ? escrow : null;
+        }
+
+        /// <summary>MESH_TEST_TRADE_BLACKOUT `<n>:<seconds>`: the n-th commit this cell handles has its answers dropped for that long.</summary>
+        private void TestTradeBlackoutOnCommit(string tradeId)
+        {
+            int n = ++_testCommitsHandled;
+            string text = System.Environment.GetEnvironmentVariable("MESH_TEST_TRADE_BLACKOUT");
+            if (string.IsNullOrEmpty(text))
+                return;
+            string[] parts = text.Split(':');
+            if (parts.Length == 2 && int.TryParse(parts[0], out int which) && which == n
+                && float.TryParse(parts[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float seconds))
+            {
+                _testTradeBlackouts[tradeId] = Time.unscaledTime + seconds;
+                Logging.LogWarning("Mesh", $"Trade {tradeId}: every answer dropped for {seconds:0} s (MESH_TEST_TRADE_BLACKOUT {text})");
+            }
+        }
+
+        /// <summary>
+        /// Settles one exchange (DESIGN 1.51): committed gives the trader the other's offer, failed gives its own back;
+        /// applied when the trader is registered here (its open trade ended), mailed to its account otherwise.
+        /// </summary>
+        private void SettleDealEscrow(DealEscrow escrow, bool committed, List<CharacterItem> received, int goldReceived, UITextKeys reason, string why)
+        {
+            _dealEscrowsByTrade.Remove(escrow.tradeId);
+            bool open = _dealEscrows.TryGetValue(escrow.traderId, out DealEscrow attached) && ReferenceEquals(attached, escrow);
+            if (open)
+                _dealEscrows.Remove(escrow.traderId);
+            _dealHoldLogged.Remove(escrow.traderId);
+            _dealsSettled[escrow.tradeId] = Time.unscaledTime;
+            BasePlayerCharacterEntity player = RegisteredPlayer(escrow.traderId);
+            if (player == null)
+            {
+                if (committed)
+                    MailToAbsent(escrow.traderUserId, escrow.traderName, "Trade completed", $"What {escrow.traderName} received in a trade that completed after it left ({why}).",
+                        received, goldReceived, $"Trade {escrow.tradeId} committed for {escrow.traderName}, who is not on this cell");
+                else
+                    MailToAbsent(escrow.traderUserId, escrow.traderName, "Trade cancelled", $"{escrow.traderName}'s offer back from a trade that did not complete ({why}).",
+                        escrow.items, escrow.goldTaken, $"Trade {escrow.tradeId} failed for {escrow.traderName}, who is not on this cell; its offer");
+                return;
+            }
+            if (committed)
+            {
+                ServerLogHandlers.LogExchangeDealingItemsAndGold(player, player.DealingComponent != null ? player.DealingComponent.DealingCharacter : null, escrow.goldOffered, new DealingCharacterItems { });
+                MeshDealing.Give(player, received, goldReceived, item => player.OnRewardItem(RewardGivenType.Dealing, item));
+                player.OnRewardGold(RewardGivenType.Dealing, goldReceived);
+                Logging.Log("Mesh", $"Trade committed here: {player.CharacterName} received {received.Count} item(s) and {goldReceived} gold across a line; its escrow is spent (trade {escrow.tradeId}{(escrow.released ? $", {Time.unscaledTime - escrow.since:0} s after the commit" : string.Empty)})");
+            }
+            else
+            {
+                MeshDealing.Give(player, escrow.items, escrow.goldTaken, null);
+                Logging.LogWarning("Mesh", $"Trade escrow of {player.CharacterName} returned ({why}): {escrow.items.Count} item(s), {escrow.goldTaken} gold");
+                if (open && reason != UITextKeys.NONE)
+                    ServerGameMessageHandlers.SendGameMessage(player.ConnectionId, reason);
+            }
+            if (open)
+                player.DealingComponent?.StopDealing();
         }
 
         /// <summary>The escrow's cell asks the other cell about an exchange it has no answer on.</summary>
@@ -332,8 +404,9 @@ namespace MultiplayerARPG.MMO.Mesh
             BaseCharacterEntity other = ResolveGhostOrReal(escrow.otherMeshId);
             string tradeId = escrow.tradeId;
             System.Action<NetDataWriter> query = writer => writer.Put(tradeId);
-            Logging.LogWarning("Mesh", $"Trade {tradeId} of {escrow.trader?.CharacterName}: {why}; asking the other cell");
-            if (!SendToPlayer(other, GhostActionKind.DealQuery, escrow.trader, query) && !SendToPlayerOnZone(escrow.otherZone, escrow.otherMeshId, GhostActionKind.DealQuery, escrow.trader, query))
+            BasePlayerCharacterEntity trader = RegisteredPlayer(escrow.traderId);
+            Logging.LogWarning("Mesh", $"Trade {tradeId} of {escrow.traderName}: {why}; asking the other cell");
+            if (!SendToPlayer(other, GhostActionKind.DealQuery, trader, query) && !SendToPlayerOnZone(escrow.otherZone, escrow.otherMeshId, GhostActionKind.DealQuery, trader, query))
                 Logging.LogWarning("Mesh", $"Trade {tradeId}: the other trader is neither here nor streamed here, and zone {escrow.otherZone ?? "?"} is not linked; asked again later");
         }
 
@@ -342,38 +415,50 @@ namespace MultiplayerARPG.MMO.Mesh
             return trader != null && !string.IsNullOrEmpty(trader.Id) && _dealEscrows.ContainsKey(trader.Id);
         }
 
-        /// <summary>Puts a trader's escrow back into its inventory, if it has one (a puppet being destroyed has no id and no escrow).</summary>
-        internal void RefundDealEscrow(BasePlayerCharacterEntity trader, string why)
+        /// <summary>
+        /// The trader is leaving the cell (its entity destroyed): an open exchange stays open, settled by the answer
+        /// (mailed once the trader is gone; DESIGN 1.51). A puppet being destroyed has no id and no escrow.
+        /// </summary>
+        internal void ReleaseDealEscrowOnLeaving(BasePlayerCharacterEntity trader)
         {
             if (trader == null || string.IsNullOrEmpty(trader.Id) || !_dealEscrows.TryGetValue(trader.Id, out DealEscrow escrow))
                 return;
             _dealEscrows.Remove(trader.Id);
-            MeshDealing.Give(trader, escrow.items, escrow.goldTaken, null);
-            Logging.LogWarning("Mesh", $"Trade escrow of {trader.CharacterName} returned ({why}): {escrow.items.Count} item(s), {escrow.goldTaken} gold");
+            _dealHoldLogged.Remove(trader.Id);
+            escrow.released = true;
         }
 
-        private IEnumerator DealEscrowTimeout(string traderId, string tradeId)
+        /// <summary>Asks about an exchange every 10 s; releases its trader after a minute and asks every 30 s; gives up after 30 minutes.</summary>
+        private IEnumerator DealEscrowTimeout(string tradeId)
         {
             while (true)
             {
-                yield return new WaitForSecondsRealtime(DealEscrowSeconds);
-                if (!_dealEscrows.TryGetValue(traderId, out DealEscrow escrow) || escrow.trader == null || escrow.tradeId != tradeId)
+                bool released = _dealEscrowsByTrade.TryGetValue(tradeId, out DealEscrow before) && before.released;
+                yield return new WaitForSecondsRealtime(released ? DealReleasedAskSeconds : DealEscrowSeconds);
+                if (!_dealEscrowsByTrade.TryGetValue(tradeId, out DealEscrow escrow))
                     yield break;
                 float waited = Time.unscaledTime - escrow.since;
-                if (waited < DealGiveUpSeconds)
+                if (waited >= DealGiveUpSeconds)
                 {
-                    SendDealQuery(escrow, $"no answer in {waited:0} s");
-                    continue;
+                    Logging.LogError("Mesh", $"Trade {tradeId} of {escrow.traderName}: no answer from the other cell in {DealGiveUpSeconds:0} s; the escrow goes back");
+                    SettleDealEscrow(escrow, false, null, 0, UITextKeys.UI_ERROR_DEALING_CANCELED, $"no answer from the other cell in {DealGiveUpSeconds:0} s");
+                    yield break;
                 }
-                Logging.LogError("Mesh", $"Trade {tradeId} of {escrow.trader.CharacterName}: no answer from the other cell in {DealGiveUpSeconds:0} s; the escrow goes back");
-                _dealsSettled[tradeId] = Time.unscaledTime;
-                RefundDealEscrow(escrow.trader, $"no answer from the other cell in {DealGiveUpSeconds:0} s");
-                if (escrow.trader.DealingComponent != null)
+                if (!escrow.released && waited >= DealReleaseSeconds)
                 {
-                    ServerGameMessageHandlers.SendGameMessage(escrow.trader.ConnectionId, UITextKeys.UI_ERROR_DEALING_CANCELED);
-                    escrow.trader.DealingComponent.StopDealing();
+                    escrow.released = true;
+                    if (_dealEscrows.TryGetValue(escrow.traderId, out DealEscrow open) && ReferenceEquals(open, escrow))
+                        _dealEscrows.Remove(escrow.traderId);
+                    _dealHoldLogged.Remove(escrow.traderId);
+                    BasePlayerCharacterEntity trader = RegisteredPlayer(escrow.traderId);
+                    if (trader != null && trader.DealingComponent != null)
+                    {
+                        ServerGameMessageHandlers.SendGameMessage(trader.ConnectionId, UITextKeys.UI_ERROR_DEALING_CANCELED);
+                        trader.DealingComponent.StopDealing();
+                    }
+                    Logging.LogWarning("Mesh", $"Trade {tradeId} of {escrow.traderName} released after {DealReleaseSeconds:0} s without an answer: the exchange stays open, settled when the other cell answers (mailed if {escrow.traderName} has left)");
                 }
-                yield break;
+                SendDealQuery(escrow, $"no answer in {waited:0} s");
             }
         }
 
@@ -408,6 +493,7 @@ namespace MultiplayerARPG.MMO.Mesh
             MeshIdentity otherIdentity = MeshIdentity.Get(other);
             string otherZone = otherIdentity != null ? otherIdentity.OwnerZoneId : null;
             float delay = TestTradeAnswerDelay();
+            TestTradeBlackoutOnCommit(tradeId);
             UITextKeys forPlayer = UITextKeys.NONE, forOther = UITextKeys.NONE;
             if (!ReferenceEquals(dealing.DealingCharacter, other) || dealing.DealingState != DealingState.ConfirmDealing)
                 forOther = UITextKeys.UI_ERROR_INVALID_DEALING_STATE;
@@ -455,6 +541,11 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 Logging.LogWarning("Mesh", $"Trade {decision.tradeId}: the answer held {delay:0.#} s (MESH_TEST_TRADE_ANSWER_DELAY)");
                 StartCoroutine(SendDealAnswerLater(answering, otherInfo, decision, delay));
+                return;
+            }
+            if (_testTradeBlackouts.TryGetValue(decision.tradeId, out float blackoutUntil) && Time.unscaledTime < blackoutUntil)
+            {
+                Logging.LogWarning("Mesh", $"Trade {decision.tradeId}: the answer ({(decision.committed ? "committed" : "failed")}) dropped (MESH_TEST_TRADE_BLACKOUT, {blackoutUntil - Time.unscaledTime:0} s left)");
                 return;
             }
             if (decision.committed && TestTradeDrop("committed", ++_testCommittedSent))
@@ -586,7 +677,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 ushort reason = kind == GhostActionKind.DealFailed ? reader.GetUShort() : (ushort)0;
                 string tradeId = reader.GetString();
                 DealEscrow escrow = FindDealEscrow(tradeId);
-                if (escrow == null || escrow.trader == null)
+                if (escrow == null)
                 {
                     if (_dealsSettled.ContainsKey(tradeId))
                         Logging.Log("Mesh", $"Trade {tradeId} {(kind == GhostActionKind.DealCommitted ? "committed" : "failed")} for {msg.targetMeshId} again (a repeated answer); settled already, nothing given");
@@ -594,11 +685,11 @@ namespace MultiplayerARPG.MMO.Mesh
                         Logging.LogWarning("Mesh", $"Trade {tradeId}: an answer ({kind}) for {msg.targetMeshId}, who is not here, with no escrow here; dropped");
                     return true;
                 }
-                Logging.LogWarning("Mesh", $"Trade {tradeId}: the answer ({kind}) reached this cell after {escrow.trader.CharacterName} left it; applied to the character the kit keeps for its save");
+                Logging.LogWarning("Mesh", $"Trade {tradeId}: the answer ({kind}) reached this cell after {escrow.traderName} left it");
                 if (kind == GhostActionKind.DealCommitted)
-                    ApplyDealCommitted(escrow.trader, tradeId, reader);
+                    SettleDealEscrow(escrow, true, ReadItems(reader), reader.GetInt(), UITextKeys.NONE, "the other cell committed it");
                 else
-                    ApplyDealFailed(escrow.trader, tradeId, (UITextKeys)reason);
+                    SettleDealEscrow(escrow, false, null, 0, (UITextKeys)reason, $"refused by the other cell: {(UITextKeys)reason}");
                 return true;
             }
             string asked = reader.GetString();
@@ -611,6 +702,8 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (player == null || string.IsNullOrEmpty(player.Id) || _handoffsInProgress.Contains(player.Id) || !_dealEscrows.TryGetValue(player.Id, out DealEscrow escrow))
                 return;
+            _dealEscrows.Remove(player.Id); // settled by the answer, mailed (the kit may destroy the character at once)
+            escrow.released = true;
             SendDealQuery(escrow, "the trader left the cell with its exchange in escrow");
         }
 
@@ -630,7 +723,8 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             List<CharacterItem> received = ReadItems(payload);
             int goldReceived = payload.GetInt();
-            if (!_dealEscrows.TryGetValue(player.Id, out DealEscrow escrow) || escrow.tradeId != tradeId)
+            DealEscrow escrow = FindDealEscrow(tradeId);
+            if (escrow == null)
             {
                 if (_dealsSettled.ContainsKey(tradeId))
                     Logging.Log("Mesh", $"Trade {tradeId} committed for {player.CharacterName} again (a repeated answer); settled already, nothing given");
@@ -638,14 +732,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     Logging.LogError("Mesh", $"Trade {tradeId} committed for {player.CharacterName} with no escrow here: the other side's {received.Count} item(s) and {goldReceived} gold are not given");
                 return;
             }
-            _dealEscrows.Remove(player.Id);
-            _dealHoldLogged.Remove(player.Id);
-            _dealsSettled[tradeId] = Time.unscaledTime;
-            ServerLogHandlers.LogExchangeDealingItemsAndGold(player, player.DealingComponent != null ? player.DealingComponent.DealingCharacter : null, escrow.goldOffered, new DealingCharacterItems { });
-            MeshDealing.Give(player, received, goldReceived, item => player.OnRewardItem(RewardGivenType.Dealing, item));
-            player.OnRewardGold(RewardGivenType.Dealing, goldReceived);
-            Logging.Log("Mesh", $"Trade committed here: {player.CharacterName} received {received.Count} item(s) and {goldReceived} gold across a line; its escrow is spent (trade {tradeId})");
-            player.DealingComponent?.StopDealing();
+            SettleDealEscrow(escrow, true, received, goldReceived, UITextKeys.NONE, "the other cell committed it");
         }
 
         /// <summary>The other cell refused the commit: the escrow goes back and the trade ends with the reason.</summary>
@@ -659,16 +746,13 @@ namespace MultiplayerARPG.MMO.Mesh
 
         private void ApplyDealFailed(BasePlayerCharacterEntity player, string tradeId, UITextKeys reason)
         {
-            if (!_dealEscrows.TryGetValue(player.Id, out DealEscrow escrow) || escrow.tradeId != tradeId)
+            DealEscrow escrow = FindDealEscrow(tradeId);
+            if (escrow == null)
             {
                 Logging.Log("Mesh", $"Trade {tradeId} failed for {player.CharacterName} with no escrow of it here (settled already)");
                 return;
             }
-            _dealsSettled[tradeId] = Time.unscaledTime;
-            _dealHoldLogged.Remove(player.Id);
-            RefundDealEscrow(player, $"refused by the other cell: {reason}");
-            ServerGameMessageHandlers.SendGameMessage(player.ConnectionId, reason);
-            player.DealingComponent?.StopDealing();
+            SettleDealEscrow(escrow, false, null, 0, reason, $"refused by the other cell: {reason}");
         }
 
         // ---- invitations ----
@@ -746,7 +830,7 @@ namespace MultiplayerARPG.MMO.Mesh
         private void TradeOnLeaving(BasePlayerCharacterEntity player) { }
         internal List<DealDecision> DealDecisionsOf(string traderId) { return null; }
         internal void ImportDealDecision(string traderId, DealDecision decision, float age) { }
-        internal void RefundDealEscrow(BasePlayerCharacterEntity trader, string why) { }
+        internal void ReleaseDealEscrowOnLeaving(BasePlayerCharacterEntity trader) { }
 #endif
     }
 }

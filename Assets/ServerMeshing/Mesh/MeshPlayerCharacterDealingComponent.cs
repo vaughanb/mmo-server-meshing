@@ -381,13 +381,13 @@ namespace MultiplayerARPG.MMO.Mesh
 #endif
         }
 
-        /// <summary>This trader is leaving the cell mid-trade (a hop, a demotion, a disconnect): an escrow goes back, and the other trader's owner ends it there.</summary>
+        /// <summary>This trader is leaving the cell mid-trade (a hop, a demotion, a disconnect): an exchange in escrow stays open until its answer, and the other trader's owner ends the trade there.</summary>
         internal void EndAcrossBeforeLeaving()
         {
 #if UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES
             if (!IsServer || Mesh == null)
                 return;
-            Mesh.RefundDealEscrow(Entity, "the trader left the cell");
+            Mesh.ReleaseDealEscrowOnLeaving(Entity); // DESIGN 1.51: settled by the answer, mailed once the trader is gone
             if (OtherIsGhost && DealingState != DealingState.None)
                 EndAcross(UITextKeys.UI_ERROR_DEALING_CANCELED);
 #endif
