@@ -66,6 +66,40 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             Assert.That(ids, Is.EquivalentTo(new[] { "SE", "NW", "NE" }));
         }
 
+        /// <summary>
+        /// The empty quadrant at a seam corner (DESIGN 1.50): north of Map2's C2 and east of Map1's NE belongs to no map.
+        /// A player who steps into it stays on the cell it came from (its map's clamped grid, or its nearest rectangle);
+        /// no cell across the seam takes it, so there is nothing to hand off and nothing to bounce between. What stops it
+        /// there is the world's own edge, as at any map edge with no neighbour.
+        /// </summary>
+        [TestCase("NE", 350f, 150f, "NE")]  // Map1's frame is the world's
+        [TestCase("NE", 450f, 290f, "NE")]
+        [TestCase("C2", 0f, 150f, "C2")]    // Map2's frame (400 m east): world (400, 150)
+        [TestCase("C2", -60f, 160f, "C2")]  // world (340, 160)
+        public void OwnerOf_EmptyQuadrantAtASeamCorner_StaysOnItsCell(string fromId, float x, float z, string expectedId)
+        {
+            using (new MeshFakeWorlds.BandEnvironment())
+            {
+                MeshWorldRegistry world = MeshFakeWorlds.RigLike(false);
+                try
+                {
+                    MeshCell from = world.GetCellById(fromId);
+                    Assert.That(from, Is.Not.Null);
+                    Vector3 position = new Vector3(x, 0f, z);
+                    Assert.That(world.CellAtWorld(new Vector3(x + from.frameOrigin.x, 0f, z + from.frameOrigin.z)), Is.Null, "the position is outside every map");
+
+                    MeshCell owner = world.OwnerOf(from, position);
+
+                    Assert.That(owner, Is.Not.Null);
+                    Assert.That(owner.id, Is.EqualTo(expectedId));
+                }
+                finally
+                {
+                    Object.DestroyImmediate(world);
+                }
+            }
+        }
+
         private static IEnumerable<TestCaseData> SameCases()
         {
             yield return new TestCaseData(null, null, true).SetName("Same_NullAndNull_IsTrue");

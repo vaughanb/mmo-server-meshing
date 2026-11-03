@@ -445,8 +445,8 @@ Where the work stands, how to get it running on another machine, and what is lef
    side, step over, open the strongbox, step back. A chest's storage still closes at a hop; a trade, a duel and a party or
    guild invitation with a player across a line work since 1.44 (item 22, all four in `regress.py social` since 1.45), and
    friend requests, a player's shop and a crafting queue since 1.46 (item 24), with a purchase across a hop, a shop
-   moved by a split or merge and a workbench's queue run since 1.47 (item 25); a shop dialog crosses by the same code
-   but was not run.
+   moved by a split or merge and a workbench's queue run since 1.47 (item 25), and a purchase or a trade that loses an
+   answer or a party since 1.48 and 1.49 (items 26 and 27).
    A corpse in the band is a puppet with its items since 1.38 (`GhostKind.Container`), and a loot on it goes to its owner; a
    PK kill across a line credits the killer on its own cell (`GhostAction.PkKill`). Both measured, the loot with a pinned test
    deer (`MESH_TEST_MONSTER=-1.3,540,Deer` on the cell start) killed from across the line. A shop dialog crosses a hop and a
@@ -457,8 +457,8 @@ Where the work stands, how to get it running on another machine, and what is lef
      frame is now the one after the swap, 63–70 ms: the kit's `Assets.Initialize` and the pool init of its online-scene
      handling — the next lever. The session's first hop still has its 123–134 ms connect frame (first-use compilation).
      A corner where four maps meet is run (1.43): hops straight through the point between cells that touch there, three
-     scenes pre-loaded at once; a corner with an empty quadrant is the edge of the world, and a step into the empty
-     quadrant is not stopped (not run).
+     scenes pre-loaded at once; a corner with an empty quadrant is the edge of the world: a step into it stays on the cell
+     it came from, and the world's own edge stops it, as at any map edge (1.50, a test pins it).
      A death on the east map respawns on the west start (the kit's save point).
 2. **Monsters at a crossing (1.23, 1.28):** a lone monster chases a player across a Static map's line, hits
    through the ghost, and is handed over with its target; a monster that walks over a line on its own walks on
@@ -483,8 +483,9 @@ Where the work stands, how to get it running on another machine, and what is lef
 4. **The kit copy is upstream `master` at 493df35fc (1.33).** CE-14 is upstream (PR 28) and no `MESH-EDIT` marker is left. No
    release has it yet, so the package names `master` at 05ec55012 as its minimum: when a release does, name that. A later
    sync is a three-way merge, not a copy (`upstream/README.md`).
-5. **The rig regression** on the code of 1.49 is the changed paths only: `trade` 75, `social` 70 and `market` 83
-   checks, all passing (2026-11-02), as on 1.48's `market` 83, `social` 70 and `splitvend` 116, and on 1.47's `market` 70, `splitvend` 116, `social` 70 and `harvest` 47 (the code
+5. **The rig regression** is run on the paths a change reaches, not in full (the user's choice, 2026-11-02). On the
+   code of 1.50 (the server code of 1.49): `splitvend` 116 checks, and `pet` and `party` 109 in a full run stopped after
+   them; on 1.49's `trade` 75, `social` 70 and `market` 83, all passing (2026-11-02), as on 1.48's `market` 83, `social` 70 and `splitvend` 116, and on 1.47's `market` 70, `splitvend` 116, `social` 70 and `harvest` 47 (the code
    every scenario runs changed by one lookup in the boundary tick). The full run below is the 1.46 code's. It passed all 35 scenarios on the code of 1.46, `social` at 70 checks (2026-11-02, 3,216 checks, 175 min, every scenario on its
    first run; 27 fewer per split or merge scenario than 1.45 only because that run crossed midnight and also checked the
    8 km demo map's logs of the day before for "no own-cell layout"), as it had all 35 on the code of 1.45 (3,694 checks, 230 min) and all 34 on the code of 1.44 (2026-11-01, 3,658 checks, 205 min; `party`'s flaky
