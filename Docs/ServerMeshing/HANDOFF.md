@@ -248,6 +248,9 @@ Where the work stands, how to get it running on another machine, and what is lef
     is sent as a container, its building-only rotation and receiver-only age listed, and the grid is shaped to
     `LayerCount` arrays of columns × rows before it is written. `MeshMessageBranchTests` round-trips every `GhostKind`
     by hand. No message changed.
+34. **The frame after a seam swap, 71 to 14 ms (DESIGN 1.58, package 0.97.43).** The swap carries the kit's pooled
+    instances instead of clearing the pools (43 ms of re-instantiation), and the arrived scene's entities are registered
+    from its own roots (14 ms of whole-scene searches). The next longest frame is the pre-load of the scene just left.
 33. **A chest open at a line stays open (DESIGN 1.57, package 0.97.42).** A chest is served by the cell it stands on
     and its puppet next door is refused, so a player who walks over the line with one open is held on the chest's
     cell, as an open trade holds it, until it closes the chest or walks out of its reach. Regress `chest`.
@@ -479,9 +482,10 @@ Where the work stands, how to get it running on another machine, and what is lef
    purchase on the new cell is served. Passengers on a vehicle have no content: the demo's horse has one seat.
    - A seam between the two 8 km maps (1.40, 1.41): the hop is the usual one (adopted 154–202 ms, the character
      0.35–0.76 m on). The spawn areas live in a server-only scene the cells load and a client never does (1.41), so the
-     pre-load is 45–59 ms over 2 frames with 7–8 roots (1.40: one 87–101 ms frame for 2,300 objects). The longest hop
-     frame is now the one after the swap, 63–70 ms: the kit's `Assets.Initialize` and the pool init of its online-scene
-     handling — the next lever. The session's first hop still has its 123–134 ms connect frame (first-use compilation).
+     pre-load is 45–59 ms over 2 frames with 7–8 roots (1.40: one 87–101 ms frame for 2,300 objects). The frame after
+     the swap is 13–19 ms since 1.58 (68–80 before: the pools remade and whole-scene searches). The longest frame of a
+     seam hop is now the pre-load of the scene just left, a second after the swap (45–55 ms over 2 frames): the next
+     lever is keeping that scene as the pre-load instead of unloading it (DESIGN 1.58 says what that needs). The session's first hop still has its 123–134 ms connect frame (first-use compilation).
      A corner where four maps meet is run (1.43): hops straight through the point between cells that touch there, three
      scenes pre-loaded at once; a corner with an empty quadrant is the edge of the world: a step into it stays on the cell
      it came from, and the world's own edge stops it, as at any map edge (1.50, a test pins it).
@@ -511,7 +515,7 @@ Where the work stands, how to get it running on another machine, and what is lef
    release has it yet, so the package names `master` at 05ec55012 as its minimum: when a release does, name that. A later
    sync is a three-way merge, not a copy (`upstream/README.md`).
 5. **The rig regression** is run on the paths a change reaches, not in full (the user's choice, 2026-11-02). On the
-   code of 1.57: `chest` 50 checks. On the code of 1.54: `tradestep` 65, `buystep` 61, `salestep` 61, `mailstep` 64, `tradecrash` 66, `buycrash` 61,
+   code of 1.58: `seam` 58 and `seamcold` 54 checks. On the code of 1.57: `chest` 50 checks. On the code of 1.54: `tradestep` 65, `buystep` 61, `salestep` 61, `mailstep` 64, `tradecrash` 66, `buycrash` 61,
    `salecrash` 62, `tradestop` 66, `buystop` 61, `salestop` 62, `vendleave` 60, `trade` 82, `market` 84, `social` 70,
    `splitvend` 116 and `sleephold` 55 checks. On the code of 1.53: `vendleave` 60, `buystop` 61, `salestop` 62, `sleephold` 55, `trade` 82 and `tradestop` 66 checks. On the
    code of 1.52: `tradestop` 66, `trade` 82, `market` 84, `social` 70, `splitvend` 116, `sleep` 57 and `merge` 144

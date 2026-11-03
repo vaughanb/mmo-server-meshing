@@ -61,7 +61,13 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             _sceneContentRoots.Clear();
             foreach (GameObject root in SceneManager.GetActiveScene().GetRootGameObjects())
+            {
+                // The kit makes its pooled instances in the active scene before this runs (InitPoolingQueues comes first):
+                // they are runtime objects, so a swap carries them with the rest instead of unloading them (DESIGN 1.58).
+                if (root.TryGetComponent(out LiteNetLibIdentity identity) && identity.IsPooledInstance)
+                    continue;
                 _sceneContentRoots.Add(root);
+            }
         }
 
         /// <summary>Client tick: pre-load every neighbouring map's scene near a seam, drop each when the player walks away from its seam.</summary>
@@ -244,6 +250,7 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 await SwapToPreloadedScene(ready);
                 swapped = true;
+                Stamp("seam: swapped; the kit's scene change follows");
             }
             // A hop between cells of one scene: the scene the kit is about to "load" is the one already active and
             // registered, so OnClientOnlineSceneLoaded skips the scene-entity registration (and its pool clear). Only while
@@ -267,6 +274,50 @@ namespace MultiplayerARPG.MMO.Mesh
 
         /// <summary>Set by HandleServerSceneChange for a migration that stays in the active scene; consumed by OnClientOnlineSceneLoaded.</summary>
         internal bool SameSceneHop { get; private set; }
+
+        private static System.Reflection.FieldInfo s_pooledObjects;
+        private static bool s_pooledObjectsMissing;
+
+        /// <summary>
+        /// DropDestroyedPooledInstances: a pooled instance the swap did not carry (one a game parented under the old scene's
+        /// content) went with the unload, and the kit would hand the dead object out of its queue. The kit keeps its pools
+        /// in an internal field of LiteNetLibAssets, so this reaches it by name and drops what is destroyed; a kit without
+        /// the field gets the pre-1.58 behaviour, its pools cleared for InitPoolingQueues to remake. Returns the instances
+        /// dropped, or -1 when the pools were cleared instead.
+        /// </summary>
+        private int DropDestroyedPooledInstances()
+        {
+            if (!s_pooledObjectsMissing && s_pooledObjects == null)
+            {
+                s_pooledObjects = typeof(LiteNetLibAssets).GetField("PooledObjects", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
+                s_pooledObjectsMissing = s_pooledObjects == null;
+                if (s_pooledObjectsMissing)
+                    Logging.LogWarning("Mesh", "Seam: the kit's LiteNetLibAssets has no PooledObjects field; a swap clears the pools for the kit to remake (DropDestroyedPooledInstances)");
+            }
+            Dictionary<int, Queue<LiteNetLibIdentity>> pools = s_pooledObjects != null ? s_pooledObjects.GetValue(Assets) as Dictionary<int, Queue<LiteNetLibIdentity>> : null;
+            if (pools == null)
+            {
+                Assets.ClearPooledObjects();
+                return -1;
+            }
+            int dropped = 0;
+            foreach (Queue<LiteNetLibIdentity> queue in pools.Values)
+            {
+                int count = queue.Count;
+                for (int i = 0; i < count; ++i)
+                {
+                    LiteNetLibIdentity instance = queue.Dequeue();
+                    if (instance != null)
+                        queue.Enqueue(instance);
+                    else
+                        dropped++;
+                }
+            }
+            return dropped;
+        }
+
+        /// <summary>The arrived scene's own roots, set by a swap for the kit's scene-loaded hook that follows (MeshRegisterSceneEntities); null otherwise.</summary>
+        private List<GameObject> _swapArrivedRoots;
 
         private static System.Reflection.FieldInfo s_groundedTransform;
         private static bool s_groundedTransformMissing;
@@ -352,9 +403,6 @@ namespace MultiplayerARPG.MMO.Mesh
                 foreach (AudioListener listener in root.GetComponentsInChildren<AudioListener>(true)) cameraStates[listener.name + "#listener"] = listener.enabled;
             }
             double carriedMs = swapWatch.Elapsed.TotalMilliseconds;
-            // Pooled instances live in the scene they were made in: let the kit rebuild the pools in the new one.
-            Assets.ClearPooledObjects();
-            double pooledMs = swapWatch.Elapsed.TotalMilliseconds;
             AsyncOperation unload = SceneManager.UnloadSceneAsync(oldScene);
             double unloadCallMs = swapWatch.Elapsed.TotalMilliseconds;
             int unloadFrames = 0;
@@ -363,7 +411,13 @@ namespace MultiplayerARPG.MMO.Mesh
                 await UniTask.Yield();
                 unloadFrames++;
             }
-            Stamp($"seam: swap: {carried.Count} roots carried in {carriedMs:0.#} ms, pools cleared by {pooledMs:0.#}, unload called by {unloadCallMs:0.#}, unloaded after {unloadFrames} frame(s)");
+            // The kit's pooled instances were carried (SnapshotSceneContent leaves them out of the scene's content), so the
+            // pools stay and the kit's InitPoolingQueues after the swap finds every queue made. Until 1.58 they were cleared
+            // here and that re-instantiation was most of the frame after the swap (43 of 75 ms on the 8 km demo).
+            int poolsDropped = DropDestroyedPooledInstances();
+            Stamp($"seam: swap: {carried.Count} roots carried in {carriedMs:0.#} ms, unload called by {unloadCallMs:0.#}, unloaded after {unloadFrames} frame(s), " +
+                  (poolsDropped < 0 ? "pools cleared (no pool field)" : $"pools kept ({poolsDropped} destroyed instance(s) dropped)"));
+            _swapArrivedRoots = seam.roots;
             swapWatch.Restart();
 
             // The new scene to its natural origin, the carried old-frame objects (stand-ins, cameras, controller) by the same shift.

@@ -408,8 +408,10 @@ namespace MultiplayerARPG.MMO.Mesh
                 // System.GC.Collect(). The scene did not change and the pools were just re-initialised, so both are
                 // pure waiting during a hop.
                 this.InvokeInstanceDevExtMethods("OnClientOnlineSceneLoaded");
+                Stamp("online scene loaded: dev extensions done");
                 foreach (BaseGameNetworkManagerComponent component in ManagerComponents)
                     component.OnClientOnlineSceneLoaded(this);
+                Stamp($"online scene loaded: {ManagerComponents.Length} manager component(s) done");
                 _clientSceneLoadedTime = Time.unscaledTime - INSTANTIATES_OBJECTS_DELAY;
                 if (SameSceneHop)
                 {
@@ -428,6 +430,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     ProceedUntilClientReady().Forget();
                 return;
             }
+            _swapArrivedRoots = null; // the kit registers every loaded object itself on this path
             base.OnClientOnlineSceneLoaded();
             Stamp("online scene loaded: end (entities registered + GC)");
         }
@@ -435,21 +438,42 @@ namespace MultiplayerARPG.MMO.Mesh
         [Tooltip("Run the adoption's state read once over the player's own character when its data is in, so the first crossing of a session does not compile it (6-7 ms of its frame on Mono).")]
         public bool warmUpMigrationCode = true;
 
-        /// <summary>Mirror of the private BaseGameNetworkManager.RegisterEntities() without the forced GC.</summary>
+        /// <summary>
+        /// Mirror of the private BaseGameNetworkManager.RegisterEntities() without the forced GC. After a seam swap only the
+        /// arrived scene's own roots are searched (DESIGN 1.58): every other object is a carried runtime one, spawned from a
+        /// prefab registered already, and six searches of every loaded object took 14 ms of the frame after the swap.
+        /// </summary>
         private void MeshRegisterSceneEntities()
         {
-            foreach (MonsterSpawnArea area in FindObjectsByType<MonsterSpawnArea>(FindObjectsSortMode.InstanceID))
+            List<GameObject> roots = _swapArrivedRoots;
+            _swapArrivedRoots = null;
+            foreach (MonsterSpawnArea area in SceneEntities<MonsterSpawnArea>(roots))
                 area.RegisterPrefabs();
-            foreach (HarvestableSpawnArea area in FindObjectsByType<HarvestableSpawnArea>(FindObjectsSortMode.InstanceID))
+            foreach (HarvestableSpawnArea area in SceneEntities<HarvestableSpawnArea>(roots))
                 area.RegisterPrefabs();
-            foreach (ItemDropSpawnArea area in FindObjectsByType<ItemDropSpawnArea>(FindObjectsSortMode.InstanceID))
+            foreach (ItemDropSpawnArea area in SceneEntities<ItemDropSpawnArea>(roots))
                 area.RegisterPrefabs();
+            Stamp("register scene entities: spawn areas done");
 #if !EXCLUDE_PREFAB_REFS || DISABLE_ADDRESSABLES
-            GameInstance.AddMonsterCharacterEntities(FindObjectsByType<BaseMonsterCharacterEntity>(FindObjectsSortMode.InstanceID));
-            GameInstance.AddHarvestableEntities(FindObjectsByType<HarvestableEntity>(FindObjectsSortMode.InstanceID));
-            GameInstance.AddItemDropEntities(FindObjectsByType<ItemDropEntity>(FindObjectsSortMode.InstanceID));
+            GameInstance.AddMonsterCharacterEntities(SceneEntities<BaseMonsterCharacterEntity>(roots));
+            GameInstance.AddHarvestableEntities(SceneEntities<HarvestableEntity>(roots));
+            GameInstance.AddItemDropEntities(SceneEntities<ItemDropEntity>(roots));
+            Stamp($"register scene entities: entities added ({(roots != null ? $"{roots.Count} arrived root(s)" : "every loaded object")})");
 #endif
             PoolSystem.Clear();
+            Stamp("register scene entities: pools cleared");
+        }
+
+        /// <summary>The active components of a type: under the given roots (as FindObjectsByType, inactive ones left out), or every loaded object's for none.</summary>
+        private static T[] SceneEntities<T>(List<GameObject> roots) where T : Component
+        {
+            if (roots == null)
+                return FindObjectsByType<T>(FindObjectsSortMode.InstanceID);
+            List<T> found = new List<T>();
+            for (int i = 0; i < roots.Count; ++i)
+                if (roots[i] != null)
+                    found.AddRange(roots[i].GetComponentsInChildren<T>(false));
+            return found.ToArray();
         }
 
         protected override void HandleEnterGameResponse(ResponseHandlerData responseHandler, AckResponseCode responseCode, EnterGameResponseMessage response)
