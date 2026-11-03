@@ -2060,14 +2060,24 @@ namespace MultiplayerARPG.MMO.Mesh
             ghost.mountPending = true;
             try
             {
+                float delay = TestGhostMountDelay();
+                if (delay > 0f)
+                {
+                    // DESIGN 1.56, the rig only: the vehicle comes this much later, so a rider who mounts just before a line
+                    // reaches this cell before its puppet's vehicle does (its arrival re-summons, its passenger waits).
+                    Logging.LogWarning("Mesh", $"Ghost {(ghost.entity != null ? ghost.entity.CharacterName : "?")}: its vehicle comes {delay:0.#} s late (MESH_TEST_GHOST_MOUNT_DELAY)");
+                    await UniTask.Delay(Mathf.CeilToInt(delay * 1000f), true);
+                }
                 BaseCharacterEntity entity = ghost.entity;
-                if (entity == null)
+                if (entity == null || !StillPuppet(entity, "mount"))
                     return;
                 if (entity.PassengingVehicleEntity != null)
                 {
                     VehicleEntity old = entity.PassengingVehicleEntity as VehicleEntity;
                     bool drove = entity.PassengingVehicleSeatIndex == 0; // DESIGN 1.39: a passenger's old vehicle is its driver's
                     await entity.ExitVehicle();
+                    if (!StillPuppet(entity, "mount"))
+                        return;
                     if (drove && old != null && old.Identity != null && !old.Identity.IsDestroyed)
                         old.NetworkDestroy();
                 }
@@ -2081,7 +2091,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 vehicle.Level = Mathf.Max(1, level);
                 vehicle.InitStats();
                 vehicle.CurrentHp = vehicle.MaxHp;
-                if (entity == null || entity.Identity == null || entity.Identity.IsDestroyed)
+                if (entity == null || entity.Identity == null || entity.Identity.IsDestroyed || !StillPuppet(entity, "mount"))
                 {
                     vehicle.NetworkDestroy();
                     return;
@@ -2103,8 +2113,17 @@ namespace MultiplayerARPG.MMO.Mesh
             try
             {
                 BaseCharacterEntity entity = ghost.entity;
+                if (entity != null && !StillPuppet(entity, "dismount"))
+                    return;
                 VehicleEntity vehicle = entity != null ? entity.PassengingVehicleEntity as VehicleEntity : null;
                 bool drove = entity != null && entity.PassengingVehicleSeatIndex == 0; // DESIGN 1.39: a passenger leaves its driver's vehicle standing
+                int aboard = 0;
+                if (drove && vehicle != null)
+                    for (byte s = 1; s < vehicle.Seats.Count; ++s)
+                        if (!vehicle.IsSeatAvailable(s))
+                            aboard++;
+                if (aboard > 0)
+                    Logging.Log("Mesh", $"Ghost {entity.CharacterName} gets off its vehicle with {aboard} passenger(s) aboard: they are set down here (DESIGN 1.56)");
                 if (entity != null)
                     await entity.ExitVehicle();
                 if (drove && vehicle != null && vehicle.Identity != null && !vehicle.Identity.IsDestroyed)
@@ -2133,6 +2152,8 @@ namespace MultiplayerARPG.MMO.Mesh
                     WarnThrottled($"Ghost {entity.CharacterName}: seat {seat} on its driver's vehicle is taken here (object {ObjectIdOf(vehicle.GetPassenger(seat))}); shown on foot");
                     return;
                 }
+                if (!StillPuppet(entity, "seat"))
+                    return;
                 StopPuppetMotion(ghost);
                 bool seated = await entity.EnterVehicle(vehicle, seat);
                 if (traceHandoffTiming || !seated)
@@ -2142,6 +2163,19 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 ghost.mountPending = false;
             }
+        }
+
+        /// <summary>
+        /// DESIGN 1.56: a puppet's mount change runs over frames (a delayed spawn, the kit's enter and exit animations), and its
+        /// character may be promoted meanwhile, its arrival keeping or re-summoning its own mount: the change stops there.
+        /// </summary>
+        private static bool StillPuppet(BaseCharacterEntity entity, string what)
+        {
+            if (entity != null && MeshIdentity.IsGhostEntity(entity))
+                return true;
+            if (entity != null)
+                Logging.Log("Mesh", $"Ghost {entity.CharacterName}: promoted while its {what} was in flight; the {what} stops (the arrival keeps or re-summons its own)");
+            return false;
         }
 
         private static string ObjectIdOf(BaseGameEntity entity)
@@ -2187,6 +2221,51 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>How long an arrival waits for its driver's vehicle to be on this cell before it stays on foot.</summary>
         public const float PendingSeatSeconds = 5f;
 
+        /// <summary>PendingSeatSeconds, or MESH_TEST_PENDING_SEAT_SECONDS for the rig (DESIGN 1.56: 0 gives up at once).</summary>
+        private static float PendingSeatWait()
+        {
+            string text = System.Environment.GetEnvironmentVariable("MESH_TEST_PENDING_SEAT_SECONDS");
+            return !string.IsNullOrEmpty(text) && float.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float s) && s >= 0f
+                ? s : PendingSeatSeconds;
+        }
+
+        private readonly Dictionary<string, float> _testHandoffHolds = new Dictionary<string, float>(); // character id -> held until
+
+        /// <summary>
+        /// MESH_TEST_HOLD_HANDOFF `<character name>:<seconds>` (the rig only, DESIGN 1.56): that character's handoff is held this
+        /// long from the first time it is due, once per process, as an open purchase or trade holds it: its vehicle's other
+        /// rider crosses without it.
+        /// </summary>
+        private bool TestHoldsHandoff(BasePlayerCharacterEntity player)
+        {
+            string text = System.Environment.GetEnvironmentVariable("MESH_TEST_HOLD_HANDOFF");
+            if (string.IsNullOrEmpty(text) || player == null || string.IsNullOrEmpty(player.Id))
+                return false;
+            int colon = text.LastIndexOf(':');
+            if (colon <= 0 || text.Substring(0, colon) != player.CharacterName
+                || !float.TryParse(text.Substring(colon + 1), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float seconds))
+                return false;
+            if (!_testHandoffHolds.TryGetValue(player.Id, out float until))
+            {
+                _testHandoffHolds[player.Id] = until = Time.unscaledTime + seconds;
+                Logging.LogWarning("Mesh", $"Handoff of {player.CharacterName} held {seconds:0} s (MESH_TEST_HOLD_HANDOFF)");
+            }
+            if (Time.unscaledTime < until)
+                return true;
+            return false;
+        }
+
+        /// <summary>MESH_TEST_GHOST_MOUNT_DELAY `<cell>:<seconds>`: how late a ghost's vehicle comes on this cell (the rig only).</summary>
+        private float TestGhostMountDelay()
+        {
+            string text = System.Environment.GetEnvironmentVariable("MESH_TEST_GHOST_MOUNT_DELAY");
+            if (string.IsNullOrEmpty(text) || !HasOwnZone)
+                return 0f;
+            int colon = text.LastIndexOf(':');
+            return colon > 0 && MeshFault.NamesCell(text.Substring(0, colon), OwnZoneId)
+                && float.TryParse(text.Substring(colon + 1), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float s) && s > 0f ? s : 0f;
+        }
+
         /// <summary>Destination: seat <paramref name="player"/> behind its driver as the carried state says, now or as soon as the driver's vehicle is here.</summary>
         internal void SeatArrival(BasePlayerCharacterEntity player, string driverMeshId, byte seat)
         {
@@ -2200,7 +2279,7 @@ namespace MultiplayerARPG.MMO.Mesh
             if (TrySeat(player, driverMeshId, seat, "at registration"))
                 return;
             _pendingSeats[player.Id] = new PendingSeat { entity = player, driverMeshId = driverMeshId, seat = seat, time = Time.unscaledTime };
-            Logging.Log("Mesh", $"Arrival {player.CharacterName}: the vehicle of its driver {driverMeshId} is not here yet; seat {seat} is tried again for {PendingSeatSeconds:0} s");
+            Logging.Log("Mesh", $"Arrival {player.CharacterName}: the vehicle of its driver {driverMeshId} is not here yet; seat {seat} is tried again for {PendingSeatWait():0.#} s");
         }
 
         /// <summary>True when the seat was taken, or can never be (someone else sits there); false while the driver's vehicle is not here.</summary>
@@ -2248,9 +2327,9 @@ namespace MultiplayerARPG.MMO.Mesh
                     _pendingSeatsDone.Add(kv.Key);
                     continue;
                 }
-                if (Time.unscaledTime - pending.time > PendingSeatSeconds)
+                if (Time.unscaledTime - pending.time > PendingSeatWait())
                 {
-                    Logging.LogWarning("Mesh", $"Arrival {pending.entity.CharacterName}: the vehicle of its driver {pending.driverMeshId} never came within {PendingSeatSeconds:0} s; it stays on foot");
+                    Logging.LogWarning("Mesh", $"Arrival {pending.entity.CharacterName}: the vehicle of its driver {pending.driverMeshId} never came within {PendingSeatWait():0.#} s; it stays on foot");
                     _pendingSeatsDone.Add(kv.Key);
                 }
             }

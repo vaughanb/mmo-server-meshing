@@ -107,6 +107,9 @@ ENV_KEYS = ["MESH_NO_MONSTER_HANDOFF", "MESH_FAULT_DIE_ON_NOTICE", "MESH_GHOST_L
             "MESH_FAULT_QUIT_WITH_EXCHANGE",
             # DESIGN 1.54: a cell dies with an exchange open, or at its n-th exchange step (regress_vend's tradecrash, buystep, ...)
             "MESH_FAULT_CRASH_WITH_EXCHANGE", "MESH_FAULT_CRASH_IN_STEP",
+            # DESIGN 1.56: a ghost's vehicle comes late, an arrival's seat wait, a character's handoff held (the 8 km demo's
+            # vehicle runs; listed so a stray one is cleared)
+            "MESH_TEST_GHOST_MOUNT_DELAY", "MESH_TEST_PENDING_SEAT_SECONDS", "MESH_TEST_HOLD_HANDOFF",
             # 0.72 dynamic cells: per-map cell mode, and where the central's layout coordinator keeps its store
             "MESH_CELL_MODE", "MESH_COORDINATOR_STORE",
             # Phase 0 step 2 instrument toggles (p0tools.ENV_REGISTRY): tick-frame bins, frame and physics rates,

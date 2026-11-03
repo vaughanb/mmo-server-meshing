@@ -248,6 +248,11 @@ Where the work stands, how to get it running on another machine, and what is lef
     is sent as a container, its building-only rotation and receiver-only age listed, and the grid is shaped to
     `LayerCount` arrays of columns × rows before it is written. `MeshMessageBranchTests` round-trips every `GhostKind`
     by hand. No message changed.
+32. **The vehicle paths 1.39 left unrun (DESIGN 1.56, package 0.97.41).** A driver who gets off with a passenger aboard,
+    a passenger and its driver on different cells (only while one's handoff is held: a riding pair changes cells
+    together), and the seat retry and its give-up, all run on the 8 km demo with the auto client's `ride` mode. A
+    puppet's mount change stops if its character is promoted meanwhile (it would have unseated a promoted driver).
+    A monster-driven vehicle has no content.
 31. **An exchange across a line survives a crash of either cell (DESIGN 1.54, package 0.97.39).** Every step is written
     to the journal before anything else, the changed player is saved at once, and the step's message leaves only once
     that save is accepted; a marker in the player's saved data tells a restarted cell whether a pending step reached the
@@ -489,6 +494,7 @@ Where the work stands, how to get it running on another machine, and what is lef
    kit's own demo and the BaseDemo-CE rig keep the kit's timer.
 3. **Mount and pet crossings (1.24, 1.27, 1.28):** both run on the 8 km demo (HorseWhistle and PupCollar in MeshTester's
    bag; patrol `mountUp` / `summonPet`). A mounted rider crosses clean for itself and for an observer at the line (1.27).
+   Getting off with a passenger aboard, a pair split by a held handoff and the seat retry run since 1.56 (`ride` mode).
    A passenger behind a driver crosses too (1.39): the demo copy's two-seat `DemoHorse2` and `HorseWhistle2` (made by
    `CreateTwoSeatHorse`, in bot7Char's bag), the driver on `patrol -meshMount` across the line, the editor's `stand` client
    at (12, 512) with `boardSeat` 1; read its `passenger:` lines, the cells' `Arrival ... mount=passenger` and `seated behind`
