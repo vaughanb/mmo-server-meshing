@@ -4,7 +4,8 @@ The server-meshing add-on needed a few small changes in the kit itself (DESIGN.m
 They are kept here as a patch series against the upstream `develop` branch, one commit per change, with upstream-neutral
 wording (no add-on markers). The local copy of the kit in `Assets/OpenMMORPG/` carried the same changes with
 `MESH-EDIT` markers until DESIGN 0.94 (2026-10-27), and 0010 until 1.33. Since then it is OpenMMORPG `master` at 493df35fc, which
-has all ten upstream (0010 is PR 28, merged 2026-10-30, on `master` from 05ec55012 and in no release yet: v1.2.1 lacks it). It
+has all ten upstream (0010 is PR 28, merged 2026-10-30, in v1.3.0, the first release with it: v1.2.1 lacks it; v1.3.0 is
+`master` at 493df35fc). Since 1.55 the copy also carries 0011, which upstream does not have; the add-on does not use it. It
 differs from upstream only where the add-on's subclasses sit on demo prefabs and in the build-profile and sky assets. Sync it with a
 three-way merge (base: the last synced commit), not a copy, or those are lost. Upstream's `MessageRoundTripTests` also walks
 the add-on's messages and fails on three by construction (DESIGN 1.33).

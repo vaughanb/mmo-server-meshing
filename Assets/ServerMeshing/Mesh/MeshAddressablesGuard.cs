@@ -6,5 +6,5 @@
 // and the add-on fails with CS1929/CS7036 errors that do not say why. This line says why. Each build target keeps its
 // own define list: Dedicated Server is separate from Windows/Mac/Linux, and a build profile can add its own.
 #if !DISABLE_ADDRESSABLES
-#error Server Meshing needs the scripting define DISABLE_ADDRESSABLES on this build target. Add it in Project Settings > Player > (this target's tab, e.g. Dedicated Server) > Other Settings > Scripting Define Symbols, or in the build profile's Scripting Defines. The Setup window (Tools > Open MMORPG > Server Meshing > Setup > Validate) checks it and adds it. See SETUP.md section 3.
+#error Server Meshing needs the scripting define DISABLE_ADDRESSABLES on this build target. Add it in Project Settings > Player > (this target's tab, e.g. Dedicated Server) > Other Settings > Scripting Define Symbols, or in the build profile's Scripting Defines. The kit's Tools > Open MMORPG > Install > Import Project Settings sets it on Windows/Mac/Linux and Dedicated Server. The Setup window's Add define cannot help here: it is part of what does not compile. See SETUP.md section 3.
 #endif

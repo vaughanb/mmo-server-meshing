@@ -1,7 +1,7 @@
-# Handoff — 2026-10-28
+# Handoff — 2026-11-03
 
 Where the work stands, how to get it running on another machine, and what is left. The design record
-([DESIGN.md](DESIGN.md), version 1.16) has the full reasoning and measurements; this note is the short path in.
+([DESIGN.md](DESIGN.md), version 1.59) has the full reasoning and measurements; this note is the short path in.
 
 ## What was done
 
@@ -248,6 +248,9 @@ Where the work stands, how to get it running on another machine, and what is lef
     is sent as a container, its building-only rotation and receiver-only age listed, and the grid is shaped to
     `LayerCount` arrays of columns × rows before it is written. `MeshMessageBranchTests` round-trips every `GhostKind`
     by hand. No message changed.
+35. **Release 0.98.0 (DESIGN 1.59).** The package requires OpenMMORPG v1.3.0, the docs say how much the harness ran on
+    this code, and the package was imported into a fresh project on v1.3.0. Published by updating
+    open-mmorpg/open-mmorpg-addons PR 1 (branch `add-server-meshing`) for the user's review.
 34. **The frame after a seam swap, 71 to 14 ms (DESIGN 1.58, package 0.97.43).** The swap carries the kit's pooled
     instances instead of clearing the pools (43 ms of re-instantiation), and the arrived scene's entities are registered
     from its own roots (14 ms of whole-scene searches). The next longest frame is the pre-load of the scene just left.
@@ -511,9 +514,10 @@ Where the work stands, how to get it running on another machine, and what is lef
    patrols ±12 m at z 513; a bot from the build stands at (−3, 517) with `MESH_TRACE_OBSERVED=1`
    (`-meshAutoMode stand -meshWalkX -3 -meshWalkZ 517`). Read its `MeshRemote` lines as well as `MeshObserved`: the
    stall trace follows only characters within 30 m, so a character sent to a garbage position never shows there.
-4. **The kit copy is upstream `master` at 493df35fc (1.33).** CE-14 is upstream (PR 28) and no `MESH-EDIT` marker is left. No
-   release has it yet, so the package names `master` at 05ec55012 as its minimum: when a release does, name that. A later
-   sync is a three-way merge, not a copy (`upstream/README.md`).
+4. **The kit copy is upstream `master` at 493df35fc (1.33), which is the v1.3.0 release.** CE-14 is upstream (PR 28) and no
+   `MESH-EDIT` marker is left. The package names v1.3.0 as its minimum since 0.98.0 (1.59). The copy also carries 0011 (1.55:
+   the seated-character switch, off by default), not upstream yet and not used by the add-on. A later sync is a three-way
+   merge, not a copy (`upstream/README.md`).
 5. **The rig regression** is run on the paths a change reaches, not in full (the user's choice, 2026-11-02). On the
    code of 1.58: `seam` 58 and `seamcold` 54 checks. On the code of 1.57: `chest` 50 checks. On the code of 1.54: `tradestep` 65, `buystep` 61, `salestep` 61, `mailstep` 64, `tradecrash` 66, `buycrash` 61,
    `salecrash` 62, `tradestop` 66, `buystop` 61, `salestop` 62, `vendleave` 60, `trade` 82, `market` 84, `social` 70,

@@ -49,7 +49,7 @@ right for a sandbox where towns can appear anywhere.
 ## 3. Prerequisites
 
 - The add-on folder `Assets/ServerMeshing/` (it compiles into the game assembly; no asmdef needed).
-- OpenMMORPG `master` at 05ec55012 (2026-10-30) or later, newer than the v1.2.1 release. It carries all eight kit changes the add-on relies on
+- OpenMMORPG v1.3.0 (2026-10-30) or later. It carries all eight kit changes the add-on relies on
   (DESIGN.md §17, [upstream/README.md](upstream/README.md)): patches 0001-0004 (an owner-change movement fix,
   frame-granular request waits, a virtual `IsWatched()` on the monster activity component, a protected pending-spawn
   dictionary on the map manager), 0005 (a cache finalizer that corrupted pooled collections), 0006-0007 (movement flags
@@ -59,8 +59,8 @@ right for a sandbox where towns can appear anywhere.
   0008 (`MeshMapNetworkManager` overrides the property, §6a.8), Dynamic maps or not; `MeshKitEditTests` fails if a kit
   update drops either.
 - The add-on also needs the kit's client migration ([open-mmorpg/OpenMMORPG#28](https://github.com/open-mmorpg/OpenMMORPG/pull/28): `MigrateClient` and kept
-  objects, patch 0010, DESIGN.md 1.01). No release carries it yet: v1.2.1 does not, and `master` does from 05ec55012. 0.97.23
-  was built and tested on `master` at 493df35fc.
+  objects, patch 0010, DESIGN.md 1.01). v1.3.0 is the first release with it (v1.2.1 does not have it). 0.98.0 was
+  built and tested on v1.3.0 (`master` at 493df35fc).
 - From 0.95.0 the add-on also needs the kit's slot-indexed damage amounts (`DamageElementMinMaxFloatAmounts`, upstream
   74ec05b, on `develop` since 2026-10-07 and in v1.1.4): its attack and skill components, the harvestable and the
   ghost-hit forwarding override and call those signatures. Versions up to 0.94.0 used the damage dictionaries the kit
@@ -77,8 +77,10 @@ right for a sandbox where towns can appear anywhere.
   handed-over entities through the kit's prefab tables and calls the kit's non-Addressables `MountType.GetPrefab` and
   `GameSpawnArea.Spawn`; without the define it stops with `Server Meshing needs the scripting define
   DISABLE_ADDRESSABLES` (`MeshAddressablesGuard.cs`) beside CS1929/CS7036 errors in `MeshMapNetworkManager_*.cs`.
-  Validate (§4.3) checks both targets and the active build profile, and its **Add define** adds it. The kit's
-  **Demo Map Server** and **Demo Client** profiles carry it already.
+  The kit's **Tools ▸ Open MMORPG ▸ Install ▸ Import Project Settings** sets it on both targets. Once the add-on
+  compiles, Validate (§4.3) checks both targets and the active build profile, and its **Add define** adds it to one
+  that lacks it; on a project without it anywhere the window does not compile either, so add it by hand first. The
+  kit's **Demo Map Server** and **Demo Client** profiles carry it already.
 - Your map scenes in the build settings, your map infos in the game database.
 
 ## 4. Step by step
@@ -1005,7 +1007,7 @@ with a hand-written `README.md` and `screenshot.png`; `Addons/README.md` has the
 
 - the add-on (`Assets/ServerMeshing/Mesh`, runtime and Editor) with this guide, DESIGN.md and MULTIHOST.md under
   `Documentation/`, and the top-level README. The spike notes, the upstream patch series and the raw capacity table stay
-  in the repository. Import it into any project that has OpenMMORPG installed (`master` at 05ec55012 or later: §3), then follow §4.
+  in the repository. Import it into any project that has OpenMMORPG installed (v1.3.0 or later: §3), then follow §4.
 
 The test rig is not in the package (since 0.96.0; 0.93.0-0.95.0 carried it): `Assets/ServerMeshing/TestMap` (the two
 test maps, test items, auto client, launcher, play runner, load generator) and the harnesses in `Tools/ServerMeshing/`

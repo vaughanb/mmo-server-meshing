@@ -27,15 +27,19 @@ OpenMMORPG since **v1.1.4**; the add-on needs a newer kit than that (see Require
 - One cell process holds about **270 players at a 60 fps server tick** on a modern core; size cells so no expected crowd
   exceeds 250 (250–300 m suits a sandbox where towns can appear anywhere).
 - Ten cells over two maps are exercised by the regression harness of the [test rig](#the-test-rig) in the source
-  repository, on one machine or across two: 35 scenarios, twenty-two of them dynamic cells (two run with links on demand, one
+  repository: 52 scenarios, among them dynamic cells, trades, shops and mail across a line, crash recovery and a
+  three-hour soak. The last full run on one machine was on 0.97.31's code; each later change ran the scenarios it
+  reaches. Across two machines the dynamic scenarios last ran on 0.90's code and the soak on 0.92's. Before that the
+  harness had 35 scenarios,
+  twenty-two of them dynamic cells (two run with links on demand, one
   is the operator's `unfreeze` of a family a central restart left frozen, and one a three-hour soak of automatic splits
   and merges under kills and central restarts) and two on-demand links. Across two
   machines the dynamic scenarios run with the cut family on the second machine's own map spawner.
 
 ## Requirements
 
-- **OpenMMORPG `master` at 05ec55012** (2026-10-30) or later, newer than the v1.2.1 release: no tagged release carries
-  client migration yet. That kit has everything the add-on relies on:
+- **OpenMMORPG v1.3.0** (2026-10-30) or later, the first release with client migration (v1.2.1 does not have it).
+  That kit has everything the add-on relies on:
   - the eight kit changes, upstream patches 0001-0008: an owner-change movement fix, frame-granular request waits, a
     virtual `IsWatched()` on the monster activity component, a protected pending-spawn dictionary on the map manager
     (0001-0004), a cache finalizer that corrupted pooled collections under load (0005), one-shot movement flags sent to
@@ -49,8 +53,12 @@ OpenMMORPG since **v1.1.4**; the add-on needs a newer kit than that (see Require
     0.94.0 used the dictionaries and do not compile on v1.1.4 (`no suitable method found to override` on
     `ApplyAttack`, `ApplySkillUsing` and `ApplyReceiveDamage`);
   - client migration ([open-mmorpg/OpenMMORPG#28](https://github.com/open-mmorpg/OpenMMORPG/pull/28)): `MigrateClient` and kept objects in
-    LiteNetLibManager, which every crossing runs on. The add-on does not compile without it. 0.97.43 was built and tested
-    on `master` at 493df35fc.
+    LiteNetLibManager, which every crossing runs on. The add-on does not compile without it. 0.98.0 was built and tested
+    on v1.3.0 (`master` at 493df35fc).
+- The scripting define `DISABLE_ADDRESSABLES` on the Windows/Mac/Linux and Dedicated Server targets. The kit's
+  **Tools ▸ Open MMORPG ▸ Install ▸ Import Project Settings** (a step of its own install) sets both. Without it the
+  add-on does not compile, and the Setup window, which checks the define on every target later, is part of what does
+  not compile: add it by hand first (`Documentation/SETUP.md` §3).
 - Unity 6000.3 or newer, matching the kit.
 - Your map scenes in the build settings and your map infos in the game database.
 
