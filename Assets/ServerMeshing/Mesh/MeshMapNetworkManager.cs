@@ -1065,11 +1065,17 @@ namespace MultiplayerARPG.MMO.Mesh
                 Vector3 pos = entity.EntityTransform.position;
                 TrackVelocity(entity.Id, pos, now);
                 PreconnectHint(entity, pos); // the client holds a connection to the cell it is approaching (MeshMapNetworkManager_Preconnect)
+                bool chestOpen = ChestOpenInReach(entity); // every player: an out-of-reach chest closes as the kit closes it
                 if (MeshCell.Same(world.OwnerOf(OwnCell, pos), OwnCell))
+                {
+                    HoldsHandoffForChest(entity, false);
                     continue;
+                }
                 // Hysteresis: only flip once clearly past the edge, so loitering on the line doesn't thrash.
                 if (-OwnCell.DistanceToEdge(pos) < handoffHysteresis)
                     continue;
+                if (HoldsHandoffForChest(entity, chestOpen))
+                    continue; // DESIGN 1.57: the chest's storage is served here
                 if (HoldsHandoffForVending(entity) || HoldsHandoffForTrade(entity) || HoldsHandoffForSteps(entity) || TestHoldsHandoff(entity))
                     continue; // DESIGN 1.47/1.49: the answer comes here, where the price or the offer is in escrow
                 _handoffCandidates.Add(entity);

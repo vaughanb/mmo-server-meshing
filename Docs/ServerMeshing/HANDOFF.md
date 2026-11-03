@@ -248,6 +248,9 @@ Where the work stands, how to get it running on another machine, and what is lef
     is sent as a container, its building-only rotation and receiver-only age listed, and the grid is shaped to
     `LayerCount` arrays of columns × rows before it is written. `MeshMessageBranchTests` round-trips every `GhostKind`
     by hand. No message changed.
+33. **A chest open at a line stays open (DESIGN 1.57, package 0.97.42).** A chest is served by the cell it stands on
+    and its puppet next door is refused, so a player who walks over the line with one open is held on the chest's
+    cell, as an open trade holds it, until it closes the chest or walks out of its reach. Regress `chest`.
 32. **The vehicle paths 1.39 left unrun (DESIGN 1.56, package 0.97.41).** A driver who gets off with a passenger aboard,
     a passenger and its driver on different cells (only while one's handoff is held: a riding pair changes cells
     together), and the seat retry and its give-up, all run on the 8 km demo with the auto client's `ride` mode. A
@@ -465,7 +468,7 @@ Where the work stands, how to get it running on another machine, and what is lef
    A local chat reaches the players across a line, and an NPC dialog or a player or guild storage open at a hop crosses with it (1.37,
    `MeshInteractionHandlers.cs`: the kit's chat and storage handlers wrapped in `SetServerHandlersRef`, and the first built-in
    `IMeshHandoffCarrier`). The 8 km map's banker and merchant stand on the line beside the start to try it: talk to the banker from one
-   side, step over, open the strongbox, step back. A chest's storage still closes at a hop; a trade, a duel and a party or
+   side, step over, open the strongbox, step back. A chest open at the line holds its user on the chest's cell (1.57, regress `chest`); a trade, a duel and a party or
    guild invitation with a player across a line work since 1.44 (item 22, all four in `regress.py social` since 1.45), and
    friend requests, a player's shop and a crafting queue since 1.46 (item 24), with a purchase across a hop, a shop
    moved by a split or merge and a workbench's queue run since 1.47 (item 25), and a purchase or a trade that loses an
@@ -508,7 +511,7 @@ Where the work stands, how to get it running on another machine, and what is lef
    release has it yet, so the package names `master` at 05ec55012 as its minimum: when a release does, name that. A later
    sync is a three-way merge, not a copy (`upstream/README.md`).
 5. **The rig regression** is run on the paths a change reaches, not in full (the user's choice, 2026-11-02). On the
-   code of 1.54: `tradestep` 65, `buystep` 61, `salestep` 61, `mailstep` 64, `tradecrash` 66, `buycrash` 61,
+   code of 1.57: `chest` 50 checks. On the code of 1.54: `tradestep` 65, `buystep` 61, `salestep` 61, `mailstep` 64, `tradecrash` 66, `buycrash` 61,
    `salecrash` 62, `tradestop` 66, `buystop` 61, `salestop` 62, `vendleave` 60, `trade` 82, `market` 84, `social` 70,
    `splitvend` 116 and `sleephold` 55 checks. On the code of 1.53: `vendleave` 60, `buystop` 61, `salestop` 62, `sleephold` 55, `trade` 82 and `tradestop` 66 checks. On the
    code of 1.52: `tradestop` 66, `trade` 82, `market` 84, `social` 70, `splitvend` 116, `sleep` 57 and `merge` 144
@@ -524,8 +527,8 @@ Where the work stands, how to get it running on another machine, and what is lef
    restore Build Settings and DemoMesh8kInit. `Config/mySqlConfig.json` is here and MySQL80 runs. A full run takes ~3 h.
    To change a setting for a run pass `--env KEY=VALUE`: a variable set in the editor did not reach the cells (1.34). Confirm it in the cell logs before trusting a pass
    (`Puppet motion kinematic (from ...)`, `Puppets window`).
-6. **Run the full EditMode suite** after any further core edit (4,503 tests, all green since the add-on's rows joined
-   `MessageRoundTripTests` on 2026-10-31, item 19; `WebSocketClientSendTests.
+6. **Run the full EditMode suite** after any further core edit (4,542 tests on the code of 1.57, all green but the kit
+   updater's one ignored test; the add-on's rows joined `MessageRoundTripTests` on 2026-10-31, item 19; `WebSocketClientSendTests.
    ReusedWriter_SendsOwnedPayloadsInOrder` is timing-flaky and passes alone).
 
 ## Gotchas found on the way

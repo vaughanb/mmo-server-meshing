@@ -190,6 +190,49 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
         }
 
         [Test]
+        public void OpenChest_IsReportedForItsConnection_UntilClosed()
+        {
+            FakeKit kit = new FakeKit();
+            MeshServerStorageHandlers mesh = new MeshServerStorageHandlers(kit);
+            mesh.OpenStorage(1, null, null, Player);
+            Assert.IsFalse(mesh.TryGetOpenChest(1, out _, out _), "a player storage is not a chest");
+
+            mesh.OpenStorage(1, null, null, Chest);
+            Assert.IsTrue(mesh.TryGetOpenChest(1, out StorageId id, out IActivatableEntity entity));
+            Assert.AreEqual(Chest, id);
+            Assert.IsNull(entity);
+            Assert.IsFalse(mesh.TryGetOpenChest(2, out _, out _), "another connection has none");
+
+            mesh.CloseStorage(1, Chest);
+            Assert.IsFalse(mesh.TryGetOpenChest(1, out _, out _));
+            Assert.AreEqual(Chest, kit.Closed[0], "closed in the kit too, window and all");
+        }
+
+        [Test]
+        public void ARefusedChestOpen_IsNotReported()
+        {
+            FakeKit kit = new FakeKit { Accept = false };
+            MeshServerStorageHandlers mesh = new MeshServerStorageHandlers(kit);
+            mesh.OpenStorage(1, null, null, Chest);
+            Assert.IsFalse(mesh.TryGetOpenChest(1, out _, out _), "the kit refused it (a puppet chest has no handler entry): nothing holds the player");
+        }
+
+        [Test]
+        public void OpenChest_IsNotReported_AfterCloseAllOrAHandoff()
+        {
+            FakeKit kit = new FakeKit();
+            MeshServerStorageHandlers mesh = new MeshServerStorageHandlers(kit);
+            mesh.OpenStorage(1, null, null, Chest);
+            mesh.CloseAllStorages(1);
+            Assert.IsFalse(mesh.TryGetOpenChest(1, out _, out _), "the client's close request");
+
+            mesh.OpenStorage(1, null, null, Chest);
+            mesh.BeginHandoff(1);
+            mesh.CloseAllStorages(1);
+            Assert.IsFalse(mesh.TryGetOpenChest(1, out _, out _), "a hop it was not held for closes it");
+        }
+
+        [Test]
         public void Clear_ForgetsEverything()
         {
             FakeKit kit = new FakeKit();

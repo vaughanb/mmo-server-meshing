@@ -2,7 +2,9 @@
 //
 // The kit's chat and storage handlers are wrapped as the server's handler references are set (MeshInteractionHandlers.cs),
 // and a storage the arrival had open on the origin is reopened here once both its carried state is read and its relates
-// data is loaded, in whichever order those come.
+// data is loaded, in whichever order those come. A chest does not cross (DESIGN 1.57): its storage is served by the cell
+// it stands on, so the boundary tick holds a player who has one open in reach on this cell, and closes one out of reach
+// the moment it sees it, by the kit's own rule, so what the wrapper counts open is what the kit has open.
 using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
 using LiteNetLibManager;
@@ -20,6 +22,7 @@ namespace MultiplayerARPG.MMO.Mesh
         private readonly Dictionary<string, List<MeshInteractionState.CarriedStorage>> _storageReopens = new Dictionary<string, List<MeshInteractionState.CarriedStorage>>();
         private readonly Dictionary<string, float> _arrivalsLoaded = new Dictionary<string, float>();
         private readonly List<string> _arrivalsLoadedGone = new List<string>();
+        private readonly HashSet<string> _chestHoldLogged = new HashSet<string>();
 
         /// <summary>The kit's handlers, wrapped: a local chat reaches the players across a line, storage opens are known to the handoff, and a party or guild invitation reaches a player across a line (DESIGN 1.44).</summary>
         protected override void SetServerHandlersRef()
@@ -46,6 +49,40 @@ namespace MultiplayerARPG.MMO.Mesh
         private void BeginStorageHandoff(long connectionId)
         {
             _storageWrapper?.BeginHandoff(connectionId);
+        }
+
+        /// <summary>
+        /// The boundary tick, for every player here: whether it has a chest open within the chest's reach. One out of reach
+        /// (or gone) is closed now, as the kit's once-a-second sweep would close it (the same test on the same positions),
+        /// because that sweep closes inside the kit, past the wrapper, which would go on counting the chest open.
+        /// </summary>
+        private bool ChestOpenInReach(BasePlayerCharacterEntity player)
+        {
+            if (_storageWrapper == null || !_storageWrapper.TryGetOpenChest(player.ConnectionId, out StorageId storageId, out IActivatableEntity chest))
+                return false;
+            if (!chest.IsNull() && GameplayUtils.IsTargetInDistance(player.EntityTransform.position, chest.EntityTransform, chest.GetActivatableDistance()))
+                return true;
+            _storageWrapper.CloseStorage(player.ConnectionId, storageId);
+            Logging.Log("Mesh", $"Chest {storageId.storageOwnerId} closed for {player.CharacterName}: {(chest.IsNull() ? "gone" : "out of reach")}, as the kit closes it");
+            return false;
+        }
+
+        /// <summary>
+        /// The boundary tick holds the handoff of a player past the line with a chest open in reach (DESIGN 1.57): the chest's
+        /// storage is served here and its puppet next door cannot open it, so the player stays until it closes the chest or
+        /// walks out of the chest's reach. A draining cell holds nobody: its handoff closes the chest as before.
+        /// </summary>
+        private bool HoldsHandoffForChest(BasePlayerCharacterEntity player, bool chestOpenInReach)
+        {
+            if (!chestOpenInReach || IsDraining)
+            {
+                if (_chestHoldLogged.Remove(player.Id))
+                    Logging.Log("Mesh", $"Handoff of {player.CharacterName} no longer held for a chest");
+                return false;
+            }
+            if (_chestHoldLogged.Add(player.Id) && _storageWrapper.TryGetOpenChest(player.ConnectionId, out StorageId storageId, out IActivatableEntity chest))
+                Logging.Log("Mesh", $"Handoff of {player.CharacterName} held: chest {storageId.storageOwnerId} is open here (until it closes or the player is {chest.GetActivatableDistance():0.#} m from it)");
+            return true;
         }
 
         /// <summary>The carrier, as the arrival registers: the storages it had open, to reopen once its data is in.</summary>
@@ -102,6 +139,8 @@ namespace MultiplayerARPG.MMO.Mesh
             }
         }
 #else
+        private bool ChestOpenInReach(BasePlayerCharacterEntity player) { return false; }
+        private bool HoldsHandoffForChest(BasePlayerCharacterEntity player, bool chestOpenInReach) { return false; }
         private void BeginStorageHandoff(long connectionId) { }
         internal void QueueStorageReopen(BasePlayerCharacterEntity player, List<MeshInteractionState.CarriedStorage> storages) { }
         private void MarkArrivalLoaded(BasePlayerCharacterEntity player) { }

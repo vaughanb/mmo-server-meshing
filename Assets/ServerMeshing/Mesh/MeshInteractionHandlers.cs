@@ -11,7 +11,9 @@
 // the handoff; the destination restores the dialog as the arrival registers and reopens the storages once its relates
 // data is loaded. MeshServerStorageHandlers wraps the kit's storage handlers to know what a connection has open, to leave
 // the close to the kit's own sweep during a handoff (so the client never sees one), and to make NotifyStorageItemsUpdated
-// safe for a storage nobody has opened on this cell, where the kit indexes a dictionary and throws.
+// safe for a storage nobody has opened on this cell, where the kit indexes a dictionary and throws. A chest is served by the
+// cell it stands on (its puppet next door has no handler entry, so the kit refuses it there): since 1.57 a player who walks
+// over a line with one open is held on the chest's cell until it closes (MeshMapNetworkManager_Interactions).
 using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
 using LiteNetLib.Utils;
@@ -284,6 +286,24 @@ namespace MultiplayerARPG.MMO.Mesh
             _handingOff.Add(connectionId);
         }
 
+        /// <summary>The chest (a building's storage) this connection has open here, if any: the first one, with the entity it was opened at.</summary>
+        public bool TryGetOpenChest(long connectionId, out StorageId storageId, out IActivatableEntity entity)
+        {
+            storageId = default;
+            entity = null;
+            if (!_open.TryGetValue(connectionId, out List<Open> list))
+                return false;
+            for (int i = 0; i < list.Count; ++i)
+            {
+                if (list[i].id.storageType != StorageType.Building)
+                    continue;
+                storageId = list[i].id;
+                entity = list[i].entity;
+                return true;
+            }
+            return false;
+        }
+
         /// <summary>The carrier, as the handoff state is written: the player and guild storages the connection had open, once; null for none.</summary>
         public List<MeshInteractionState.CarriedStorage> TakeCarried(long connectionId)
         {
@@ -330,8 +350,9 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 // The handoff: what the player has open goes with it (TakeCarried) and the client is told nothing, so its
                 // window stays for the destination to fill. A chest belongs to the cell it stands on, so that one closes
-                // as the kit closes it, window and all. The kit's own sweep closes this connection's entries within a
-                // second, once the character is unregistered.
+                // as the kit closes it, window and all (the boundary tick holds a crossing while one is open in reach, so
+                // this is a draining cell's or a too-far one's). The kit's own sweep closes this connection's entries
+                // within a second, once the character is unregistered.
                 if (_open.TryGetValue(connectionId, out List<Open> list))
                 {
                     List<MeshInteractionState.CarriedStorage> carried = new List<MeshInteractionState.CarriedStorage>();

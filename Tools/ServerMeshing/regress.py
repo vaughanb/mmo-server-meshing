@@ -1096,6 +1096,24 @@ def run_scenario(name, rep):
         c_lines = zone_lines("C", start, day)
         rep.check(count(c_lines, r"Hit on ghost meshbotChar") == 0, "no hit on the party member's ghost was forwarded")
 
+    elif name == "chest":
+        # DESIGN 1.57: a chest open across the C/E line. The tester places one on C 1 m short of the line, opens it, walks
+        # 2.5 m past the line inside its 6 m reach and is held on C with the window open; moves scrolls while held; closes
+        # it and hops; is refused by the chest's puppet on E; walks back, counts what is in it; walks out of reach past the
+        # line, where C closes the chest as the kit would and hands the tester over. No monsters.
+        db_reset((97.5, 66), (0, 0), clear_buildings=True)
+        request_play("chest", 97.5, 66, env={"MESH_NO_MONSTER_HANDOFF": "1", "MESH_NO_MONSTERS": "1"}, line_x=100)
+        wait_play(60)
+        st = wait_status(lambda st: st.get("finished") == "True", 300, "the chest tester")
+        result = st.get("result", "")
+        rep.check("-> PASS" in result, f"tester: {result[:220]}")
+        c_lines, e_lines = zone_lines("C", start, day), zone_lines("E", start, day)
+        rep.check(count(c_lines, rf"Handoff of {TESTER} held: chest \S+ is open here") >= 2, "C held the tester for the chest twice (open in reach, then walking away)")
+        rep.check(count(c_lines, rf"Handoff of {TESTER} no longer held for a chest") >= 2, "both holds ended")
+        rep.check(count(c_lines, rf"Chest \S+ closed for {TESTER}: out of reach") >= 1, "C closed the chest out of reach, as the kit closes it")
+        rep.check(count(c_lines, r"Unable to move item") + count(e_lines, r"Unable to move item") == 0, "no storage move failed on either cell")
+        rep.check("removed=True" in result, "the tester destroyed its chest (buildings persist between scenarios)")
+
     elif name == "social":
         # DESIGN 1.44: a trade, a party and a guild invitation, and a duel with a player standing across the C/E line, a
         # metre and a bit apart (the kit's conversation distance is 1 m plus its 1 m buffer). Both start in no party and
@@ -1286,7 +1304,7 @@ def remote_mode_of(name):
     return regress_remote.SPAWNER if REMOTE_FORCE_SPAWNER or name in SPAWNER_SCENARIOS else regress_remote.CELL
 
 
-ALL = (DEFAULT + ["pvp", "wake", "dynidle", "social"] + list(regress_split.SCENARIOS) + list(regress_merge.SCENARIOS)
+ALL = (DEFAULT + ["pvp", "wake", "dynidle", "social", "chest"] + list(regress_split.SCENARIOS) + list(regress_merge.SCENARIOS)
        + list(regress_splitcrash.SCENARIOS) + list(regress_auto.SCENARIOS) + list(regress_building.SCENARIOS)
        + list(regress_central.SCENARIOS) + list(regress_links.SCENARIOS) + list(regress_family.SCENARIOS)
        + list(regress_policy.SCENARIOS) + list(regress_soak.SCENARIOS) + list(regress_vend.SCENARIOS))
