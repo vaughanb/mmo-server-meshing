@@ -146,6 +146,8 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (!IsServer)
                 return;
+            if (DropWhileResolving(msg))
+                return; // DESIGN 1.54: a restarted cell's exchanges are being resolved against the database
             BaseCharacterEntity target = ResolveOwnedCharacter(msg.targetMeshId);
             if (target == null)
             {

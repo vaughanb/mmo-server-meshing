@@ -248,6 +248,11 @@ Where the work stands, how to get it running on another machine, and what is lef
     is sent as a container, its building-only rotation and receiver-only age listed, and the grid is shaped to
     `LayerCount` arrays of columns × rows before it is written. `MeshMessageBranchTests` round-trips every `GhostKind`
     by hand. No message changed.
+31. **An exchange across a line survives a crash of either cell (DESIGN 1.54, package 0.97.39).** Every step is written
+    to the journal before anything else, the changed player is saved at once, and the step's message leaves only once
+    that save is accepted; a marker in the player's saved data tells a restarted cell whether a pending step reached the
+    database, and a mail's reference in its text whether a mail did. `regress.py tradecrash buycrash salecrash tradestep
+    buystep salestep mailstep` kill the cells with an exchange open and inside its steps.
 30. **A vendor who leaves, a stop on either side of a sale, an answer through a sleeping cell (DESIGN 1.53, package
     0.97.38).** A buyer's word for a sale pending on a cell is settled there even after the vendor left (mailed), and a
     cell that cannot reach the cell it waits on asks the central to wake it. `regress.py vendleave buystop salestop
@@ -497,7 +502,9 @@ Where the work stands, how to get it running on another machine, and what is lef
    release has it yet, so the package names `master` at 05ec55012 as its minimum: when a release does, name that. A later
    sync is a three-way merge, not a copy (`upstream/README.md`).
 5. **The rig regression** is run on the paths a change reaches, not in full (the user's choice, 2026-11-02). On the
-   code of 1.53: `vendleave` 60, `buystop` 61, `salestop` 62, `sleephold` 55, `trade` 82 and `tradestop` 66 checks. On the
+   code of 1.54: `tradestep` 65, `buystep` 61, `salestep` 61, `mailstep` 64, `tradecrash` 66, `buycrash` 61,
+   `salecrash` 62, `tradestop` 66, `buystop` 61, `salestop` 62, `vendleave` 60, `trade` 82, `market` 84, `social` 70,
+   `splitvend` 116 and `sleephold` 55 checks. On the code of 1.53: `vendleave` 60, `buystop` 61, `salestop` 62, `sleephold` 55, `trade` 82 and `tradestop` 66 checks. On the
    code of 1.52: `tradestop` 66, `trade` 82, `market` 84, `social` 70, `splitvend` 116, `sleep` 57 and `merge` 144
    checks. On the code of 1.51: `trade` 82, `market` 84 and `social` 70 checks. On the code of 1.50 (the server code of 1.49): `splitvend` 116 checks, and `pet` and `party` 109 in a full run stopped after
    them; on 1.49's `trade` 75, `social` 70 and `market` 83, all passing (2026-11-02), as on 1.48's `market` 83, `social` 70 and `splitvend` 116, and on 1.47's `market` 70, `splitvend` 116, `social` 70 and `harvest` 47 (the code

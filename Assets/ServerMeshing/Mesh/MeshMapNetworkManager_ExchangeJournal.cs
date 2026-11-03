@@ -12,6 +12,9 @@
 //
 // DESIGN 1.53: a cell with only answers (no open exchange) may sleep; the cell that waits for one of them asks the central
 // to wake it when its link is down (WakeToAsk), and the woken cell answers from the journal it wrote as it went to sleep.
+//
+// DESIGN 1.54: the journal is written ahead of every step (MeshMapNetworkManager_ExchangeSteps), not only at the quit; a
+// restarted cell reads it as before, and its pending records are resolved against the database before they are acted on.
 using System.Collections.Generic;
 using System.IO;
 using LiteNetLib.Utils;
@@ -30,7 +33,8 @@ namespace MultiplayerARPG.MMO.Mesh
         private bool _exchangesRestored;
 
         /// <summary>Open exchanges on this cell: trade escrows (open or released), purchases in escrow, sales waiting for a word.</summary>
-        internal int OpenExchangeCount => _dealEscrowsByTrade.Count + _vendingEscrows.Count + _pendingSales.Count;
+        internal int OpenExchangeCount => _dealEscrowsByTrade.Count + _vendingEscrows.Count + _pendingSales.Count
+            + _mailsInFlight.Count + _restoredPurchases.Count; // a settling step is the journal's to resolve, and does not keep a cell up
 
         private string ExchangeJournalPath()
         {
@@ -42,11 +46,11 @@ namespace MultiplayerARPG.MMO.Mesh
         protected override void OnApplicationQuit()
         {
             if (IsServer && HasOwnZone)
-                WriteExchangeJournal();
+                WriteExchangeJournal(true);
             base.OnApplicationQuit();
         }
 
-        private void WriteExchangeJournal()
+        private void WriteExchangeJournal(bool quitting)
         {
             string path;
             try
@@ -74,7 +78,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (File.Exists(path))
                     File.Delete(path);
                 File.Move(temp, path);
-                Logging.Log("Mesh", $"Exchanges journal written as the cell stops: {journal.trades.Count} trade escrow(s), {journal.purchases.Count} purchase(s), {journal.sales.Count} sale(s), {journal.tradeWords.Count + journal.saleWords.Count} answer(s) -> {path}");
+                if (quitting)
+                    Logging.Log("Mesh", $"Exchanges journal written as the cell stops: {journal.trades.Count} trade escrow(s), {journal.purchases.Count} purchase(s), {journal.sales.Count} sale(s), {journal.settlements.Count} settling step(s), {journal.mails.Count} mail(s), {journal.tradeWords.Count + journal.saleWords.Count} answer(s) -> {path}");
             }
             catch (System.Exception e)
             {
@@ -91,7 +96,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 MeshExchangeJournal.Trade t = new MeshExchangeJournal.Trade
                 {
                     tradeId = e.tradeId, traderId = e.traderId, traderUserId = e.traderUserId, traderName = e.traderName,
-                    otherMeshId = e.otherMeshId, otherZone = e.otherZone, goldTaken = e.goldTaken, goldOffered = e.goldOffered, age = now - e.since,
+                    otherMeshId = e.otherMeshId, otherZone = e.otherZone, goldTaken = e.goldTaken, goldOffered = e.goldOffered, age = now - e.since, pending = e.pending,
                 };
                 t.items.AddRange(e.items);
                 journal.trades.Add(t);
@@ -102,15 +107,18 @@ namespace MultiplayerARPG.MMO.Mesh
                 journal.purchases.Add(new MeshExchangeJournal.Purchase
                 {
                     saleId = kv.Value.saleId, buyerId = kv.Key, buyerUserId = buyer != null ? buyer.UserId : string.Empty,
-                    buyerName = buyer != null ? buyer.CharacterName : kv.Key, vendorName = kv.Value.vendorName, gold = kv.Value.gold,
+                    buyerName = buyer != null ? buyer.CharacterName : kv.Key, vendorName = kv.Value.vendorName, gold = kv.Value.gold, pending = kv.Value.pending,
                 });
             }
+            journal.purchases.AddRange(_restoredPurchases); // restored, pending, not yet resolved
             foreach (PendingSale s in _pendingSales.Values)
                 journal.sales.Add(new MeshExchangeJournal.Sale
                 {
                     saleId = s.saleId, vendorId = s.vendorId, vendorUserId = s.vendorUserId, vendorName = s.vendorName, buyerId = s.buyerId,
-                    buyerName = s.buyerName, buyerZone = s.buyerZone, item = s.item, price = s.price, age = now - s.since,
+                    buyerName = s.buyerName, buyerZone = s.buyerZone, item = s.item, price = s.price, age = now - s.since, pending = s.pending,
                 });
+            journal.settlements.AddRange(_settlements.Values);
+            journal.mails.AddRange(_mailsInFlight.Values);
             foreach (KeyValuePair<string, List<SaleDecision>> kv in _saleDecisions)
                 foreach (SaleDecision d in kv.Value)
                     if (now - d.at <= VendingDecisionSeconds)
@@ -154,11 +162,9 @@ namespace MultiplayerARPG.MMO.Mesh
             MeshExchangeJournal journal;
             try
             {
+                // DESIGN 1.54: the file stays: it is rewritten from what is taken up, so a crash meanwhile reads it again.
                 journal = MeshExchangeJournal.Read(new NetDataReader(File.ReadAllBytes(path)));
-                string done = path + ".restored";
-                if (File.Exists(done))
-                    File.Delete(done);
-                File.Move(path, done);
+                File.Copy(path, path + ".restored", true);
             }
             catch (System.Exception e)
             {
@@ -171,6 +177,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 return;
             }
             float now = Time.unscaledTime;
+            HoldJournal();
             foreach (string id in journal.settledTrades)
                 _dealsSettled[id] = now;
             foreach (MeshExchangeJournal.TradeWord w in journal.tradeWords)
@@ -186,29 +193,48 @@ namespace MultiplayerARPG.MMO.Mesh
                 DealEscrow escrow = new DealEscrow
                 {
                     tradeId = t.tradeId, traderId = t.traderId, traderUserId = t.traderUserId, traderName = t.traderName, released = true,
-                    otherMeshId = t.otherMeshId, otherZone = t.otherZone, goldTaken = t.goldTaken, goldOffered = t.goldOffered, since = now - t.age,
+                    otherMeshId = t.otherMeshId, otherZone = t.otherZone, goldTaken = t.goldTaken, goldOffered = t.goldOffered, since = now - t.age, pending = t.pending,
                 };
                 escrow.items.AddRange(t.items);
                 _dealEscrowsByTrade[escrow.tradeId] = escrow;
-                StartCoroutine(DealEscrowTimeout(escrow.tradeId));
+                if (!escrow.pending)
+                    StartCoroutine(DealEscrowTimeout(escrow.tradeId));
             }
             foreach (MeshExchangeJournal.Sale s in journal.sales)
             {
                 _pendingSales[s.saleId] = new PendingSale
                 {
                     saleId = s.saleId, vendorId = s.vendorId, vendorUserId = s.vendorUserId, vendorName = s.vendorName, buyerId = s.buyerId,
-                    buyerName = s.buyerName, buyerZone = s.buyerZone, item = s.item, price = s.price, since = now - s.age, released = true,
+                    buyerName = s.buyerName, buyerZone = s.buyerZone, item = s.item, price = s.price, since = now - s.age, released = true, pending = s.pending,
                 };
-                StartCoroutine(WatchPendingSale(s.saleId));
+                if (!s.pending)
+                    StartCoroutine(WatchPendingSale(s.saleId));
             }
             foreach (MeshExchangeJournal.Purchase p in journal.purchases)
             {
-                // The item never reached the buyer on this cell: from now on its sale is refused here, and the price goes back.
-                RecordSaleDecision(p.buyerId, p.saleId, false);
-                MailToAbsent(p.buyerUserId, p.buyerName, "Purchase cancelled", $"The gold for a purchase from {p.vendorName}'s shop that did not complete before the server restarted.",
-                    null, p.gold, $"Vending: purchase {p.saleId} of {p.buyerName} refunded after the restart");
+                // The item never reached the buyer on this cell: from now on its sale is refused here, and the price goes
+                // back. A pending one waits for its marker (DESIGN 1.54): its gold may never have left in the database.
+                if (p.pending)
+                    _restoredPurchases.Add(p);
+                else
+                    RefundRestoredPurchase(p);
             }
-            Logging.Log("Mesh", $"Exchanges journal taken up: {journal.trades.Count} trade escrow(s) and {journal.sales.Count} sale(s) asked about again, {journal.purchases.Count} purchase(s) refunded, {journal.tradeWords.Count + journal.saleWords.Count} answer(s) kept (from {path})");
+            foreach (MeshExchangeJournal.Settlement st in journal.settlements)
+                _settlements[SettlementKey(st.kind, st.exchangeId, st.characterId)] = st;
+            foreach (MeshExchangeJournal.Mail m in journal.mails)
+                _mailsInFlight[m.reference] = m;
+            int pending = _restoredPurchases.Count + journal.settlements.Count;
+            foreach (MeshExchangeJournal.Trade t in journal.trades)
+                if (t.pending)
+                    pending++;
+            foreach (MeshExchangeJournal.Sale s in journal.sales)
+                if (s.pending)
+                    pending++;
+            _exchangesResolving = pending > 0 || journal.mails.Count > 0;
+            ReleaseJournal();
+            Logging.Log("Mesh", $"Exchanges journal taken up: {journal.trades.Count} trade escrow(s) and {journal.sales.Count} sale(s) asked about again, {journal.purchases.Count} purchase(s) refunded, {journal.tradeWords.Count + journal.saleWords.Count} answer(s) kept, {pending} pending record(s) and {journal.mails.Count} mail(s) to resolve (from {path})");
+            if (_exchangesResolving)
+                ResolveRestoredExchanges().Forget();
         }
 
         /// <summary>The per-frame part: the journal taken up once the zone is known, and the rig's clean-quit fault.</summary>
@@ -217,7 +243,13 @@ namespace MultiplayerARPG.MMO.Mesh
             if (!IsServer)
                 return;
             RestoreExchangesOnce();
-            string toggle = MeshFault.Toggle(FaultQuitWithExchange);
+            FaultWithExchange(FaultQuitWithExchange);
+            FaultWithExchange(FaultCrashWithExchange); // DESIGN 1.54: a kill instead of the quit
+        }
+
+        private void FaultWithExchange(string key)
+        {
+            string toggle = MeshFault.Toggle(key);
             if (toggle == null || !HasOwnZone || OpenExchangeCount == 0)
                 return;
             foreach (string part in toggle.Split(','))
@@ -234,7 +266,12 @@ namespace MultiplayerARPG.MMO.Mesh
                 foreach (PendingSale s in _pendingSales.Values)
                     oldest = Mathf.Max(oldest, now - s.since);
                 if (oldest >= seconds)
-                    MeshFault.QuitOnce(FaultQuitWithExchange, OwnZoneId, $"an exchange open {oldest:0} s");
+                {
+                    if (key == FaultCrashWithExchange)
+                        MeshFault.FireOnce(key, OwnZoneId, $"an exchange open {oldest:0} s");
+                    else
+                        MeshFault.QuitOnce(key, OwnZoneId, $"an exchange open {oldest:0} s");
+                }
                 return;
             }
         }

@@ -50,6 +50,20 @@ leave (the fixture by the safe disconnect): E holds its open escrow and stays up
 left) sleeps and writes it to its journal, E asks the central to wake C, the woken C answers from its journal, E mails
 the fixture and then sleeps.
 
+DESIGN 1.54, a cell that dies instead of stopping (MESH_FAULT_CRASH_WITH_EXCHANGE kills it as the quit fault quits it,
+MESH_FAULT_CRASH_IN_STEP kills it at its n-th exchange step, before the step's save is sent or after it was accepted and
+before the journal says so):
+tradecrash, buycrash, salecrash: tradestop, buystop and salestop with a kill: no journal is written as the cell dies, the
+one written ahead of each step is taken up.
+tradestep: one trade; C (the answering cell) dies at its first step before the save: its half never reached the
+database, its restarted process answers the commit failed, and E gives the fixture's offer back; nothing is exchanged.
+buystep: one purchase; C dies at its first step (the buyer's escrow) after the save: the purchase was never sent, the
+restarted C finds the escrow's marker in the buyer's saved data and refunds it by mail.
+salestep: one purchase; E dies at its first step (the item out of the vendor's bag) before the save: the restarted E
+finds no marker and drops the sale (the item never left in the database), and C gives the escrow back on its timeout.
+mailstep: vendleave with E dying at its second step (the vendor's gold, mailed) after the database accepted the mail: the
+restarted E finds the mail's reference in the vendor's mailbox and does not send it again.
+
 regress.py hands itself in as `rig`; the graders read the cells' logs and the database.
 """
 import os
@@ -62,7 +76,8 @@ import regress_merge
 import regress_split
 import rigtools
 
-SCENARIOS = ("market", "splitvend", "trade", "tradestop", "vendleave", "buystop", "salestop", "sleephold")
+SCENARIOS = ("market", "splitvend", "trade", "tradestop", "vendleave", "buystop", "salestop", "sleephold",
+             "tradecrash", "tradestep", "buycrash", "salecrash", "buystep", "salestep", "mailstep")
 SLEEP_SCENARIOS = ("sleephold",)
 SLEEPHOLD_ZONES = {"C", "E"}   # sleeping cells with no awake ring: only the traders' cells start
 PERSIST_REASON = regress_split.PERSIST_REASON
@@ -164,10 +179,10 @@ def run(name, rep, rig, start, day, bots):
     if name == "trade":
         run_trade(rep, rig, start, day, bots)
         return None
-    if name == "tradestop":
-        run_tradestop(rep, rig, start, day, bots)
+    if name in TRADEFAULT:
+        run_tradestop(name, rep, rig, start, day, bots)
         return None
-    if name in ("vendleave", "buystop", "salestop"):
+    if name in VENDFAULT:
         run_vendfault(name, rep, rig, start, day, bots)
         return None
     if name == "sleephold":
@@ -186,6 +201,7 @@ def grade_layout(rep, rig, start, day, result):
 # ------------------------------------------------------------------ market
 
 def run_market(rep, rig, start, day, bots):
+    clear_journals()   # DESIGN 1.54: a journal stays on disk while it holds answers; no earlier run's may be taken up
     rig.db_reset(MARKET_BUYER_AT, MARKET_VENDOR_AT, tester_party=0, bot_party=0, clear_buildings=True)
     buyer_char, vendor_char = f"{MARKET_BUYER}Char", provision.BOT.character_name
     provision.reset_bot_positions(2, 1, [MARKET_BUYER_AT], status_path=rig.STATUS)
@@ -305,6 +321,7 @@ def mailed_amount(mails, data_id):
 
 
 def run_trade(rep, rig, start, day, bots):
+    clear_journals()
     driver_char, acceptor_char = f"{TRADE_DRIVER}Char", provision.BOT.character_name
     rig.db_reset(TRADE_DRIVER_AT, TRADE_ACCEPTOR_AT, tester_party=0, bot_party=0)
     provision.reset_bot_positions(2, 1, [TRADE_DRIVER_AT], status_path=rig.STATUS)
@@ -387,7 +404,13 @@ def run_trade(rep, rig, start, day, bots):
 
 TRADESTOP_STEPS = "trade,trade,quit"
 TRADESTOP_BLACKOUT = "2:45"         # C's second commit handled: answered after 45 s
-TRADESTOP_QUIT = "E:5"              # E quits cleanly once an exchange has been open 5 s
+TRADESTOP_QUIT = "E:5"              # E quits cleanly (or dies) once an exchange has been open 5 s
+TRADEFAULT = {
+    # name: (the driver's steps, the cells' environment)
+    "tradestop": (TRADESTOP_STEPS, {"MESH_TEST_TRADE_BLACKOUT": TRADESTOP_BLACKOUT, "MESH_FAULT_QUIT_WITH_EXCHANGE": TRADESTOP_QUIT}),
+    "tradecrash": (TRADESTOP_STEPS, {"MESH_TEST_TRADE_BLACKOUT": TRADESTOP_BLACKOUT, "MESH_FAULT_CRASH_WITH_EXCHANGE": TRADESTOP_QUIT}),
+    "tradestep": ("trade,quit", {"MESH_FAULT_CRASH_IN_STEP": "C:1:before"}),
+}
 # The cells' exchange journals: <persistentDataPath>/ServerMeshing of the player build (MeshMapNetworkManager.exchangeJournalFolder).
 JOURNAL_FOLDER = os.path.join(os.path.expanduser("~"), "AppData", "LocalLow", "DefaultCompany", "kit-ce-project", "ServerMeshing")
 
@@ -404,7 +427,8 @@ def clear_journals():
     return removed
 
 
-def run_tradestop(rep, rig, start, day, bots):
+def run_tradestop(name, rep, rig, start, day, bots):
+    steps, fault_env = TRADEFAULT[name]
     driver_char, acceptor_char = f"{TRADE_DRIVER}Char", provision.BOT.character_name
     rig.db_reset(TRADE_DRIVER_AT, TRADE_ACCEPTOR_AT, tester_party=0, bot_party=0)
     provision.reset_bot_positions(2, 1, [TRADE_DRIVER_AT], status_path=rig.STATUS)
@@ -422,19 +446,21 @@ def run_tradestop(rep, rig, start, day, bots):
     if stale:
         rep.notes.append(f"   {stale} exchanges journal(s) of an earlier run removed")
     rig.request_play("stand", TRADE_DRIVER_AT[0], TRADE_DRIVER_AT[1], enabled=False, line_x=TRADE_LINE,
-                     env={"MESH_NO_MONSTER_HANDOFF": "1", "MESH_NO_MONSTERS": "1", "MESH_TEST_TRADE_BLACKOUT": TRADESTOP_BLACKOUT,
-                          "MESH_FAULT_QUIT_WITH_EXCHANGE": TRADESTOP_QUIT})
+                     env=dict({"MESH_NO_MONSTER_HANDOFF": "1", "MESH_NO_MONSTERS": "1"}, **fault_env))
     rig.wait_play(60)
     time.sleep(20)
-    acceptor_log = rig.launch_bot("tradestop", provision.BOT.username,
+    acceptor_log = rig.launch_bot(name, provision.BOT.username,
                                   ["-meshAutoMode", "stand", "-meshWalkX", f"{TRADE_ACCEPTOR_AT[0]:g}", "-meshWalkZ", f"{TRADE_ACCEPTOR_AT[1]:g}",
                                    "-meshSocialAccept"], observe_seconds=300)
     bots.append(("stand", acceptor_log))
     time.sleep(10)
-    driver_log = rig.launch_bot("tradestop", TRADE_DRIVER,
+    driver_log = rig.launch_bot(name, TRADE_DRIVER,
                                 ["-meshAutoMode", "social", "-meshWalkX", f"{TRADE_DRIVER_AT[0]:g}", "-meshWalkZ", f"{TRADE_DRIVER_AT[1]:g}",
-                                 "-meshSocialTarget", acceptor_char, "-meshSocialSteps", TRADESTOP_STEPS], line_x=TRADE_LINE)
+                                 "-meshSocialTarget", acceptor_char, "-meshSocialSteps", steps], line_x=TRADE_LINE)
     bots.append(("social", driver_log))
+    if name == "tradestep":
+        grade_tradestep(rep, rig, start, day, driver_char, acceptor_char)
+        return
     result = rig.wait_for_bot(driver_log, "social", 420)
     rep.check("-> PASS" in result, f"driver: {result[:300] or 'no RESULT'}")
     rep.check("across=True" in result, "the two traders stood on either side of the line (C and E)")
@@ -448,12 +474,16 @@ def run_tradestop(rep, rig, start, day, bots):
     time.sleep(30)
     c_lines, e_lines = rig.zone_lines("C", start, day), rig.zone_lines("E", start, day)
     a = re.escape(acceptor_char)
-    for zone, lines, pattern, want, what in (
-            ("E", e_lines, rf"Trade commit: {a}'s offer .* in escrow", 2, "took the fixture's offer into escrow twice"),
-            ("C", c_lines, r"Trade \S+: every answer dropped for 45 s \(MESH_TEST_TRADE_BLACKOUT", 1, "blacked out the second trade's answers"),
-            ("E", e_lines, r"FAULT: quitting on an exchange open \d+ s \(MESH_FAULT_QUIT_WITH_EXCHANGE\)", 1, "quit cleanly with the second trade open"),
-            ("E", e_lines, r"Exchanges journal written as the cell stops: 1 trade escrow\(s\)", 1, "wrote the open escrow to its journal"),
-            ("E", e_lines, r"Exchanges journal taken up: 1 trade escrow\(s\)", 1, "took the journal up after its restart")):
+    checks = [("E", e_lines, rf"Trade commit: {a}'s offer .* in escrow", 2, "took the fixture's offer into escrow twice"),
+              ("C", c_lines, r"Trade \S+: every answer dropped for 45 s \(MESH_TEST_TRADE_BLACKOUT", 1, "blacked out the second trade's answers")]
+    if name == "tradestop":
+        checks += [("E", e_lines, r"FAULT: quitting on an exchange open \d+ s \(MESH_FAULT_QUIT_WITH_EXCHANGE\)", 1, "quit cleanly with the second trade open"),
+                   ("E", e_lines, r"Exchanges journal written as the cell stops: 1 trade escrow\(s\)", 1, "wrote the open escrow to its journal")]
+    else:
+        checks += [("E", e_lines, r"FAULT: dying on an exchange open \d+ s \(MESH_FAULT_CRASH_WITH_EXCHANGE\)", 1, "died with the second trade open"),
+                   ("E", e_lines, r"Exchanges journal written as the cell stops", 0, "wrote no journal as it died (the one written ahead is taken up)")]
+    checks.append(("E", e_lines, r"Exchanges journal taken up: 1 trade escrow\(s\)", 1, "took the journal up after its restart"))
+    for zone, lines, pattern, want, what in checks:
         n = rig.count(lines, pattern)
         rep.check(n == want, f"{zone} {what} ({n}, expected {want})")
     applied = rig.count(e_lines, rf"Trade committed here: {a} received .* s after the commit\)")
@@ -474,6 +504,35 @@ def run_tradestop(rep, rig, start, day, bots):
     rep.check(gd == TRADE_GOLD and ga + gm == TRADE_GOLD, f"the traders' gold: driver {gd} (expected {TRADE_GOLD}), fixture {ga} + {gm} mailed (expected {TRADE_GOLD})")
 
 
+def grade_tradestep(rep, rig, start, day, driver_char, acceptor_char):
+    """C dies at its half before the save: the restarted C answers failed and E gives the escrow back; nothing changes hands."""
+    a = re.escape(acceptor_char)
+    settled = wait_lines(rig, "E", start, day, rf"Trade escrow of {a} returned|Trade \S+ failed for {a}, who is not on this cell: mailed", 240)
+    rep.check(settled, "E gave the fixture's offer back")
+    time.sleep(30)   # the kit's save scheduler writes a character at most every 20 s
+    c_lines, e_lines = rig.zone_lines("C", start, day), rig.zone_lines("E", start, day)
+    for zone, lines, pattern, want, what in (
+            ("E", e_lines, rf"Trade commit: {a}'s offer .* in escrow", 1, "took the fixture's offer into escrow"),
+            ("C", c_lines, r"FAULT: dying on exchange step 1 \(trade \S+ answered by .*\) before its save \(MESH_FAULT_CRASH_IN_STEP\)", 1, "died at its half, before the save"),
+            ("C", c_lines, r"Exchanges journal taken up: .* 1 pending record\(s\)", 1, "took up the journal with its pending half"),
+            ("C", c_lines, r"Exchange step TradeAnswered of .* never reached the database; the word on the trade is failed", 1, "found no marker: the word is failed"),
+            ("C", c_lines, r"Exchanges resolved against the database: 0 kept, 0 dropped \(never reached it\), 1 settling step", 1, "resolved the journal"),
+            ("C", c_lines, r"Trade \S+ asked about for .*: the same answer \(failed\)", 1, "answered E's question failed")):
+        n = rig.count(lines, pattern)
+        rep.check(n >= want if want else n == 0, f"{zone} {what} ({n}, expected {want if want else 0})")
+    rep.check(rig.count(c_lines + e_lines, r"with no escrow here|are lost") == 0, "nothing lost")
+    for name, data_id, want, what in ((driver_char, ITEM_SKILL, 0, "scrolls"), (driver_char, ITEM_BENCH, 5, "benches"),
+                                      (acceptor_char, ITEM_SKILL, 20, "scrolls"), (acceptor_char, ITEM_BENCH, 0, "benches")):
+        n = item_count(rig, name, data_id)
+        rep.check(n == want, f"{name} has {n} {what} in the database, expected {want} (nothing exchanged)")
+    mails = mails_to(rig, acceptor_char, 0)
+    benches = mailed_amount(mails, ITEM_BENCH)
+    ga, gd = gold_of(rig, acceptor_char), gold_of(rig, driver_char)
+    gm = sum(g for g, _ in mails)
+    rep.check(gd == TRADE_GOLD and ga + gm == TRADE_GOLD and benches == 0,
+              f"the traders' gold: driver {gd}, fixture {ga} + {gm} mailed (expected {TRADE_GOLD} each, nothing exchanged)")
+
+
 # ------------------------------------------------------------------ vendleave, buystop, salestop
 
 VENDFAULT = {
@@ -481,7 +540,15 @@ VENDFAULT = {
     "vendleave": ({"MESH_TEST_VENDING_BLACKOUT": "1:40"}, ["-meshSocialQuitAfterSales", "1", "-meshSocialQuitSafe"], "buy,quit"),
     "buystop": ({"MESH_TEST_VENDING_ANSWER_DELAY": "8", "MESH_FAULT_QUIT_WITH_EXCHANGE": "C:3"}, [], "buy"),
     "salestop": ({"MESH_TEST_VENDING_BLACKOUT": "1:30", "MESH_FAULT_QUIT_WITH_EXCHANGE": "E:5"}, [], "buy,quit"),
+    # DESIGN 1.54: the same with a kill, and the kills inside a step
+    "buycrash": ({"MESH_TEST_VENDING_ANSWER_DELAY": "8", "MESH_FAULT_CRASH_WITH_EXCHANGE": "C:3"}, [], "buy"),
+    "salecrash": ({"MESH_TEST_VENDING_BLACKOUT": "1:30", "MESH_FAULT_CRASH_WITH_EXCHANGE": "E:5"}, [], "buy,quit"),
+    "buystep": ({"MESH_FAULT_CRASH_IN_STEP": "C:1:after"}, [], "buy"),
+    "salestep": ({"MESH_FAULT_CRASH_IN_STEP": "E:1:before"}, [], "buy"),
+    "mailstep": ({"MESH_TEST_VENDING_BLACKOUT": "1:40", "MESH_FAULT_CRASH_IN_STEP": "E:2:after"}, ["-meshSocialQuitAfterSales", "1", "-meshSocialQuitSafe"], "buy,quit"),
 }
+# The buyer's cell or the vendor's dies under the purchase: the buyer's RESULT is not the scenario's.
+VENDFAULT_NO_RESULT = ("buystop", "buycrash", "buystep", "salestep")
 
 
 def clear_mail(rig, *character_names):
@@ -529,7 +596,10 @@ def run_vendfault(name, rep, rig, start, day, bots):
                                 "-meshSocialTarget", vendor_char, "-meshSocialSteps", steps], line_x=MARKET_LINE)
     bots.append(("social", buyer_log))
     b, v = re.escape(buyer_char), re.escape(vendor_char)
-    if name == "buystop":
+    if name in ("buystep", "salestep"):
+        grade_vendstep(name, rep, rig, start, day, buyer_char, vendor_char, vendor_bag)
+        return
+    if name in ("buystop", "buycrash"):
         # The buyer's cell stops under it: its RESULT is not this scenario's; the sale's end is. Either the item goes back to
         # the vendor (the buyer away when the late answer comes), or the buyer, logged in again on the vendor's own cell
         # (its own was down), receives it there and pays again (the first rig run): the restarted C refunded the escrow.
@@ -544,6 +614,20 @@ def run_vendfault(name, rep, rig, start, day, bots):
     checks = [("E", e_lines, rf"Vending sold here: {v} sold .* to {b} across a line", 1, "sold the item")]
     if name == "vendleave":
         checks += [("E", e_lines, rf"Vending: sale \S+ paid for {v}, who is not on this cell: mailed to {v}", 1, "mailed the vendor its gold")]
+    elif name == "mailstep":
+        checks += [("E", e_lines, r"FAULT: dying on exchange step 2 \(Vending: sale \S+ paid for .*\) after its save, before the journal \(MESH_FAULT_CRASH_IN_STEP\)", 1, "died after the mail was accepted"),
+                   ("E", e_lines, rf"Vending: sale \S+ paid for {v}, who is not on this cell: mailed to {v}", 1, "mailed the vendor its gold (once, before it died)"),
+                   ("E", e_lines, r"Exchanges journal taken up: .* 1 mail\(s\) to resolve", 1, "took up the journal with the mail"),
+                   ("E", e_lines, rf"the mail to {v} \(reference \S+\) reached the database before the restart; not sent again", 1, "found the mail's reference in the vendor's mailbox")]
+    elif name == "buycrash":
+        checks += [("C", c_lines, r"FAULT: dying on an exchange open \d+ s \(MESH_FAULT_CRASH_WITH_EXCHANGE\)", 1, "died with the purchase in escrow"),
+                   ("C", c_lines, r"Exchanges journal written as the cell stops", 0, "wrote no journal as it died"),
+                   ("C", c_lines, r"Exchanges journal taken up: .* 1 purchase\(s\) refunded", 1, "took the journal written ahead up after its restart"),
+                   ("C", c_lines, rf"Vending: purchase \S+ of {b} refunded after the restart: mailed to {b}", 1, "mailed the buyer its gold")]
+    elif name == "salecrash":
+        checks += [("E", e_lines, r"FAULT: dying on an exchange open \d+ s \(MESH_FAULT_CRASH_WITH_EXCHANGE\)", 1, "died with the sale open"),
+                   ("E", e_lines, r"Exchanges journal written as the cell stops", 0, "wrote no journal as it died"),
+                   ("E", e_lines, r"Exchanges journal taken up: 0 trade escrow\(s\) and 1 sale\(s\)", 1, "took the journal written ahead up after its restart")]
     elif name == "buystop":
         checks += [("C", c_lines, r"FAULT: quitting on an exchange open \d+ s \(MESH_FAULT_QUIT_WITH_EXCHANGE\)", 1, "quit cleanly with the purchase in escrow"),
                    ("C", c_lines, r"Exchanges journal written as the cell stops: 0 trade escrow\(s\), 1 purchase\(s\)", 1, "wrote the purchase to its journal"),
@@ -556,7 +640,10 @@ def run_vendfault(name, rep, rig, start, day, bots):
     for zone, lines, pattern, want, what in checks:
         n = rig.count(lines, pattern)
         rep.check(n == want, f"{zone} {what} ({n}, expected {want})")
-    if name != "buystop":
+    if name == "mailstep":
+        n = len(mails_to(rig, vendor_char, 0))
+        rep.check(n == 1, f"the vendor has one mail ({n}): the restarted E did not send it again")
+    if name not in ("buystop", "buycrash"):
         n = rig.count(c_lines, r"the word on sale \S+ \(paid\) dropped \(MESH_TEST_VENDING_BLACKOUT")
         rep.check(n >= 1, f"C dropped its word on the sale ({n})")
     rep.check(rig.count(c_lines + e_lines, r"are lost|no word from the buyer's cell in \d+ s") == 0, "nothing lost, the sale settled on the buyer's cell's word")
@@ -564,7 +651,7 @@ def run_vendfault(name, rep, rig, start, day, bots):
     vendor_mails, buyer_mails = mails_to(rig, vendor_char, 0), mails_to(rig, buyer_char, 0)
     vg, bg = gold_of(rig, vendor_char), gold_of(rig, buyer_char)
     vm, bm = sum(g for g, _ in vendor_mails), sum(g for g, _ in buyer_mails)
-    if name == "buystop":
+    if name in ("buystop", "buycrash"):
         bought = item_count(rig, buyer_char, ITEM_SKILL)
         returned = rig.count(e_lines, rf"Vending: sale \S+ of {v} to {b} not delivered")
         rep.check(bought + returned == 1 and bag_amount(rig, vendor_char) + bought == vendor_bag,
@@ -575,6 +662,43 @@ def run_vendfault(name, rep, rig, start, day, bots):
         rep.check(vg + vm == PRICE and bg == BUYER_GOLD - PRICE, f"one sale: vendor {vg}+{vm} mailed (expected {PRICE}), buyer {bg} (expected {BUYER_GOLD - PRICE})")
         rep.check(bag_amount(rig, vendor_char) == vendor_bag - 1 and item_count(rig, buyer_char, ITEM_SKILL) == 1,
                   f"the item with the buyer (vendor's bag {bag_amount(rig, vendor_char)} of {vendor_bag})")
+
+
+def grade_vendstep(name, rep, rig, start, day, buyer_char, vendor_char, vendor_bag):
+    """buystep: the purchase never sent, its escrow refunded by mail after C's restart; salestep: the sale dropped by the
+    restarted E, the escrow back on C's timeout. Either way no sale, and the gold all with the buyer."""
+    b, v = re.escape(buyer_char), re.escape(vendor_char)
+    if name == "buystep":
+        settled = wait_lines(rig, "C", start, day, rf"Vending: purchase \S+ of {b} refunded after the restart: mailed to {b}", 240)
+        rep.check(settled, "the restarted C refunded the escrow by mail")
+    else:
+        settled = wait_lines(rig, "E", start, day, r"Exchanges resolved against the database", 240)
+        rep.check(settled, "the restarted E resolved its journal")
+        rep.check(wait_lines(rig, "C", start, day, rf"Vending escrow of {b} returned", 60), "C gave the escrow back")
+    time.sleep(30)   # the kit's save scheduler writes a character at most every 20 s
+    c_lines, e_lines = rig.zone_lines("C", start, day), rig.zone_lines("E", start, day)
+    if name == "buystep":
+        checks = [("C", c_lines, r"FAULT: dying on exchange step 1 \(purchase \S+ of .* in escrow\) after its save, before the journal \(MESH_FAULT_CRASH_IN_STEP\)", 1, "died after the escrow's save"),
+                  ("C", c_lines, r"Exchanges journal taken up: .* 1 pending record\(s\)", 1, "took up the journal with the pending escrow"),
+                  ("C", c_lines, r"Exchanges resolved against the database: 1 kept, 0 dropped", 1, "found the escrow's marker in the buyer's saved data"),
+                  ("E", e_lines, rf"Vending sold here: {v} sold .* to {b}", 0, "never heard of the purchase")]
+    else:
+        checks = [("E", e_lines, r"FAULT: dying on exchange step 1 \(sale \S+ of .*\) before its save \(MESH_FAULT_CRASH_IN_STEP\)", 1, "died before the sale's save"),
+                  ("E", e_lines, r"Exchanges journal taken up: .* 1 pending record\(s\)", 1, "took up the journal with the pending sale"),
+                  ("E", e_lines, rf"Vending: sale \S+ of {v} to {b} never reached the database .*; dropped", 1, "found no marker and dropped the sale"),
+                  ("C", c_lines, rf"Vending bought here: {b} received", 0, "never received the item")]
+    for zone, lines, pattern, want, what in checks:
+        n = rig.count(lines, pattern)
+        rep.check(n == want, f"{zone} {what} ({n}, expected {want})")
+    rep.check(rig.count(c_lines + e_lines, r"are lost") == 0, "nothing lost")
+    vendor_mails, buyer_mails = mails_to(rig, vendor_char, 0), mails_to(rig, buyer_char, 0)
+    vg, bg = gold_of(rig, vendor_char), gold_of(rig, buyer_char)
+    vm, bm = sum(g for g, _ in vendor_mails), sum(g for g, _ in buyer_mails)
+    bought = item_count(rig, buyer_char, ITEM_SKILL)
+    rep.check(bought == 0 and bag_amount(rig, vendor_char) == vendor_bag, f"no sale: the buyer holds {bought} item(s), the vendor's bag {bag_amount(rig, vendor_char)} of {vendor_bag}")
+    rep.check(vg + vm == 0 and bg + bm == BUYER_GOLD, f"the gold all with the buyer: buyer {bg}+{bm} mailed (expected {BUYER_GOLD}), vendor {vg}+{vm}")
+    if name == "buystep":
+        rep.check(bm == PRICE, f"the escrow refunded by mail ({bm} gold mailed, expected {PRICE})")
 
 
 # ------------------------------------------------------------------ sleephold
@@ -611,7 +735,7 @@ def run_sleephold(rep, rig, start, day, bots):
     c_lines, e_lines = rig.zone_lines("C", start, day), rig.zone_lines("E", start, day)
     for zone, lines, pattern, what in (
             ("C", c_lines, r"Sleeping: cell C has nobody near it", "slept once the driver left"),
-            ("C", c_lines, r"Exchanges journal written as the cell stops: 0 trade escrow\(s\), 0 purchase\(s\), 0 sale\(s\), 1 answer\(s\)", "wrote its answer to its journal as it slept"),
+            ("C", c_lines, r"Exchanges journal written as the cell stops: 0 trade escrow\(s\), 0 purchase\(s\), 0 sale\(s\), 0 settling step\(s\), 0 mail\(s\), 1 answer\(s\)", "wrote its answer to its journal as it slept"),
             ("E", e_lines, r"Sleep asked for cell E but 1 exchange\(s\) across a line are open here: staying up", "stayed up while the exchange was open"),
             ("E", e_lines, r"Exchange: zone C is not linked; asking the central to wake it", "asked the central to wake C"),
             ("C", c_lines, r"Exchanges journal taken up: .* 1 answer\(s\) kept", "answered from its journal once woken")):
@@ -656,6 +780,7 @@ def buy(rep, rig, bots, user, vendor_char, what):
 
 
 def run_splitvend(rep, rig, start, day, bots):
+    clear_journals()
     vendor_char = f"{SPLIT_VENDOR}Char"
     buyers = [f"{u}Char" for u in SPLIT_BUYERS]
     # Before start_split's own reset and Play: the buyers' places (they log in later, in the kept half) and the bags.

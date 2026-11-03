@@ -952,7 +952,9 @@ This chapter runs the test rig, which lives in the source repository
   than a minute releases its player and stays open; what it owes a player who has left the cell arrives as a mail from
   'Server Meshing' (DESIGN 1.51), so the game's mail must be enabled. A cell does not sleep or retire while an exchange
   is open, and one stopped cleanly keeps its open exchanges in a journal under `<persistentDataPath>/ServerMeshing`
-  (the map manager's `exchangeJournalFolder`) for its next start on the same host (DESIGN 1.52). Friend requests need nothing: the kit writes them to the database by character id.
+  (the map manager's `exchangeJournalFolder`) for its next start on the same host (DESIGN 1.52). The journal is written
+  ahead of every step and each step's player is saved before the other cell hears of it, so a cell that crashes keeps
+  its exchanges too (DESIGN 1.54); the add-on keeps a small server int per open exchange in the player's saved data. Friend requests need nothing: the kit writes them to the database by character id.
 - **A player's shop** (the kit's vending) can be seen and bought from across a line (DESIGN 1.46): the add-on's vending
   component goes onto the player entity like the dealing one, the shop's sign travels in the ghost snapshot, and a
   purchase is done in two halves with the price held in escrow on the buyer's cell. A shop is carried with a handoff

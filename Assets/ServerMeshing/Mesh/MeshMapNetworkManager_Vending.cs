@@ -34,6 +34,10 @@
 // (MeshMapNetworkManager_Delivery): a vendor who leaves no longer gets paid up front for a sale whose item may come
 // back. MESH_TEST_VENDING_BLACKOUT (`<n>:<seconds>`) drops every word about the sale of this cell's n-th word for that
 // long, as a link down for a minute would.
+//
+// DESIGN 1.54: each step is written ahead and saved before its message leaves (MeshMapNetworkManager_ExchangeSteps): the
+// buyer's escrow before the purchase is sent, the vendor's item before the answer, the buyer's item before its word; the
+// vendor's pay or its item back, and the buyer's refund, are settlements kept in the journal until their saves land.
 using System.Collections;
 using System.Collections.Generic;
 using LiteNetLib.Utils;
@@ -75,12 +79,14 @@ namespace MultiplayerARPG.MMO.Mesh
             public string vendorName;
             public string saleId;
             public float since;
+            public bool pending; // its save not yet accepted (DESIGN 1.54)
         }
 
         private sealed class PendingSale
         {
             public string saleId, vendorId, vendorUserId, vendorName, buyerId, buyerName, buyerZone;
             public bool released; // the vendor's handoff no longer waits for it
+            public bool pending;  // the item taken, the vendor's save not yet accepted (DESIGN 1.54)
             public CharacterItem item;
             public int price;
             public float since;
@@ -281,19 +287,36 @@ namespace MultiplayerARPG.MMO.Mesh
                 AnswerBuyer(buyer.Id, buyerZone, GhostActionKind.VendingFailed, vendor, writer => { writer.Put((ushort)reason); writer.Put(saleId); }, delay);
                 return;
             }
-            _pendingSales[saleId] = new PendingSale
+            PendingSale pendingSale = new PendingSale
             {
                 saleId = saleId, vendorId = target.Id, vendorUserId = vendor != null ? vendor.UserId : null, vendorName = target.CharacterName, buyerId = buyer.Id, buyerName = buyer.CharacterName,
-                buyerZone = buyerZone, item = sold, price = price, since = Time.unscaledTime,
+                buyerZone = buyerZone, item = sold, price = price, since = Time.unscaledTime, pending = vendor != null,
             };
+            _pendingSales[saleId] = pendingSale;
             StartCoroutine(WatchPendingSale(saleId));
             Logging.Log("Mesh", $"Vending sold here: {target.CharacterName} sold {sold.amount} x item {sold.dataId} for {price} gold to {buyer.CharacterName} across a line (sale {saleId}; paid on the buyer's cell's word)");
-            string saleZone = OwnZoneId, vendorId = target.Id;
-            AnswerBuyer(buyer.Id, buyerZone, GhostActionKind.VendingSold, vendor, writer =>
+            string saleZone = OwnZoneId, vendorId = target.Id, buyerId = buyer.Id;
+            System.Action answer = () => AnswerBuyer(buyerId, buyerZone, GhostActionKind.VendingSold, vendor, writer =>
             {
                 writer.Put((byte)0); writer.Put(saleId); writer.Put(sold); writer.Put(price);
                 writer.Put(saleZone ?? string.Empty); writer.Put(vendorId ?? string.Empty); // DESIGN 1.52: where the word goes
             }, delay);
+            if (vendor == null)
+            {
+                answer();
+                return;
+            }
+            // DESIGN 1.54: the item out of the vendor's bag reaches the database before the buyer's cell hears of it.
+            SetStepMarker(vendor, saleId, MeshExchangeJournal.StepTaken);
+            CommitStep(vendor, $"sale {saleId} of {target.CharacterName}", saved =>
+            {
+                if (saved && _pendingSales.TryGetValue(saleId, out PendingSale still) && ReferenceEquals(still, pendingSale))
+                {
+                    pendingSale.pending = false;
+                    JournalChanged();
+                }
+                answer();
+            });
         }
 
         /// <summary>
@@ -393,6 +416,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 vending.ReturnSale(sale.item);
                 Logging.LogWarning("Mesh", $"Vending: sale {saleId} of {sale.vendorName} to {sale.buyerName} not delivered ({why}); {sale.item.amount} x item {sale.item.dataId} back in {sale.vendorName}'s bag");
             }
+            Settle(MeshExchangeJournal.SettlementKind.SaleSettled, vendor, saleId, paid ? MeshExchangeJournal.StepDelivered : MeshExchangeJournal.StepReturned, sale.buyerName,
+                paid ? null : new List<CharacterItem> { sale.item }, paid ? sale.price : 0, $"sale {saleId} settled for {sale.vendorName}");
         }
 
         /// <summary>The buyer's cell's word on one of this cell's sales (DESIGN 1.48).</summary>
@@ -435,10 +460,28 @@ namespace MultiplayerARPG.MMO.Mesh
                 return false;
             buyer.Gold -= entry.price;
             string saleId = System.Guid.NewGuid().ToString("N");
-            _vendingEscrows[buyer.Id] = new VendingEscrow { buyer = buyer, gold = entry.price, vendorName = vendorGhost.CharacterName, saleId = saleId, since = Time.unscaledTime };
-            string itemId = entry.item.id;
+            VendingEscrow escrow = new VendingEscrow { buyer = buyer, gold = entry.price, vendorName = vendorGhost.CharacterName, saleId = saleId, since = Time.unscaledTime, pending = true };
+            _vendingEscrows[buyer.Id] = escrow;
+            string itemId = entry.item.id, buyerId = buyer.Id;
             int price = entry.price;
-            ForwardGhostAction(vendorGhost, GhostActionKind.VendingBuy, buyer.GetInfo(), writer => { writer.Put(index); writer.Put(itemId); writer.Put(price); writer.Put(saleId); });
+            // DESIGN 1.54: the escrow reaches the database before the vendor's cell hears of the purchase.
+            SetStepMarker(buyer, saleId, MeshExchangeJournal.StepTaken);
+            CommitStep(buyer, $"purchase {saleId} of {buyer.CharacterName} in escrow", saved =>
+            {
+                if (!_vendingEscrows.TryGetValue(buyerId, out VendingEscrow still) || !ReferenceEquals(still, escrow))
+                    return; // given back meanwhile (the buyer left)
+                if (saved)
+                {
+                    escrow.pending = false;
+                    JournalChanged();
+                }
+                if (vendorGhost == null || buyer == null)
+                {
+                    Logging.LogWarning("Mesh", $"Vending: the vendor of purchase {saleId} is gone before it was sent; the escrow goes back on its timeout");
+                    return;
+                }
+                ForwardGhostAction(vendorGhost, GhostActionKind.VendingBuy, buyer.GetInfo(), writer => { writer.Put(index); writer.Put(itemId); writer.Put(price); writer.Put(saleId); });
+            });
             StartCoroutine(VendingEscrowTimeout(buyer.Id, saleId));
             Logging.Log("Mesh", $"Vending buy: {buyer.CharacterName}'s {price} gold in escrow for entry {index} ({entry.item.amount} x item {entry.item.dataId}) of {vendorGhost.CharacterName}'s shop, asked its owner (sale {saleId})");
             return true;
@@ -454,6 +497,8 @@ namespace MultiplayerARPG.MMO.Mesh
             EndVendingEscrow(buyer.Id);
             buyer.Gold = buyer.Gold.Increase(escrow.gold);
             Logging.LogWarning("Mesh", $"Vending escrow of {buyer.CharacterName} returned ({why}): {escrow.gold} gold");
+            Settle(MeshExchangeJournal.SettlementKind.PurchaseRefunded, buyer, escrow.saleId, MeshExchangeJournal.StepReturned, escrow.vendorName, null, escrow.gold,
+                $"purchase {escrow.saleId} of {buyer.CharacterName} refunded");
         }
 
         private IEnumerator VendingEscrowTimeout(string buyerId, string saleId)
@@ -475,6 +520,7 @@ namespace MultiplayerARPG.MMO.Mesh
             float now = Time.unscaledTime;
             decisions.RemoveAll(d => now - d.at > VendingDecisionSeconds || d.saleId == saleId);
             decisions.Add(new SaleDecision { saleId = saleId, paid = paid, at = now });
+            JournalChanged(); // DESIGN 1.54: before the word leaves
         }
 
         private bool TryGetSaleDecision(string buyerId, string saleId, out bool paid)
@@ -562,6 +608,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 return;
             }
             bool paid = true;
+            HoldJournal(); // DESIGN 1.54: the escrow spent, the item, the word and the step, written as one
             if (_vendingEscrows.TryGetValue(buyer.Id, out VendingEscrow escrow) && escrow.saleId == saleId)
                 EndVendingEscrow(buyer.Id);
             else if (buyer.Gold >= price)
@@ -576,15 +623,20 @@ namespace MultiplayerARPG.MMO.Mesh
                 ServerGameMessageHandlers.SendGameMessage(buyer.ConnectionId, UITextKeys.UI_ERROR_NOT_ENOUGH_GOLD);
             }
             RecordSaleDecision(buyer.Id, saleId, paid);
-            if (paid)
+            if (!paid)
             {
-                buyer.IncreaseItems(sold, item => buyer.OnRewardItem(RewardGivenType.Vending, item));
-                buyer.FillEmptySlots();
-                if (vendor != null)
-                    ServerLogHandlers.LogBuyVendingItem(buyer, vendor, sold, price);
-                Logging.Log("Mesh", $"Vending bought here: {buyer.CharacterName} received {sold.amount} x item {sold.dataId} for {price} gold from {(vendor != null ? vendor.CharacterName : "a vendor")} across a line; its escrow is spent");
+                ReleaseJournal();
+                SendSaleDone(instigator, saleId, false, buyer, saleZone, vendorId);
+                return;
             }
-            SendSaleDone(instigator, saleId, paid, buyer, saleZone, vendorId);
+            buyer.IncreaseItems(sold, item => buyer.OnRewardItem(RewardGivenType.Vending, item));
+            buyer.FillEmptySlots();
+            if (vendor != null)
+                ServerLogHandlers.LogBuyVendingItem(buyer, vendor, sold, price);
+            Logging.Log("Mesh", $"Vending bought here: {buyer.CharacterName} received {sold.amount} x item {sold.dataId} for {price} gold from {(vendor != null ? vendor.CharacterName : "a vendor")} across a line; its escrow is spent");
+            Settle(MeshExchangeJournal.SettlementKind.PurchaseBought, buyer, saleId, MeshExchangeJournal.StepDelivered, vendor != null ? vendor.CharacterName : (escrow != null ? escrow.vendorName : string.Empty),
+                null, price, $"purchase {saleId} of {buyer.CharacterName} received", saved => SendSaleDone(instigator, saleId, true, buyer, saleZone, vendorId));
+            ReleaseJournal();
         }
 
         /// <summary>The vendor's cell asks about a sale it has no word on: this cell's word, or not paid when it never saw the item.</summary>

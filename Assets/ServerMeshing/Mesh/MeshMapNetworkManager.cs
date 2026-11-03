@@ -1070,7 +1070,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 // Hysteresis: only flip once clearly past the edge, so loitering on the line doesn't thrash.
                 if (-OwnCell.DistanceToEdge(pos) < handoffHysteresis)
                     continue;
-                if (HoldsHandoffForVending(entity) || HoldsHandoffForTrade(entity))
+                if (HoldsHandoffForVending(entity) || HoldsHandoffForTrade(entity) || HoldsHandoffForSteps(entity))
                     continue; // DESIGN 1.47/1.49: the answer comes here, where the price or the offer is in escrow
                 _handoffCandidates.Add(entity);
             }

@@ -23,6 +23,10 @@
 // otherwise (MeshMapNetworkManager_Delivery): a trader who logged out (the kit's safe disconnect despawns at once), was
 // disconnected or hopped away. MESH_TEST_TRADE_BLACKOUT (`<n>:<seconds>`) drops every answer to the n-th commit a cell
 // handles for that long, as a link down for a minute would.
+//
+// DESIGN 1.54: each step is written ahead and saved before its message leaves (MeshMapNetworkManager_ExchangeSteps): the
+// escrow before the commit is sent, the answering trader's half before its answer; the escrow's settlement is kept in
+// the journal until its save lands.
 using System.Collections;
 using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
@@ -66,6 +70,7 @@ namespace MultiplayerARPG.MMO.Mesh
             public int goldTaken;   // the offer plus the fee, out of the inventory
             public int goldOffered; // what the other trader receives
             public float since;
+            public bool pending;    // the offer taken, the trader's save not yet accepted (DESIGN 1.54)
         }
 
         private readonly Dictionary<string, DealEscrow> _dealEscrows = new Dictionary<string, DealEscrow>();        // trader id: its open trade's escrow
@@ -269,7 +274,7 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 traderId = trader.Id, traderUserId = trader.UserId, traderName = trader.CharacterName,
                 otherMeshId = MeshEntityIdOf(otherGhost), otherZone = otherIdentity != null ? otherIdentity.OwnerZoneId : null,
-                tradeId = System.Guid.NewGuid().ToString("N"), goldTaken = goldWithFee, goldOffered = goldOffered, since = Time.unscaledTime,
+                tradeId = System.Guid.NewGuid().ToString("N"), goldTaken = goldWithFee, goldOffered = goldOffered, since = Time.unscaledTime, pending = true,
             };
             if (!MeshDealing.TakeOffered(trader, offered, goldWithFee, escrow.items))
                 return false;
@@ -277,16 +282,30 @@ namespace MultiplayerARPG.MMO.Mesh
             _dealEscrowsByTrade[escrow.tradeId] = escrow;
             List<CharacterItem> items = escrow.items;
             string tradeId = escrow.tradeId;
-            if (TestTradeDrop("commit", ++_testCommitsSent))
-                Logging.LogWarning("Mesh", $"Trade commit {tradeId} of {trader.CharacterName} dropped (MESH_TEST_TRADE_DROP commit{_testCommitsSent})");
-            else
-                ForwardGhostAction(otherGhost, GhostActionKind.DealCommit, trader.GetInfo(), writer =>
+            // DESIGN 1.54: the escrow reaches the database before the other cell hears of the commit.
+            SetStepMarker(trader, tradeId, MeshExchangeJournal.StepTaken);
+            CommitStep(trader, $"trade {tradeId} of {trader.CharacterName} in escrow", saved =>
+            {
+                if (!_dealEscrowsByTrade.TryGetValue(tradeId, out DealEscrow still) || !ReferenceEquals(still, escrow))
+                    return; // settled meanwhile
+                if (saved)
                 {
-                    writer.Put(tradeId);
-                    writer.Put(items.Count);
-                    for (int i = 0; i < items.Count; ++i) writer.Put(items[i]);
-                    writer.Put(goldOffered);
-                });
+                    escrow.pending = false;
+                    JournalChanged();
+                }
+                if (TestTradeDrop("commit", ++_testCommitsSent))
+                    Logging.LogWarning("Mesh", $"Trade commit {tradeId} of {escrow.traderName} dropped (MESH_TEST_TRADE_DROP commit{_testCommitsSent})");
+                else if (otherGhost == null)
+                    Logging.LogWarning("Mesh", $"Trade commit {tradeId} of {escrow.traderName}: the other trader is gone before it was sent; asked about on its timeout");
+                else
+                    ForwardGhostAction(otherGhost, GhostActionKind.DealCommit, trader != null ? trader.GetInfo() : EntityInfo.Empty, writer =>
+                    {
+                        writer.Put(tradeId);
+                        writer.Put(items.Count);
+                        for (int i = 0; i < items.Count; ++i) writer.Put(items[i]);
+                        writer.Put(goldOffered);
+                    });
+            });
             StartCoroutine(DealEscrowTimeout(tradeId));
             Logging.Log("Mesh", $"Trade commit: {trader.CharacterName}'s offer ({items.Count} item(s), {goldOffered} gold, {goldWithFee - goldOffered} fee) in escrow, sent to {otherGhost.CharacterName}'s owner (trade {tradeId})");
             return true;
@@ -396,6 +415,8 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             if (open)
                 player.DealingComponent?.StopDealing();
+            Settle(MeshExchangeJournal.SettlementKind.TradeSettled, player, escrow.tradeId, committed ? MeshExchangeJournal.StepDelivered : MeshExchangeJournal.StepReturned, null,
+                committed ? received : escrow.items, committed ? goldReceived : escrow.goldTaken, $"trade {escrow.tradeId} settled for {player.CharacterName}");
         }
 
         /// <summary>The escrow's cell asks the other cell about an exchange it has no answer on.</summary>
@@ -528,12 +549,15 @@ namespace MultiplayerARPG.MMO.Mesh
                 Logging.LogWarning("Mesh", $"Trade commit from {other.CharacterName} refused for {player.CharacterName}: {forOther}");
                 return;
             }
+            HoldJournal(); // DESIGN 1.54: the half, the word and the step, written as one; the answer after the save
             MeshDealing.Give(player, offered, goldOffered, item => player.OnRewardItem(RewardGivenType.Dealing, item));
             player.OnRewardGold(RewardGivenType.Dealing, goldOffered);
             ServerLogHandlers.LogExchangeDealingItemsAndGold(player, other, goldGiven, dealing.DealingItems);
             DealDecision done = RecordDealDecision(player.Id, new DealDecision { tradeId = tradeId, committed = true, taken = taken, goldGiven = goldGiven, otherId = MeshEntityIdOf(other), otherZone = otherZone });
             Logging.Log("Mesh", $"Trade committed here: {player.CharacterName} gave {taken.Count} item(s) and {goldGiven} gold, received {offered.Count} item(s) and {goldOffered} gold from {other.CharacterName} across a line (trade {tradeId})");
-            SendDealAnswer(player, instigator, done, delay);
+            Settle(MeshExchangeJournal.SettlementKind.TradeAnswered, player, tradeId, MeshExchangeJournal.StepDelivered, other.CharacterName, null, 0,
+                $"trade {tradeId} answered by {player.CharacterName}", saved => SendDealAnswer(player, instigator, done, delay));
+            ReleaseJournal();
             dealing.StopDealing();
         }
 
@@ -604,6 +628,7 @@ namespace MultiplayerARPG.MMO.Mesh
             float now = Time.unscaledTime;
             decisions.RemoveAll(d => now - d.at > DealDecisionSeconds || d.tradeId == decision.tradeId);
             decisions.Add(decision);
+            JournalChanged(); // DESIGN 1.54: before the answer leaves
             return decision;
         }
 
