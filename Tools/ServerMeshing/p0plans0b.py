@@ -31,7 +31,7 @@ METER = {"MESH_METER_SENDS": "count"}
 KINEMATIC_PUPPETS = {"MESH_PUPPET_MOTION": "kinematic"}
 PARITY, TIERED = "20/20/20", "20/10/5/20"     # sender tiers near/mid/far[/owner] Hz
 KIT_RECORD_B = 28                             # a kit EntityState character record (step 5 decision 7)
-WIRE_B = {"legacy54": 54, "header56": 56, "compact28": 28}
+WIRE_B = {"legacy54": 54, "header56": 56, "compact28": 31}   # compact28 is the space game's 31 B mode 3 since 2026-11-02
 STEP_WARMUP, BINDS_PER_S, STEP_MARGIN_S = 10, 50, 20
 HALVES = ("C", "E")
 # b3 (observed O, R, SA): eyes on E over a4's owners on C; client-driven owners as character phantoms seeing 50 movers

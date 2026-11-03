@@ -94,7 +94,7 @@ namespace MultiplayerARPG.MMO.Mesh
         }
 
         /// <summary>
-        /// WriteCompactState appends compact28 (mode 3) only under that wire and while no teleport is unacknowledged (a
+        /// WriteCompactState appends the compact record (mode 3, 31 B) only under compact28 and while no teleport is unacknowledged (a
         /// pending teleport is never quantised); false otherwise, or for a non-finite field, so the fan-out sends Full.
         /// </summary>
         public bool WriteCompactState(long sampleTimestamp, NetDataWriter writer)
@@ -102,7 +102,9 @@ namespace MultiplayerARPG.MMO.Mesh
             if (!CompactAllowed(_wire, _teleportSequence, _ackedSequence))
                 return false;
             BuildSample(out ServerMeshShipSample sample);
-            if (!ServerMeshShipWire.WriteCompact28(writer, in sample))
+            sample.SampleTime = sampleTimestamp / 1000.0;
+            sample.FrameTag = ServerMeshShipWire.RigFrameTag;
+            if (!ServerMeshShipWire.WriteCompact(writer, in sample))
                 return false;
             CountMirrorAge(sampleTimestamp);
             return true;

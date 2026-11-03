@@ -302,7 +302,7 @@ class FamilyTests(unittest.TestCase):
                          {"MESH_LOAD_SHIPS": "C:300:mirror", "MESH_LOAD_AREA": "0,0,15", "MESH_SHIP_WIRE": "compact28",
                           "MESH_SENDER_COMPACT": "far", "MESH_SHIP_SCALE": "0.03", "MESH_LOAD_PLAN": None})
         self.assertEqual((ship["expected_v"], ship["game"], ship["kind"], ship["payload_B"], ship["scale"]),
-                         (300, "space", "ship", 28, 0.03))
+                         (300, "space", "ship", 31, 0.03))
         self.assertEqual(find(specs, "main", "ship-kit-56", V=100)["payload_B"], 56)
         classify = find(specs, "classify", "ship-sender-56-parity")
         self.assertEqual((classify["env"]["MESH_SENDER_CLASSIFY_BUILDS"], classify["env"]["MESH_SENDER_TIERS"]),
@@ -350,7 +350,7 @@ class FamilyTests(unittest.TestCase):
         cap = find(specs, "cap", "ship-sender-28-tiered", P=400, packet_bytes=510)
         self.assertEqual((cap["env"]["MESH_PHANTOM"], cap["env"]["MESH_SHIP_WIRE"], cap["env"]["MESH_SENDER"],
                           cap["env"]["MESH_SHIP_SCALE"], cap["game"], cap["payload_B"]),
-                         ("virtual:400:ship:C", "compact28", "on", "0.5", "space", 28))
+                         ("virtual:400:ship:C", "compact28", "on", "0.5", "space", 31))
         saturation = find(specs, "saturation", "kit-character-eyes")
         self.assertEqual((saturation["env"]["MESH_PHANTOM"], saturation["env"]["MESH_PHANTOM_VIEW"],
                           saturation["env"]["MESH_PHANTOM_STEPS"], saturation["env"]["MESH_THREAD_CPU"],

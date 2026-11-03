@@ -755,10 +755,11 @@ This chapter runs the test rig, which lives in the source repository
   ship), `MESH_SHIP_WIRE=legacy54|header56|compact28` (default legacy54: the space game's 54-byte record; header56
   is the space game's two-byte header before it, byte 0 the wire mode in bits 0-1 and the flight state in bits 2-4
   (the rig always writes mode 0, flight state 0) and byte 1 the epoch (0, as in the game; respawns leave it), with
-  authority no longer on the wire; compact28 is the space game's mode 3, 28 bytes: header, float32 position,
-  smallest-three rotation, half-float velocity, int8 angular velocity at 4/127 rad/s and a state byte, for far
-  observers sent by the state sender with `MESH_SENDER_COMPACT=far`, never while a teleport is unacknowledged, whose
-  Full record is header56), `MESH_SHIP_SCALE` (0.001 to
+  authority no longer on the wire; compact28 is the space game's mode 3, 31 bytes since their golden fixture pinned it
+  (`Docs/ServerMeshing/fixtures/ship_wire_mode3_golden.json`; the name is from the 28-byte reading before it): header,
+  float32 position, smallest-three rotation, half-float velocity, int8 angular velocity at 8/127 rad/s, a state byte,
+  a 2-byte stamp of the writer's clock and a 1-byte frame tag, for far observers sent by the state sender with
+  `MESH_SENDER_COMPACT=far`, never while a teleport is unacknowledged, whose Full record is header56), `MESH_SHIP_SCALE` (0.001 to
   10, default 1: every distance and speed of the ship times this factor; rates, timers, torques and bytes never scale,
   and the runner scales `MESH_SENDER_R0` itself), `MESH_SHIP_PROJECTILES=instantiate|pooled` (default instantiate: the
   space game's server bolts, each instantiated and casting `RaycastAll` every frame; pooled reuses bolts with

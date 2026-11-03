@@ -21,6 +21,7 @@ the add-on's messages and fails on three by construction (DESIGN 1.33).
 | 0008 MapNetworkManager: let subclasses choose the building persistence channel (CE-10) | extension seam | `MMO/Scripts/MMOGame/Networking/Map/MapNetworkManager.cs`, `MapNetworkManager_DatabaseFunction.cs` |
 | 0009 ClusterServer: forget the online users of a map server that disconnects (DESIGN 0.91) | **bug fix** | `Server/Cluster/ClusterServer.cs` |
 | 0010 LiteNetLibManager: move a running client to another server and keep its objects (CE-14, DESIGN 1.01-1.03) | feature (no behaviour change unless called) | `ThirdParty/LiteNetLibManager/Scripts/LiteNetLibManager.cs`, `LiteNetLibClient.cs`, `GameApi/LiteNetLibAssets.cs`, `LiteNetLibGameManager.cs`, `LiteNetLibIdentity.cs`, `LiteNetLibElement.cs`, `LiteNetLibSyncField.cs`, `LiteNetLibSyncList.cs`, two EditMode test files |
+| 0011 Movement: let the server skip states for characters seated in a vehicle (the space game's kit patch #29, 2026-11-02) | performance (no behaviour change unless turned on) | `Core/Scripts/Gameplay/EntityMovementSystems/Implements/BuiltInEntityMovementFunctions3D.cs` |
 
 0001-0004: 7 files, 30 insertions, 4 deletions, verified against upstream `develop` at `aa8ecf1` (2026-09-15): every
 anchor line is present and unchanged, and the diff contains nothing but these lines (byte-order marks and line
@@ -59,6 +60,16 @@ cleanly to `develop` at dc025c2 (2026-10-29, after PR #25), checked with `git ap
 clone. Merged as PR 28 on 2026-10-30; the kit copy has been upstream's own version of it since DESIGN 1.33, which is
 what the add-on and the rig now build on.
 
+0011 (2026-11-02) is the space team's kit patch #29 (their `VENDOR_PATCHES.md`; contract proposal 6, agreed
+2026-10-05), written by them on the branch `space/mode3-golden-and-seated-patch` (see
+`phase0/space_note_2026-11-02.md`). `BuiltInEntityMovementFunctions3D.SkipSeatedServerStates`, off by default, lets the
+server skip a seated character's movement states on both send paths; a seated copy also holds its interpolation at the
+seat, whether the switch is on or not. Generated from the kit copy's own commit with `git format-patch
+--relative=Assets/OpenMMORPG`; 28 insertions, 1 deletion; `git am` applies it to the kit's layout at this repo's
+`origin/master` (bb99b71). Not checked against `develop` yet. The kit copy carries it ahead of upstream, so with the
+switch off the kit copy differs from upstream only by the interpolation hold. The add-on does not turn the switch on:
+its sender would then skip seated characters, which changes what the seated-pilot load runs measure.
+
 ## Status
 
 **0001-0004: merged.** Fast-forwarded onto upstream `master` and `develop` on 2026-09-15 (aa8ecf1 → 98a2d18); [PR #1](https://github.com/open-mmorpg/OpenMMORPG/pull/1) records it. The patches stay here as the record of what changed in the kit and why.
@@ -82,6 +93,8 @@ DESIGN 0.94 (v1.1.4); the add-on's workaround is still in place (the two do not 
 step.
 
 **0010: written, not pushed.** Applies to `develop` at dc025c2; no upstream branch or PR yet. The PR text is `PR-0010.md`.
+
+**0011: written, not pushed.** Not yet checked against `develop`; no upstream branch or PR. The PR text is `PR-0011.md`.
 
 ## Pushing (how it was done; for a re-run)
 

@@ -121,7 +121,7 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             yield return new TestCaseData(ServerMeshShipWireKind.Header56, 56, (byte)0x08, 56).SetName("ClientRecordSize_Header56Mode0_56");
             yield return new TestCaseData(ServerMeshShipWireKind.Header56, 56, (byte)0xE0, 56).SetName("ClientRecordSize_Bits5To7Ignored_56");
             yield return new TestCaseData(ServerMeshShipWireKind.Compact28, 56, (byte)0x08, 56).SetName("ClientRecordSize_Compact28Mode0_56");
-            yield return new TestCaseData(ServerMeshShipWireKind.Compact28, 28, (byte)0x0B, 28).SetName("ClientRecordSize_Compact28Mode3_28");
+            yield return new TestCaseData(ServerMeshShipWireKind.Compact28, 31, (byte)0x0B, 31).SetName("ClientRecordSize_Compact28Mode3_31");
             yield return new TestCaseData(ServerMeshShipWireKind.Header56, 0, (byte)0x09, 56).SetName("ClientRecordSize_NothingLeft_56");
         }
 

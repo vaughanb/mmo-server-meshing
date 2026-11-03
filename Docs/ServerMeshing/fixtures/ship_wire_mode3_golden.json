@@ -1,0 +1,94 @@
+{
+  "fixture": "ship wire mode 3 (the compact bubble state), golden bytes",
+  "version": 1,
+  "source": "mmorpg-kit-space, Game.Space.Ships.ShipWire.WriteCompactState (Assets/Scripts/Space/Ships/ShipWire.Compact.cs); checked by ShipWireTests",
+  "layout": {
+    "size": 31,
+    "bytes": [
+      "0: header byte 0 = wire mode 3 in bits 0-1 | flightMode << 2 (bits 2-4); bits 5-7 zero",
+      "1: epoch",
+      "2-13: offset x, y, z as little-endian float32: the position in sim minus S, the slot origin of the ship's bubble",
+      "14-17: rotation, smallest-three, little-endian uint32",
+      "18-23: velocity x, y, z as little-endian IEEE binary16",
+      "24-26: angular velocity x, y, z as int8",
+      "27: state byte = the teleport sequence's low 7 bits | forward << 7",
+      "28-29: stamp, little-endian uint16",
+      "30: frame tag"
+    ]
+  },
+  "rules": [
+    "Inputs: every number but stampSeconds is an IEEE float32 (each decimal string round-trips to one); stampSeconds is a double.",
+    "Rotation: normalize; a zero or non-finite norm packs as the identity (0, 0, 0, 1). The index of the largest |component| (x 0, y 1, z 2, w 3; the first on a tie) goes in bits 30-31; if that component is negative, every component is negated. The other three, in index order, go in bits 20-29, 10-19 and 0-9: clamp to plus or minus 1/sqrt(2), then step = floor((v * sqrt(2) + 1) * 0.5 * 1023 + 0.5), at most 1023.",
+    "Half rounds up, not to even: an exact 0 lands on step 511.5 and packs as 512. Every other component in these cases is at least 0.02 of a step from a tie, so float32 and double arithmetic agree on them.",
+    "Velocity: clamp each component to plus or minus 65504, then binary16 round-to-nearest. The cases use values exact in binary16, besides the clamped ones.",
+    "Angular velocity: steps = clamp(v / 8 * 127, -127, 127), then floor(steps + 0.5); NaN packs as 0.",
+    "Stamp: floor(stampSeconds * 10000 + 0.5) mod 65536 (100 microsecond ticks of the writer's frame clock).",
+    "Frame tag: FNV-1a 32 (offset basis 2166136261, prime 16777619) over the 12 little-endian bytes of S's x, y and z float32; then h ^ (h >> 8) ^ (h >> 16) ^ (h >> 24), its low byte.",
+    "A record with a teleport pending, or one sent reliably, is mode 0, never mode 3; the writer returns false and writes nothing (IMeshCompactStateSource)."
+  ],
+  "cases": [
+    {
+      "name": "hand-worked: the identity",
+      "flightMode": 2, "epoch": 77,
+      "slotOrigin": [70000, 66000, -140000], "offset": [1234.5, -0.25, 29999],
+      "rotation": [0, 0, 0, 1],
+      "velocity": [250, -0.5, 4000], "angularVelocity": [2, -8.5, 0.03],
+      "forward": true, "teleportLow": 53, "stampSeconds": 7.0001,
+      "bytes": "0B4D00509A44000080BE005EEA46000208E0D05B00B8D06B208100B57111E9"
+    },
+    {
+      "name": "hand-worked: 90 degrees about z (z and w tie, the first wins)",
+      "flightMode": 2, "epoch": 77,
+      "slotOrigin": [70000, 66000, -140000], "offset": [1234.5, -0.25, 29999],
+      "rotation": [0, 0, 0.707106769, 0.707106769],
+      "velocity": [250, -0.5, 4000], "angularVelocity": [2, -8.5, 0.03],
+      "forward": true, "teleportLow": 53, "stampSeconds": 7.0001,
+      "bytes": "0B4D00509A44000080BE005EEA46FF0308A0D05B00B8D06B208100B57111E9"
+    },
+    {
+      "name": "the largest component negative: the quaternion is negated",
+      "flightMode": 0, "epoch": 0,
+      "slotOrigin": [70000, 66000, -140000], "offset": [1234.5, -0.25, 29999],
+      "rotation": [0.10259784, -0.20519568, 0.307793528, -0.9233805],
+      "velocity": [1.5, -2048, 0], "angularVelocity": [-1, 0.7, 3.3],
+      "forward": false, "teleportLow": 0, "stampSeconds": 0,
+      "bytes": "030000509A44000080BE005EEA4621515ADB003E00E80000F00B34000000E9"
+    },
+    {
+      "name": "x largest",
+      "flightMode": 3, "epoch": 128,
+      "slotOrigin": [70000, 66000, -140000], "offset": [-150000.75, 400000, 0.001],
+      "rotation": [0.8040303, 0.100503787, -0.5025189, 0.301511347],
+      "velocity": [-0.125, 32, -65504], "angularVelocity": [0.21, -0.37, 5.9],
+      "forward": true, "teleportLow": 127, "stampSeconds": 6.5535,
+      "bytes": "0F80307C12C80050C3486F12833ADA52822400B00050FFFB03FA5EFFFFFFE9"
+    },
+    {
+      "name": "y largest, near a bubble's far edge",
+      "flightMode": 0, "epoch": 255,
+      "slotOrigin": [-490000, 0, 1077000], "offset": [9999.5, -4000, -20000.25],
+      "rotation": [-0.32302916, 0.9152492, 0.215352759, -0.107676379],
+      "velocity": [1024, 0.75, -3.5], "angularVelocity": [-6.2, 0.11, -0.09],
+      "forward": true, "teleportLow": 1, "stampSeconds": 1234.56789,
+      "bytes": "03FF003E1C4600007AC580409CC6B26D6A510064003A00C39E02FF814F6131"
+    },
+    {
+      "name": "clamps: velocity past the largest half, angular velocity past 8 rad/s",
+      "flightMode": 0, "epoch": 5,
+      "slotOrigin": [70000, 66000, -140000], "offset": [0, 0, 0],
+      "rotation": [0.6, 0, 0, 0.8],
+      "velocity": [70000, -1000000, 0], "angularVelocity": [8, -8, 100],
+      "forward": true, "teleportLow": 64, "stampSeconds": 3.3333,
+      "bytes": "0305000000000000000000000000000228FBFF7BFFFB00007F817FC03582E9"
+    },
+    {
+      "name": "a zero quaternion packs as the identity; the stamp wraps at 6.5536 s",
+      "flightMode": 4, "epoch": 1,
+      "slotOrigin": [0, 0, 0], "offset": [0.5, 1.25, -2],
+      "rotation": [0, 0, 0, 0],
+      "velocity": [0, 0, 0], "angularVelocity": [0, 0, 0],
+      "forward": false, "teleportLow": 18, "stampSeconds": 6.5536,
+      "bytes": "13010000003F0000A03F000000C0000208E000000000000000000012000009"
+    }
+  ]
+}

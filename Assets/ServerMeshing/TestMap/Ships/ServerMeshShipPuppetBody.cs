@@ -175,7 +175,7 @@ namespace MultiplayerARPG.MMO.Mesh
             return true;
         }
 
-        /// <summary>WriteCompactState appends compact28 of the posed transform under that wire only.</summary>
+        /// <summary>WriteCompactState appends the compact record (mode 3) of the posed transform under compact28 only.</summary>
         public bool WriteCompactState(long sampleTimestamp, NetDataWriter writer)
         {
             if (writer == null)
@@ -183,7 +183,9 @@ namespace MultiplayerARPG.MMO.Mesh
             if (_wire != ServerMeshShipWireKind.Compact28)
                 return false;
             Posed(out ServerMeshShipSample posed);
-            return ServerMeshShipWire.WriteCompact28(writer, in posed);
+            posed.SampleTime = sampleTimestamp / 1000.0;
+            posed.FrameTag = ServerMeshShipWire.RigFrameTag;
+            return ServerMeshShipWire.WriteCompact(writer, in posed);
         }
 
         /// <summary>

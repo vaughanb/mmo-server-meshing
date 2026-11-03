@@ -40,7 +40,7 @@ STEP7_REGISTRY = {
     "MESH_LOAD_SHIPS": "<cell>:<n>:<ai|mirror|parked>[,...]: load ships per cell, n 1 to 2000, one group per (cell, "
                        "authority); placed in MESH_LOAD_AREA within the cell when it is set",
     "MESH_LOAD_SHIP_PILOTS": "0 or 1: seat a server pilot character in every load ship (default 0)",
-    "MESH_SHIP_WIRE": "legacy54, header56 or compact28: the ship record (compact28 sends 28 B to far pairs with "
+    "MESH_SHIP_WIRE": "legacy54, header56 or compact28: the ship record (compact28 sends 31 B to far pairs with "
                       "MESH_SENDER_COMPACT=far, header56 otherwise; default legacy54)",
     "MESH_SHIP_SCALE": "0.001 to 10: the factor on every ship distance, speed and size (default 1)",
     "MESH_SHIP_PROJECTILES": "instantiate or pooled: how server bolts are made and cast (default instantiate, as the "

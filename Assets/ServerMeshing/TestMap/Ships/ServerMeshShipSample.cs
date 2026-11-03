@@ -27,17 +27,26 @@ namespace MultiplayerARPG.MMO.Mesh
 
         /// <summary>
         /// TeleportByte is the teleport sequence from the server, or the acknowledged one in an upload; read from a
-        /// compact28 record it holds the sequence's low 7 bits only.
+        /// compact record it holds the sequence's low 7 bits only.
         /// </summary>
         public byte TeleportByte;
 
-        /// <summary>FlightState is a 3-bit flight state, 0 to 7 (header56 and compact28 only).</summary>
+        /// <summary>FlightState is a 3-bit flight state, 0 to 7 (header56 and compact only).</summary>
         public byte FlightState;
 
-        /// <summary>Epoch is the ship's epoch byte (header56 and compact28 only).</summary>
+        /// <summary>Epoch is the ship's epoch byte (header56 and compact only).</summary>
         public byte Epoch;
 
-        /// <summary>Compact is true when the sample was read from a compact28 record.</summary>
+        /// <summary>Compact is true when the sample was read from a compact record.</summary>
         public bool Compact;
+
+        /// <summary>SampleTime is the writer's frame-clock time in seconds the state describes; a compact record carries it as its stamp.</summary>
+        public double SampleTime;
+
+        /// <summary>Stamp is a compact record's stamp as read: 100 µs ticks of the writer's frame clock, mod 65,536.</summary>
+        public ushort Stamp;
+
+        /// <summary>FrameTag is the compact record's frame tag: a hash of the slot origin S (ServerMeshShipWire.RigFrameTag in the rig).</summary>
+        public byte FrameTag;
     }
 }

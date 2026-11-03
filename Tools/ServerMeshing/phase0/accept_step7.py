@@ -5,8 +5,8 @@ the rig chain, run 10 is the unit gates).
 
   sizes     run 2: scale 1, 20 ship phantoms, 30 parked load ships, meter count, record sizes on; arms legacy54,
             header56 (kit) and compact28 (MESH_SENDER=on, compact far, R0 1 m). legacy54 sizes min 54 max 54 with
-            top 54:n; header56 min 56 max 56; compact28 only 56 and 28 with 28 >= 80 % and Sender payload full 56/56
-            compact 28/28; framed - payload mean in [5, 9] in every arm (in [5, 6] reported)
+            top 54:n; header56 min 56 max 56; compact28 only 56 and 31 with 31 >= 80 % and Sender payload full 56/56
+            compact 31/31 (28 before the space game's golden fixture, 2026-11-02); framed - payload mean in [5, 9] in every arm (in [5, 6] reported)
   once      run 3: run 2's header56 setup with MESH_SENDER=on and sources direct: Sender writes = builds x direct in
             every window whose direct held, direct 50, errors 0 dropped 0; Send 119 records = Sender u + r within
             +-0.5 % over the span; refusals <= 50 in the first window and 0 after; Ships notInSlot 0
@@ -70,6 +70,8 @@ SPACE = dict(COARSE, MESH_RATES="30/0.02")
 SIZES_BASE = dict(SPACE, MESH_PHANTOM="virtual:20:ship:C", MESH_LOAD_SHIPS="C:30:parked", MESH_METER_SENDS="count",
                   MESH_METER_RECORD_SIZES="1")
 COMPACT = {"MESH_SHIP_WIRE": "compact28", "MESH_SENDER": "on", "MESH_SENDER_COMPACT": "far", "MESH_SENDER_R0": "1"}
+# The compact record's length: 31 B since the space game's golden fixture pinned mode 3 (2026-11-02; 28 B before it)
+COMPACT_B = 31
 BOT_BASE = dict(COARSE, MESH_LOAD_SHIPS="C:40:mirror,C:10:parked", MESH_RIG_SHIPS="1")
 BOT_USER = "meshbot"
 BOT_ARGS = ["-meshAutoMode", "stand", "-meshWalkX", "0", "-meshWalkZ", "0", "-meshBotNetSeconds", "5"]
@@ -286,16 +288,16 @@ class Acceptance:
                            f"{label}: sizes min {want} max {want} top {want}:n in every window "
                            f"({[(s['min'], s['max'], s['top'][0], s['n']) for s in sizes][:4]})")
             else:
-                ok = bool(sizes) and all(set(lengths(s)) <= {28, 56} and sum(lengths(s).values()) == s["n"]
+                ok = bool(sizes) and all(set(lengths(s)) <= {COMPACT_B, 56} and sum(lengths(s).values()) == s["n"]
                                          and s["over"] == 0 for s in sizes)
-                self.check(ok, f"{label}: only lengths 56 and 28 ({[s['top'] for s in sizes][:3]})")
-                share = sum(lengths(s).get(28, 0) for s in sizes) / max(1, sum(s["n"] for s in sizes))
-                self.check(share >= 0.80, f"{label}: 28 B records {share:.1%} of all (>= 80 %, expected ~98 %)")
+                self.check(ok, f"{label}: only lengths 56 and {COMPACT_B} ({[s['top'] for s in sizes][:3]})")
+                share = sum(lengths(s).get(COMPACT_B, 0) for s in sizes) / max(1, sum(s["n"] for s in sizes))
+                self.check(share >= 0.80, f"{label}: {COMPACT_B} B records {share:.1%} of all (>= 80 %, expected ~98 %)")
                 pay = [s["payload"] for s in got["sender"] if s["payload"] and s["payload"]["full_n"]
                        and s["payload"]["compact_n"]]
                 self.check(bool(pay) and all((p["full_min"], p["full_max"], p["compact_min"], p["compact_max"])
-                                             == (56, 56, 28, 28) for p in pay),
-                           f"{label}: Sender payload full 56/56 compact 28/28 ({pay[:2]})")
+                                             == (56, 56, COMPACT_B, COMPACT_B) for p in pay),
+                           f"{label}: Sender payload full 56/56 compact {COMPACT_B}/{COMPACT_B} ({pay[:2]})")
             self.framing(label, sizes)
             ph = got["phantom"]
             self.rep.note(f"    {label}: phantom uploads {mean(p['uploads_per_s'] for p in ph):.0f}/s; an upload is "

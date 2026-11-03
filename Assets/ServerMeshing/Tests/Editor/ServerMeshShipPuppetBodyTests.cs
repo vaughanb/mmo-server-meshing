@@ -222,7 +222,7 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
         }
 
         [Test]
-        public void WriteCompactState_CompactWire_Writes28Bytes()
+        public void WriteCompactState_CompactWire_Writes31Bytes()
         {
             ServerMeshShipPuppetBody body = NewBody(ServerMeshShipWireKind.Compact28);
             ServerMeshShipSample sample = Sample(new Vector3(1f, 2f, 3f), Vector3.zero);
@@ -233,7 +233,7 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
             bool wrote = body.WriteCompactState(5, writer);
 
             Assert.That(wrote, Is.True);
-            Assert.That(writer.Length, Is.EqualTo(ServerMeshShipWire.Compact28Bytes));
+            Assert.That(writer.Length, Is.EqualTo(ServerMeshShipWire.CompactBytes));
         }
 
         [Test]

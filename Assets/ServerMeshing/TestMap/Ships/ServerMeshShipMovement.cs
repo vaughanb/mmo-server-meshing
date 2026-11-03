@@ -441,7 +441,7 @@ namespace MultiplayerARPG.MMO.Mesh
 
         /// <summary>
         /// ClientRecordSize is the bytes a record of <paramref name="wire"/> needs on a client: 54 under legacy54; else, by
-        /// the header byte's wire mode, 56 for mode 0, 28 for mode 3 and 0 for modes 1 and 2, which a client does not read
+        /// the header byte's wire mode, 56 for mode 0, 31 for mode 3 and 0 for modes 1 and 2, which a client does not read
         /// (56 when nothing is left to peek).
         /// </summary>
         public static int ClientRecordSize(ServerMeshShipWireKind wire, int availableBytes, byte firstByte)
@@ -453,7 +453,7 @@ namespace MultiplayerARPG.MMO.Mesh
             int mode = ServerMeshShipWire.ModeOf(firstByte);
             if (mode == ServerMeshShipWire.ModeBubble)
                 return ServerMeshShipWire.Header56Bytes;
-            return mode == ServerMeshShipWire.ModeCompact ? ServerMeshShipWire.Compact28Bytes : 0;
+            return mode == ServerMeshShipWire.ModeCompact ? ServerMeshShipWire.CompactBytes : 0;
         }
 
         /// <summary>
