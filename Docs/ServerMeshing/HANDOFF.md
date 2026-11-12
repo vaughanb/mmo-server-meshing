@@ -1,7 +1,7 @@
-# Handoff — 2026-11-03
+# Handoff — 2026-11-11
 
 Where the work stands, how to get it running on another machine, and what is left. The design record
-([DESIGN.md](DESIGN.md), version 1.59) has the full reasoning and measurements; this note is the short path in.
+([DESIGN.md](DESIGN.md), version 1.60) has the full reasoning and measurements; this note is the short path in.
 
 ## What was done
 
@@ -248,6 +248,11 @@ Where the work stands, how to get it running on another machine, and what is lef
     is sent as a container, its building-only rotation and receiver-only age listed, and the grid is shaped to
     `LayerCount` arrays of columns × rows before it is written. `MeshMessageBranchTests` round-trips every `GhostKind`
     by hand. No message changed.
+36. **A game's own changes to the add-on, brought back (DESIGN 1.60, package 0.98.1).** A starting cell holds its
+    rings back, one server per cell, loopback links on one host, the saved pose in the handoff notice, the stand-in's
+    asset keeper and gap carry, summon mounts across a line (`IMeshSummonMount`), and the fall origin of a puppet
+    promoted in place. The snapshot, the handoff notice and the handoff state grew. EditMode only: the harness was
+    not run on it, and the rig has no summon mount.
 35. **Release 0.98.0 (DESIGN 1.59).** The package requires OpenMMORPG v1.3.0, the docs say how much the harness ran on
     this code, and the package was imported into a fresh project on v1.3.0. Published by updating
     open-mmorpg/open-mmorpg-addons PR 1 (branch `add-server-meshing`) for the user's review.
