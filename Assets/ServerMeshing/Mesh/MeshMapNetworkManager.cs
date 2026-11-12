@@ -61,6 +61,9 @@ namespace MultiplayerARPG.MMO.Mesh
         [Tooltip("SEAMLESS: seconds to glide the local stand-in onto the re-spawned entity before swapping (hides any dead-reckoning error).")]
         public float standInBlendSeconds = 0.3f;
 
+        [Tooltip("SEAMLESS: the player's own movement during the gap is kept, up to this many seconds of travel at their move speed: the new entity is moved to where the local stand-in got to instead of the stand-in gliding back. Keep it below the movement component's arrivalMoveGraceSeconds, which is what the arriving cell lets through. 0 = glide back.")]
+        public float migrationCarrySeconds = 1.5f;
+
         [Tooltip("SEAMLESS: after the blend, wait up to this long for the new entity's stats (MaxHp > 0) before re-binding the HUD, so it never shows 0/0.")]
         public float entityDataWaitSeconds = 1f;
 
@@ -543,7 +546,12 @@ namespace MultiplayerARPG.MMO.Mesh
             }
 #if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
             if (ok && ServerUserHandlers.TryGetUserId(connectionId, out string traceUserId) && _pendingSpawnPlayerCharactersByUserId.TryGetValue(traceUserId, out IPlayerCharacterData tracePending))
+            {
+                // A handoff arrival stands where the origin's save put it, even when the row loaded here is older.
+                if (IsServer && tracePending is PlayerCharacterData arrivalData)
+                    ApplyHandoffPoseToArrival(arrivalData);
                 Stamp($"enter-game data for {tracePending.CharacterName}: position {(Vector3)tracePending.CurrentPosition} map {tracePending.CurrentMapName}");
+            }
 #endif
 #if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
             // Arrival by handoff with a ghost already standing here: hand the kit the ghost as the "already spawned"
@@ -726,11 +734,44 @@ namespace MultiplayerARPG.MMO.Mesh
             // base.Start() assigns the kit's handler with `=`; we append ours so both run.
             ClusterClient.onResponseAppServerAddress += OnMeshAppServerAddress;
             ClusterClient.onResponseAppServerRegister += OnMeshAppServerRegister;
+            KeepClusterRegisterRefusal();
         }
 
         [Tooltip("A map server restarted by MapSpawn registers with the cluster before the cluster has timed out its dead predecessor (same channel + map key) and the kit does not retry the refused registration, leaving a server that serves nobody. Retry every this many seconds until it is accepted.")]
         public float clusterRegisterRetrySeconds = 3f;
         private int _clusterRegisterRetries;
+
+        [Tooltip("Seconds a registration refused because the cluster already lists a server for this cell (UI_ERROR_MAP_EXISTED) is retried. " +
+                 "A predecessor that died is dropped when its connection times out (5 s); one still listed after this is alive, so this " +
+                 "process is a duplicate and exits, without the kit's save of the cell's buildings (its copy is not the live one). 0 retries for ever.")]
+        public float clusterRegisterExistedQuitSeconds = 30f;
+        private float _clusterMapExistedSince = -1f;
+        private UITextKeys _clusterRegisterRefusal;
+        private static readonly System.Reflection.MethodInfo s_kitRegisterResponse = typeof(ClusterClient).GetMethod("HandleResponseAppServerRegister", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        private static readonly System.Reflection.MethodInfo s_setReadyToQuit = typeof(MapNetworkManager).GetProperty(nameof(ReadyToQuit))?.GetSetMethod(true);
+
+        /// <summary>
+        /// The kit hands a registration answer on as a bare response code; wrap its response handler so the reason of
+        /// a refusal is kept too (UI_ERROR_MAP_EXISTED: the cluster already has a server for this cell).
+        /// </summary>
+        private void KeepClusterRegisterRefusal()
+        {
+            if (ClusterClient == null)
+                return;
+            ResponseDelegate<ResponseAppServerRegisterMessage> kitHandler = s_kitRegisterResponse != null
+                ? System.Delegate.CreateDelegate(typeof(ResponseDelegate<ResponseAppServerRegisterMessage>), ClusterClient, s_kitRegisterResponse, false) as ResponseDelegate<ResponseAppServerRegisterMessage>
+                : null;
+            if (kitHandler == null)
+            {
+                Logging.LogWarning("Mesh", "ClusterClient.HandleResponseAppServerRegister not found (kit changed): a duplicate of this cell is not recognised and retries its registration for ever");
+                return;
+            }
+            ClusterClient.RegisterResponseHandler<RequestAppServerRegisterMessage, ResponseAppServerRegisterMessage>(MMORequestTypes.AppServerRegister, (responseHandler, responseCode, response) =>
+            {
+                _clusterRegisterRefusal = responseCode == AckResponseCode.Success ? UITextKeys.NONE : response.message;
+                kitHandler(responseHandler, responseCode, response);
+            });
+        }
 
         [Tooltip("Seconds between attempts to open the cluster connection when it could not be opened at all. " +
                  "Once the transport client is up the kit takes over: a failed attempt raises ConnectionFailed, " +
@@ -740,11 +781,24 @@ namespace MultiplayerARPG.MMO.Mesh
         public float clusterConnectRetrySeconds = 5f;
         private float _nextClusterConnectRetry;
         private bool _clusterHandedToKit;
+        // The kit opens the cluster connection only once the map's entities are spawned (PostSpawnEntities): the
+        // registration it sends is what tells the login server players can be sent here. Until then an inactive
+        // client means "not started yet", not "could not open", and opening it early registers a server that
+        // refuses every player with UI_ERROR_APP_NOT_READY until spawning finishes.
+        private bool _kitStartedCluster;
+
+#if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
+        protected override async UniTask PostSpawnEntities()
+        {
+            await base.PostSpawnEntities();
+            _kitStartedCluster = true;
+        }
+#endif
 
         /// <summary>Server tick: open the cluster connection if start-up could not, then leave it to the kit.</summary>
         private void ClusterConnectTick()
         {
-            if (clusterConnectRetrySeconds <= 0f || _clusterHandedToKit || ClusterClient == null)
+            if (clusterConnectRetrySeconds <= 0f || !_kitStartedCluster || _clusterHandedToKit || ClusterClient == null)
                 return;
             if (ClusterClient.IsNetworkActive)
             {
@@ -807,14 +861,44 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (_clusterRegisterRetries > 0)
                     Logging.Log("Mesh", $"Cluster registration accepted after {_clusterRegisterRetries} retr{(_clusterRegisterRetries == 1 ? "y" : "ies")}");
                 _clusterRegisterRetries = 0;
+                _clusterMapExistedSince = -1f;
                 SendLayoutHello();
                 return;
             }
             if (!IsServer)
                 return;
+            if (_clusterRegisterRefusal == UITextKeys.UI_ERROR_MAP_EXISTED)
+            {
+                if (_clusterMapExistedSince < 0f)
+                    _clusterMapExistedSince = Time.unscaledTime;
+                float existedFor = Time.unscaledTime - _clusterMapExistedSince;
+                if (clusterRegisterExistedQuitSeconds > 0f && existedFor >= clusterRegisterExistedQuitSeconds)
+                {
+                    QuitAsDuplicate(existedFor);
+                    return;
+                }
+            }
             _clusterRegisterRetries++;
-            Logging.LogWarning("Mesh", $"Cluster registration refused ({responseCode}); retrying in {clusterRegisterRetrySeconds:0.#} s (attempt {_clusterRegisterRetries})");
+            string reason = _clusterRegisterRefusal != UITextKeys.NONE ? $"{responseCode}, {_clusterRegisterRefusal}" : responseCode.ToString();
+            Logging.LogWarning("Mesh", $"Cluster registration refused ({reason}); retrying in {clusterRegisterRetrySeconds:0.#} s (attempt {_clusterRegisterRetries})");
             RetryClusterRegister().Forget();
+        }
+
+        /// <summary>
+        /// Another server has held this cell's registration for clusterRegisterExistedQuitSeconds: it is alive and
+        /// this process is a second one. Exit, skipping the kit's save-before-quit: this server never had a player, and
+        /// its buildings are the copy loaded at start-up, which would overwrite what the live server has changed since.
+        /// </summary>
+        private void QuitAsDuplicate(float existedFor)
+        {
+            Logging.LogError("Mesh", $"Cell {ChannelId} ({RefId}) is served by another map server: the cluster has refused this one with UI_ERROR_MAP_EXISTED for {existedFor:0} s. This process is a duplicate; exiting without saving");
+            if (s_setReadyToQuit == null)
+            {
+                System.Diagnostics.Process.GetCurrentProcess().Kill(); // MapNetworkManager.ReadyToQuit not found (kit changed): Quit would save
+                return;
+            }
+            s_setReadyToQuit.Invoke(this, new object[] { true });
+            Application.Quit();
         }
 
         private async UniTaskVoid RetryClusterRegister()
@@ -842,6 +926,7 @@ namespace MultiplayerARPG.MMO.Mesh
             OwnZoneId = string.Empty;
             TryResolveOwnZone();
             _clusterHandedToKit = false;
+            _kitStartedCluster = false;
             _clusterWasRegistered = false;
             DatabaseOnStartServer(); // the database reconnect starts over with this server (MeshMapNetworkManager_Database)
             _nextClusterConnectRetry = Time.unscaledTime + Mathf.Max(1f, clusterConnectRetrySeconds);
@@ -1172,7 +1257,9 @@ namespace MultiplayerARPG.MMO.Mesh
             Vector3 frameOffset = OwnCell.OffsetTo(zone);
             savePosition += frameOffset;
             _velocities.Remove(characterId);
-            Logging.Log("Mesh", $"Handoff START {entity.CharacterName} ({characterId}) zone {OwnZoneId}->{zone.id} pos={position} vel={velocity} save={savePosition}{(frameOffset != Vector3.zero ? $" (frame offset {frameOffset}, map {mapName})" : string.Empty)} -> {peer.networkAddress}:{peer.networkPort}");
+            // A rider on its own summon (a tamed horse) names it in the notice; the destination re-seats it (RestoreSummonMount).
+            string mountSummonId = MountedSummonIdOf(entity, out byte mountSeat);
+            Logging.Log("Mesh", $"Handoff START {entity.CharacterName} ({characterId}) zone {OwnZoneId}->{zone.id} pos={position} vel={velocity} save={savePosition}{(frameOffset != Vector3.zero ? $" (frame offset {frameOffset}, map {mapName})" : string.Empty)} -> {peer.networkAddress}:{peer.networkPort}{(mountSummonId != null ? $" riding summon {mountSummonId} seat {mountSeat}" : string.Empty)}");
 
             try
             {
@@ -1198,7 +1285,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     snapshot.CurrentPosition = savePosition;
                     snapshot.CurrentRotation = rotation;
                     MeshCarriedAction action = InFlightAction(entity); // DESIGN 1.06: the destination accepts its remaining triggers
-                    if (SendHandoffState(zone.id, new HandoffStateMessage { characterId = characterId, userId = handoffUserId, accessToken = accessToken, data = snapshot, action = action, originObjectId = entity.ObjectId, velocity = velocity, carried = MeshHandoffCarriers.Collect(entity, w => Logging.LogWarning("Mesh", w)) }))
+                    if (SendHandoffState(zone.id, new HandoffStateMessage { characterId = characterId, userId = handoffUserId, accessToken = accessToken, data = snapshot, action = action, originObjectId = entity.ObjectId, velocity = velocity, mountSummonId = mountSummonId, mountSeat = mountSeat, carried = MeshHandoffCarriers.Collect(entity, w => Logging.LogWarning("Mesh", w)) }))
                     {
                         if (entity.TryGetComponent(out PlayerCharacterDataUpdater stateUpdater))
                             Destroy(stateUpdater);
@@ -1241,11 +1328,13 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (!demotePlayerOnHandoff)
                     entity.NetworkDestroy();
 
-                // Tell the neighbour who is coming so it can spawn without re-awaiting relates data.
+                // Tell the neighbour who is coming so it can spawn without re-awaiting relates data, and where: the
+                // saved pose goes with the notice, and the arrival stands there whatever row the neighbour loads
+                // (see ApplyHandoffPoseToArrival).
                 if (ServerUserHandlers.TryGetUserId(connectionId, out string userId))
-                    SendHandoffNotice(zone.id, characterId, userId);
+                    SendHandoffNotice(zone.id, characterId, userId, savePosition, velocity, rotation, mountSummonId, mountSeat);
                 else
-                    SendHandoffNotice(zone.id, characterId, entity.UserId);
+                    SendHandoffNotice(zone.id, characterId, entity.UserId, savePosition, velocity, rotation, mountSummonId, mountSeat);
 
                 MMOWarpMessage message = new MMOWarpMessage
                 {

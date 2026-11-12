@@ -212,8 +212,13 @@ there and turns the map spawner's `sleepCells` with the central's; the rest are 
 | `spawnRequestTimeoutSeconds` | A start request that produced no registration is repeated after this. | 20 |
 
 With sleeping on, `MeshMapSpawnNetworkManager.sleepCells` must be on too (the validator checks that the two agree). A cell takes 2–4 s from launch to serving on the rig machine; a player crossing a 250 m cell on a mount
-takes 15 s or more, so the rings hide the start entirely. A login into a sleeping cell waits behind the normal loading
-screen (up to 20 s). A cell told to sleep refuses while a player is on it.
+takes 15 s or more, so the rings hide the start entirely. A login into a sleeping cell waits up to
+`MeshLoginNetworkManager.loginWakeTimeoutSeconds` (20 s, capped 10 s below `clientSelectTimeoutSeconds`, the kit's 30 s
+request timeout; a game whose cold cells start slower raises both, and the timeout its client sends
+`RequestSelectCharacter` with) behind the normal loading screen. A cell
+that is still starting holds its rings back: they start once it serves, so a cold login waits for one cell, not for a
+whole ring loading at once (six world cells together took 23 s on the test server). A cell told to sleep refuses while
+a player is on it.
 
 ## 5. Reference: the map-server settings
 
@@ -251,13 +256,13 @@ All on `MeshMapNetworkManager` (the map-manager prefab). Defaults are the values
 | `linkIdleSeconds`, `linkOpenGraceSeconds` | 30 s, 10 s | Maps with `onDemandLinks` only: a link no longer needed closes after this long without a message either way (never under the handoff ack guard or the arrival reservation plus 5 s, 25 s by default); a link being opened is not taken for a dead cell before it has been tried this long. Rig `MESH_LINK_IDLE`. |
 | `linkSuspectTimeoutSeconds` | 2 s | A link a handoff came back over unclaimed is doubted (no handoff goes that way) until the neighbour is heard from; silent this long, it is reconnected — a restarted neighbour is reached at once instead of after the transport's timeout. |
 | `handoffLinkSettleSeconds` | 0.5 s | No handoff across a link that has been up for less than this, so the destination has a snapshot or two of the character and promotes its puppet instead of spawning fresh (which re-summons pets — a visible swap for observers). |
-| `meshLinkPortOffset` | 10000 | The server-to-server link listens on the map port plus this. |
+| `meshLinkPortOffset` | 10000 | The server-to-server link listens on the map port plus this. A neighbour that advertises this cell's own `publicAddress` is on the same host and is linked over 127.0.0.1, so a server behind a router forwards only the map ports, never the link ports. |
 | `expectedMaxSpeed`, `meshStatsIntervalSeconds` | 8 m/s, 10 s | Band sizing check at start-up; the `Mesh stats` log line cadence. |
 | `databaseReconnectSeconds`, `databaseReconnectGraceSeconds`, `databaseDrainWaitSeconds` | 5 s, 15 s, 35 s | Re-open the **database** connection whenever this server has none: the kit opens it once at start-up and never again, so a map server that loses the database manager -- or starts before it exists -- runs on accepting players while every save fails. The grace period keeps the retry off the kit's own first attempt. Requests still waiting when the connection is re-opened can never be answered, and the kit's reconnect would clear their callbacks and leave whoever awaits them waiting for ever, so the reconnect answers each with the kit's own timeout first (`Database connection lost; reconnecting to …, timing out N request(s) it can no longer answer`; DESIGN 0.87). The drain wait is only the fallback for a kit whose request table the add-on cannot reach: it lets those requests time out on their own for up to 35 s, then reconnects anyway and says how many it stranded. A process that *hosts* the database manager is left alone. |
 | `resendStrandedDatabaseReads` | on | A database request is sent again, under its own request id, once the reconnect is up when that is safe: a **read** (`Get*`, `Find*`, `Validate*`, `MailList`) that was on its way when the connection dropped, or **any** request the transport refused while the connection was down or still connecting (it never left the process). Lines: `... and keeping N to send again` at the reconnect, then `Database connection open again: sent R stranded read(s) again and U request(s) it had refused while down`. The kit's caller -- an arrival's access-token check, its character or its gold, a handoff's save -- then gets the database's answer instead of a timeout. A write that went out is never sent twice (it may have been applied before the drop) and still ends in a timeout. Each request's kit 30 s timer still bounds it (DESIGN 0.89). |
 | `arrivalLoadRetrySeconds` | 90 s | A handoff arrival's relates data (gold, cash, user level) loads in the background; the kit kicks the player on the first failed query. When the query failed because the database connection dropped under it, it is asked again once the connection is back, for up to this long (`Arrival <name> conn=<id>: <what> failed with the database connection lost; asking again once it is back (retry n)`); a failure over a live connection, or running out of time, ends in the kit's kick. 0 restores the kit's kick. |
 | `loadReportSeconds`, `occupancyBucketSize` | 5 s, 20 m | Every this many seconds the cell sends the central a **load report**: the work probe's window (main-thread work per frame without the frame limiter's wait, its p95, the share of frames that did not wait at all), what it owns and holds as puppets, and an occupancy grid of where they stand in buckets of this size. The central keeps the latest per cell and logs a one-line summary every `loadSummarySeconds` (30 s). 0 disables. |
-| `clusterConnectRetrySeconds` | 5 s | Re-open the cluster connection when the process could not open one at all. The kit handles every later failure by itself, but not this one: with no client socket it polls no events, so no disconnect is ever raised and the server runs on serving nobody. Matters when map servers can start before the central. 0 disables. |
+| `clusterConnectRetrySeconds` | 5 s | Re-open the cluster connection when the process could not open one at all. The kit handles every later failure by itself, but not this one: with no client socket it polls no events, so no disconnect is ever raised and the server runs on serving nobody. Matters when map servers can start before the central. It waits for the kit's own first attempt, which comes after the map's entities are spawned: registering sooner sends players to a server that refuses them as not ready. 0 disables. |
 
 **Client**
 
@@ -275,7 +280,8 @@ All on `MeshMapNetworkManager` (the map-manager prefab). Defaults are the values
 **Other components.** `MeshMonsterActivityComponent`: `ghostWatchMargin` (10 m) is the range beyond the monster's visual
 range in which a player *ghost* keeps it awake (the kit sleeps a monster nobody subscribes to, and ghosts never
 subscribe), re-evaluated every `ghostWatchInterval` (0.5 s). `MeshLoginNetworkManager`: `routeByPosition` (on) sends a
-selected character to the cell that owns its saved position instead of the client's chosen channel.
+selected character to the cell that owns its saved position instead of the client's chosen channel, and
+`loginWakeTimeoutSeconds` (20 s) is how long that selection waits for the cell to start when it is asleep.
 
 **Diagnostics:** `traceHandoffTiming` (on) writes one line per handoff step, ghost lag and replay; the `Mesh stats`
 line every 10 s reports players, owned and ghost counts, link traffic, handoffs (mean/max ms), ghost steering error,

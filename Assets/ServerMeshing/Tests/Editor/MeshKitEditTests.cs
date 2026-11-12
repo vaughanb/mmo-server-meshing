@@ -188,5 +188,20 @@ namespace MultiplayerARPG.MMO.Mesh.Tests
         {
             return (bool)Flag(handler, name).GetValue(handler);
         }
+
+        // ---- kit internals the add-on reaches by reflection (each degrades to a logged warning) ----
+
+        [Test]
+        public void KitInternalsReachedByReflectionStillExist()
+        {
+            const BindingFlags instance = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            Assert.IsNotNull(typeof(MapSpawnNetworkManager).GetField("_spawningPort", instance),
+                "MapSpawnNetworkManager._spawningPort: a repeated start request starts a second server on a booting cell (MeshMapSpawnNetworkManager)");
+            Assert.IsNotNull(typeof(MapSpawnNetworkManager).GetField("_freePorts", instance), "MapSpawnNetworkManager._freePorts (MeshMapSpawnNetworkManager)");
+            Assert.IsNotNull(typeof(ClusterClient).GetMethod("HandleResponseAppServerRegister", instance),
+                "ClusterClient.HandleResponseAppServerRegister: a duplicate cell server is not recognised (MeshMapNetworkManager.KeepClusterRegisterRefusal)");
+            PropertyInfo readyToQuit = typeof(MapNetworkManager).GetProperty(nameof(MapNetworkManager.ReadyToQuit));
+            Assert.IsNotNull(readyToQuit?.GetSetMethod(true), "MapNetworkManager.ReadyToQuit setter: a duplicate cell server kills itself instead of quitting (MeshMapNetworkManager.QuitAsDuplicate)");
+        }
     }
 }

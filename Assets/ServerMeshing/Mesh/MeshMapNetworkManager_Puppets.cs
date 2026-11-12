@@ -142,7 +142,7 @@ namespace MultiplayerARPG.MMO.Mesh
         /// <summary>IsMountedPuppet is true for a puppet that rides, is about to, or is getting off: the seat moves a rider, so its own body cannot.</summary>
         private static bool IsMountedPuppet(MeshGhost ghost, GhostSnapshotMessage msg)
         {
-            return msg.mountEntityId != 0 || ghost.mountPending || ghost.entity.PassengingVehicleEntity != null;
+            return msg.mountEntityId != 0 || !string.IsNullOrEmpty(msg.mountSummonId) || ghost.mountPending || ghost.entity.PassengingVehicleEntity != null; // Or a summon mount
         }
 
         /// <summary>

@@ -6,6 +6,13 @@
 // registry) is started on its own cells only, through the kit's own private SpawnMap (reached by reflection — the
 // kit stays untouched); maps without a layout are left to the kit's loop over its channel list.
 //
+// One server per channel. The kit starts a map every time it is asked, and the central repeats a start request
+// that has not registered yet, which a cold start can outlast (five cells at once took 38 s on 2026-10-13, against a
+// 30 s repeat): that put a second server on a channel whose first one was still running, and the second lost the
+// registration race and retried for ever. A start request for a channel whose server this spawner started is still
+// running is answered UI_ERROR_MAP_EXISTED, starting nothing. (The start-up spawn running once per spawner lifetime
+// is upstream's MeshSpawnOnce since 0.72.)
+using System.Collections.Concurrent;
 // Kills (Slice 2d decision 4): the central's supervisor sends KillChannel (30020) for a hung, stale or straggling cell. The
 // kit keeps the pids it started in a private set with no channel, so the cell's own hello names its pid; the spawner
 // kills that process only when it runs the build's executable and started within 60 s of the incarnation's ticks (the
@@ -40,7 +47,13 @@ namespace MultiplayerARPG.MMO.Mesh
 
 #if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
         private static readonly MethodInfo s_spawnMap = FindSpawnMap();
+        private static readonly FieldInfo s_spawningPort = typeof(MapSpawnNetworkManager).GetField("_spawningPort", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo s_freePorts = typeof(MapSpawnNetworkManager).GetField("_freePorts", BindingFlags.Instance | BindingFlags.NonPublic);
         private ClusterClient.OnResponseAppServerRegister _kitOnRegister;
+        private ConcurrentQueue<int> _kitFreePorts;
+        private readonly Dictionary<string, int> _runningPorts = new Dictionary<string, int>(); // "{channelId}_{mapName}" -> port of the server started for it on request, while it runs
+        private readonly HashSet<int> _freedPorts = new HashSet<int>();
+        private readonly List<string> _exited = new List<string>();
         // The spawner registers again after every central restart; its cells are still running then (the spawner
         // outlives the central), so they are started once per spawner lifetime, never again on a re-registration.
         private MeshSpawnOnce _startOnce = new MeshSpawnOnce();
@@ -56,6 +69,7 @@ namespace MultiplayerARPG.MMO.Mesh
             base.Update();
             if (ClusterClient != null && ClusterClient.IsAppRegistered && UnityEngine.Time.unscaledTime >= _nextHostReport)
                 SendHostReport();
+            ForgetExitedServers();
         }
 
         /// <summary>
@@ -133,6 +147,11 @@ namespace MultiplayerARPG.MMO.Mesh
                 Logging.LogError("Mesh", "MapSpawnNetworkManager.SpawnMap not found (kit changed): meshed maps are started by the kit's loop, on every channel");
                 return;
             }
+            _kitFreePorts = s_freePorts?.GetValue(this) as ConcurrentQueue<int>;
+            if (s_spawningPort != null && _kitFreePorts != null)
+                ClusterClient.RegisterRequestHandler<RequestSpawnMapMessage, ResponseSpawnMapMessage>(MMORequestTypes.SpawnMap, HandleMeshRequestSpawnMap); // replaces the kit's
+            else
+                Logging.LogError("Mesh", "MapSpawnNetworkManager port fields not found (kit changed): a start request repeated while a cell is still booting starts a second server on it");
             string env = System.Environment.GetEnvironmentVariable(ENV_SERVED_CELLS);
             if (!string.IsNullOrEmpty(env))
             {
@@ -396,6 +415,70 @@ namespace MultiplayerARPG.MMO.Mesh
                 path = args.Length > 0 && File.Exists(args[0]) ? args[0] : System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName;
             }
             return MeshSpawnerKillRule.FullPath(path);
+        }
+
+        /// <summary>
+        /// The kit's start-request handler, except that a channel's map is not started while the server this spawner
+        /// started for it is still running: the central repeats a start that has not registered yet, and a cold start
+        /// can outlast its wait. The refusal is UI_ERROR_MAP_EXISTED, which the central reads as "still starting".
+        /// An instance (a request with an instance id) is a new server every time, as in the kit.
+        /// </summary>
+        private UniTaskVoid HandleMeshRequestSpawnMap(RequestHandlerData requestHandler, RequestSpawnMapMessage request, RequestProceedResultDelegate<ResponseSpawnMapMessage> result)
+        {
+            string key = string.IsNullOrEmpty(request.instanceId) ? PeerInfoExtensions.GetPeerInfoKey(request.channelId, request.mapName) : null;
+            UITextKeys message = UITextKeys.NONE;
+            if (!ClusterClient.IsAppRegistered)
+                message = UITextKeys.UI_ERROR_APP_NOT_READY;
+            else if (string.IsNullOrEmpty(request.mapName))
+                message = UITextKeys.UI_ERROR_EMPTY_SCENE_NAME;
+            else if (key != null && _runningPorts.TryGetValue(key, out int port))
+            {
+                message = UITextKeys.UI_ERROR_MAP_EXISTED;
+                Logging.Log("Mesh", $"Start of {request.channelId} ({request.mapName}) asked again while the server started for it (port {port}) is still running: none started");
+            }
+            if (message.IsError())
+            {
+                result.InvokeError(new ResponseSpawnMapMessage { message = message });
+                return default;
+            }
+            // SpawnMap(channelId, mapName, isAllocate, instanceId, warpPosition, overrideRotation, warpRotation, autoRestart, result), as the kit's handler calls it
+            s_spawnMap.Invoke(this, new object[] { request.channelId, request.mapName, false, request.instanceId, request.instanceWarpPosition, request.instanceWarpOverrideRotation, request.instanceWarpRotation, false, result });
+            if (key != null)
+                _runningPorts[key] = (int)s_spawningPort.GetValue(this); // SpawnMap takes the port before its process thread starts
+            return default;
+        }
+
+        /// <summary>
+        /// Forget the servers that have exited. The kit frees a server's port only once its process is gone (the
+        /// finally of SpawnMap's thread, run as a main-thread action at the end of the kit's Update) and hands it out
+        /// again no earlier than its next Update, so a tracked port seen in the free queue here belongs to a server
+        /// that exited, including one that failed to start.
+        /// </summary>
+        private void ForgetExitedServers()
+        {
+            if (_runningPorts.Count == 0 || _kitFreePorts == null || _kitFreePorts.IsEmpty)
+                return;
+            _freedPorts.Clear();
+            foreach (int port in _kitFreePorts)
+                _freedPorts.Add(port);
+            _exited.Clear();
+            foreach (KeyValuePair<string, int> running in _runningPorts)
+            {
+                if (_freedPorts.Contains(running.Value))
+                    _exited.Add(running.Key);
+            }
+            for (int i = 0; i < _exited.Count; ++i)
+            {
+                Logging.Log("Mesh", $"Server {_exited[i]} (port {_runningPorts[_exited[i]]}) has exited");
+                _runningPorts.Remove(_exited[i]);
+            }
+        }
+
+        protected override void Clean()
+        {
+            // The kit's Clean kills every server this spawner started (and throws on one that already exited).
+            _runningPorts.Clear();
+            base.Clean();
         }
 
         private async UniTaskVoid SpawnCells(List<KeyValuePair<string, string>> cells)

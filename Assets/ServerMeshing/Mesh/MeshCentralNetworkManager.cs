@@ -14,6 +14,13 @@
 // to exit. A player therefore never reaches a sleeping cell: the ring wakes it a full cell ahead (about 3 s to serve
 // on the rig against 10 s or more of travel).
 //
+// A cell that is itself still starting holds back its rings: they are kept awake if they are already up, but only
+// started once the cell is. Starting a whole ring at once shares the host between all of them, and the player waiting
+// on the centre cell waits for every one (on the test server six world cells took 23 s together; one starts in a few).
+//
+// A start that has not registered after spawnRequestTimeoutSeconds is asked for again, which makes the loop the
+// supervisor of a cell that died while starting. The spawner starts nothing while the server it started for that cell
+// is still running and answers UI_ERROR_MAP_EXISTED, so a slow cold start is waited for, not started twice.
 // Dynamic cells (DESIGN.md 0.72): when the world has a Dynamic map, this server also runs the layout coordinator
 // (MeshLayoutCoordinator), which answers each cell's layout hello and runs manual splits (Slice 2b,
 // MeshCentralNetworkManager_Split.cs); with none, nothing of it runs. A split family is never slept or started by the
@@ -44,15 +51,15 @@ namespace MultiplayerARPG.MMO.Mesh
         public float awakeTickSeconds = 2f;
         [Tooltip("Seconds a wake request (a login into a sleeping cell) keeps the cell wanted while the player arrives.")]
         public float wakeHoldSeconds = 60f;
-        [Tooltip("Seconds before a start request that produced no registration is repeated.")]
+        [Tooltip("Seconds before a start request that produced no registration is repeated. The spawner starts nothing while the server it started for the cell is still running, so a repeat only restarts a cell whose server has exited.")]
         public float spawnRequestTimeoutSeconds = 20f;
 
         private readonly Dictionary<string, float> _wakeHolds = new Dictionary<string, float>();      // cell id -> wanted until
         private readonly Dictionary<string, float> _spawnRequested = new Dictionary<string, float>(); // cell id -> when
         private readonly Dictionary<string, float> _unwantedSince = new Dictionary<string, float>();  // cell id -> when it stopped being wanted
         private readonly Dictionary<string, float> _sleepSent = new Dictionary<string, float>();      // cell id -> when told to sleep
-        private readonly HashSet<string> _wanted = new HashSet<string>();
-        private readonly List<MeshCell> _ring = new List<MeshCell>();
+        private readonly HashSet<string> _wanted = new HashSet<string>();    // keep up, and start if down
+        private readonly HashSet<string> _keptAwake = new HashSet<string>(); // keep up, but do not start yet: the ring of a cell still starting
         private float _nextTick;
 
         protected override void Initialize()
@@ -248,6 +255,8 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 if (IsCellUp(cell))
                     return true;
+                // Wanted for as long as someone is waiting on it, however long the start takes.
+                _wakeHolds[cell.id] = Time.unscaledTime + wakeHoldSeconds;
                 await UniTask.Delay(200);
             }
             return IsCellUp(cell);
@@ -317,22 +326,31 @@ namespace MultiplayerARPG.MMO.Mesh
             return default;
         }
 
-        private void AddWithRings(MeshCell cell)
+        /// <summary>
+        /// AddWithRings adds a cell someone needs to <paramref name="wanted"/>, and the cells within
+        /// <paramref name="awakeRings"/> of it to <paramref name="wanted"/> when the cell is up, or to
+        /// <paramref name="keptAwake"/> while it is still starting.
+        /// </summary>
+        public static void AddWithRings(MeshCell cell, bool cellIsUp, int awakeRings, HashSet<string> wanted, HashSet<string> keptAwake)
         {
-            _wanted.Add(cell.id);
-            _ring.Clear();
-            _ring.Add(cell);
+            wanted.Add(cell.id);
+            HashSet<string> rings = cellIsUp ? wanted : keptAwake;
+            HashSet<string> visited = new HashSet<string> { cell.id };
+            List<MeshCell> reached = new List<MeshCell> { cell };
             int start = 0;
             for (int ring = 0; ring < awakeRings; ++ring)
             {
-                int end = _ring.Count;
+                int end = reached.Count;
                 for (int i = start; i < end; ++i)
                 {
-                    for (int n = 0; n < _ring[i].neighbours.Count; ++n)
+                    for (int n = 0; n < reached[i].neighbours.Count; ++n)
                     {
-                        MeshCell neighbour = _ring[i].neighbours[n];
-                        if (_wanted.Add(neighbour.id))
-                            _ring.Add(neighbour);
+                        MeshCell neighbour = reached[i].neighbours[n];
+                        if (visited.Add(neighbour.id))
+                        {
+                            rings.Add(neighbour.id);
+                            reached.Add(neighbour);
+                        }
                     }
                 }
                 start = end;
@@ -343,12 +361,13 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             float now = Time.unscaledTime;
             _wanted.Clear();
+            _keptAwake.Clear();
             IReadOnlyList<MeshCell> cells = world.Cells;
             for (int i = 0; i < cells.Count; ++i)
             {
                 MeshCell cell = cells[i];
                 if (ClusterServer.CountUsers(cell.id) > 0 || (_wakeHolds.TryGetValue(cell.id, out float until) && until > now))
-                    AddWithRings(cell);
+                    AddWithRings(cell, IsCellUp(cell), awakeRings, _wanted, _keptAwake);
             }
             for (int i = 0; i < cells.Count; ++i)
             {
@@ -362,6 +381,12 @@ namespace MultiplayerARPG.MMO.Mesh
                 }
                 bool up = IsCellUp(cell);
                 bool wanted = _wanted.Contains(cell.id);
+                if (!wanted && _keptAwake.Contains(cell.id))
+                {
+                    _unwantedSince.Remove(cell.id);
+                    _sleepSent.Remove(cell.id);
+                    continue;
+                }
                 if (wanted)
                 {
                     _unwantedSince.Remove(cell.id);
@@ -432,14 +457,26 @@ namespace MultiplayerARPG.MMO.Mesh
                 _spawnRequested[cell.id] = now;
                 return;
             }
+            if (_spawnRequested.TryGetValue(cell.id, out float requestedAt))
+                Logging.Log("Mesh", $"Cell {cell.id} ({cell.mapId}) still not registered {now - requestedAt:0} s after the last start attempt: asking map-spawn server {spawnerConnectionId} again");
+            else
+                Logging.Log("Mesh", $"Waking cell {cell.id} ({cell.mapId}): start requested from map-spawn server {spawnerConnectionId}");
             _spawnRequested[cell.id] = now;
             string key = MeshSleepConfig.PeerKey(cell);
-            Logging.Log("Mesh", $"Waking cell {cell.id} ({cell.mapId}): start requested from map-spawn server {spawnerConnectionId}");
             ClusterServer.RequestSpawnMap(spawnerConnectionId, new RequestSpawnMapMessage { channelId = cell.id, mapName = cell.mapId, instanceId = string.Empty }, key,
                 (responseCode, response, extraSerializer) =>
                 {
-                    if (responseCode != AckResponseCode.Success)
-                        Logging.LogWarning("Mesh", $"Cell {cell.id}: start request answered {responseCode} ({response.message})");
+                    if (responseCode == AckResponseCode.Success)
+                        return;
+                    if (response.message == UITextKeys.UI_ERROR_MAP_EXISTED)
+                    {
+                        // The spawner's server for this cell is still running: still booting, or up and about to
+                        // register. Wait another timeout for it rather than count the start as failed.
+                        _spawnRequested[cell.id] = Time.unscaledTime;
+                        Logging.Log("Mesh", $"Cell {cell.id}: map-spawn server {spawnerConnectionId} still has its server running; waiting for it to register");
+                        return;
+                    }
+                    Logging.LogWarning("Mesh", $"Cell {cell.id}: start request answered {responseCode} ({response.message})");
                 }).Forget();
         }
     }

@@ -559,13 +559,39 @@ namespace MultiplayerARPG.MMO.Mesh
         public void Deserialize(NetDataReader reader) { targetMeshId = reader.GetString(); combatAmountType = reader.GetByte(); totalDamage = reader.GetInt(); currentHp = reader.GetInt(); }
     }
 
-    /// <summary>Sent by the owning cell right before it tells the client to reconnect: "this character is coming to you".</summary>
+    /// <summary>
+    /// Sent by the owning cell right before it tells the client to reconnect: "this character is coming to you", with
+    /// the pose its handoff save carries. The destination puts the arrival at that pose whatever the row it loads says:
+    /// the row can be older than the save (the database server answers an update from its cache and re-caches whatever
+    /// deferred save it finishes writing next, so a periodic save in flight when the handoff save arrived put the
+    /// pre-handoff position back; 2026-10-17, session 8, run 2). See MeshMapNetworkManager.ApplyHandoffPoseToArrival.
+    /// </summary>
     public struct HandoffNoticeMessage : INetSerializable
     {
         public string characterId;
         public string userId;
-        public void Serialize(NetDataWriter writer) { writer.Put(characterId); writer.Put(userId); }
-        public void Deserialize(NetDataReader reader) { characterId = reader.GetString(); userId = reader.GetString(); }
+        public bool hasPose;      // false from a cell built before the pose was carried
+        public Vector3 position;  // the handoff's saved position, already in the DESTINATION's frame (as the row is)
+        public Vector3 velocity;  // the owner's horizontal velocity at the handoff (the save already leads by it)
+        public Vector3 rotation;  // the saved rotation (euler)
+        // The rider sits on one of its own summons (IMeshSummonMount): that CharacterSummon's id and the seat.
+        // Empty when on foot or on a kit vehicle (those go by the saved CharacterMount). Absent from older cells.
+        public string mountSummonId;
+        public byte mountSeat;
+        public void Serialize(NetDataWriter writer)
+        {
+            writer.Put(characterId); writer.Put(userId); writer.Put(hasPose);
+            if (hasPose) { writer.PutVector3(position); writer.PutVector3(velocity); writer.PutVector3(rotation); }
+            writer.Put(mountSummonId ?? string.Empty); writer.Put(mountSeat);
+        }
+        public void Deserialize(NetDataReader reader)
+        {
+            characterId = reader.GetString(); userId = reader.GetString();
+            hasPose = reader.AvailableBytes > 0 && reader.GetBool();
+            if (hasPose) { position = reader.GetVector3(); velocity = reader.GetVector3(); rotation = reader.GetVector3(); }
+            mountSummonId = reader.AvailableBytes > 0 ? reader.GetString() : string.Empty;
+            mountSeat = reader.AvailableBytes > 0 ? reader.GetByte() : (byte)0;
+        }
     }
 
     /// <summary>
@@ -582,6 +608,8 @@ namespace MultiplayerARPG.MMO.Mesh
         public MeshCarriedAction action; // the attack or skill in flight at the crossing (DESIGN 1.06), kind None when idle
         public uint originObjectId;      // the character's object id on the origin, which its client names it by until it adopts the new one (DESIGN 1.07)
         public Vector3 velocity;         // the character's velocity at the crossing, as the origin measured it: the destination walks it on at that through its client's gap (DESIGN 1.09)
+        public string mountSummonId;     // The CharacterSummon the rider sits on (IMeshSummonMount), empty on foot or on a kit vehicle
+        public byte mountSeat;           // Its seat on that summon
         public byte[] carried;           // game state outside the kit's data, by carrier (MeshHandoffCarriers, DESIGN 1.22); null when none; written last
         public void Serialize(NetDataWriter writer)
         {
@@ -592,6 +620,7 @@ namespace MultiplayerARPG.MMO.Mesh
             writer.Put(action);
             writer.Put(originObjectId);
             writer.Put(velocity.x); writer.Put(velocity.y); writer.Put(velocity.z);
+            writer.Put(mountSummonId ?? string.Empty); writer.Put(mountSeat);
             writer.PutBytesWithLength(carried ?? new byte[0]);
         }
         public void Deserialize(NetDataReader reader)
@@ -603,6 +632,7 @@ namespace MultiplayerARPG.MMO.Mesh
             action = reader.Get<MeshCarriedAction>();
             originObjectId = reader.GetUInt();
             velocity = new Vector3(reader.GetFloat(), reader.GetFloat(), reader.GetFloat());
+            mountSummonId = reader.GetString(); mountSeat = reader.GetByte();
             carried = reader.AvailableBytes >= 4 ? reader.GetBytesWithLength() : null;
             if (carried != null && carried.Length == 0)
                 carried = null;
@@ -673,6 +703,11 @@ namespace MultiplayerARPG.MMO.Mesh
         public CharacterItem[] items;  // containers only (DESIGN 1.38): what the corpse holds, written after everything else when kind == Container
         public double sampleMs;        // the sender's MeshLinkClock when it sampled the position, ms (0: not stamped); written last (DESIGN 1.19)
         public float ageSeconds;       // receiver only, never on the wire: how late the snapshot arrived against its link's fastest (DESIGN 1.19)
+        // A player riding one of its own summons (IMeshSummonMount, a tamed horse): that CharacterSummon's id and
+        // the seat, so the neighbour seats the puppet on the pet's puppet. Empty on foot or on a kit vehicle
+        // (mountEntityId). Written after the vending title, before the trailing sampleMs and container items.
+        public string mountSummonId;
+        public byte mountSummonSeat; // mountSeat is the kit vehicle's seat
 
         public void Serialize(NetDataWriter writer)
         {
@@ -698,6 +733,7 @@ namespace MultiplayerARPG.MMO.Mesh
             writer.Put(summonType);
             writer.Put(rightWeaponDataId); writer.Put(rightWeaponLevel); writer.Put(leftWeaponDataId); writer.Put(leftWeaponLevel); writer.Put(partyId); writer.Put(guildId); writer.Put(factionId); writer.Put(isPkOn); writer.Put(isWeaponsSheathed); if (kind == GhostKind.Building) { writer.Put(fullRotation.x); writer.Put(fullRotation.y); writer.Put(fullRotation.z); }
             if (kind == GhostKind.Player) { writer.Put(vendingTitle != null); if (vendingTitle != null) writer.Put(vendingTitle); }
+            writer.Put(mountSummonId ?? string.Empty); writer.Put(mountSummonSeat);
             writer.Put(sampleMs);
             if (kind == GhostKind.Container)
             {
@@ -730,6 +766,7 @@ namespace MultiplayerARPG.MMO.Mesh
             summonType = reader.GetByte();
             rightWeaponDataId = reader.GetInt(); rightWeaponLevel = reader.GetInt(); leftWeaponDataId = reader.GetInt(); leftWeaponLevel = reader.GetInt(); partyId = reader.GetInt(); guildId = reader.GetInt(); factionId = reader.GetInt(); isPkOn = reader.GetBool(); isWeaponsSheathed = reader.GetBool(); if (kind == GhostKind.Building) fullRotation = new Vector3(reader.GetFloat(), reader.GetFloat(), reader.GetFloat());
             vendingTitle = kind == GhostKind.Player && reader.GetBool() ? reader.GetString() : null;
+            mountSummonId = reader.GetString(); mountSummonSeat = reader.GetByte();
             sampleMs = reader.AvailableBytes >= 8 ? reader.GetDouble() : 0.0;
             items = null;
             if (kind == GhostKind.Container && reader.AvailableBytes >= 4)
@@ -1173,9 +1210,9 @@ namespace MultiplayerARPG.MMO.Mesh
             Send(MeshLinkMessageTypes.BuildingPlace, new BuildingPlaceMessage { building = building });
         }
 
-        public void SendHandoffNotice(string characterId, string userId)
+        public void SendHandoffNotice(HandoffNoticeMessage msg)
         {
-            Send(MeshLinkMessageTypes.HandoffNotice, new HandoffNoticeMessage { characterId = characterId, userId = userId });
+            Send(MeshLinkMessageTypes.HandoffNotice, msg);
         }
 
         public void SendHandoffState(HandoffStateMessage msg)

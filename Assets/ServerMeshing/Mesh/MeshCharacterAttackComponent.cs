@@ -16,6 +16,9 @@ namespace MultiplayerARPG.MMO.Mesh
 {
     public class MeshCharacterAttackComponent : DefaultCharacterAttackComponent
     {
+        /// <summary>Attack routines still awaiting (debug traces: a stuck IsAttacking with none running never ends).</summary>
+        public int ActiveAttackRoutines { get { return _attackCancellationTokenSources.Count; } }
+
 #if (UNITY_EDITOR || UNITY_SERVER || !EXCLUDE_SERVER_CODES) && UNITY_STANDALONE
         private int _triggersPaid;
 

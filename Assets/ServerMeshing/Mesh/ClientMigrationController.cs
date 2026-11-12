@@ -86,7 +86,32 @@ namespace MultiplayerARPG.MMO.Mesh
             public BaseGameEntity source;
             public string modelName;
             public float bornAt;
+            public List<Object> owned;      // Render assets handed over by standInAssetKeeper, freed with the stand-in
+            public float groundOffset;      // Local stand-in only, height above the ground at capture (a rider sits above it)
         }
+
+        /// <summary>The owner's movement component, which moves its own character to where the local stand-in
+        /// got to during the gap (the player kept running; the new cell spawned the entity where the old one last had
+        /// it). Movement is client-moved (NotSecure), so this is an ordinary owner move the arriving cell validates.</summary>
+        public interface IGapMovementCarrier
+        {
+            void CarryOwnerTo(Vector3 position, float yAngle);
+        }
+
+        private static readonly RaycastHit[] s_groundHits = new RaycastHit[8];
+        private GameObject _standInRoot;
+
+        /// <summary>Game code that keeps a stand-in visible when its source entity destroys runtime-made render
+        /// assets on despawn (a UMA character's mesh, materials and atlases: UMAData.OnDestroy, which made the player
+        /// vanish for the whole gap). TakeOver runs right after the clone is made, while the source is still alive, and
+        /// puts what the clone now owns in <c>owned</c>; Free releases it when the stand-in is retired.</summary>
+        public interface IStandInAssetKeeper
+        {
+            void TakeOver(BaseGameEntity source, GameObject clone, List<Object> owned);
+            void Free(List<Object> owned);
+        }
+
+        public static IStandInAssetKeeper standInAssetKeeper;
 
         private sealed class Tracked
         {
@@ -393,6 +418,7 @@ namespace MultiplayerARPG.MMO.Mesh
             }
 
             // 3) Swap the connection (offline-scene reload suppressed by the manager; Assets.Clear() still runs).
+            ReleaseCharacterFrames();
             _manager.BeginMigration();
             _manager.StopClient();
             _manager.BeginMigrationAttempt();
@@ -453,7 +479,10 @@ namespace MultiplayerARPG.MMO.Mesh
                 for (int i = 0; i < standIns.Count; ++i)
                 {
                     StandIn s = standIns[i];
-                    if (s.go != null && s.velocity.sqrMagnitude > 0.0001f)
+                    if (s.go == null || s.velocity.sqrMagnitude <= 0.0001f) continue;
+                    if (s.isLocalPlayer)
+                        MoveLocalStandIn(s, s.velocity * dt);
+                    else
                         s.go.transform.position += s.velocity * dt;
                 }
                 newEntity = FindNewOwnedEntity(prevEntity);
@@ -469,6 +498,8 @@ namespace MultiplayerARPG.MMO.Mesh
             }
             if (newEntity != null && newEntity.PassengingVehicleEntity != null)
                 mountedAfterMs = tPlayerReady;
+            float carried = newEntity != null && !mountedBefore && newEntity.PassengingVehicleEntity == null
+                ? CarryGapMovement(newEntity, localStandIn, localMoveSpeed) : 0f;
             if (newEntity != null && keptController && controller != null)
             {
                 // Input resumes NOW on the new entity (it is already walking when the models swap). The camera
@@ -548,10 +579,7 @@ namespace MultiplayerARPG.MMO.Mesh
             if (playerReady && newEntity != null && newEntity.PassengingVehicleEntity != null && newEntity.PassengingVehicleSeatIndex != 0)
                 StartCoroutine(ReleaseDroppedSeatRoutine(newEntity)); // DESIGN 1.39
             if (localStandIn != null && localStandIn.go != null)
-            {
-                Destroy(localStandIn.go);
-                localStandIn.go = null;
-            }
+                DestroyStandIn(localStandIn);
             if (cameraAnchor != null && playerReady)
                 Destroy(cameraAnchor.gameObject); // on a failed hop the cameras keep it until the kit tears them down
             for (int i = 0; i < disabledCamera.Count; ++i)
@@ -563,7 +591,10 @@ namespace MultiplayerARPG.MMO.Mesh
             while (Time.realtimeSinceStartup < retireDeadline && RetireMatchedStandIns(standIns) > 0)
                 yield return null;
             for (int i = 0; i < standIns.Count; ++i)
-                if (standIns[i].go != null) Destroy(standIns[i].go);
+                if (standIns[i].go != null) DestroyStandIn(standIns[i]);
+            if (_standInRoot != null)
+                Destroy(_standInRoot); // One empty root was left behind per handoff
+            _standInRoot = null;
             long tFaded = sw.ElapsedMilliseconds;
 
             if (_manager.MigrationDisconnected)
@@ -594,7 +625,7 @@ namespace MultiplayerARPG.MMO.Mesh
             Logging.Log("Spike2",
                 $"Migration to {address}:{port} | SEAMLESS connected={connected} playerReady={playerReady} keptController={keptController} fellBack={fellBack} | " +
                 $"standIns={tCapture}ms stop={tStop}ms connected={tConnected}ms playerReady={tPlayerReady}ms settled={tSettled}ms retired={tFaded}ms | " +
-                $"pos {posBefore} -> {posAfter} (jump={LastResult.positionJump:0.##}m, resync={resyncJump:0.##}m) | " +
+                $"pos {posBefore} -> {posAfter} (jump={LastResult.positionJump:0.##}m, resync={resyncJump:0.##}m, carried={carried:0.##}m) | " +
                 $"standIns={standIns.Count} framesWithoutCamera={framesWithoutCamera} mounted={(mountedBefore ? (mountedAfterMs >= 0 ? mountedAfterMs + "ms" : "LOST") : "no")}");
         }
 
@@ -668,6 +699,7 @@ namespace MultiplayerARPG.MMO.Mesh
             // Instantiate under an inactive parent so no model script runs Awake on the clone; strip the scripts; activate.
             GameObject root = new GameObject("[Mesh] StandIns");
             root.SetActive(false);
+            _standInRoot = root;
             Dictionary<uint, LiteNetLibIdentity>.Enumerator it = _manager.Assets.GetSpawnedObjects();
             while (it.MoveNext())
             {
@@ -687,10 +719,12 @@ namespace MultiplayerARPG.MMO.Mesh
                     continue;
                 }
                 clone.transform.localScale = src.lossyScale;
-                foreach (MonoBehaviour mb in clone.GetComponentsInChildren<MonoBehaviour>(true))
-                    Destroy(mb);
-                foreach (Collider col in clone.GetComponentsInChildren<Collider>(true))
-                    Destroy(col);
+                // Immediately, not Destroy(): a deferred destroy is still pending when the root is activated below, so
+                // every cloned script (the whole player entity, when the model is the entity root) would Awake.
+                StripComponents(clone.GetComponentsInChildren<MonoBehaviour>(true));
+                StripComponents(clone.GetComponentsInChildren<Collider>(true));
+                List<Object> owned = new List<Object>();
+                standInAssetKeeper?.TakeOver(entity, clone, owned);
                 // A model animated by a script (the kit's PlayableCharacterModel) would freeze once stripped: keep its clips playing.
                 MeshStandInAnimation.Attach(entity.Model.gameObject, clone);
                 // The footsteps play from a script on the entity too: keep them stepping on the stand-in.
@@ -704,6 +738,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     isLocalPlayer = ReferenceEquals(entity, localEntity),
                     modelName = entity.Model.name,
                     bornAt = Time.unscaledTime,
+                    owned = owned,
                 });
             }
             // The local player's mount rides along with the local stand-in (input-predicted), not on its own velocity.
@@ -719,8 +754,134 @@ namespace MultiplayerARPG.MMO.Mesh
                     v.isLocalVehicle = true;
                 }
             }
+            if (local != null && localEntity != null &&
+                PhysicUtils.FindGroundedPosition(localEntity.EntityTransform.position, s_groundHits, 6f, GameInstance.Singleton.GetGameEntityGroundDetectionLayerMask(), out Vector3 localGround, localEntity.EntityTransform))
+                local.groundOffset = Mathf.Max(0f, local.go.transform.position.y - localGround.y);
             root.SetActive(true);
             return list;
+        }
+
+        /// <summary>The local stand-in follows the ground and stops at walls, as the character would. A flat
+        /// dead-reckoned move sank it into rising ground for the whole gap (the player seemed to fall through the map,
+        /// then pop back up at the swap).</summary>
+        private static void MoveLocalStandIn(StandIn s, Vector3 delta)
+        {
+            Vector3 hor = new Vector3(delta.x, 0f, delta.z);
+            float dist = hor.magnitude;
+            if (dist < 0.0001f)
+                return;
+            Transform t = s.go.transform;
+            int mask = GameInstance.Singleton.GetGameEntityGroundDetectionLayerMask();
+            Vector3 feet = t.position - (Vector3.up * s.groundOffset);
+            Vector3 dir = hor / dist;
+            if (Physics.SphereCast(feet + Vector3.up, 0.3f, dir, out RaycastHit wall, dist, mask, QueryTriggerInteraction.Ignore))
+                dist = Mathf.Max(0f, wall.distance - 0.05f);
+            Vector3 next = feet + (dir * dist);
+            if (PhysicUtils.FindGroundedPosition(next, s_groundHits, 6f, mask, out Vector3 ground))
+                next.y = ground.y;
+            t.position = next + (Vector3.up * s.groundOffset);
+        }
+
+        /// <summary>Move the new entity to where the local stand-in got to, up to migrationCarrySeconds of travel,
+        /// so the blend no longer glides the player back over ground they already covered (13 m back into a chasing
+        /// wolf, play-test 30 Oct 2026). Returns the distance carried.</summary>
+        private float CarryGapMovement(BasePlayerCharacterEntity entity, StandIn standIn, float moveSpeed)
+        {
+            if (standIn == null || standIn.go == null || _manager.migrationCarrySeconds <= 0f || moveSpeed <= 0f)
+                return 0f;
+            if (!(entity.ActiveMovement is IGapMovementCarrier carrier))
+                return 0f;
+            Vector3 from = entity.EntityTransform.position;
+            Vector3 to = standIn.go.transform.position - (Vector3.up * standIn.groundOffset);
+            Vector3 hor = Vector3.ClampMagnitude(new Vector3(to.x - from.x, 0f, to.z - from.z), moveSpeed * _manager.migrationCarrySeconds);
+            if (hor.sqrMagnitude < 0.01f)
+                return 0f;
+            Vector3 target = from + hor;
+            target.y = to.y;
+            if (entity.ActiveMovement.FindGroundedPosition(target, 6f, out Vector3 ground))
+                target.y = ground.y;
+            carrier.CarryOwnerTo(target, standIn.go.transform.eulerAngles.y);
+            return hor.magnitude;
+        }
+
+        /// <summary>A UICharacterEntity keeps a static GameInstance.OnSetPlayingCharacterEvent handler for the
+        /// entity it shows, and the kit removes it only while that entity is alive. StopClient destroys the old cell's
+        /// entities under the frozen HUD's target frame (a wolf chasing the player), so the new entity's PlayingCharacter
+        /// set ran the frame's handler on a destroyed monster: a NullReferenceException in BaseMonsterCharacterEntity.DataId
+        /// that also cut the kit's bind short. Name tags leaked the same handler on every handoff. Let go of them first;
+        /// the local player's own frames stay, so the frozen HUD keeps showing its last values through the gap.
+        /// The target frame can already hold a destroyed entity: the kit only hides it when the target goes, and a
+        /// respawn moves the player out of range (despawning the wolves) before the handoff starts. Data = null still
+        /// makes its handler harmless then, hence the reference check rather than Unity's null.</summary>
+        private void ReleaseCharacterFrames()
+        {
+            BasePlayerCharacterEntity local = GameInstance.PlayingCharacterEntity;
+            BasePlayerCharacterController controller = BasePlayerCharacterController.Singleton;
+            if (controller != null && controller.UISceneGameplay != null)
+            {
+                foreach (UICharacterEntity frame in controller.UISceneGameplay.GetComponentsInChildren<UICharacterEntity>(true))
+                    if (frame != null && !ReferenceEquals(frame.Data, null) && frame.Data != local) frame.Data = null;
+            }
+            if (_manager.Assets == null)
+                return;
+            Dictionary<uint, LiteNetLibIdentity>.Enumerator it = _manager.Assets.GetSpawnedObjects();
+            while (it.MoveNext())
+            {
+                BaseCharacterEntity character = it.Current.Value != null ? it.Current.Value.GetComponent<BaseCharacterEntity>() : null;
+                if (character != null && character != local && character.UICharacterEntity != null && character.UICharacterEntity.Data != null)
+                    character.UICharacterEntity.Data = null;
+            }
+        }
+
+        private static void DestroyStandIn(StandIn s)
+        {
+            if (s.go != null)
+                Destroy(s.go);
+            s.go = null;
+            if (s.owned == null)
+                return;
+            if (s.owned.Count > 0)
+                standInAssetKeeper?.Free(s.owned);
+            s.owned = null;
+        }
+
+        /// <summary>DestroyImmediate each component, dependents first: Unity refuses (and logs an error) to remove a
+        /// component that a [RequireComponent] on a sibling still needs.</summary>
+        private static void StripComponents(Component[] components)
+        {
+            List<Component> remaining = new List<Component>(components);
+            bool progress = true;
+            while (remaining.Count > 0 && progress)
+            {
+                progress = false;
+                for (int i = remaining.Count - 1; i >= 0; --i)
+                {
+                    Component c = remaining[i];
+                    if (c != null && IsRequiredBySibling(c))
+                        continue;
+                    if (c != null)
+                        DestroyImmediate(c);
+                    remaining.RemoveAt(i);
+                    progress = true;
+                }
+            }
+        }
+
+        private static bool IsRequiredBySibling(Component component)
+        {
+            System.Type type = component.GetType();
+            foreach (Component other in component.GetComponents<Component>())
+            {
+                if (other == null || ReferenceEquals(other, component)) continue;
+                foreach (RequireComponent req in other.GetType().GetCustomAttributes(typeof(RequireComponent), true))
+                {
+                    if ((req.m_Type0 != null && req.m_Type0.IsAssignableFrom(type)) ||
+                        (req.m_Type1 != null && req.m_Type1.IsAssignableFrom(type)) ||
+                        (req.m_Type2 != null && req.m_Type2.IsAssignableFrom(type)))
+                        return true;
+                }
+            }
+            return false;
         }
 
         /// <summary>Move and turn <paramref name="t"/> so it lands on <paramref name="target"/>'s pose in <paramref name="remaining"/> seconds.</summary>
@@ -767,7 +928,7 @@ namespace MultiplayerARPG.MMO.Mesh
                     if (e == null || e.Model == null || e.Model.name != s.modelName) continue;
                     if ((e.EntityTransform.position - p).sqrMagnitude <= _manager.standInMatchDistance * _manager.standInMatchDistance) { matched = true; break; }
                 }
-                if (matched) { Destroy(s.go); s.go = null; }
+                if (matched) DestroyStandIn(s);
                 else alive++;
             }
             return alive;
@@ -1147,6 +1308,7 @@ namespace MultiplayerARPG.MMO.Mesh
             _maskAlpha = 1f;
             long tCapture = sw.ElapsedMilliseconds;
 
+            ReleaseCharacterFrames();
             _manager.BeginMigration();
             _manager.StopClient();
             _manager.BeginMigrationAttempt();

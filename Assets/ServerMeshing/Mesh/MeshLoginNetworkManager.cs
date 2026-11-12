@@ -2,7 +2,8 @@
 //
 // The kit's login server routes a selected character to the map server registered for {the client's chosen channel}
 // + {the character's map}. On a meshed map the channel IS the cell, and the right cell is the one whose zone contains
-// the character's saved position — not whatever channel the client picked, and not the one that saved the row. This
+// the position the map server will place the character at (its map info's enter point: the saved position, or a
+// first arrival's surface exit) — not whatever channel the client picked, and not the one that saved the row. This
 // subclass (swapped onto the demo's server-instance prefab) rewrites the request's channel before the kit's own
 // handler runs: the zone that owns the position when a server serves it, otherwise the nearest live cell of the same
 // map (any cell can host a character standing anywhere and hands it off by position once the right cell is back).
@@ -21,6 +22,19 @@ namespace MultiplayerARPG.MMO.Mesh
         public MeshWorldRegistry world;
         [Tooltip("Route selected characters by their saved position instead of the client's chosen channel.")]
         public bool routeByPosition = true;
+        [Tooltip("Seconds a character selection waits for its sleeping cell to start. Capped 10 s below clientSelectTimeoutSeconds so the player gets the server's answer rather than a timeout.")]
+        public float loginWakeTimeoutSeconds = 20f;
+        [Tooltip("Seconds the client waits for the answer to its character selection: the kit's request timeout (30 s). Raise it together with the timeout the client sends RequestSelectCharacter with, when a cold cell needs longer to start.")]
+        public float clientSelectTimeoutSeconds = 30f;
+
+        // The server must answer before the client gives up, with room for the rest of the selection.
+        private const float CLIENT_TIMEOUT_MARGIN_SECONDS = 10f;
+
+        /// <summary>LoginWakeTimeout is how long a selection waits for a sleeping cell: the configured seconds, capped so the client still gets an answer.</summary>
+        public static float LoginWakeTimeout(float configuredSeconds, float clientTimeoutSeconds)
+        {
+            return Mathf.Max(0f, Mathf.Min(configuredSeconds, clientTimeoutSeconds - CLIENT_TIMEOUT_MARGIN_SECONDS));
+        }
         [Tooltip("Slice 5: seconds a login waits for the central's layout coordinator to finish recovering (a restarted central adopting the cells' layout) before it routes; past it the layout as it stands routes.")]
         public float recoveryWaitSeconds = 15f;
 
@@ -51,6 +65,14 @@ namespace MultiplayerARPG.MMO.Mesh
                 PlayerCharacterData character = characterResp.IsSuccess ? characterResp.Response.CharacterData : null;
                 if (character != null && world.HasLayout(character.CurrentMapName))
                 {
+                    // Where the map server will place the character, which is not always the saved position (a first
+                    // arrival goes to a surface exit). This copy is ours and never saved, so letting the map info
+                    // write to it is harmless; the kit's handler fetches its own.
+                    if (GameInstance.MapInfos.TryGetValue(character.CurrentMapName, out BaseMapInfo mapInfo) && mapInfo != null)
+                    {
+                        mapInfo.GetEnterMapPoint(character, out _, out Vector3 arrival, out _);
+                        character.CurrentPosition = arrival;
+                    }
                     if (CentralNetworkManager is MeshCentralNetworkManager central && central.sleepCells)
                     {
                         // Sleeping cells: the owning cell serves the character; wake it first if it is asleep.
@@ -58,7 +80,7 @@ namespace MultiplayerARPG.MMO.Mesh
                         if (owner != null && !owner.isDynamic && !central.IsCellUp(owner))
                         {
                             Logging.Log("Mesh", $"Login into sleeping cell {owner.id}: waking it for {character.CharacterName}");
-                            bool up = await central.WakeAndWait(owner, 20f);
+                            bool up = await central.WakeAndWait(owner, LoginWakeTimeout(loginWakeTimeoutSeconds, clientSelectTimeoutSeconds));
                             Logging.Log("Mesh", $"Cell {owner.id} {(up ? "is up" : "did not come up in time")} for {character.CharacterName}");
                         }
                     }

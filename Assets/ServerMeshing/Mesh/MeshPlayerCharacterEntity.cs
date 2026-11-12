@@ -26,6 +26,17 @@ namespace MultiplayerARPG.MMO.Mesh
             base.EntityOnSetOwnerClient(isOwnerClient);
         }
 
+        /// <summary>
+        /// The fall the kit measures starts here, on the ground. A puppet promoted where it stands is not teleported,
+        /// and the kit's OnTeleport is what otherwise resets the fall origin: one whose movement never reported it
+        /// grounded while it was a puppet would take fall damage for every metre it has descended since it appeared.
+        /// </summary>
+        public void ResetFallOrigin()
+        {
+            _lastGrounded = true;
+            _lastGroundedPosition = EntityTransform.position;
+        }
+
         /// <summary>Traced: a crossing must not put a drawn weapon away (the flag is not saved, and a fresh entity starts sheathed in the demo).</summary>
         protected override void OnIsWeaponsSheathedChange(bool isInitial, bool oldIsWeaponsSheathed, bool isWeaponsSheathed)
         {

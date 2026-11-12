@@ -202,6 +202,45 @@ namespace MultiplayerARPG.MMO.Mesh
         private float _nextMonsterScan;
         private string _cellIncarnation;
 
+        // ---- Where an arrival stands (pure; the network-free part of the promotion) ----
+
+        /// <summary>Where an arriving character is put when it registers, and what that says about the row and the puppet.</summary>
+        public struct ArrivalPlacement
+        {
+            public Vector3 position;  // where the arrival stands
+            public bool fromHandoff;  // the handoff notice's pose was used (otherwise the row the kit loaded)
+            public bool rowStale;     // the row disagreed with the handoff's pose by more than ArrivalRowTolerance
+            public float rowError;    // metres between the row and the handoff's pose (0 without a pose)
+            public bool puppetYanked; // the puppet stood past the teleport distance from the chosen position
+            public float puppetError; // metres between the puppet and the chosen position (0 without a puppet)
+        }
+
+        /// <summary>A row further than this from the handoff's pose is stale: the two are one save, and a float's round trip through the database stays far under it.</summary>
+        public const float ArrivalRowTolerance = 0.25f;
+
+        /// <summary>
+        /// PlaceArrival picks where an arriving character stands: the handoff notice's pose when there is one (the
+        /// origin saved exactly that, so a row that differs is stale), else the row the kit loaded. The puppet the
+        /// arrival promotes in place is moved to that position whatever its distance (the save leads the owner and
+        /// the client spawns there); past the teleport distance the move is a yank worth counting, as SteerGhost
+        /// counts one. Pure.
+        /// </summary>
+        public static ArrivalPlacement PlaceArrival(bool hasHandoffPose, Vector3 handoffPosition, Vector3 rowPosition, bool hasPuppet, Vector3 puppetPosition, float teleportDistance)
+        {
+            ArrivalPlacement placement = new ArrivalPlacement { fromHandoff = hasHandoffPose };
+            placement.position = hasHandoffPose ? handoffPosition : rowPosition;
+            if (hasHandoffPose)
+            {
+                placement.rowError = Vector3.Distance(rowPosition, handoffPosition);
+                placement.rowStale = placement.rowError > ArrivalRowTolerance;
+            }
+            if (hasPuppet)
+            {
+                placement.puppetError = Vector3.Distance(puppetPosition, placement.position);
+                placement.puppetYanked = placement.puppetError > teleportDistance;
+            }
+            return placement;
+        }
         /// <summary>CellIncarnation identifies this server process (its start time); a restart gets a new one.</summary>
         internal string CellIncarnation => _cellIncarnation ?? string.Empty;
 
@@ -445,12 +484,23 @@ namespace MultiplayerARPG.MMO.Mesh
                 _linkClients[cell.id] = client;
             }
             if (!client.IsConnected && Time.unscaledTime - client.LastConnectAttempt > (force ? 1f : 5f))
-                client.Connect(peer.networkAddress, peer.networkPort + meshLinkPortOffset);
+                client.Connect(LinkAddress(peer.networkAddress, AppAddress), peer.networkPort + meshLinkPortOffset);
             else if (client.IsConnected && client.IsSuspect && client.SuspectFor > linkSuspectTimeoutSeconds)
             {
                 Logging.LogWarning("Mesh", $"Neighbour zone {cell.id} silent for {client.SuspectFor:0.0}s since a handoff to it came back unclaimed; re-linking");
-                client.Connect(peer.networkAddress, peer.networkPort + meshLinkPortOffset);
+                client.Connect(LinkAddress(peer.networkAddress, AppAddress), peer.networkPort + meshLinkPortOffset);
             }
+        }
+
+        /// <summary>
+        /// LinkAddress is where to reach a neighbour's link port. A cell advertises the address players connect to,
+        /// which on a server behind a router is the router's public name with only the map ports forwarded; the link
+        /// ports are for servers only and are not forwarded. A neighbour advertising our own address is on this host, so
+        /// it is linked over loopback. Hosts that advertise their own LAN addresses (MULTIHOST.md) keep linking to those.
+        /// </summary>
+        public static string LinkAddress(string peerAddress, string ownAddress)
+        {
+            return string.Equals(peerAddress, ownAddress, System.StringComparison.OrdinalIgnoreCase) ? "127.0.0.1" : peerAddress;
         }
 
         // Band neighbours: every cell whose rectangle touches ours (edge or corner) in the world registry, from this map
@@ -851,6 +901,8 @@ namespace MultiplayerARPG.MMO.Mesh
                 if (mask == 0)
                     continue;
                 VehicleEntity mount = entity.PassengingVehicleEntity as VehicleEntity;
+                byte mountSeat = 0;
+                string mountSummonId = mount == null && asPlayer != null ? MountedSummonIdOf(asPlayer, out mountSeat) : null;
                 SummonInfoOf(entity, out string summonerMeshId, out string summonId, out SummonType summonType);
                 EquipWeapons weapons = asPlayer != null ? entity.EquipWeapons : default;
                 msg = new GhostSnapshotMessage
@@ -872,6 +924,8 @@ namespace MultiplayerARPG.MMO.Mesh
                     mountLevel = mount != null ? mount.Level : 0,
                     mountSeat = mount != null ? entity.PassengingVehicleSeatIndex : (byte)0, // DESIGN 1.39: a passenger names its driver
                     driverMeshId = mount != null && entity.PassengingVehicleSeatIndex != 0 ? DriverMeshIdOf(mount) : string.Empty,
+                    mountSummonId = mountSummonId,
+                    mountSummonSeat = mountSeat,
                     kind = asPlayer != null ? GhostKind.Player : GhostKind.Monster,
                     characterId = meshId,
                     entityId = entity.EntityId,
@@ -1088,6 +1142,17 @@ namespace MultiplayerARPG.MMO.Mesh
                     else if (ridden.Identity != null && !ridden.Identity.IsDestroyed)
                         ridden.RemovePassenger(ghost.entity.PassengingVehicleSeatIndex); // DESIGN 1.39: a passenger's seat is its driver's vehicle's: freed, not destroyed
                 }
+                // A summon mount is a puppet of its own: the rider gets off, and a mount going away drops its
+                // riders here (a pooled instance would otherwise stay their vehicle).
+                UnseatFromSummonMount(ghost.entity);
+                if (ghost.entity is IVehicleEntity carrier)
+                {
+                    foreach (BaseGameEntity passenger in carrier.GetAllPassengers())
+                    {
+                        if (ReferenceEquals(passenger.PassengingVehicleEntity, carrier))
+                            passenger.ClearPassengingVehicle();
+                    }
+                }
                 // Nothing of the puppet survives into a pooled reuse of the instance: the hit hook and the identity.
                 if (ghost.hitHook != null)
                     ghost.entity.onReceiveDamage -= ghost.hitHook;
@@ -1216,6 +1281,9 @@ namespace MultiplayerARPG.MMO.Mesh
                     // only showed once the client started returning in 3 s instead of 10 (2026-09-17: a pet standing
                     // still beside its moving twin, seen 71 times by a watching client in one run).
                     DestroyLeftoverSummonPuppets(playerCharacter, "superseded by the promoted character's summons");
+                    // A rider on one of its summons (a tamed horse) sits on it again.
+                    IncomingHandoff mountNotice = _incomingHandoffFrom.TryGetValue(playerCharacter.Id, out IncomingHandoff n) ? n : null;
+                    RestoreSummonMount(playerCharacter, connectionId, mountNotice != null ? mountNotice.mountSummonId : null, mountNotice != null ? mountNotice.mountSeat : (byte)0);
                 }
             }
             else if (!playerCharacter.IsDead())
@@ -1224,6 +1292,10 @@ namespace MultiplayerARPG.MMO.Mesh
                 // saved summons, so any pet puppet still linked to this character is a leftover of the departing cell's
                 // stream — destroy it now instead of letting it stand next to the new pet until it expires stale.
                 DestroyLeftoverSummonPuppets(playerCharacter, "superseded by the kit's re-summon");
+                // The kit re-summons right after this registration (MapNetworkManager.SetPlayerReadyRoutine),
+                // so a rider on one of its summons is seated once that summon exists.
+                if (_incomingHandoffFrom.TryGetValue(playerCharacter.Id, out IncomingHandoff freshNotice) && !string.IsNullOrEmpty(freshNotice.mountSummonId))
+                    RestoreSummonMountAfterResummon(playerCharacter, connectionId, freshNotice.mountSummonId, freshNotice.mountSeat).Forget();
             }
             // The ack goes out once the registration path has decided what happened: the origin releases the pets it
             // demoted only when we did NOT promote (their mesh ids are dead over here otherwise).
@@ -1350,6 +1422,23 @@ namespace MultiplayerARPG.MMO.Mesh
                     ridden = null;
                 }
             }
+            // A puppet sits on a summon mount (an IVehicleEntity summon such as a tamed horse) because its snapshots
+            // named one (SyncGhostSummonMount) or it was demoted while riding. The seat is kept when the handoff notice
+            // names that very summon and seat: the pet's puppet is promoted with the player and RestoreSummonMount
+            // continues the ride on it, so watchers here never see the rider get off and on again. Otherwise it is
+            // unseated (the teleport below puts it at the data's pose) and RestoreSummonMount seats it if it can.
+            IVehicleEntity seatedOn = player.PassengingVehicleEntity;
+            bool keepSummonSeat = false;
+            if (seatedOn != null && !(seatedOn is VehicleEntity))
+            {
+                keepSummonSeat = _incomingHandoffFrom.TryGetValue(data.Id, out IncomingHandoff seatNotice) && !string.IsNullOrEmpty(seatNotice.mountSummonId)
+                    && seatNotice.mountSeat == player.PassengingVehicleSeatIndex && ReferenceEquals(FindSummonMountPuppet(data.Id, seatNotice.mountSummonId), seatedOn);
+                if (!keepSummonSeat)
+                {
+                    UnseatFromSummonMount(player);
+                    seatedOn = null;
+                }
+            }
             // Same setup the kit does for a fresh spawn, on the existing object.
             GameInstance.GetPlayerCharacterEntityHashAssetId(data.EntityId, out int metaDataId);
             GameInstance.SetupByMetaData(player, metaDataId);
@@ -1368,14 +1457,25 @@ namespace MultiplayerARPG.MMO.Mesh
             float crossingSpeed = _incomingHandoffFrom.TryGetValue(data.Id, out IncomingHandoff crossing) ? crossing.velocity.magnitude : 0f;
             Vector3 expected = crossingSpeed >= ArrivalWalkMinSpeed ? TrackAt(crossing.trackOrigin, crossing.time, crossing.velocity, Time.unscaledTime) : (Vector3)data.CurrentPosition;
             expected.y = standing.y;
-            if (!passenger && Vector3.Distance(standing, expected) > Mathf.Max(arrivalTeleportDistance, crossingSpeed * arrivalTeleportSeconds))
+            bool farFromTrack = Vector3.Distance(standing, expected) > Mathf.Max(arrivalTeleportDistance, crossingSpeed * arrivalTeleportSeconds);
+            if (keepSummonSeat)
+            {
+                // A rider that kept its seat on a summon mount is placed by moving the mount, under the same rule.
+                if (farFromTrack)
+                    PlaceSummonMountUnderSeat(seatedOn, player.PassengingVehicleSeatIndex, data.CurrentPosition, data.CurrentRotation);
+            }
+            else if (!passenger && farFromTrack)
                 player.Teleport(data.CurrentPosition, Quaternion.Euler(data.CurrentRotation), true); // a passenger's teleport would move its driver's vehicle: its seat places it
+            // A puppet left where it stands keeps the fall origin it had as a puppet (where it appeared, when its movement
+            // never reported it grounded): the kit's OnTeleport is what resets it, and the teleport above is conditional.
+            if (player is MeshPlayerCharacterEntity promoted)
+                promoted.ResetFallOrigin();
             player.ForceMakeCaches();
             player.FillEmptySlots();
             Logging.Log("Mesh", $"Arrival bag {data.CharacterName}: state {BagSummary(data.NonEquipItems)}; the ghost had {ghostBag}; the entity now {BagSummary(player.NonEquipItems)}");
             player.Identity.DoNotDestroyWhenDisconnect = true;
             _reservedArrivals[data.Id] = new ReservedArrival { entity = player, userId = userId, time = Time.unscaledTime, noticeTime = _incomingHandoffFrom.TryGetValue(data.Id, out IncomingHandoff notice) ? notice.time : -1f, mount = ridden, keepMount = keepMount, passenger = passenger };
-            Logging.Log("Mesh", $"Arrival {data.CharacterName} ({data.Id}) conn={connectionId}: ghost promoted in place at {player.EntityTransform.position} mount={(passenger ? "passenger" : keepMount ? "kept" : data.Mount.type != MountType.None ? "re-summon" : "none")}");
+            Logging.Log("Mesh", $"Arrival {data.CharacterName} ({data.Id}) conn={connectionId}: ghost promoted in place at {player.EntityTransform.position} mount={(passenger ? "passenger" : keepMount ? "kept" : keepSummonSeat ? "seat kept on a summon" : data.Mount.type != MountType.None ? "re-summon" : "none")}");
             entity = player;
             return true;
         }
@@ -1492,7 +1592,7 @@ namespace MultiplayerARPG.MMO.Mesh
             MakeGhostInPlace(entity, id, GhostKind.Player, newOwnerZone, passenger ? null : riddenMount);
             SeedDemotedPuppet(entity, meshId, GhostKind.Player, velocity); // DESIGN 1.09: walks on until the destination's snapshots (MeshMapNetworkManager_ArrivalWalk)
             int pets = DemoteSummonsWith(entity, newOwnerZone);
-            Logging.Log("Mesh", $"Player {entity.CharacterName} demoted to ghost (owner {newOwnerZone}, mounted={riddenMount != null}{(passenger ? " as passenger" : string.Empty)}, summons={pets})");
+            Logging.Log("Mesh", $"Player {entity.CharacterName} demoted to ghost (owner {newOwnerZone}, mounted={(riddenMount != null ? "vehicle" : entity.PassengingVehicleEntity != null ? "summon" : "no")}{(passenger ? " as passenger" : string.Empty)}, summons={pets})");
         }
 
         internal void OnMeshNeighbourHello(long connectionId, string zoneId, string incarnation)
@@ -2012,6 +2112,8 @@ namespace MultiplayerARPG.MMO.Mesh
         {
             if (ghost.entity == null || ghost.mountPending)
                 return;
+            if (SyncGhostSummonMount(ghost, msg))
+                return; // The puppet rides (or waits for) its summon's puppet
             VehicleEntity current = ghost.entity.PassengingVehicleEntity as VehicleEntity;
             if (msg.mountEntityId != 0 && msg.mountSeat != 0)
             {
@@ -2053,6 +2155,105 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 DismountGhost(ghost).Forget();
             }
+        }
+
+        // ---- Summon mounts on ghosts ----
+        // A rider on one of its own summons (IMeshSummonMount, a tamed horse) names that summon in its snapshots. The
+        // mount is not spawned here: the pet streams as its own puppet (linked to the rider by summoner and summon id),
+        // so the rider's puppet is seated on that puppet. Steering then goes through the mount only: the pet's snapshots
+        // steer its puppet, and the rider's puppet rides the seat (SteerGhost skips it; the kit's ActiveMovement of a
+        // seated rider is the mount's, so steering both would drive the mount twice toward two points).
+
+        /// <summary>
+        /// Seat a puppet on its summon mount's puppet, move it to another, or unseat it when its snapshots stop
+        /// naming one. True when the snapshot names a summon mount (the kit vehicle path has nothing to do then).
+        /// </summary>
+        private bool SyncGhostSummonMount(MeshGhost ghost, GhostSnapshotMessage msg)
+        {
+            BaseCharacterEntity rider = ghost.entity;
+            IVehicleEntity current = rider.PassengingVehicleEntity;
+            IVehicleEntity seatedOn = current != null && !(current is VehicleEntity) ? current : null;
+            if (string.IsNullOrEmpty(msg.mountSummonId))
+            {
+                if (seatedOn != null)
+                {
+                    UnseatFromSummonMount(rider);
+                    if (traceHandoffTiming)
+                        Logging.Log("Mesh", $"Ghost {rider.CharacterName} got off its summon mount");
+                }
+                return false;
+            }
+            IVehicleEntity wanted = FindSummonMountPuppet(msg.characterId, msg.mountSummonId);
+            if (seatedOn != null && ReferenceEquals(seatedOn, wanted) && rider.PassengingVehicleSeatIndex == msg.mountSummonSeat)
+                return true;
+            if (current is VehicleEntity)
+            {
+                DismountGhost(ghost).Forget(); // off the kit vehicle first; a later snapshot seats it
+                return true;
+            }
+            if (seatedOn != null)
+                UnseatFromSummonMount(rider);
+            if (wanted == null)
+                return true; // the mount's puppet is not here (yet): the rider is steered on foot meanwhile
+            if (!wanted.IsSeatAvailable(msg.mountSummonSeat))
+            {
+                WarnThrottled($"Ghost {msg.characterName} rides summon {msg.mountSummonId} seat {msg.mountSummonSeat}, but that seat on its puppet is taken; shown on foot");
+                return true;
+            }
+            EndSteering(ghost); // from here the mount's snapshots move it (SteerGhost)
+            rider.StopMove();
+            bool seated;
+            if (wanted is IMeshSummonMount custom)
+            {
+                seated = custom.SeatPuppetRider(rider, msg.mountSummonSeat);
+            }
+            else
+            {
+                wanted.SetPassenger(msg.mountSummonSeat, rider);
+                seated = true;
+            }
+            if (!seated)
+                WarnThrottled($"Ghost {msg.characterName}: the puppet of summon {msg.mountSummonId} refused it seat {msg.mountSummonSeat}; shown on foot");
+            else if (traceHandoffTiming)
+                Logging.Log("Mesh", $"Ghost {rider.CharacterName} seated on summon {wanted.Entity.name} ({msg.mountSummonId}) seat {msg.mountSummonSeat}");
+            return true;
+        }
+
+        /// <summary>The puppet of <paramref name="summonerMeshId"/>'s summon <paramref name="summonId"/>, when it is a vehicle.</summary>
+        private IVehicleEntity FindSummonMountPuppet(string summonerMeshId, string summonId)
+        {
+            if (string.IsNullOrEmpty(summonId))
+                return null;
+            foreach (string petId in PetGhostsOf(summonerMeshId))
+            {
+                if (_ghosts.TryGetValue(petId, out MeshGhost g) && string.Equals(g.summonId, summonId) && g.entity is IVehicleEntity mount
+                    && g.entity.Identity != null && !g.entity.Identity.IsDestroyed && !g.entity.IsDead())
+                    return mount;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Take a rider off the summon mount it sits on. The seat is cleared before the passenger is removed: the
+        /// kit's RemovePassenger puts the passenger at the seat's exit with a Teleport, and a server does not run its own
+        /// RpcOnExitVehicle, so a rider still seated there would teleport the mount (its ActiveMovement) instead.
+        /// </summary>
+        private static void UnseatFromSummonMount(BaseCharacterEntity rider)
+        {
+            IVehicleEntity mount = rider.PassengingVehicleEntity;
+            if (mount == null || mount is VehicleEntity)
+                return;
+            byte seat = rider.PassengingVehicleSeatIndex;
+            rider.ClearPassengingVehicle();
+            if (mount.Entity != null && ReferenceEquals(mount.GetPassenger(seat), rider))
+                mount.RemovePassenger(seat);
+        }
+
+        /// <summary>A puppet seated on a summon mount's puppet (it rides the seat; the mount's own snapshots steer it).</summary>
+        private static bool IsOnSummonMount(BaseCharacterEntity entity)
+        {
+            IVehicleEntity mount = entity != null ? entity.PassengingVehicleEntity : null;
+            return mount != null && !(mount is VehicleEntity);
         }
 
         private async UniTaskVoid MountGhost(MeshGhost ghost, VehicleEntity prefab, int level, Vector3 position, float yaw)
@@ -2396,6 +2597,14 @@ namespace MultiplayerARPG.MMO.Mesh
         private void SteerGhost(MeshGhost ghost, GhostSnapshotMessage msg)
         {
             BaseCharacterEntity entity = ghost.entity;
+            if (IsOnSummonMount(entity))
+            {
+                // The seat carries it and the mount's puppet is steered by the mount's snapshots (see
+                // SyncGhostSummonMount); a move order here would go to the mount (ActiveMovement) toward the seat point.
+                EndSteering(ghost);
+                SyncGhostHp(ghost, msg);
+                return;
+            }
             Vector3 current = ghost.body != null ? ghost.body.Pose(Time.unscaledTime) : entity.EntityTransform.position;
             float dist = Vector3.Distance(current, msg.position);
             bool moving = msg.velocity.sqrMagnitude > 0.04f;
@@ -3957,6 +4166,10 @@ namespace MultiplayerARPG.MMO.Mesh
             public Vector3 velocity;         // DESIGN 1.09: its velocity at the crossing, to walk it on through its client's gap
             public Vector3 trackOrigin;      // DESIGN 1.09: where it was at the crossing (the state's position, less the origin's lead)
             public byte[] carried;           // DESIGN 1.22: game state outside the kit's data, read back as it registers
+            // The pose a handoff NOTICE carries (the saved-row path; a state carries the character itself).
+            public bool hasPose; public Vector3 position; public Vector3 rotation;
+            public bool poseApplied; // the arrival's row was replaced by the pose
+            public string mountSummonId; public byte mountSeat; // The summon the rider sits on (RestoreSummonMount)
         }
         private sealed class PendingHandoffAck { public string zone; public string name; public float startTime; public float sentTime; public float linkDownSince = -1f; }
         private readonly Dictionary<string, IncomingHandoff> _incomingHandoffFrom = new Dictionary<string, IncomingHandoff>(); // characterId -> who announced it
@@ -4022,6 +4235,8 @@ namespace MultiplayerARPG.MMO.Mesh
             {
                 fromZone = _neighbourZoneByConnection.TryGetValue(connectionId, out string z) ? z : null,
                 time = Time.unscaledTime,
+                hasPose = msg.hasPose, position = msg.position, velocity = msg.velocity, rotation = msg.rotation,
+                mountSummonId = msg.mountSummonId, mountSeat = msg.mountSeat,
             };
         }
 
@@ -4040,6 +4255,7 @@ namespace MultiplayerARPG.MMO.Mesh
                 originObjectId = msg.originObjectId,
                 velocity = msg.velocity,
                 carried = msg.carried,
+                mountSummonId = msg.mountSummonId, mountSeat = msg.mountSeat,
                 trackOrigin = msg.data != null ? (Vector3)msg.data.CurrentPosition - msg.velocity * (handoffLeadSeconds - arrivalTrackLeadSeconds) : Vector3.zero,
             };
             SteerArrivingPuppet(msg.characterId, _incomingHandoffFrom[msg.characterId].trackOrigin, msg.velocity); // DESIGN 1.11 (MeshMapNetworkManager_ArrivalWalk)
@@ -4356,10 +4572,156 @@ namespace MultiplayerARPG.MMO.Mesh
             }
         }
 
-        internal void SendHandoffNotice(string zoneId, string characterId, string userId)
+        internal void SendHandoffNotice(string zoneId, string characterId, string userId, Vector3 savePosition, Vector3 velocity, Vector3 rotation, string mountSummonId, byte mountSeat)
         {
             if (_linkClients.TryGetValue(zoneId, out MeshLinkClient client))
-                client.SendHandoffNotice(characterId, userId);
+                client.SendHandoffNotice(new HandoffNoticeMessage { characterId = characterId, userId = userId, hasPose = true, position = savePosition, velocity = velocity, rotation = rotation, mountSummonId = mountSummonId, mountSeat = mountSeat });
+        }
+
+        /// <summary>
+        /// The CharacterSummon id of the summon <paramref name="rider"/> sits on (an IVehicleEntity summon such as a
+        /// tamed horse), or null when it is on foot or on a kit vehicle (VehicleEntity mounts go by the saved CharacterMount).
+        /// </summary>
+        internal static string MountedSummonIdOf(BasePlayerCharacterEntity rider, out byte seatIndex)
+        {
+            seatIndex = 0;
+            IVehicleEntity vehicle = rider != null ? rider.PassengingVehicleEntity : null;
+            if (vehicle == null || vehicle is VehicleEntity || vehicle.Entity == null)
+                return null;
+            uint objectId = vehicle.Entity.ObjectId;
+            for (int i = 0; i < rider.Summons.Count; ++i)
+            {
+                if (rider.Summons[i].objectId == objectId && !string.IsNullOrEmpty(rider.Summons[i].id))
+                {
+                    seatIndex = rider.PassengingVehicleSeatIndex;
+                    return rider.Summons[i].id;
+                }
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// A fresh spawn (no puppet of the rider was left to promote, e.g. it went stale during a slow arrival) gets
+        /// its summons from the kit right after the registration: wait for the ridden one, then seat the rider.
+        /// </summary>
+        private async UniTaskVoid RestoreSummonMountAfterResummon(BasePlayerCharacterEntity player, long connectionId, string summonId, byte seat)
+        {
+            for (int frame = 0; frame < 60; ++frame)
+            {
+                await UniTask.NextFrame();
+                if (player == null || player.Identity == null || player.Identity.IsDestroyed || player.ConnectionId != connectionId)
+                    return;
+                for (int i = 0; i < player.Summons.Count; ++i)
+                {
+                    if (string.Equals(player.Summons[i].id, summonId) && player.Summons[i].CacheEntity != null)
+                    {
+                        RestoreSummonMount(player, connectionId, summonId, seat);
+                        return;
+                    }
+                }
+            }
+            Logging.LogWarning("Mesh", $"Arrival {player.CharacterName}: summon {summonId} was not re-summoned within 60 frames; arrives on foot");
+        }
+
+        /// <summary>
+        /// An arrival that was riding one of its summons sits on it again. Called once the summons are promoted (or
+        /// re-summoned) for the arriving character: the handoff notice names the summon. A character that comes back after
+        /// a rolled-back handoff has no notice and arrives on foot beside the mount (TryPromoteGhostForArrival unseats it).
+        /// </summary>
+        private void RestoreSummonMount(BasePlayerCharacterEntity player, long connectionId, string mountSummonId, byte mountSeat)
+        {
+            if (string.IsNullOrEmpty(mountSummonId) || player.IsDead())
+                return;
+            IVehicleEntity seatedOn = player.PassengingVehicleEntity;
+            if (seatedOn is VehicleEntity)
+                return;
+            IVehicleEntity mount = null;
+            for (int i = 0; i < player.Summons.Count; ++i)
+            {
+                CharacterSummon summon = player.Summons[i];
+                if (!string.Equals(summon.id, mountSummonId))
+                    continue;
+                BaseMonsterCharacterEntity pet = summon.CacheEntity;
+                if (pet == null && Assets.TryGetSpawnedObject(summon.objectId, out LiteNetLibIdentity petIdentity) && petIdentity != null)
+                    pet = petIdentity.GetComponent<BaseMonsterCharacterEntity>();
+                mount = pet as IVehicleEntity;
+                break;
+            }
+            // The puppet kept its seat on this very summon (TryPromoteGhostForArrival): the ride continues on it.
+            bool keptSeat = seatedOn != null && ReferenceEquals(seatedOn, mount) && player.PassengingVehicleSeatIndex == mountSeat;
+            if (seatedOn != null && !keptSeat)
+            {
+                Logging.LogWarning("Mesh", $"Arrival {player.CharacterName}: rode summon {mountSummonId} on the cell it left, but sits on {seatedOn.Entity?.name} here; left there");
+                return;
+            }
+            if (mount == null || mount.Entity == null || mount.Entity.Identity == null || mount.Entity.Identity.IsDestroyed || (!keptSeat && !mount.IsSeatAvailable(mountSeat)))
+            {
+                Logging.LogWarning("Mesh", $"Arrival {player.CharacterName}: rode summon {mountSummonId} on the cell it left, but {(mount == null ? "it is not here as a vehicle" : "seat " + mountSeat + " is not free")}; arrives on foot");
+                return;
+            }
+            // What the kit's EnterVehicle does, minus the enter animation and the reach rule: the rider was already
+            // seated, this is the same ride continuing. The driver owns the mount (its client drives the movement).
+            bool driver = mount.IsDriver(mountSeat);
+            if (driver)
+            {
+                Assets.SetObjectOwnerImmediately(mount.Entity.ObjectId, connectionId);
+                if (InterestManager != null)
+                    InterestManager.NotifyNewObject(mount.Entity.Identity);
+            }
+            bool seatedNow;
+            if (mount is IMeshSummonMount custom)
+            {
+                seatedNow = custom.SeatArrivingRider(player, mountSeat);
+            }
+            else
+            {
+                if (!keptSeat)
+                    mount.SetPassenger(mountSeat, player);
+                seatedNow = true;
+            }
+            if (!seatedNow && driver)
+                Assets.SetObjectOwnerImmediately(mount.Entity.ObjectId, -1);
+            if (!seatedNow && keptSeat)
+                UnseatFromSummonMount(player); // the mount's rules turned the kept seat down: on foot beside it
+            Logging.Log("Mesh", $"Arrival {player.CharacterName}: {(seatedNow ? keptSeat ? "rides on (seat kept) on" : "re-seated on" : "could not be re-seated on")} summon {mount.Entity.name} ({mountSummonId}) seat {mountSeat}");
+        }
+
+        /// <summary>
+        /// An arrival that kept its seat on a summon mount is placed by moving the mount (a seated rider's Teleport
+        /// would move the mount to the rider's point): the mount goes where its seat lands on the arrival's pose.
+        /// <paramref name="position"/> is a saved CurrentPosition, the seat's x/z at the mount's height.
+        /// </summary>
+        private static void PlaceSummonMountUnderSeat(IVehicleEntity mount, byte seat, Vector3 position, Vector3 rotation)
+        {
+            Transform mountTransform = mount.Entity.EntityTransform;
+            Transform seatTransform = seat < mount.Seats.Count ? mount.Seats[seat].passengingTransform : null;
+            Quaternion yaw = Quaternion.Euler(0f, rotation.y, 0f);
+            Vector3 seatOffset = seatTransform != null ? Quaternion.Inverse(mountTransform.rotation) * (seatTransform.position - mountTransform.position) : Vector3.zero;
+            seatOffset.y = 0f;
+            Vector3 target = position - yaw * seatOffset;
+            if ((target - mountTransform.position).sqrMagnitude > 0.25f * 0.25f)
+                mount.Entity.Teleport(target, yaw, false);
+        }
+
+        /// <summary>
+        /// The row the kit loaded for an arrival is replaced by the pose its handoff notice carried. The two should be
+        /// one save (the origin saved that pose, then sent the notice), but the row can be older: the database server
+        /// answers an update from its cache and writes it later through its deferred save scheduler, and when that
+        /// scheduler finishes writing an EARLIER save of the same character (a periodic position save that was in
+        /// flight) it puts that save's data back in the cache. Seen 2026-10-17 (session 8, run 2): cell 6-2 saved
+        /// z = -2050.28, cell 6-1 loaded z = -2040.03, the position from before the walk, and promoted its puppet
+        /// there, 10 m behind the player. Without a pose (an older origin, or a login that is no handoff) the row stands.
+        /// </summary>
+        private void ApplyHandoffPoseToArrival(PlayerCharacterData data)
+        {
+            if (data == null || !_incomingHandoffFrom.TryGetValue(data.Id, out IncomingHandoff notice) || !notice.hasPose || Time.unscaledTime - notice.time >= reservedArrivalTimeout)
+                return;
+            ArrivalPlacement placement = PlaceArrival(true, notice.position, data.CurrentPosition, false, default, ghostTeleportDistance);
+            if (placement.rowStale)
+                Logging.LogWarning("Mesh", $"Arrival {data.CharacterName} ({data.Id}): the row says {(Vector3)data.CurrentPosition}, {placement.rowError:0.00} m from the handoff's save {notice.position} (vel {notice.velocity}); the save wins");
+            data.CurrentPosition = placement.position;
+            data.CurrentRotation = notice.rotation;
+            notice.poseApplied = true;
         }
 
         /// <summary>Origin side: the notice with the character in it; false when no link to the zone is up (the caller falls back to the notice and the database).</summary>
@@ -4442,7 +4804,9 @@ namespace MultiplayerARPG.MMO.Mesh
         internal void OnGhostContainerLoot(long connectionId, GhostContainerLootMessage msg) { }
         internal bool IsPlayerGhostNear(Vector3 position, float range) { return false; }
         internal void ForwardGhostReward(BasePlayerCharacterEntity ghost, int exp, int gold, IEnumerable<CurrencyAmount> currencies, float multiplier, RewardGivenType givenType, int giverLevel, int sourceLevel) { }
-        internal void SendHandoffNotice(string zoneId, string characterId, string userId) { }
+        internal void SendHandoffNotice(string zoneId, string characterId, string userId, Vector3 savePosition, Vector3 velocity, Vector3 rotation, string mountSummonId, byte mountSeat) { }
+        internal static string MountedSummonIdOf(BasePlayerCharacterEntity rider, out byte seatIndex) { seatIndex = 0; return null; }
+        private void ApplyHandoffPoseToArrival(PlayerCharacterData data) { }
         internal bool SendHandoffState(string zoneId, HandoffStateMessage msg) { return false; }
 #endif
     }
